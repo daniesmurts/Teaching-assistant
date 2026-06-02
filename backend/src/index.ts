@@ -5,6 +5,7 @@ import authRouter from './routes/auth'
 import coursesRouter from './routes/courses'
 import rubricsRouter from './routes/rubrics'
 import gradingRouter from './routes/grading'
+import presentationsRouter from './routes/presentations'
 
 const app = express()
 const PORT = process.env.PORT ?? 3000
@@ -22,6 +23,7 @@ app.use('/api/auth', authRouter)
 app.use('/api/courses', coursesRouter)
 app.use('/api/rubrics', rubricsRouter)
 app.use('/api/grading', gradingRouter)
+app.use('/api/presentations', presentationsRouter)
 
 // ─── Error handler (must be last) ─────────────────────────────────────────────
 

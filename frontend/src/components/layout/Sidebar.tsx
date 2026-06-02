@@ -1,11 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 
-interface NavItem {
-  icon: string
-  label: string
-  to: string
-}
+interface NavItem { icon: string; label: string; to: string }
 
 const NAV: NavItem[] = [
   { icon: '⊞', label: 'Главная',        to: '/dashboard' },
@@ -14,8 +10,12 @@ const NAV: NavItem[] = [
   { icon: '▤', label: 'Презентации',    to: '/presentations' },
 ]
 
-export default function Sidebar() {
-  const teacher  = useAuthStore((s) => s.teacher)
+interface Props {
+  onClose?: () => void
+}
+
+export default function Sidebar({ onClose }: Props) {
+  const teacher   = useAuthStore((s) => s.teacher)
   const clearAuth = useAuthStore((s) => s.clearAuth)
   const navigate  = useNavigate()
 
@@ -23,18 +23,24 @@ export default function Sidebar() {
     ? teacher.name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
     : teacher?.email?.[0]?.toUpperCase() ?? '?'
 
-  function logout() {
-    clearAuth()
-    navigate('/login')
-  }
+  function logout() { clearAuth(); navigate('/login') }
 
   return (
-    <aside className="w-[210px] min-h-screen bg-sidebar flex flex-col flex-shrink-0">
-      {/* Logo */}
-      <div className="px-4 py-4 border-b border-white/5">
+    <aside className="w-[210px] h-full min-h-screen bg-sidebar flex flex-col flex-shrink-0">
+      {/* Logo + mobile close */}
+      <div className="px-4 py-4 border-b border-white/5 flex items-center justify-between">
         <span className="font-display text-[19px] font-bold text-ink-inverse tracking-tight">
           GradeAssist
         </span>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="md:hidden text-ink-inv-muted hover:text-ink-inverse transition-colors text-lg leading-none"
+            aria-label="Закрыть меню"
+          >
+            ×
+          </button>
+        )}
       </div>
 
       {/* Nav */}
@@ -43,22 +49,14 @@ export default function Sidebar() {
           <NavLink key={item.to} to={item.to}>
             {({ isActive }) => (
               <div
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer transition-colors ${
+                className={`flex items-center gap-2.5 px-3 py-2.5 rounded-md cursor-pointer transition-colors ${
                   isActive ? 'bg-sidebar-active' : 'hover:bg-sidebar-hover'
                 }`}
               >
-                <span
-                  className={`text-sm w-4 text-center select-none ${
-                    isActive ? 'text-amber-mid' : 'text-ink-inv-muted'
-                  }`}
-                >
+                <span className={`text-sm w-4 text-center select-none ${isActive ? 'text-amber-mid' : 'text-ink-inv-muted'}`}>
                   {item.icon}
                 </span>
-                <span
-                  className={`text-sm font-sans ${
-                    isActive ? 'font-medium text-ink-inverse' : 'font-normal text-ink-inv-muted'
-                  }`}
-                >
+                <span className={`text-sm font-sans ${isActive ? 'font-medium text-ink-inverse' : 'font-normal text-ink-inv-muted'}`}>
                   {item.label}
                 </span>
               </div>
@@ -78,16 +76,10 @@ export default function Sidebar() {
               {teacher?.name ?? teacher?.email}
             </div>
             {teacher?.university && (
-              <div className="text-[10px] font-sans text-ink-inv-muted truncate">
-                {teacher.university}
-              </div>
+              <div className="text-[10px] font-sans text-ink-inv-muted truncate">{teacher.university}</div>
             )}
           </div>
-          <button
-            onClick={logout}
-            title="Выйти"
-            className="text-ink-inv-muted hover:text-ink-inverse transition-colors text-xs ml-1"
-          >
+          <button onClick={logout} title="Выйти" className="text-ink-inv-muted hover:text-ink-inverse transition-colors text-xs ml-1">
             ⎋
           </button>
         </div>

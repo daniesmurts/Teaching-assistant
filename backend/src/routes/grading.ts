@@ -4,6 +4,7 @@ import { validate } from '../middleware/validate'
 import { grade, approve } from '../services/grading'
 import { generateEmailDraft } from '../services/email'
 import { findAssignmentsByTeacher } from '../db/queries/assignments'
+import { pool } from '../db/connection'
 import type { GradeLetter } from '../../../shared/types'
 
 const router = Router()
@@ -79,6 +80,41 @@ router.get('/history', async (req, res, next) => {
       limit: limit ? parseInt(limit) : undefined,
     })
     res.json(result)
+  } catch (err) { next(err) }
+})
+
+// GET /api/grading/stats
+router.get('/stats', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query<{
+      total: string
+      pending: string
+      this_month: string
+      last_month: string
+      avg_score: string | null
+    }>(
+      `SELECT
+        COUNT(*)                                                          AS total,
+        COUNT(*) FILTER (WHERE status = 'pending')                       AS pending,
+        COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW())) AS this_month,
+        COUNT(*) FILTER (
+          WHERE created_at >= date_trunc('month', NOW() - INTERVAL '1 month')
+            AND created_at <  date_trunc('month', NOW())
+        )                                                                 AS last_month,
+        ROUND(AVG(approved_score) FILTER (WHERE approved_score IS NOT NULL))::text AS avg_score
+      FROM assignments
+      WHERE teacher_id = $1`,
+      [req.teacher.id]
+    )
+
+    const r = rows[0]
+    res.json({
+      total:      parseInt(r.total,      10),
+      pending:    parseInt(r.pending,    10),
+      this_month: parseInt(r.this_month, 10),
+      last_month: parseInt(r.last_month, 10),
+      avg_score:  r.avg_score ? parseInt(r.avg_score, 10) : null,
+    })
   } catch (err) { next(err) }
 })
 

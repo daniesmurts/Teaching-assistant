@@ -42,6 +42,19 @@ export async function generateEmail(
   return res.data
 }
 
+export interface GradingStats {
+  total: number
+  pending: number
+  this_month: number
+  last_month: number
+  avg_score: number | null
+}
+
+export async function getGradingStats(): Promise<GradingStats> {
+  const res = await client.get<GradingStats>('/api/grading/stats')
+  return res.data
+}
+
 export async function getGradingHistory(params?: {
   course_id?: string
   page?: number
