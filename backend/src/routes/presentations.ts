@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
+import { aiLimiter } from '../middleware/rateLimits'
 import { generatePresentation } from '../services/presentations'
 import {
   findPresentationsByTeacher,
@@ -14,6 +15,7 @@ router.use(authenticate)
 // POST /api/presentations/generate
 router.post(
   '/generate',
+  aiLimiter,
   validate([
     { field: 'topic',            type: 'string', required: true },
     { field: 'duration_minutes', required: true },

@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import { errorHandler } from './middleware/errorHandler'
+import { generalLimiter } from './middleware/rateLimits'
 import authRouter from './routes/auth'
 import coursesRouter from './routes/courses'
 import rubricsRouter from './routes/rubrics'
@@ -12,6 +13,7 @@ const PORT = process.env.PORT ?? 3000
 
 app.use(cors())
 app.use(express.json())
+app.use(generalLimiter)
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 

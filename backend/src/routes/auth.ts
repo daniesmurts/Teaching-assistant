@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
+import { authLimiter } from '../middleware/rateLimits'
 import {
   findTeacherByEmail,
   findTeacherById,
@@ -15,6 +16,7 @@ const router = Router()
 
 router.post(
   '/register',
+  authLimiter,
   validate([
     { field: 'email', type: 'string', required: true },
     { field: 'password', type: 'string', required: true, minLength: 8 },
@@ -53,6 +55,7 @@ router.post(
 
 router.post(
   '/login',
+  authLimiter,
   validate([
     { field: 'email', type: 'string', required: true },
     { field: 'password', type: 'string', required: true },

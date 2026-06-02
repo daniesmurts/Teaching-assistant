@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
+import { aiLimiter } from '../middleware/rateLimits'
 import { grade, approve } from '../services/grading'
 import { generateEmailDraft } from '../services/email'
 import { findAssignmentsByTeacher } from '../db/queries/assignments'
@@ -13,6 +14,7 @@ router.use(authenticate)
 // POST /api/grading/grade
 router.post(
   '/grade',
+  aiLimiter,
   validate([{ field: 'submission_text', type: 'string', required: true, minLength: 10 }]),
   async (req, res, next) => {
     try {
@@ -62,7 +64,7 @@ router.post(
 )
 
 // POST /api/grading/:id/email
-router.post('/:id/email', async (req, res, next) => {
+router.post('/:id/email', aiLimiter, async (req, res, next) => {
   try {
     const tone = (req.body as { tone?: string }).tone as 'encouraging' | 'neutral' | 'direct' | undefined
     const draft = await generateEmailDraft(req.params.id, req.teacher.id, tone)
