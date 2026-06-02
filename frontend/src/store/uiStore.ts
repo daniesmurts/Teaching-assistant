@@ -12,6 +12,10 @@ interface UIState {
   removeToast: (id: string) => void
   mobileSidebarOpen: boolean
   setMobileSidebarOpen: (open: boolean) => void
+  upgradeModalOpen: boolean
+  upgradeModalCode: string | null
+  showUpgradeModal: (code?: string) => void
+  hideUpgradeModal: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -27,4 +31,8 @@ export const useUIStore = create<UIState>((set) => ({
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   mobileSidebarOpen: false,
   setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
+  upgradeModalOpen: false,
+  upgradeModalCode: null,
+  showUpgradeModal: (code) => set({ upgradeModalOpen: true, upgradeModalCode: code ?? null }),
+  hideUpgradeModal: () => set({ upgradeModalOpen: false, upgradeModalCode: null }),
 }))

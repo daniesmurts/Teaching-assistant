@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import Button from '../ui/Button'
 import { Textarea } from '../ui/Input'
 import { getCourses } from '../../api/courses'
+import { useUIStore } from '../../store/uiStore'
+import { usePlan } from '../../hooks/usePlan'
 import client from '../../api/client'
 import type { GradeRequest, GradeResponse } from '../../api/grading'
 import type { Rubric } from '../../types'
@@ -15,6 +17,8 @@ export default function GradingForm({ onResult }: Props) {
   const [form, setForm] = useState<GradeRequest>({ submission_text: '', rubric_id: '', course_id: '', student_name: '', student_email: '' })
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
+  const { atGradeLimit, gradesUsed, gradesLimit } = usePlan()
+  const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
 
   const { data: courses = [] } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
   const { data: rubrics = [] } = useQuery({
@@ -113,10 +117,30 @@ export default function GradingForm({ onResult }: Props) {
         </div>
       )}
 
-      <div className="px-4 pb-4">
-        <Button type="submit" className="w-full" loading={loading}>
-          Проверить с ИИ
-        </Button>
+      <div className="px-4 pb-4 space-y-2">
+        {atGradeLimit ? (
+          <>
+            <div className="px-3 py-2 bg-warning-bg text-warning text-xs font-sans rounded-md">
+              Вы использовали все {gradesLimit} бесплатных проверок в этом месяце.
+            </div>
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => showUpgradeModal('PLAN_LIMIT_REACHED')}
+            >
+              Перейти на Pro для продолжения →
+            </Button>
+          </>
+        ) : (
+          <Button type="submit" className="w-full" loading={loading} disabled={atGradeLimit}>
+            Проверить с ИИ
+            {gradesLimit !== null && (
+              <span className="ml-2 opacity-60 text-xs">
+                ({gradesUsed}/{gradesLimit})
+              </span>
+            )}
+          </Button>
+        )}
       </div>
     </form>
   )

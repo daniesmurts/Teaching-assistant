@@ -2,6 +2,8 @@ import { useState } from 'react'
 import Button from '../ui/Button'
 import FeedbackEmail from './FeedbackEmail'
 import { useApprove } from '../../hooks/useGrading'
+import { usePlan } from '../../hooks/usePlan'
+import { useUIStore } from '../../store/uiStore'
 import type { GradeResponse } from '../../api/grading'
 import type { GradeLetter } from '../../types'
 
@@ -22,6 +24,9 @@ const GRADE_COLORS: Record<GradeLetter, string> = {
 
 export default function GradingResult({ result, onApproved }: Props) {
   const [tab, setTab] = useState<Tab>('feedback')
+  const { can } = usePlan()
+  const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
+  const emailEnabled = can('emailGeneration')
   const [editScore, setEditScore]       = useState(String(result.ai_score))
   const [editGrade, setEditGrade]       = useState<GradeLetter>(result.ai_grade)
   const [editFeedback, setEditFeedback] = useState(result.ai_feedback)
@@ -111,11 +116,29 @@ export default function GradingResult({ result, onApproved }: Props) {
 
       {/* Tabs */}
       <div className="flex border-b border-border px-5">
-        {([['feedback', 'Отзыв'], ['criteria', 'Критерии'], ['email', 'Письмо']] as [Tab, string][]).map(([t, label]) => (
+        {([['feedback', 'Отзыв'], ['criteria', 'Критерии']] as [Tab, string][]).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)} className={tabClass(t)}>
             {label}
           </button>
         ))}
+        {/* Email tab — locked on free tier */}
+        {emailEnabled ? (
+          <button onClick={() => setTab('email')} className={tabClass('email')}>
+            Письмо
+          </button>
+        ) : (
+          <div className="relative ml-1">
+            <button
+              onClick={() => showUpgradeModal('FEATURE_NOT_IN_PLAN')}
+              className="px-3 py-2.5 text-xs font-sans text-ink-tertiary opacity-60 cursor-pointer"
+            >
+              Письмо
+            </button>
+            <span className="absolute -top-0.5 -right-1 text-[9px] bg-amber-light text-amber px-1 py-px rounded-sm font-sans font-semibold leading-none">
+              Pro
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Tab content */}

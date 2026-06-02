@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
+import UpgradeModal from '../ui/UpgradeModal'
 import { useUIStore } from '../../store/uiStore'
 import { useEffect } from 'react'
 
@@ -70,6 +71,7 @@ export default function AppShell() {
       </div>
 
       <ToastContainer />
+      <UpgradeModal />
     </div>
   )
 }

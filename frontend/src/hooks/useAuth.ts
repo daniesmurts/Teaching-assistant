@@ -17,8 +17,8 @@ export function useLogin() {
 
   return useMutation({
     mutationFn: login,
-    onSuccess: ({ token, teacher }) => {
-      setAuth(token, teacher)
+    onSuccess: ({ token, teacher, plan }) => {
+      setAuth(token, teacher, plan)
       navigate('/dashboard')
     },
     onError: (err) => addToast(errMsg(err), 'error'),
@@ -32,8 +32,8 @@ export function useRegister() {
 
   return useMutation({
     mutationFn: register,
-    onSuccess: ({ token, teacher }) => {
-      setAuth(token, teacher)
+    onSuccess: ({ token, teacher, plan }) => {
+      setAuth(token, teacher, plan)
       navigate('/dashboard')
     },
     onError: (err) => addToast(errMsg(err), 'error'),

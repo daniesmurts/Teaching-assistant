@@ -4,11 +4,21 @@ import jwt from 'jsonwebtoken'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { authLimiter } from '../middleware/rateLimits'
+import { asyncHandler } from '../lib/asyncHandler'
+import { ValidationError, NotFoundError } from '../errors/AppError'
 import {
-  findTeacherByEmail,
-  findTeacherById,
-  createTeacher,
+  findTeacherByEmail, findTeacherRowById, createTeacher, updateTeacherPassword,
 } from '../db/queries/teachers'
+import { getOrCreateCounter } from '../db/queries/usageCounters'
+import { getLimits, canUseFeature } from '../config/planLimits'
+import {
+  generateRawToken, hashToken, createResetToken,
+  invalidateExistingTokens, findValidToken, markTokenUsed,
+} from '../db/queries/passwordReset'
+import { sendEmail } from '../services/emailTransport'
+import {
+  registrationEmail, passwordResetEmail, passwordChangedEmail,
+} from '../lib/emailTemplates'
 
 const router = Router()
 
@@ -18,37 +28,34 @@ router.post(
   '/register',
   authLimiter,
   validate([
-    { field: 'email', type: 'string', required: true },
+    { field: 'email',    type: 'string', required: true },
     { field: 'password', type: 'string', required: true, minLength: 8 },
   ]),
-  async (req, res, next) => {
-    try {
-      const { email, password, name, university } = req.body as {
-        email: string
-        password: string
-        name?: string
-        university?: string
-      }
-
-      const existing = await findTeacherByEmail(email)
-      if (existing) {
-        res.status(400).json({ error: 'Этот адрес эл. почты уже зарегистрирован' })
-        return
-      }
-
-      const passwordHash = await bcrypt.hash(password, 12)
-      const teacher = await createTeacher(email, passwordHash, name, university)
-
-      const secret = process.env.JWT_SECRET!
-      const token = jwt.sign({ id: teacher.id, email: teacher.email }, secret, {
-        expiresIn: '7d',
-      })
-
-      res.status(201).json({ token, teacher })
-    } catch (err) {
-      next(err)
+  asyncHandler(async (req, res) => {
+    const { email, password, name, university, phone } = req.body as {
+      email: string; password: string; name?: string; university?: string; phone?: string
     }
-  }
+
+    const existing = await findTeacherByEmail(email)
+    if (existing) throw new ValidationError('Этот адрес эл. почты уже зарегистрирован')
+
+    const passwordHash = await bcrypt.hash(password, 12)
+    const teacher = await createTeacher(email, passwordHash, name, university, phone)
+
+    const token = jwt.sign(
+      { id: teacher.id, email: teacher.email },
+      process.env.JWT_SECRET!,
+      { expiresIn: '7d' }
+    )
+
+    // Welcome email — fire-and-forget
+    if (name || email) {
+      sendEmail({ ...registrationEmail(name ?? email), to: email })
+    }
+
+    const plan = await buildPlanData(teacher.id, 'free', null)
+    res.status(201).json({ token, teacher, plan })
+  })
 )
 
 // ─── POST /api/auth/login ─────────────────────────────────────────────────────
@@ -57,61 +64,161 @@ router.post(
   '/login',
   authLimiter,
   validate([
-    { field: 'email', type: 'string', required: true },
+    { field: 'email',    type: 'string', required: true },
     { field: 'password', type: 'string', required: true },
   ]),
-  async (req, res, next) => {
-    try {
-      const { email, password } = req.body as {
-        email: string
-        password: string
-      }
+  asyncHandler(async (req, res) => {
+    const { email, password } = req.body as { email: string; password: string }
 
-      const row = await findTeacherByEmail(email)
-      if (!row) {
-        res.status(401).json({ error: 'Неверный адрес эл. почты или пароль' })
-        return
-      }
+    const row = await findTeacherByEmail(email)
+    if (!row) throw new ValidationError('Неверный адрес эл. почты или пароль')
 
-      const valid = await bcrypt.compare(password, row.password_hash)
-      if (!valid) {
-        res.status(401).json({ error: 'Неверный адрес эл. почты или пароль' })
-        return
-      }
+    const valid = await bcrypt.compare(password, row.password_hash)
+    if (!valid) throw new ValidationError('Неверный адрес эл. почты или пароль')
 
-      const secret = process.env.JWT_SECRET!
-      const token = jwt.sign({ id: row.id, email: row.email }, secret, {
-        expiresIn: '7d',
-      })
+    const token = jwt.sign(
+      { id: row.id, email: row.email },
+      process.env.JWT_SECRET!,
+      { expiresIn: '7d' }
+    )
 
-      const teacher = {
-        id: row.id,
-        email: row.email,
-        name: row.name,
+    const plan = await buildPlanData(row.id, row.plan_tier ?? 'free', row.plan_expires_at)
+
+    res.json({
+      token,
+      teacher: {
+        id:         row.id,
+        email:      row.email,
+        name:       row.name,
         university: row.university,
+        role:       row.role ?? 'teacher',
         created_at: row.created_at.toISOString(),
-      }
-
-      res.json({ token, teacher })
-    } catch (err) {
-      next(err)
-    }
-  }
+      },
+      plan,
+    })
+  })
 )
 
 // ─── GET /api/auth/me ─────────────────────────────────────────────────────────
 
-router.get('/me', authenticate, async (req, res, next) => {
-  try {
-    const teacher = await findTeacherById(req.teacher.id)
-    if (!teacher) {
-      res.status(404).json({ error: 'Пользователь не найден' })
-      return
+router.get('/me', authenticate, asyncHandler(async (req, res) => {
+  const row = await findTeacherRowById(req.teacher.id)
+  if (!row) throw new NotFoundError('Пользователь')
+
+  const plan = await buildPlanData(row.id, req.teacher.plan_tier, row.plan_expires_at)
+
+  res.json({
+    id:         row.id,
+    email:      row.email,
+    name:       row.name,
+    university: row.university,
+    role:       req.teacher.role,
+    plan,
+  })
+}))
+
+// ─── POST /api/auth/forgot-password ──────────────────────────────────────────
+// Always returns 200 — never reveal whether email exists (prevents enumeration).
+
+router.post(
+  '/forgot-password',
+  authLimiter,
+  validate([{ field: 'email', type: 'string', required: true }]),
+  asyncHandler(async (req, res) => {
+    const { email } = req.body as { email: string }
+
+    const row = await findTeacherByEmail(email)
+
+    if (row && row.is_active) {
+      const rawToken = generateRawToken()
+      const tokenHash = hashToken(rawToken)
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000) // 1 hour
+
+      // Invalidate any previous tokens, then create the new one
+      await invalidateExistingTokens(row.id)
+      await createResetToken(row.id, tokenHash, expiresAt)
+
+      const resetUrl =
+        `${process.env.FRONTEND_URL ?? 'http://localhost:5173'}/reset-password?token=${rawToken}`
+
+      sendEmail({
+        ...passwordResetEmail(row.name ?? row.email, resetUrl),
+        to: row.email,
+      })
     }
-    res.json({ teacher })
-  } catch (err) {
-    next(err)
-  }
-})
+
+    // Always the same response — never say "email not found"
+    res.json({ message: 'Если этот адрес зарегистрирован, письмо со ссылкой отправлено.' })
+  })
+)
+
+// ─── POST /api/auth/reset-password ───────────────────────────────────────────
+
+router.post(
+  '/reset-password',
+  authLimiter,
+  validate([
+    { field: 'token',    type: 'string', required: true },
+    { field: 'password', type: 'string', required: true, minLength: 8 },
+  ]),
+  asyncHandler(async (req, res) => {
+    const { token: rawToken, password } = req.body as {
+      token: string; password: string
+    }
+
+    const tokenHash = hashToken(rawToken)
+    const record = await findValidToken(tokenHash)
+
+    if (!record) {
+      throw new ValidationError('Ссылка для сброса пароля недействительна или устарела.')
+    }
+
+    const newHash = await bcrypt.hash(password, 12)
+
+    // Update password + mark token used in parallel
+    await Promise.all([
+      updateTeacherPassword(record.teacher_id, newHash),
+      markTokenUsed(record.id),
+    ])
+
+    // Confirmation email — fire-and-forget
+    const teacher = await findTeacherRowById(record.teacher_id)
+    if (teacher) {
+      sendEmail({
+        ...passwordChangedEmail(teacher.name ?? teacher.email),
+        to: teacher.email,
+      })
+    }
+
+    res.json({ message: 'Пароль успешно изменён. Теперь вы можете войти.' })
+  })
+)
 
 export default router
+
+// ─── Helper ───────────────────────────────────────────────────────────────────
+
+async function buildPlanData(teacherId: string, planTier: string, planExpiresAt: Date | null) {
+  const tier    = planTier ?? 'free'
+  const limits  = getLimits(tier)
+  const counter = await getOrCreateCounter(teacherId)
+
+  const currentMonth      = new Date().toISOString().slice(0, 7)
+  const gradesUsed        = counter.month_year === currentMonth ? counter.grades_this_month        : 0
+  const presentationsUsed = counter.month_year === currentMonth ? counter.presentations_this_month : 0
+
+  return {
+    tier,
+    expiresAt:          planExpiresAt?.toISOString() ?? null,
+    gradesUsed,
+    gradesLimit:        limits.gradesPerMonth        === Infinity ? null : limits.gradesPerMonth,
+    presentationsUsed,
+    presentationsLimit: limits.presentationsPerMonth === Infinity ? null : limits.presentationsPerMonth,
+    features: {
+      documentUpload:      canUseFeature(tier, 'documentUpload'),
+      ragFlywheel:         canUseFeature(tier, 'ragFlywheel'),
+      emailGeneration:     canUseFeature(tier, 'emailGeneration'),
+      presentationHistory: canUseFeature(tier, 'presentationHistory'),
+    },
+  }
+}

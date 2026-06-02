@@ -5,14 +5,21 @@ import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 
 export default function Register() {
-  const [form, setForm] = useState({ email: '', password: '', name: '', university: '' })
+  const [form, setForm] = useState({
+    name: '', university: '', phone: '', email: '', password: '',
+  })
+  const [tosAccepted, setTosAccepted] = useState(false)
+  const [tosError, setTosError]       = useState(false)
   const register = useRegister()
 
-  const set = (field: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((f) => ({ ...f, [field]: e.target.value }))
+  const set = (field: keyof typeof form) =>
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setForm((f) => ({ ...f, [field]: e.target.value }))
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (!tosAccepted) { setTosError(true); return }
+    setTosError(false)
     register.mutate(form)
   }
 
@@ -26,8 +33,29 @@ export default function Register() {
 
         <div className="bg-surface border border-border rounded-lg p-6">
           <form onSubmit={handleSubmit} className="space-y-4">
-            <Input label="Полное имя" value={form.name} onChange={set('name')} placeholder="Иванов Иван Иванович" />
-            <Input label="Университет" value={form.university} onChange={set('university')} placeholder="МГУ" />
+
+            <Input
+              label="Полное имя"
+              value={form.name}
+              onChange={set('name')}
+              placeholder="Иванов Иван Иванович"
+            />
+
+            <Input
+              label="Университет / организация"
+              value={form.university}
+              onChange={set('university')}
+              placeholder="МГУ им. М.В. Ломоносова"
+            />
+
+            <Input
+              label="Телефон"
+              type="tel"
+              value={form.phone}
+              onChange={set('phone')}
+              placeholder="+7 (___) ___-__-__"
+            />
+
             <Input
               label="Эл. почта"
               type="email"
@@ -35,7 +63,9 @@ export default function Register() {
               onChange={set('email')}
               placeholder="you@university.ru"
               required
+              autoComplete="email"
             />
+
             <Input
               label="Пароль"
               type="password"
@@ -43,10 +73,51 @@ export default function Register() {
               onChange={set('password')}
               placeholder="Минимум 8 символов"
               required
+              autoComplete="new-password"
             />
+
+            {/* TOS checkbox */}
+            <div>
+              <label className={`flex items-start gap-3 cursor-pointer select-none`}>
+                <input
+                  type="checkbox"
+                  checked={tosAccepted}
+                  onChange={(e) => { setTosAccepted(e.target.checked); setTosError(false) }}
+                  className="mt-0.5 h-4 w-4 rounded border-border-mid accent-amber cursor-pointer flex-shrink-0"
+                />
+                <span className="text-xs font-sans text-ink-secondary leading-relaxed">
+                  Я принимаю{' '}
+                  <Link
+                    to="/terms"
+                    target="_blank"
+                    className="text-amber hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Условия использования
+                  </Link>
+                  {' '}и{' '}
+                  <Link
+                    to="/privacy"
+                    target="_blank"
+                    className="text-amber hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Политику конфиденциальности
+                  </Link>
+                  , в том числе обработку персональных данных в соответствии с ФЗ-152.
+                </span>
+              </label>
+              {tosError && (
+                <p className="mt-1.5 text-xs font-sans text-danger">
+                  Необходимо принять условия для продолжения.
+                </p>
+              )}
+            </div>
+
             <Button type="submit" className="w-full" loading={register.isPending}>
               Создать аккаунт
             </Button>
+
           </form>
         </div>
 

@@ -1,5 +1,8 @@
 export type {
   Teacher,
+  TeacherRole,
+  PlanTier,
+  PlanState,
   AuthResponse,
   Course,
   CourseLevel,

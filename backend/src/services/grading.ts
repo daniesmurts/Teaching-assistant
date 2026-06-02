@@ -7,12 +7,18 @@ import {
   type SimilarAssignment,
 } from '../db/queries/assignments'
 import { generateAndStoreEmbedding } from './embeddings'
+import { incrementUsage } from '../db/queries/usageCounters'
+import { sanitiseForPrompt } from '../lib/promptSanitiser'
+import { canUseFeature } from '../config/planLimits'
+import { NotFoundError } from '../errors/AppError'
+import { logger } from '../lib/logger'
 import type { Assignment, GradeLetter, CriterionScore, RubricCriterion } from '../../../shared/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface GradeParams {
-  teacherId: string
+  teacherId:  string
+  planTier:   string   // 'free' | 'pro' | 'institution'
   submissionText: string
   rubricId?: string
   courseId?: string
@@ -50,14 +56,15 @@ export interface GradeResponse {
  */
 async function retrieveExamples(
   submissionText: string,
-  courseId: string
+  courseId: string,
+  teacherId: string
 ): Promise<SimilarAssignment[]> {
   try {
-    const vector = await embed(submissionText)
+    const vector = await embed(submissionText, { teacherId, feature: 'embedding' })
     return await findSimilarAssignments(courseId, vector, 5)
   } catch (err) {
     // Non-fatal — RAG is a quality boost, not a hard requirement
-    console.warn('[RAG] Could not retrieve similar examples:', (err as Error).message)
+    logger.warn({ message: '[RAG] Could not retrieve similar examples', error: (err as Error).message })
     return []
   }
 }
@@ -65,10 +72,14 @@ async function retrieveExamples(
 // ─── Grade ────────────────────────────────────────────────────────────────────
 
 export async function grade(params: GradeParams): Promise<GradeResponse> {
-  // Fetch rubric and similar past examples in parallel
+  // RAG flywheel only available on Pro/Institution — free tier grades without examples
+  const ragEnabled = canUseFeature(params.planTier, 'ragFlywheel')
+
   const [rubric, examples] = await Promise.all([
     params.rubricId ? findRubricById(params.rubricId, params.teacherId) : Promise.resolve(null),
-    params.courseId ? retrieveExamples(params.submissionText, params.courseId) : Promise.resolve([]),
+    ragEnabled && params.courseId
+      ? retrieveExamples(params.submissionText, params.courseId, params.teacherId)
+      : Promise.resolve([]),
   ])
 
   const systemPrompt =
@@ -82,9 +93,10 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
   const result = await chatJSON<AIGradingResult>(
     [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
+      { role: 'user',   content: userPrompt },
     ],
-    'результат оценивания'
+    'результат оценивания',
+    { teacherId: params.teacherId, feature: 'grading' }
   )
 
   const assignment = await createAssignment({
@@ -97,11 +109,14 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     aiScore: clampScore(result.score),
     aiGrade: normaliseGrade(result.grade),
     aiGradeLabel: result.grade_label ?? gradeToLabel(result.grade),
-    aiFeedback: result.feedback ?? '',
+    aiFeedback: applyWatermark(result.feedback ?? '', params.planTier),
     aiCriteriaScores: result.criteria_scores ?? [],
     aiStrengths: result.strengths ?? [],
     aiImprovements: result.improvements ?? [],
   })
+
+  // Increment usage counter — fire-and-forget
+  incrementUsage(params.teacherId, 'grade').catch(() => null)
 
   return {
     assignment_id: assignment.id,
@@ -116,6 +131,11 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
   }
 }
 
+function applyWatermark(feedback: string, planTier: string): string {
+  if (!canUseFeature(planTier, 'watermark')) return feedback
+  return feedback + '\n\n---\nСгенерировано с GradeAssist (бесплатный тариф) · gradeassist.ru'
+}
+
 // ─── Approve ─────────────────────────────────────────────────────────────────
 
 export async function approve(
@@ -124,7 +144,7 @@ export async function approve(
   data: { approvedScore: number; approvedGrade: GradeLetter; approvedFeedback: string }
 ): Promise<Assignment> {
   const assignment = await approveAssignment(id, teacherId, data)
-  if (!assignment) throw Object.assign(new Error('Работа не найдена'), { status: 404 })
+  if (!assignment) throw new NotFoundError('Работа')
 
   // Fire-and-forget — store embedding so future gradings can use this as an example
   generateAndStoreEmbedding(id, assignment.submission_text).catch(() => null)
@@ -171,7 +191,9 @@ function buildRubricPrompt(
 ${criteriaBlock}
 
 ## Работа студента
-${text}
+<student_submission>
+${sanitiseForPrompt(text)}
+</student_submission>
 
 ## Инструкция
 Оцените работу по каждому критерию рубрики. Верните JSON-объект со следующими полями:
@@ -188,7 +210,9 @@ ${text}
 
 function buildHolisticPrompt(text: string, examples: SimilarAssignment[]): string {
   return `${buildExamplesBlock(examples)}## Работа студента
-${text}
+<student_submission>
+${sanitiseForPrompt(text)}
+</student_submission>
 
 ## Инструкция
 Оцените работу в целом по академическим стандартам. Верните JSON-объект со следующими полями:

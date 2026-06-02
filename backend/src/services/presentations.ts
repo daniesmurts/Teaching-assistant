@@ -1,6 +1,7 @@
 import { chat } from './deepseek'
 import { findCourseById } from '../db/queries/courses'
 import { findPresentationsByTeacher, createPresentation } from '../db/queries/presentations'
+import { incrementUsage } from '../db/queries/usageCounters'
 import type { Presentation } from '../../../shared/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -44,10 +45,13 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
 
   const userPrompt = buildPrompt(params, course, previousTopics, slideTarget)
 
-  const content = await chat([
-    { role: 'system', content: systemPrompt },
-    { role: 'user',   content: userPrompt },
-  ])
+  const content = await chat(
+    [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: userPrompt },
+    ],
+    { context: { teacherId: params.teacherId, feature: 'presentation' } }
+  )
 
   const presentation = await createPresentation({
     teacherId:       params.teacherId,
@@ -61,6 +65,9 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
     slideCountTarget: slideTarget,
     generatedContent: content,
   })
+
+  // Increment usage counter — fire-and-forget
+  incrementUsage(params.teacherId, 'presentation').catch(() => null)
 
   return { presentation_id: presentation.id, generated_content: content }
 }

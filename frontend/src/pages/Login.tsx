@@ -33,14 +33,24 @@ export default function Login() {
               required
               autoFocus
             />
-            <Input
-              label="Пароль"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
+            <div>
+              <Input
+                label="Пароль"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+              />
+              <div className="text-right mt-1">
+                <Link
+                  to="/forgot-password"
+                  className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors"
+                >
+                  Забыли пароль?
+                </Link>
+              </div>
+            </div>
             <Button type="submit" className="w-full" loading={login.isPending}>
               Войти
             </Button>

@@ -1,16 +1,37 @@
 // ─── Teacher ──────────────────────────────────────────────────────────────────
 
+export type TeacherRole = 'teacher' | 'institution_admin' | 'platform_admin'
+export type PlanTier    = 'free' | 'pro' | 'institution'
+
+export interface PlanState {
+  tier:               PlanTier
+  expiresAt:          string | null
+  gradesUsed:         number
+  gradesLimit:        number | null   // null = unlimited
+  presentationsUsed:  number
+  presentationsLimit: number | null
+  features: {
+    documentUpload:      boolean
+    ragFlywheel:         boolean
+    emailGeneration:     boolean
+    presentationHistory: boolean
+  }
+}
+
 export interface Teacher {
-  id: string
-  email: string
-  name: string | null
-  university: string | null
-  created_at: string
+  id:          string
+  email:       string
+  name:        string | null
+  university:  string | null
+  phone:       string | null
+  role?:       TeacherRole
+  created_at:  string
 }
 
 export interface AuthResponse {
-  token: string
+  token:   string
   teacher: Teacher
+  plan:    PlanState
 }
 
 // ─── Course ───────────────────────────────────────────────────────────────────
