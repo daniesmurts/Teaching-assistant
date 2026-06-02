@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "node --env-file=../.env ../node_modules/.bin/tsx watch src/index.ts",
+    "dev": "node --env-file=../.env ../node_modules/.bin/tsx watch --ignore '../node_modules/**' --ignore '../frontend/**' src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js"
   },
