@@ -66,7 +66,17 @@ export default function GradingResult({ result, onApproved }: Props) {
           {editGrade}
         </div>
         <div className="flex-1">
-          <div className="text-xs font-sans text-ink-secondary mb-1">{result.ai_grade_label}</div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-sans text-ink-secondary">{result.ai_grade_label}</span>
+            {result.used_examples > 0 && (
+              <span
+                className="text-[10px] font-sans font-medium bg-amber-light text-amber px-1.5 py-0.5 rounded-sm"
+                title={`Оценка основана на ${result.used_examples} похожих работах из архива курса`}
+              >
+                ✦ RAG ×{result.used_examples}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <input
               type="number"

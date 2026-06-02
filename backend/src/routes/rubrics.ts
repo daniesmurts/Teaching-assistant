@@ -8,6 +8,7 @@ import {
   updateRubric,
   deleteRubric,
 } from '../db/queries/rubrics'
+import type { RubricCriterion } from '../../../shared/types'
 
 const router = Router()
 router.use(authenticate)
@@ -28,7 +29,7 @@ router.post(
   ]),
   async (req, res, next) => {
     try {
-      const rubric = await createRubric(req.teacher.id, req.body as { name: string; course_id?: string; criteria: unknown[]; is_default?: boolean })
+      const rubric = await createRubric(req.teacher.id, req.body as { name: string; course_id?: string; criteria: RubricCriterion[]; is_default?: boolean })
       res.status(201).json(rubric)
     } catch (err) { next(err) }
   }
@@ -44,7 +45,7 @@ router.get('/:id', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
-    const rubric = await updateRubric(req.params.id, req.teacher.id, req.body as { name?: string; criteria?: unknown[]; is_default?: boolean })
+    const rubric = await updateRubric(req.params.id, req.teacher.id, req.body as { name?: string; criteria?: RubricCriterion[]; is_default?: boolean })
     if (!rubric) { res.status(404).json({ error: 'Rubric not found' }); return }
     res.json(rubric)
   } catch (err) { next(err) }

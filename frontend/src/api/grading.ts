@@ -18,6 +18,7 @@ export interface GradeResponse {
   ai_criteria_scores: { name: string; score: number; feedback: string }[]
   ai_strengths: string[]
   ai_improvements: string[]
+  used_examples: number
 }
 
 export async function gradeSubmission(data: GradeRequest): Promise<GradeResponse> {
