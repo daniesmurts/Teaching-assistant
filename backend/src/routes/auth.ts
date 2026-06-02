@@ -30,7 +30,7 @@ router.post(
 
       const existing = await findTeacherByEmail(email)
       if (existing) {
-        res.status(400).json({ error: 'Email already registered' })
+        res.status(400).json({ error: 'Этот адрес эл. почты уже зарегистрирован' })
         return
       }
 
@@ -66,13 +66,13 @@ router.post(
 
       const row = await findTeacherByEmail(email)
       if (!row) {
-        res.status(401).json({ error: 'Invalid email or password' })
+        res.status(401).json({ error: 'Неверный адрес эл. почты или пароль' })
         return
       }
 
       const valid = await bcrypt.compare(password, row.password_hash)
       if (!valid) {
-        res.status(401).json({ error: 'Invalid email or password' })
+        res.status(401).json({ error: 'Неверный адрес эл. почты или пароль' })
         return
       }
 
@@ -102,7 +102,7 @@ router.get('/me', authenticate, async (req, res, next) => {
   try {
     const teacher = await findTeacherById(req.teacher.id)
     if (!teacher) {
-      res.status(404).json({ error: 'Teacher not found' })
+      res.status(404).json({ error: 'Пользователь не найден' })
       return
     }
     res.json({ teacher })

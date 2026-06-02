@@ -5,9 +5,9 @@ import { useGenerateEmail } from '../../hooks/useGrading'
 type Tone = 'encouraging' | 'neutral' | 'direct'
 
 const TONES: { value: Tone; label: string }[] = [
-  { value: 'encouraging', label: 'Encouraging' },
-  { value: 'neutral',     label: 'Neutral'      },
-  { value: 'direct',      label: 'Direct'        },
+  { value: 'encouraging', label: 'Поддерживающий' },
+  { value: 'neutral',     label: 'Нейтральный'    },
+  { value: 'direct',      label: 'Деловой'        },
 ]
 
 export default function FeedbackEmail({ assignmentId }: { assignmentId: string }) {
@@ -31,7 +31,7 @@ export default function FeedbackEmail({ assignmentId }: { assignmentId: string }
     <div className="space-y-4">
       <div>
         <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">
-          Tone
+          Тон письма
         </div>
         <div className="flex gap-2">
           {TONES.map((t) => (
@@ -51,25 +51,25 @@ export default function FeedbackEmail({ assignmentId }: { assignmentId: string }
       </div>
 
       <Button onClick={generate} loading={emailMut.isPending} variant="secondary">
-        Generate draft email
+        Составить черновик письма
       </Button>
 
       {draft && (
         <div className="space-y-3">
           <div>
-            <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-1">Subject</div>
+            <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-1">Тема</div>
             <div className="px-3 py-2 bg-surface-warm border border-border rounded-md text-sm font-sans text-ink">
               {draft.subject}
             </div>
           </div>
           <div>
-            <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-1">Body</div>
+            <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-1">Текст</div>
             <pre className="px-3 py-2 bg-surface-warm border border-border rounded-md text-sm font-sans text-ink whitespace-pre-wrap leading-relaxed">
               {draft.body}
             </pre>
           </div>
           <Button size="sm" variant="secondary" onClick={copyAll}>
-            {copied ? '✓ Copied!' : 'Copy to clipboard'}
+            {copied ? '✓ Скопировано!' : 'Скопировать'}
           </Button>
         </div>
       )}

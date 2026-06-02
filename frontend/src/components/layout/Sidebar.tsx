@@ -8,10 +8,10 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { icon: '⊞', label: 'Dashboard',     to: '/dashboard' },
-  { icon: '◫', label: 'Courses',        to: '/courses' },
-  { icon: '✦', label: 'Grading',        to: '/grading' },
-  { icon: '▤', label: 'Presentations',  to: '/presentations' },
+  { icon: '⊞', label: 'Главная',        to: '/dashboard' },
+  { icon: '◫', label: 'Курсы',          to: '/courses' },
+  { icon: '✦', label: 'Проверка работ', to: '/grading' },
+  { icon: '▤', label: 'Презентации',    to: '/presentations' },
 ]
 
 export default function Sidebar() {
@@ -85,7 +85,7 @@ export default function Sidebar() {
           </div>
           <button
             onClick={logout}
-            title="Sign out"
+            title="Выйти"
             className="text-ink-inv-muted hover:text-ink-inverse transition-colors text-xs ml-1"
           >
             ⎋

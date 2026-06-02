@@ -8,11 +8,11 @@ import { useUIStore } from '../store/uiStore'
 import type { Course } from '../types'
 
 const LEVELS = [
-  { value: '', label: 'No level' },
-  { value: 'undergraduate_1', label: 'Undergraduate year 1–2' },
-  { value: 'undergraduate_2', label: 'Undergraduate year 3–4' },
-  { value: 'postgraduate',    label: 'Postgraduate' },
-  { value: 'professional',    label: 'Professional' },
+  { value: '', label: 'Не указан' },
+  { value: 'undergraduate_1', label: 'Бакалавриат 1–2 курс' },
+  { value: 'undergraduate_2', label: 'Бакалавриат 3–4 курс' },
+  { value: 'postgraduate',    label: 'Магистратура / аспирантура' },
+  { value: 'professional',    label: 'Дополнительное образование' },
 ]
 
 interface FormState {
@@ -32,17 +32,17 @@ export default function Courses() {
   const createMut = useMutation({
     mutationFn: createCourse,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['courses'] }); close() },
-    onError:   () => addToast('Failed to create course', 'error'),
+    onError:   () => addToast('Не удалось создать курс', 'error'),
   })
   const updateMut = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<FormState> }) => updateCourse(id, data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['courses'] }); close() },
-    onError:   () => addToast('Failed to update course', 'error'),
+    onError:   () => addToast('Не удалось обновить курс', 'error'),
   })
   const deleteMut = useMutation({
     mutationFn: deleteCourse,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['courses'] }),
-    onError:   () => addToast('Failed to delete course', 'error'),
+    onError:   () => addToast('Не удалось удалить курс', 'error'),
   })
 
   function close() { setShowForm(false); setEditing(null); setForm(emptyForm) }
@@ -65,35 +65,35 @@ export default function Courses() {
   return (
     <div className="flex-1 flex flex-col">
       <TopBar
-        title="Courses"
-        subtitle={courses.length > 0 ? `${courses.length} course${courses.length !== 1 ? 's' : ''}` : undefined}
-        actions={<Button size="sm" onClick={() => { setShowForm(true); setEditing(null); setForm(emptyForm) }}>+ New course</Button>}
+        title="Курсы"
+        subtitle={courses.length > 0 ? `${courses.length} ${courses.length === 1 ? 'курс' : courses.length < 5 ? 'курса' : 'курсов'}` : undefined}
+        actions={<Button size="sm" onClick={() => { setShowForm(true); setEditing(null); setForm(emptyForm) }}>+ Новый курс</Button>}
       />
 
       <div className="flex-1 p-6 max-w-4xl w-full mx-auto">
         {showForm && (
           <div className="bg-surface border border-border rounded-lg p-5 mb-6">
             <h3 className="font-sans text-sm font-medium text-ink mb-4">
-              {editing ? 'Edit course' : 'New course'}
+              {editing ? 'Редактировать курс' : 'Новый курс'}
             </h3>
             <form onSubmit={handleSubmit} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <Input
-                  label="Course name *"
+                  label="Название курса *"
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="Introduction to Computer Science"
+                  placeholder="Введение в программирование"
                   required
                 />
                 <Input
-                  label="Course code"
+                  label="Код курса"
                   value={form.code}
                   onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
                   placeholder="CS101"
                 />
               </div>
               <div>
-                <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">Level</label>
+                <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">Уровень</label>
                 <select
                   value={form.level}
                   onChange={(e) => setForm((f) => ({ ...f, level: e.target.value }))}
@@ -103,28 +103,28 @@ export default function Courses() {
                 </select>
               </div>
               <Textarea
-                label="Syllabus (optional)"
+                label="Программа курса (необязательно)"
                 value={form.syllabus_text}
                 onChange={(e) => setForm((f) => ({ ...f, syllabus_text: e.target.value }))}
-                placeholder="Paste course syllabus text here…"
+                placeholder="Вставьте текст программы курса…"
                 rows={4}
               />
               <div className="flex gap-2 pt-1">
-                <Button type="submit" loading={busy}>{editing ? 'Save changes' : 'Create course'}</Button>
-                <Button type="button" variant="secondary" onClick={close}>Cancel</Button>
+                <Button type="submit" loading={busy}>{editing ? 'Сохранить' : 'Создать курс'}</Button>
+                <Button type="button" variant="secondary" onClick={close}>Отмена</Button>
               </div>
             </form>
           </div>
         )}
 
         {isLoading ? (
-          <div className="text-sm font-sans text-ink-tertiary">Loading…</div>
+          <div className="text-sm font-sans text-ink-tertiary">Загрузка…</div>
         ) : courses.length === 0 ? (
           <div className="text-center py-16">
             <div className="font-display text-4xl text-ink-tertiary mb-3">◫</div>
-            <p className="font-sans text-sm text-ink-secondary">No courses yet.</p>
+            <p className="font-sans text-sm text-ink-secondary">Курсов пока нет.</p>
             <button onClick={() => setShowForm(true)} className="text-amber text-sm mt-1 hover:underline">
-              Create your first course
+              Создать первый курс
             </button>
           </div>
         ) : (
@@ -150,14 +150,14 @@ export default function Courses() {
                   )}
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <Button size="sm" variant="secondary" onClick={() => openEdit(course)}>Edit</Button>
+                  <Button size="sm" variant="secondary" onClick={() => openEdit(course)}>Изменить</Button>
                   <Button
                     size="sm"
                     variant="danger"
                     loading={deleteMut.isPending}
-                    onClick={() => { if (confirm(`Delete "${course.name}"?`)) deleteMut.mutate(course.id) }}
+                    onClick={() => { if (confirm(`Удалить курс «${course.name}»?`)) deleteMut.mutate(course.id) }}
                   >
-                    Delete
+                    Удалить
                   </Button>
                 </div>
               </div>

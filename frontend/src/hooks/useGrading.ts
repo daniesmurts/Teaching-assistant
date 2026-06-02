@@ -5,7 +5,7 @@ import type { AxiosError } from 'axios'
 
 function errMsg(err: unknown): string {
   const ae = err as AxiosError<{ error: string }>
-  return ae.response?.data?.error ?? 'Something went wrong'
+  return ae.response?.data?.error ?? 'Что-то пошло не так'
 }
 
 export function useGrade() {
@@ -24,7 +24,7 @@ export function useApprove() {
       approveGrade(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['history'] })
-      addToast('Grade approved', 'success')
+      addToast('Оценка подтверждена', 'success')
     },
     onError: (err) => addToast(errMsg(err), 'error'),
   })

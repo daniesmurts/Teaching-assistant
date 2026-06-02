@@ -7,7 +7,7 @@ import type { AxiosError } from 'axios'
 
 function errMsg(err: unknown): string {
   const ae = err as AxiosError<{ error: string }>
-  return ae.response?.data?.error ?? 'Something went wrong'
+  return ae.response?.data?.error ?? 'Что-то пошло не так'
 }
 
 export function useLogin() {

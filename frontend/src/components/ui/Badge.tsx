@@ -7,16 +7,24 @@ const styles: Record<BadgeVariant, string> = {
   default:  'bg-surface-warm text-ink-secondary',
 }
 
+const labels: Record<BadgeVariant, string> = {
+  pending:  'На проверке',
+  approved: 'Подтверждено',
+  sent:     'Отправлено',
+  default:  '',
+}
+
 export default function Badge({
   children,
   variant = 'default',
 }: {
-  children: React.ReactNode
+  children?: React.ReactNode
   variant?: BadgeVariant
 }) {
+  const text = variant !== 'default' ? labels[variant] : children
   return (
-    <span className={`text-xs font-sans font-medium px-2 py-0.5 rounded-sm capitalize ${styles[variant]}`}>
-      {children}
+    <span className={`text-xs font-sans font-medium px-2 py-0.5 rounded-sm ${styles[variant]}`}>
+      {text}
     </span>
   )
 }

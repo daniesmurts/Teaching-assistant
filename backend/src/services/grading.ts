@@ -43,7 +43,7 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     ? await findRubricById(params.rubricId, params.teacherId)
     : null
 
-  const systemPrompt = `You are an expert academic grader. Your job is to grade student assignments fairly and provide constructive feedback. Always respond with valid JSON only.`
+  const systemPrompt = `Вы опытный преподаватель-эксперт. Ваша задача — объективно оценивать студенческие работы и давать конструктивную обратную связь на русском языке. Всегда отвечайте только валидным JSON.`
 
   const userPrompt = rubric
     ? buildRubricPrompt(params.submissionText, rubric.name, rubric.criteria)
@@ -118,34 +118,34 @@ ${criteriaBlock}
 ## Student Submission
 ${text}
 
-## Instructions
-Grade this submission against each rubric criterion. Return a JSON object with:
-- "score": overall weighted score 0–100
-- "grade": one of "A", "B", "C", "D", "F"  (A≥90, B≥75, C≥60, D≥50, F<50)
-- "grade_label": one of "Excellent", "Good", "Satisfactory", "Poor", "Failing"
-- "feedback": 2–3 paragraph overall feedback
-- "criteria_scores": array of {"name": string, "score": number (0–100), "feedback": string}
-- "strengths": array of 3–5 specific strengths observed
-- "improvements": array of 3–5 specific areas for improvement
+## Инструкция
+Оцените работу по каждому критерию рубрики. Верните JSON-объект со следующими полями:
+- "score": итоговый взвешенный балл от 0 до 100
+- "grade": одно из "A", "B", "C", "D", "F"  (A≥90, B≥75, C≥60, D≥50, F<50)
+- "grade_label": одно из "Отлично", "Хорошо", "Удовлетворительно", "Плохо", "Неудовлетворительно"
+- "feedback": общий отзыв на 2–3 абзаца на русском языке
+- "criteria_scores": массив объектов {"name": string, "score": число (0–100), "feedback": string} — feedback на русском
+- "strengths": массив из 3–5 конкретных достоинств работы на русском языке
+- "improvements": массив из 3–5 конкретных областей для улучшения на русском языке
 
-Respond ONLY with the JSON object.`
+Ответьте ТОЛЬКО JSON-объектом, без пояснений.`
 }
 
 function buildHolisticPrompt(text: string): string {
   return `## Student Submission
 ${text}
 
-## Instructions
-Grade this submission holistically using academic standards. Return a JSON object with:
-- "score": overall score 0–100
-- "grade": one of "A", "B", "C", "D", "F"  (A≥90, B≥75, C≥60, D≥50, F<50)
-- "grade_label": one of "Excellent", "Good", "Satisfactory", "Poor", "Failing"
-- "feedback": 2–3 paragraph overall feedback
-- "criteria_scores": [] (empty array — no rubric)
-- "strengths": array of 3–5 specific strengths observed
-- "improvements": array of 3–5 specific areas for improvement
+## Инструкция
+Оцените работу в целом по академическим стандартам. Верните JSON-объект со следующими полями:
+- "score": итоговый балл от 0 до 100
+- "grade": одно из "A", "B", "C", "D", "F"  (A≥90, B≥75, C≥60, D≥50, F<50)
+- "grade_label": одно из "Отлично", "Хорошо", "Удовлетворительно", "Плохо", "Неудовлетворительно"
+- "feedback": общий отзыв на 2–3 абзаца на русском языке
+- "criteria_scores": [] (пустой массив — без рубрики)
+- "strengths": массив из 3–5 конкретных достоинств работы на русском языке
+- "improvements": массив из 3–5 конкретных областей для улучшения на русском языке
 
-Respond ONLY with the JSON object.`
+Ответьте ТОЛЬКО JSON-объектом, без пояснений.`
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -162,5 +162,5 @@ function normaliseGrade(g: unknown): GradeLetter {
 }
 
 function gradeToLabel(g: GradeLetter): string {
-  return { A: 'Excellent', B: 'Good', C: 'Satisfactory', D: 'Poor', F: 'Failing' }[g] ?? 'Unknown'
+  return { A: 'Отлично', B: 'Хорошо', C: 'Удовлетворительно', D: 'Плохо', F: 'Неудовлетворительно' }[g] ?? 'Неизвестно'
 }

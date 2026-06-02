@@ -21,10 +21,10 @@ export default function Grading() {
   return (
     <div className="flex-1 flex flex-col">
       <TopBar
-        title="Grading"
+        title="Проверка работ"
         actions={result && (
           <button onClick={reset} className="text-xs font-sans text-ink-secondary hover:text-ink transition-colors">
-            ← New submission
+            ← Новая работа
           </button>
         )}
       />
@@ -38,7 +38,7 @@ export default function Grading() {
             <div className="flex flex-col h-full">
               <div className="px-4 py-3 border-b border-border">
                 <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-1">
-                  Student submission
+                  Работа студента
                 </div>
                 {submission?.student_name && (
                   <div className="text-sm font-sans font-medium text-ink">{submission.student_name}</div>
@@ -58,8 +58,8 @@ export default function Grading() {
               <div>
                 <div className="font-display text-5xl text-ink-tertiary mb-3">✦</div>
                 <p className="font-sans text-sm text-ink-secondary max-w-xs">
-                  Paste a student submission on the left and click <strong>Grade with AI</strong>.
-                  Results will appear here.
+                  Вставьте работу студента слева и нажмите <strong>Проверить с ИИ</strong>.
+                  Результаты появятся здесь.
                 </p>
               </div>
             </div>

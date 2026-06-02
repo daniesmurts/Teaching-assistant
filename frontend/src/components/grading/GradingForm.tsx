@@ -44,7 +44,7 @@ export default function GradingForm({ onResult }: Props) {
       const res = await client.post<GradeResponse>('/api/grading/grade', payload)
       onResult(payload, res.data)
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } }).response?.data?.error ?? 'Grading failed'
+      const msg = (err as { response?: { data?: { error?: string } } }).response?.data?.error ?? 'Ошибка при проверке'
       setError(msg)
     } finally {
       setLoading(false)
@@ -58,18 +58,18 @@ export default function GradingForm({ onResult }: Props) {
       {/* Student info */}
       <div className="px-4 py-3 border-b border-border">
         <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">
-          Student info
+          Информация о студенте
         </div>
         <div className="grid grid-cols-2 gap-2">
           <input
             className={selectClass}
-            placeholder="Student name"
+            placeholder="Имя студента"
             value={form.student_name}
             onChange={set('student_name')}
           />
           <input
             className={selectClass}
-            placeholder="Email (optional)"
+            placeholder="Email (необязательно)"
             value={form.student_email}
             onChange={set('student_email')}
           />
@@ -79,15 +79,15 @@ export default function GradingForm({ onResult }: Props) {
       {/* Course + Rubric */}
       <div className="px-4 py-3 border-b border-border">
         <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">
-          Course &amp; Rubric
+          Курс и критерии оценки
         </div>
         <div className="space-y-2">
           <select className={selectClass} value={form.course_id} onChange={set('course_id')}>
-            <option value="">No course selected</option>
+            <option value="">Курс не выбран</option>
             {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <select className={selectClass} value={form.rubric_id} onChange={set('rubric_id')}>
-            <option value="">Holistic grading (no rubric)</option>
+            <option value="">Без критериев (общая оценка)</option>
             {rubrics.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         </div>
@@ -96,12 +96,12 @@ export default function GradingForm({ onResult }: Props) {
       {/* Submission */}
       <div className="flex-1 px-4 py-3 flex flex-col">
         <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">
-          Student submission *
+          Работа студента *
         </div>
         <Textarea
           value={form.submission_text}
           onChange={set('submission_text')}
-          placeholder="Paste the student's submission text here…"
+          placeholder="Вставьте текст работы студента…"
           className="flex-1 font-mono text-[13px] leading-relaxed min-h-[200px]"
           required
         />
@@ -115,7 +115,7 @@ export default function GradingForm({ onResult }: Props) {
 
       <div className="px-4 pb-4">
         <Button type="submit" className="w-full" loading={loading}>
-          Grade with AI
+          Проверить с ИИ
         </Button>
       </div>
     </form>

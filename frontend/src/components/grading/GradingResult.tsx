@@ -90,20 +90,20 @@ export default function GradingResult({ result, onApproved }: Props) {
         </div>
         {!approved ? (
           <Button onClick={handleApprove} loading={approveMut.isPending}>
-            Approve grade
+            Подтвердить оценку
           </Button>
         ) : (
           <span className="text-xs font-sans font-medium bg-success-bg text-success px-3 py-1.5 rounded-md">
-            ✓ Approved
+            ✓ Подтверждено
           </span>
         )}
       </div>
 
       {/* Tabs */}
       <div className="flex border-b border-border px-5">
-        {(['feedback', 'criteria', 'email'] as Tab[]).map((t) => (
+        {([['feedback', 'Отзыв'], ['criteria', 'Критерии'], ['email', 'Письмо']] as [Tab, string][]).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)} className={tabClass(t)}>
-            {t.charAt(0).toUpperCase() + t.slice(1)}
+            {label}
           </button>
         ))}
       </div>
@@ -114,7 +114,7 @@ export default function GradingResult({ result, onApproved }: Props) {
           <div className="space-y-4">
             <div>
               <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">
-                Overall feedback
+                Общий отзыв
               </div>
               <textarea
                 value={editFeedback}
@@ -128,7 +128,7 @@ export default function GradingResult({ result, onApproved }: Props) {
             {(result.ai_strengths?.length > 0 || result.ai_improvements?.length > 0) && (
               <div className="grid grid-cols-2 gap-2.5">
                 <div className="bg-success-bg border border-success/15 rounded-lg p-3">
-                  <div className="text-xs font-semibold text-success uppercase tracking-wide mb-2">Strengths</div>
+                  <div className="text-xs font-semibold text-success uppercase tracking-wide mb-2">Сильные стороны</div>
                   {result.ai_strengths.map((s) => (
                     <div key={s} className="flex gap-1.5 text-xs text-success mb-1 leading-relaxed">
                       <span className="flex-shrink-0">·</span><span>{s}</span>
@@ -136,7 +136,7 @@ export default function GradingResult({ result, onApproved }: Props) {
                   ))}
                 </div>
                 <div className="bg-warning-bg border border-warning/15 rounded-lg p-3">
-                  <div className="text-xs font-semibold text-warning uppercase tracking-wide mb-2">To improve</div>
+                  <div className="text-xs font-semibold text-warning uppercase tracking-wide mb-2">Что улучшить</div>
                   {result.ai_improvements.map((imp) => (
                     <div key={imp} className="flex gap-1.5 text-xs text-warning mb-1 leading-relaxed">
                       <span className="flex-shrink-0">·</span><span>{imp}</span>
@@ -151,7 +151,7 @@ export default function GradingResult({ result, onApproved }: Props) {
         {tab === 'criteria' && (
           <div className="space-y-4">
             {result.ai_criteria_scores.length === 0 ? (
-              <p className="text-sm font-sans text-ink-secondary">No rubric was used — holistic grading.</p>
+              <p className="text-sm font-sans text-ink-secondary">Критерии не использовались — общая оценка.</p>
             ) : (
               result.ai_criteria_scores.map((cs) => (
                 <div key={cs.name}>

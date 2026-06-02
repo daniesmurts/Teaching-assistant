@@ -32,31 +32,32 @@ export default function Dashboard() {
   const approved  = history?.assignments.filter((a) => a.status === 'approved').length ?? 0
   const total     = history?.total ?? 0
 
-  const greeting = teacher?.name ? `Good day, ${teacher.name.split(' ')[0]}` : 'Good day'
+  const firstName = teacher?.name?.split(' ').find(w => w.length > 1) ?? teacher?.name?.split(' ')[0]
+  const greeting = firstName ? `Добрый день, ${firstName}` : 'Добрый день'
 
   return (
     <div className="flex-1 flex flex-col">
-      <TopBar title="Dashboard" />
+      <TopBar title="Главная" />
       <div className="flex-1 p-6 max-w-4xl w-full mx-auto">
         <div className="mb-6">
           <h1 className="font-display text-2xl font-bold text-ink tracking-tight">{greeting}</h1>
           {pending > 0 && (
             <p className="font-sans text-sm text-ink-secondary mt-1">
-              {pending} assignment{pending !== 1 ? 's' : ''} pending review
+              {pending} {pending === 1 ? 'работа ожидает' : pending < 5 ? 'работы ожидают' : 'работ ожидают'} проверки
             </p>
           )}
         </div>
 
         <div className="grid grid-cols-3 gap-4 mb-8">
-          <StatCard label="Total graded" value={total} />
-          <StatCard label="Pending review" value={pending} />
-          <StatCard label="Courses" value={courses?.length ?? 0} />
+          <StatCard label="Проверено всего" value={total} />
+          <StatCard label="Ожидают проверки" value={pending} />
+          <StatCard label="Курсы" value={courses?.length ?? 0} />
         </div>
 
         {history && history.assignments.length > 0 && (
           <div>
             <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">
-              Recent submissions
+              Последние работы
             </div>
             <div className="bg-surface border border-border rounded-lg overflow-hidden">
               {history.assignments.map((a, i) => (
@@ -68,7 +69,7 @@ export default function Dashboard() {
                 >
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-sans text-ink truncate">
-                      {a.student_name ?? 'Anonymous student'}
+                      {a.student_name ?? 'Студент (без имени)'}
                     </div>
                     <div className="text-xs font-sans text-ink-tertiary mt-0.5">
                       {new Date(a.created_at).toLocaleDateString('ru-RU')}
