@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useRegister } from '../hooks/useAuth'
+import { validatePassword } from '../lib/validatePassword'
 import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 
@@ -10,6 +11,7 @@ export default function Register() {
   })
   const [tosAccepted, setTosAccepted] = useState(false)
   const [tosError, setTosError]       = useState(false)
+  const [pwError, setPwError]         = useState<string | null>(null)
   const register = useRegister()
 
   const set = (field: keyof typeof form) =>
@@ -18,8 +20,14 @@ export default function Register() {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
+
+    const pw = validatePassword(form.password)
+    setPwError(pw)
+    if (pw) return
+
     if (!tosAccepted) { setTosError(true); return }
     setTosError(false)
+
     register.mutate(form)
   }
 
@@ -66,15 +74,20 @@ export default function Register() {
               autoComplete="email"
             />
 
-            <Input
-              label="Пароль"
-              type="password"
-              value={form.password}
-              onChange={set('password')}
-              placeholder="Минимум 8 символов"
-              required
-              autoComplete="new-password"
-            />
+            <div>
+              <Input
+                label="Пароль"
+                type="password"
+                value={form.password}
+                onChange={(e) => { set('password')(e); if (pwError) setPwError(null) }}
+                placeholder="8+ символов, заглавная буква и цифра"
+                required
+                autoComplete="new-password"
+              />
+              {pwError && (
+                <p className="mt-1 text-xs font-sans text-danger">{pwError}</p>
+              )}
+            </div>
 
             {/* TOS checkbox */}
             <div>

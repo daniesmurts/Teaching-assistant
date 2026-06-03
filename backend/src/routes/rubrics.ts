@@ -4,6 +4,7 @@ import { validate } from '../middleware/validate'
 import { asyncHandler } from '../lib/asyncHandler'
 import { NotFoundError } from '../errors/AppError'
 import { checkResourceLimit } from '../middleware/checkPlan'
+import { createRubricRules, updateRubricRules } from '../validation/rubricValidation'
 import {
   findRubricsByTeacher, findRubricById, createRubric, updateRubric, deleteRubric,
 } from '../db/queries/rubrics'
@@ -20,10 +21,7 @@ router.get('/', asyncHandler(async (req, res) => {
 router.post(
   '/',
   checkResourceLimit('rubrics', 'maxRubrics'),
-  validate([
-    { field: 'name',     type: 'string', required: true },
-    { field: 'criteria', required: true },
-  ]),
+  validate(createRubricRules),
   asyncHandler(async (req, res) => {
     const rubric = await createRubric(
       req.teacher.id,
@@ -39,7 +37,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   res.json(rubric)
 }))
 
-router.put('/:id', asyncHandler(async (req, res) => {
+router.put('/:id', validate(updateRubricRules), asyncHandler(async (req, res) => {
   const rubric = await updateRubric(
     req.params.id, req.teacher.id,
     req.body as { name?: string; criteria?: RubricCriterion[]; is_default?: boolean }

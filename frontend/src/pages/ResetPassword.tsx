@@ -1,6 +1,7 @@
 import { useState, FormEvent, useEffect } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { resetPassword } from '../api/auth'
+import { validatePassword } from '../lib/validatePassword'
 import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 
@@ -32,8 +33,9 @@ export default function ResetPassword() {
       setError('Пароли не совпадают')
       return
     }
-    if (password.length < 8) {
-      setError('Пароль должен содержать не менее 8 символов')
+    const pwError = validatePassword(password)
+    if (pwError) {
+      setError(pwError)
       return
     }
 
@@ -96,7 +98,7 @@ export default function ResetPassword() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Минимум 8 символов"
+                placeholder="8+ символов, заглавная буква и цифра"
                 required
                 autoFocus
               />

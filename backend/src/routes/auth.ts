@@ -1,11 +1,14 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { authLimiter } from '../middleware/rateLimits'
 import { asyncHandler } from '../lib/asyncHandler'
+import { signToken } from '../lib/jwt'
 import { ValidationError, NotFoundError } from '../errors/AppError'
+import {
+  registerRules, loginRules, forgotPasswordRules, resetPasswordRules,
+} from '../validation/authValidation'
 import {
   findTeacherByEmail, findTeacherRowById, createTeacher, updateTeacherPassword,
 } from '../db/queries/teachers'
@@ -27,10 +30,7 @@ const router = Router()
 router.post(
   '/register',
   authLimiter,
-  validate([
-    { field: 'email',    type: 'string', required: true },
-    { field: 'password', type: 'string', required: true, minLength: 8 },
-  ]),
+  validate(registerRules),
   asyncHandler(async (req, res) => {
     const { email, password, name, university, phone } = req.body as {
       email: string; password: string; name?: string; university?: string; phone?: string
@@ -42,11 +42,7 @@ router.post(
     const passwordHash = await bcrypt.hash(password, 12)
     const teacher = await createTeacher(email, passwordHash, name, university, phone)
 
-    const token = jwt.sign(
-      { id: teacher.id, email: teacher.email },
-      process.env.JWT_SECRET!,
-      { expiresIn: '7d' }
-    )
+    const token = signToken({ id: teacher.id, email: teacher.email })
 
     // Welcome email — fire-and-forget
     if (name || email) {
@@ -63,10 +59,7 @@ router.post(
 router.post(
   '/login',
   authLimiter,
-  validate([
-    { field: 'email',    type: 'string', required: true },
-    { field: 'password', type: 'string', required: true },
-  ]),
+  validate(loginRules),
   asyncHandler(async (req, res) => {
     const { email, password } = req.body as { email: string; password: string }
 
@@ -76,11 +69,7 @@ router.post(
     const valid = await bcrypt.compare(password, row.password_hash)
     if (!valid) throw new ValidationError('Неверный адрес эл. почты или пароль')
 
-    const token = jwt.sign(
-      { id: row.id, email: row.email },
-      process.env.JWT_SECRET!,
-      { expiresIn: '7d' }
-    )
+    const token = signToken({ id: row.id, email: row.email })
 
     const plan = await buildPlanData(row.id, row.plan_tier ?? 'free', row.plan_expires_at)
 
@@ -123,7 +112,7 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
 router.post(
   '/forgot-password',
   authLimiter,
-  validate([{ field: 'email', type: 'string', required: true }]),
+  validate(forgotPasswordRules),
   asyncHandler(async (req, res) => {
     const { email } = req.body as { email: string }
 
@@ -157,10 +146,7 @@ router.post(
 router.post(
   '/reset-password',
   authLimiter,
-  validate([
-    { field: 'token',    type: 'string', required: true },
-    { field: 'password', type: 'string', required: true, minLength: 8 },
-  ]),
+  validate(resetPasswordRules),
   asyncHandler(async (req, res) => {
     const { token: rawToken, password } = req.body as {
       token: string; password: string

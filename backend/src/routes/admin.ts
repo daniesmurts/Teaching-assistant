@@ -3,7 +3,10 @@ import { authenticate } from '../middleware/authenticate'
 import { requireAdmin } from '../middleware/requireRole'
 import { asyncHandler } from '../lib/asyncHandler'
 import { pool } from '../db/connection'
-import { getDailyUsage, getUsageByTeacher, getTodayCost } from '../db/queries/usageLog'
+import {
+  getDailyUsage, getUsageByTeacher, getTodayCost,
+  getUsageByFeature, getRecentErrors,
+} from '../db/queries/usageLog'
 
 const router = Router()
 router.use(authenticate)
@@ -57,6 +60,54 @@ router.get('/usage/daily', asyncHandler(async (req, res) => {
 router.get('/usage/by-teacher', asyncHandler(async (req, res) => {
   const limit = parseInt((req.query.limit as string) ?? '20', 10)
   res.json(await getUsageByTeacher(Math.min(limit, 100)))
+}))
+
+// ─── GET /api/admin/usage/by-feature?days=30 ─────────────────────────────────
+
+router.get('/usage/by-feature', asyncHandler(async (req, res) => {
+  const days = parseInt((req.query.days as string) ?? '30', 10)
+  res.json(await getUsageByFeature(Math.min(days, 365)))
+}))
+
+// ─── GET /api/admin/errors?days=7 ────────────────────────────────────────────
+
+router.get('/errors', asyncHandler(async (req, res) => {
+  const days = parseInt((req.query.days as string) ?? '7', 10)
+  res.json(await getRecentErrors(Math.min(days, 90)))
+}))
+
+// ─── Global template rubrics ──────────────────────────────────────────────────
+
+router.get('/rubrics/templates', asyncHandler(async (_req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, name, criteria, template_subject, created_at
+     FROM rubrics
+     WHERE is_global_template = TRUE
+     ORDER BY template_subject, name`
+  )
+  res.json(rows)
+}))
+
+router.post('/rubrics/templates', asyncHandler(async (req, res) => {
+  const { name, criteria, template_subject } = req.body as {
+    name: string; criteria: unknown; template_subject?: string
+  }
+  const { rows } = await pool.query(
+    `INSERT INTO rubrics (teacher_id, name, criteria, is_global_template, template_subject)
+     VALUES ($1, $2, $3, TRUE, $4)
+     RETURNING id, name, criteria, template_subject, created_at`,
+    [req.teacher.id, name, JSON.stringify(criteria), template_subject ?? 'general']
+  )
+  res.status(201).json(rows[0])
+}))
+
+router.delete('/rubrics/templates/:id', asyncHandler(async (req, res) => {
+  const { rowCount } = await pool.query(
+    'DELETE FROM rubrics WHERE id = $1 AND is_global_template = TRUE',
+    [req.params.id]
+  )
+  if (!rowCount) { res.status(404).json({ error: 'Шаблон не найден' }); return }
+  res.status(204).send()
 }))
 
 // ─── GET /api/admin/teachers ──────────────────────────────────────────────────

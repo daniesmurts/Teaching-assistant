@@ -10,13 +10,21 @@ import Dashboard from './pages/Dashboard'
 import Courses from './pages/Courses'
 import Grading from './pages/Grading'
 import Presentations from './pages/Presentations'
+import AdminLayout from './pages/admin/AdminLayout'
 import AdminOverview from './pages/admin/AdminOverview'
+import AdminUsage from './pages/admin/AdminUsage'
+import AdminTeachers from './pages/admin/AdminTeachers'
+import AdminRubrics from './pages/admin/AdminRubrics'
+import AdminErrors from './pages/admin/AdminErrors'
 import Landing from './pages/Landing'
 import About from './pages/About'
 import Institutions from './pages/Institutions'
 import FAQ from './pages/FAQ'
 import Ethics from './pages/Ethics'
 import Contact from './pages/Contact'
+import Pricing from './pages/Pricing'
+import Changelog from './pages/Changelog'
+import UseCases from './pages/UseCases'
 import Offer from './pages/legal/Offer'
 import Privacy from './pages/legal/Privacy'
 import Terms from './pages/legal/Terms'
@@ -49,6 +57,9 @@ export default function App() {
           <Route path="/faq"      element={<FAQ />} />
           <Route path="/ethics"   element={<Ethics />} />
           <Route path="/contact"  element={<Contact />} />
+          <Route path="/pricing"  element={<Pricing />} />
+          <Route path="/changelog" element={<Changelog />} />
+          <Route path="/use-cases" element={<UseCases />} />
           <Route path="/offer"    element={<Offer />} />
           <Route path="/privacy"  element={<Privacy />} />
           <Route path="/terms"    element={<Terms />} />
@@ -63,9 +74,13 @@ export default function App() {
             <Route path="/grading"       element={<Grading />} />
             <Route path="/presentations" element={<Presentations />} />
           </Route>
-          {/* Admin — platform_admin only, no sidebar, direct URL access */}
-          <Route path="/admin" element={<AdminRoute><AppShell /></AdminRoute>}>
-            <Route index element={<AdminOverview />} />
+          {/* Admin — platform_admin only, own layout, direct URL access */}
+          <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>
+            <Route index            element={<AdminOverview />} />
+            <Route path="usage"     element={<AdminUsage />} />
+            <Route path="teachers"  element={<AdminTeachers />} />
+            <Route path="rubrics"   element={<AdminRubrics />} />
+            <Route path="errors"    element={<AdminErrors />} />
           </Route>
         </Routes>
       </BrowserRouter>

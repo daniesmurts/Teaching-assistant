@@ -4,6 +4,7 @@ import { validate } from '../middleware/validate'
 import { asyncHandler } from '../lib/asyncHandler'
 import { NotFoundError } from '../errors/AppError'
 import { checkResourceLimit } from '../middleware/checkPlan'
+import { createCourseRules, updateCourseRules } from '../validation/courseValidation'
 import {
   findCoursesByTeacher, findCourseById, createCourse, updateCourse, deleteCourse,
 } from '../db/queries/courses'
@@ -18,7 +19,7 @@ router.get('/', asyncHandler(async (req, res) => {
 router.post(
   '/',
   checkResourceLimit('courses', 'maxCourses'),
-  validate([{ field: 'name', type: 'string', required: true }]),
+  validate(createCourseRules),
   asyncHandler(async (req, res) => {
     const course = await createCourse(
       req.teacher.id,
@@ -34,7 +35,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   res.json(course)
 }))
 
-router.put('/:id', asyncHandler(async (req, res) => {
+router.put('/:id', validate(updateCourseRules), asyncHandler(async (req, res) => {
   const course = await updateCourse(
     req.params.id, req.teacher.id,
     req.body as { name?: string; code?: string; level?: string; syllabus_text?: string }

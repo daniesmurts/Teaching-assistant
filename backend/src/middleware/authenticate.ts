@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express'
-import jwt from 'jsonwebtoken'
+import { verifyToken } from '../lib/jwt'
 import { findTeacherRowById } from '../db/queries/teachers'
 import { UnauthorizedError } from '../errors/AppError'
 
@@ -42,18 +42,13 @@ export async function authenticate(
     return
   }
 
-  const token  = authHeader.slice(7)
-  const secret = process.env.JWT_SECRET
-  if (!secret) {
-    res.status(500).json({ error: 'Ошибка конфигурации сервера' })
-    return
-  }
+  const token = authHeader.slice(7)
 
   let payload: JwtPayload
   try {
-    payload = jwt.verify(token, secret) as JwtPayload
-  } catch {
-    res.status(401).json({ error: 'Сессия истекла. Пожалуйста, войдите снова.', code: 'UNAUTHORIZED' })
+    payload = verifyToken(token)
+  } catch (err) {
+    next(err)
     return
   }
 

@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { aiLimiter } from '../middleware/rateLimits'
+import { gradeRules, approveRules } from '../validation/gradingValidation'
 import { asyncHandler } from '../lib/asyncHandler'
 import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
 import { grade, approve } from '../services/grading'
@@ -18,7 +19,7 @@ router.post(
   '/grade',
   aiLimiter,
   checkMonthlyLimit('gradesPerMonth'),
-  validate([{ field: 'submission_text', type: 'string', required: true, minLength: 10 }]),
+  validate(gradeRules),
   asyncHandler(async (req, res) => {
     const { submission_text, rubric_id, course_id, student_name, student_email } = req.body as {
       submission_text: string
@@ -43,11 +44,7 @@ router.post(
 // POST /api/grading/:id/approve
 router.post(
   '/:id/approve',
-  validate([
-    { field: 'approved_score',    required: true },
-    { field: 'approved_grade',    type: 'string', required: true },
-    { field: 'approved_feedback', type: 'string', required: true },
-  ]),
+  validate(approveRules),
   asyncHandler(async (req, res) => {
     const { approved_score, approved_grade, approved_feedback } = req.body as {
       approved_score: number

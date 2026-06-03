@@ -2,6 +2,8 @@ import express from 'express'
 import helmet from 'helmet'
 import cors from 'cors'
 import { logger } from './lib/logger'
+import { config, validateConfig } from './lib/config'
+import { pool } from './db/connection'
 import { errorHandler } from './middleware/errorHandler'
 import { generalLimiter } from './middleware/rateLimits'
 import authRouter from './routes/auth'
@@ -9,10 +11,14 @@ import coursesRouter from './routes/courses'
 import rubricsRouter from './routes/rubrics'
 import gradingRouter from './routes/grading'
 import presentationsRouter from './routes/presentations'
+import documentsRouter from './routes/documents'
 import adminRouter from './routes/admin'
 
+// Validate environment before anything else — crash early on misconfig
+validateConfig()
+
 const app = express()
-const PORT = Number(process.env.PORT ?? 3000)
+const PORT = config.port
 
 // ─── Security headers ─────────────────────────────────────────────────────────
 
@@ -63,8 +69,17 @@ app.use(generalLimiter)
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() })
+app.get('/api/health', async (_req, res) => {
+  try {
+    await pool.query('SELECT 1')
+    res.json({
+      status:    'ok',
+      timestamp: new Date().toISOString(),
+      env:       config.nodeEnv,
+    })
+  } catch {
+    res.status(503).json({ status: 'degraded', error: 'database unavailable' })
+  }
 })
 
 app.use('/api/auth',          authRouter)
@@ -72,6 +87,7 @@ app.use('/api/courses',       coursesRouter)
 app.use('/api/rubrics',       rubricsRouter)
 app.use('/api/grading',       gradingRouter)
 app.use('/api/presentations', presentationsRouter)
+app.use('/api/documents',     documentsRouter)
 app.use('/api/admin',         adminRouter)
 
 // ─── Global error handler (must be last) ──────────────────────────────────────

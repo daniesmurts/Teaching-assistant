@@ -1,47 +1,30 @@
 import { Request, Response, NextFunction } from 'express'
-
-type Rule = {
-  field: string
-  type?: 'string' | 'number' | 'boolean' | 'array'
-  required?: boolean
-  minLength?: number
-}
+import { validationResult, type ValidationChain } from 'express-validator'
+import { ValidationError } from '../errors/AppError'
 
 /**
- * Returns middleware that validates req.body against a list of rules.
- * On failure, sends 400 with a descriptive error message.
+ * Runs a list of express-validator chains, then checks for errors.
+ * On failure, passes a ValidationError to the global error handler.
+ *
+ * Usage:
+ *   router.post('/register', validate(registerRules), asyncHandler(...))
  */
-export function validate(rules: Rule[]) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    for (const rule of rules) {
-      const value: unknown = (req.body as Record<string, unknown>)[rule.field]
+export function validate(chains: ValidationChain[]) {
+  return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+    // Run all chains in parallel
+    await Promise.all(chains.map((chain) => chain.run(req)))
 
-      if (rule.required && (value === undefined || value === null || value === '')) {
-        res.status(400).json({ error: `Field "${rule.field}" is required` })
-        return
-      }
-
-      if (value !== undefined && value !== null) {
-        if (rule.type && typeof value !== rule.type) {
-          res.status(400).json({
-            error: `Field "${rule.field}" must be of type ${rule.type}`,
-          })
-          return
-        }
-
-        if (
-          rule.minLength !== undefined &&
-          typeof value === 'string' &&
-          value.length < rule.minLength
-        ) {
-          res.status(400).json({
-            error: `Field "${rule.field}" must be at least ${rule.minLength} characters`,
-          })
-          return
-        }
-      }
+    const result = validationResult(req)
+    if (result.isEmpty()) {
+      next()
+      return
     }
 
-    next()
+    const details = result.array().map((e) => ({
+      field:   'path' in e ? String(e.path) : 'unknown',
+      message: e.msg as string,
+    }))
+
+    next(new ValidationError(details[0].message, details))
   }
 }

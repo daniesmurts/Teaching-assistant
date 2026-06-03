@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import Button from '../components/ui/Button'
 import { Input, Textarea } from '../components/ui/Input'
+import DocumentUpload from '../components/ui/DocumentUpload'
 import { getCourses, createCourse, updateCourse, deleteCourse } from '../api/courses'
 import { useUIStore } from '../store/uiStore'
 import type { Course } from '../types'
@@ -109,6 +110,31 @@ export default function Courses() {
                 placeholder="Вставьте текст программы курса…"
                 rows={4}
               />
+
+              {/* Syllabus upload — only when editing (chunks need a course id) */}
+              {editing && (
+                <div>
+                  <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">
+                    Загрузить программу или материалы
+                  </label>
+                  <DocumentUpload
+                    documentType="syllabus"
+                    courseId={editing.id}
+                    hint="PDF или Word — будет проиндексировано для подготовки лекций"
+                    onReady={(doc) => {
+                      if (doc.extractedText) {
+                        setForm((f) => ({ ...f, syllabus_text: doc.extractedText! }))
+                      }
+                      addToast(
+                        doc.chunkCount
+                          ? `Документ проиндексирован (${doc.chunkCount} фрагментов)`
+                          : 'Документ обработан',
+                        'success'
+                      )
+                    }}
+                  />
+                </div>
+              )}
               <div className="flex gap-2 pt-1">
                 <Button type="submit" loading={busy}>{editing ? 'Сохранить' : 'Создать курс'}</Button>
                 <Button type="button" variant="secondary" onClick={close}>Отмена</Button>

@@ -5,6 +5,7 @@ import { aiLimiter } from '../middleware/rateLimits'
 import { asyncHandler } from '../lib/asyncHandler'
 import { NotFoundError } from '../errors/AppError'
 import { checkMonthlyLimit } from '../middleware/checkPlan'
+import { generatePresentationRules } from '../validation/presentationValidation'
 import { generatePresentation } from '../services/presentations'
 import {
   findPresentationsByTeacher, findPresentationById, deletePresentation,
@@ -18,10 +19,7 @@ router.post(
   '/generate',
   aiLimiter,
   checkMonthlyLimit('presentationsPerMonth'),
-  validate([
-    { field: 'topic',            type: 'string', required: true },
-    { field: 'duration_minutes', required: true },
-  ]),
+  validate(generatePresentationRules),
   asyncHandler(async (req, res) => {
     const {
       course_id, lecture_number, topic, duration_minutes,

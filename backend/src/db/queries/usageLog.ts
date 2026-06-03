@@ -101,6 +101,55 @@ export async function getUsageByTeacher(limit = 20): Promise<UsageByTeacherRow[]
   return rows
 }
 
+export interface UsageByFeatureRow {
+  feature:            string
+  total_tokens:       number
+  cost_usd:           number
+  call_count:         number
+  avg_tokens_per_call: number
+}
+
+export async function getUsageByFeature(days = 30): Promise<UsageByFeatureRow[]> {
+  const { rows } = await pool.query<UsageByFeatureRow>(
+    `SELECT
+       feature,
+       SUM(input_tokens + output_tokens)::int          AS total_tokens,
+       ROUND(SUM(cost_usd)::numeric, 6)                AS cost_usd,
+       COUNT(*)::int                                   AS call_count,
+       ROUND(AVG(input_tokens + output_tokens))::int   AS avg_tokens_per_call
+     FROM api_usage_log
+     WHERE created_at >= NOW() - ($1 || ' days')::INTERVAL
+     GROUP BY feature
+     ORDER BY cost_usd DESC`,
+    [days]
+  )
+  return rows
+}
+
+export interface ErrorRow {
+  feature:    string
+  error_code: string | null
+  count:      number
+  last_seen:  string
+}
+
+export async function getRecentErrors(days = 7): Promise<ErrorRow[]> {
+  const { rows } = await pool.query<ErrorRow>(
+    `SELECT
+       feature,
+       error_code,
+       COUNT(*)::int          AS count,
+       MAX(created_at)::text  AS last_seen
+     FROM api_usage_log
+     WHERE NOT success
+       AND created_at >= NOW() - ($1 || ' days')::INTERVAL
+     GROUP BY feature, error_code
+     ORDER BY count DESC`,
+    [days]
+  )
+  return rows
+}
+
 export async function getTodayCost(): Promise<number> {
   const { rows } = await pool.query<{ cost: string }>(
     `SELECT ROUND(COALESCE(SUM(cost_usd), 0)::numeric, 6)::text AS cost

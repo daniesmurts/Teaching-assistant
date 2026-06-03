@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import Button from '../ui/Button'
 import { Textarea } from '../ui/Input'
 import { getCourses } from '../../api/courses'
+import DocumentUpload from '../ui/DocumentUpload'
 import { useUIStore } from '../../store/uiStore'
 import { usePlan } from '../../hooks/usePlan'
 import client from '../../api/client'
@@ -102,11 +103,25 @@ export default function GradingForm({ onResult }: Props) {
         <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">
           Работа студента *
         </div>
+
+        {/* Optional document upload — auto-fills the textarea (editable for OCR fixes) */}
+        <div className="mb-2">
+          <DocumentUpload
+            documentType="assignment"
+            hint="Загрузите PDF, Word или скан — текст подставится ниже"
+            onReady={(doc) => {
+              if (doc.extractedText) {
+                setForm((f) => ({ ...f, submission_text: doc.extractedText! }))
+              }
+            }}
+          />
+        </div>
+
         <Textarea
           value={form.submission_text}
           onChange={set('submission_text')}
-          placeholder="Вставьте текст работы студента…"
-          className="flex-1 font-mono text-[13px] leading-relaxed min-h-[200px]"
+          placeholder="Вставьте текст работы студента или загрузите файл выше…"
+          className="flex-1 font-mono text-[13px] leading-relaxed min-h-[160px]"
           required
         />
       </div>
