@@ -9,11 +9,14 @@ export default function About() {
 
       {/* Hero & Mission Statement */}
       <section className="max-w-[800px] mx-auto px-6 pt-24 pb-20 text-center">
-        <h1 className="font-display text-4xl sm:text-5xl font-bold leading-[1.1] tracking-tight mb-8">
+        <h1 className="font-display text-4xl sm:text-5xl font-bold leading-[1.1] tracking-tight mb-6">
           Технологии должны помогать преподавателям, а не заменять их.
         </h1>
+        <p className="text-xs font-semibold text-amber uppercase tracking-[0.15em] mb-8">
+          ИСПУМ — Интеллектуальная Система Проверки и Подготовки Учебных Материалов
+        </p>
         <p className="text-lg text-ink-secondary mb-10 leading-relaxed max-w-[600px] mx-auto">
-          GradeAssist был создан, чтобы решить самую болезненную проблему академической среды — бесконечные часы, уходящие на проверку работ. Мы создали инструмент, который уважает вашу экспертизу и возвращает вам время для исследований, лекций и личной жизни.
+          <strong className="text-ink font-semibold">ИСПУМ</strong> был создан, чтобы решить самую болезненную проблему академической среды — бесконечные часы, уходящие на проверку работ. Мы создали инструмент, который уважает вашу экспертизу и возвращает вам время для исследований, лекций и личной жизни.
         </p>
         <Link to="/register" className="inline-block px-8 py-3 rounded-md bg-amber text-white font-medium hover:opacity-90 transition-opacity">
           Начать использовать бесплатно
@@ -28,7 +31,7 @@ export default function About() {
               <div className="text-xs font-bold text-amber uppercase tracking-wider">Интеллектуальная проверка</div>
               <h2 className="font-display text-3xl font-bold">Обучается на ваших оценках</h2>
               <p className="text-ink-secondary leading-relaxed">
-                Система обучается на ваших оценках. Чем больше вы проверяете, тем точнее становятся рекомендации. GradeAssist не просто использует шаблоны — наша технология RAG (Retrieval-Augmented Generation) анализирует ваши предыдущие вердикты и подстраивается под ваш уникальный стиль преподавания и требования к студентам.
+                Система обучается на ваших оценках. Чем больше вы проверяете, тем точнее становятся рекомендации. ИСПУМ не просто использует шаблоны — наша технология RAG (Retrieval-Augmented Generation) анализирует ваши предыдущие вердикты и подстраивается под ваш уникальный стиль преподавания и требования к студентам.
               </p>
               <Link to="/register" className="inline-block px-6 py-2 rounded-md border border-border-mid bg-transparent text-ink font-medium hover:bg-surface transition-colors mt-2">
                 Проверить первую работу
@@ -172,7 +175,7 @@ export default function About() {
       <section className="max-w-[800px] mx-auto px-6 py-24 text-center">
         <h2 className="font-display text-4xl font-bold mb-6">Верните себе 15 часов в неделю.</h2>
         <p className="text-lg text-ink-secondary mb-10 max-w-[500px] mx-auto">
-          Присоединяйтесь к преподавателям, которые уже оптимизировали свою рутину с помощью GradeAssist.
+          Присоединяйтесь к преподавателям, которые уже оптимизировали свою рутину с помощью ИСПУМ.
         </p>
         <Link to="/register" className="inline-block px-10 py-4 rounded-md bg-amber text-white font-bold text-lg shadow-sm hover:opacity-90 hover:shadow transition-all">
           Зарегистрироваться бесплатно

@@ -10,7 +10,7 @@ export default function Cookies() {
       
       <h2 className="text-xl font-display font-bold text-ink mt-8 mb-4">2. Как мы используем cookie</h2>
       <p>
-        В сервисе GradeAssist файлы cookie и локальные хранилища данных (LocalStorage) используются исключительно для:
+        В сервисе ИСПУМ файлы cookie и локальные хранилища данных (LocalStorage) используются исключительно для:
         <ul className="list-disc pl-5 mt-2 space-y-1">
           <li><strong>Авторизации:</strong> сохранения состояния входа в систему (JWT токен хранится в `ga_token`), чтобы вам не приходилось вводить пароль при каждом посещении.</li>
           <li><strong>Базовой аналитики:</strong> для понимания того, как вы взаимодействуете с Сервисом, чтобы мы могли улучшать его работу.</li>

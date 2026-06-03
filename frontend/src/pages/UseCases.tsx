@@ -11,7 +11,7 @@ export default function UseCases() {
         {/* Header */}
         <section className="max-w-[800px] mx-auto px-6 pt-16 md:pt-24 pb-16 text-center">
           <h1 className="font-display text-4xl sm:text-5xl font-bold leading-[1.1] tracking-tight mb-6">
-            Кто использует GradeAssist?
+            Кто использует ИСПУМ?
           </h1>
           <p className="text-lg text-ink-secondary leading-relaxed max-w-[600px] mx-auto">
             Наша платформа гибко адаптируется под любые образовательные задачи: от частных уроков до массовых проверок на уровне всего университета.
@@ -25,7 +25,7 @@ export default function UseCases() {
               <div className="inline-block px-3 py-1 bg-amber-light/20 text-amber font-bold text-xs uppercase tracking-wider rounded-md">Университеты</div>
               <h2 className="font-display text-3xl font-bold text-ink">Стандартизация потока</h2>
               <p className="text-ink-secondary leading-relaxed">
-                Когда на курсе учится 200 студентов, а работы проверяют три разных ассистента, сложно сохранить объективность. GradeAssist (на тарифе "Институт") позволяет заведующему кафедрой создать <strong>единую рубрику</strong>, которая гарантирует, что каждый студент будет оценен по одним и тем же жестким критериям, независимо от того, кто именно из преподавателей проверяет работу.
+                Когда на курсе учится 200 студентов, а работы проверяют три разных ассистента, сложно сохранить объективность. ИСПУМ (на тарифе "Институт") позволяет заведующему кафедрой создать <strong>единую рубрику</strong>, которая гарантирует, что каждый студент будет оценен по одним и тем же жестким критериям, независимо от того, кто именно из преподавателей проверяет работу.
               </p>
               <ul className="space-y-2 text-sm text-ink-secondary">
                 <li className="flex gap-2"><span>•</span> Общие стандарты для всех ассистентов</li>
@@ -69,7 +69,7 @@ export default function UseCases() {
               <div className="inline-block px-3 py-1 bg-amber-light/20 text-amber font-bold text-xs uppercase tracking-wider rounded-md">Частные репетиторы</div>
               <h2 className="font-display text-3xl font-bold text-ink">Быстрая обратная связь (ОГЭ/ЕГЭ)</h2>
               <p className="text-ink-secondary leading-relaxed">
-                При подготовке к государственным экзаменам ключевую роль играет количество написанных эссе. С GradeAssist репетитор может задавать ученикам писать по 3-4 эссе в неделю, не сгорая на их проверке. ИИ мгновенно находит стилистические ошибки и проверяет структуру по жестким критериям ФИПИ.
+                При подготовке к государственным экзаменам ключевую роль играет количество написанных эссе. С ИСПУМ репетитор может задавать ученикам писать по 3-4 эссе в неделю, не сгорая на их проверке. ИИ мгновенно находит стилистические ошибки и проверяет структуру по жестким критериям ФИПИ.
               </p>
               <ul className="space-y-2 text-sm text-ink-secondary">
                 <li className="flex gap-2"><span>•</span> Моментальный черновик разбора работы</li>
@@ -118,7 +118,7 @@ export default function UseCases() {
               <div className="inline-block px-3 py-1 bg-amber-light/20 text-amber font-bold text-xs uppercase tracking-wider rounded-md">Школы</div>
               <h2 className="font-display text-3xl font-bold text-ink">Снижение нагрузки на учителей</h2>
               <p className="text-ink-secondary leading-relaxed">
-                Учителя литературы и истории проводят выходные за стопками тетрадей. GradeAssist выступает в роли умного ассистента, который берет на себя самую рутинную часть работы: проверку орфографии, пунктуации и базовой логики текста, оставляя учителю творческую часть — оценку смыслов и наставничество.
+                Учителя литературы и истории проводят выходные за стопками тетрадей. ИСПУМ выступает в роли умного ассистента, который берет на себя самую рутинную часть работы: проверку орфографии, пунктуации и базовой логики текста, оставляя учителю творческую часть — оценку смыслов и наставничество.
               </p>
               <ul className="space-y-2 text-sm text-ink-secondary">
                 <li className="flex gap-2"><span>•</span> Освобождает до 15 часов в неделю</li>

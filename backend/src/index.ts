@@ -13,6 +13,7 @@ import gradingRouter from './routes/grading'
 import presentationsRouter from './routes/presentations'
 import documentsRouter from './routes/documents'
 import adminRouter from './routes/admin'
+import paymentsRouter from './routes/payments'
 
 // Validate environment before anything else — crash early on misconfig
 validateConfig()
@@ -41,7 +42,7 @@ app.use(helmet({
 // ─── CORS ─────────────────────────────────────────────────────────────────────
 
 const ALLOWED_ORIGINS = [
-  process.env.FRONTEND_URL,      // production: https://gradeassist.ru
+  process.env.FRONTEND_URL,      // production: https://ispum.ru
   'http://localhost:5173',        // Vite dev server
   'http://localhost:4173',        // Vite preview
 ].filter(Boolean) as string[]
@@ -89,6 +90,7 @@ app.use('/api/grading',       gradingRouter)
 app.use('/api/presentations', presentationsRouter)
 app.use('/api/documents',     documentsRouter)
 app.use('/api/admin',         adminRouter)
+app.use('/api/payments',      paymentsRouter)
 
 // ─── Global error handler (must be last) ──────────────────────────────────────
 

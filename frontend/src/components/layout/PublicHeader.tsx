@@ -4,7 +4,7 @@ export default function PublicHeader() {
   return (
     <header className="max-w-[1000px] w-full mx-auto px-6 py-6 flex items-center justify-between">
       <Link to="/" className="font-display font-bold text-xl tracking-tight hover:text-amber transition-colors shrink-0 mr-4">
-        GradeAssist
+        ИСПУМ
       </Link>
       <div className="flex items-center gap-4 md:gap-6">
         <Link to="/about" className="text-sm font-medium text-ink-secondary hover:text-ink transition-colors">О нас</Link>

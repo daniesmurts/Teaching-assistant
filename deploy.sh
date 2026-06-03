@@ -9,8 +9,8 @@
 #   - The VM already provisioned via vm-setup.sh, with /var/www/gradeassist/.env in place
 set -euo pipefail
 
-# ── Config — EDIT THESE ──────────────────────────────────────────────────────
-VM_HOST="gradeassist@YOUR.VM.IP.ADDRESS"
+# ── Config ───────────────────────────────────────────────────────────────────
+VM_HOST="boadtech@93.77.161.62"          # ← VM public IP (ephemeral — update if it changes)
 APP_DIR="/var/www/gradeassist"
 FRONTEND_BUCKET="gradeassist-frontend"
 # ─────────────────────────────────────────────────────────────────────────────
@@ -19,13 +19,8 @@ echo "▶ [1/5] Building frontend…"
 npm run build --workspace=frontend
 
 echo "▶ [2/5] Uploading frontend → s3://${FRONTEND_BUCKET}/ …"
-# Uses yc CLI. (Alternative: aws s3 sync frontend/dist s3://$FRONTEND_BUCKET --endpoint-url https://storage.yandexcloud.net)
-yc storage s3 cp --recursive frontend/dist/ "s3://${FRONTEND_BUCKET}/" --acl public-read
-# Bust the service-worker / index cache: re-upload index.html + sw.js with no-cache
-yc storage s3 cp frontend/dist/index.html "s3://${FRONTEND_BUCKET}/index.html" \
-  --acl public-read --cache-control "no-cache, must-revalidate"
-yc storage s3 cp frontend/dist/sw.js "s3://${FRONTEND_BUCKET}/sw.js" \
-  --acl public-read --cache-control "no-cache, must-revalidate" || true
+# Uses S3 static keys (no yc/OAuth). Reads YANDEX_STORAGE_* from the local .env.
+node --env-file=.env scripts/upload-frontend.mjs frontend/dist "${FRONTEND_BUCKET}"
 
 echo "▶ [3/5] Syncing backend source → VM…"
 rsync -avz --delete \
@@ -38,8 +33,15 @@ echo "▶ [4/5] Installing, building, migrating on VM…"
 ssh "$VM_HOST" bash -s <<'REMOTE'
 set -euo pipefail
 cd /var/www/gradeassist/backend
-npm ci
+# backend/package.json is self-contained (workspaces lockfile is at the repo root,
+# which we don't ship), so use install, not ci. Force-include devDeps —
+# the TypeScript compiler is a devDependency needed by `npm run build`.
+npm install --include=dev
+# Compile TypeScript → dist/ (clean first so no stale artifacts linger).
+rm -rf dist
 npm run build
+# Fail loudly if the entry point didn't get built (catches silent build issues).
+test -f dist/backend/src/index.js || { echo "❌ Build did not produce dist/backend/src/index.js"; exit 1; }
 # Apply any pending DB migrations (idempotent — tracked in migrations table)
 node --env-file=../.env scripts/migrate.js
 REMOTE

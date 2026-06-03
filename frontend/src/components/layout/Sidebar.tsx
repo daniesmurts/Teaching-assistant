@@ -8,6 +8,7 @@ const NAV: NavItem[] = [
   { icon: '◫', label: 'Курсы',          to: '/courses' },
   { icon: '✦', label: 'Проверка работ', to: '/grading' },
   { icon: '▤', label: 'Презентации',    to: '/presentations' },
+  { icon: '◆', label: 'Тариф',          to: '/billing' },
 ]
 
 interface Props {
@@ -30,7 +31,7 @@ export default function Sidebar({ onClose }: Props) {
       {/* Logo + mobile close */}
       <div className="px-4 py-4 border-b border-white/5 flex items-center justify-between">
         <span className="font-display text-[19px] font-bold text-ink-inverse tracking-tight">
-          GradeAssist
+          ИСПУМ
         </span>
         {onClose && (
           <button

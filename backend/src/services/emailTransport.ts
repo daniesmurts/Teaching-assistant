@@ -51,7 +51,7 @@ export async function sendEmail(payload: EmailPayload): Promise<void> {
 
   try {
     await transporter.sendMail({
-      from:    `"GradeAssist" <${process.env.SMTP_USER}>`,
+      from:    `"ИСПУМ" <${process.env.SMTP_USER}>`,
       to:      payload.to,
       subject: payload.subject,
       html:    payload.html,

@@ -6,10 +6,12 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
+import PaymentResult from './pages/PaymentResult'
 import Dashboard from './pages/Dashboard'
 import Courses from './pages/Courses'
 import Grading from './pages/Grading'
 import Presentations from './pages/Presentations'
+import Billing from './pages/Billing'
 import AdminLayout from './pages/admin/AdminLayout'
 import AdminOverview from './pages/admin/AdminOverview'
 import AdminUsage from './pages/admin/AdminUsage'
@@ -68,11 +70,13 @@ export default function App() {
           <Route path="/register"         element={<Register />} />
           <Route path="/forgot-password"  element={<ForgotPassword />} />
           <Route path="/reset-password"   element={<ResetPassword />} />
+          <Route path="/payment/result"   element={<PaymentResult />} />
           <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
             <Route path="/dashboard"     element={<Dashboard />} />
             <Route path="/courses"       element={<Courses />} />
             <Route path="/grading"       element={<Grading />} />
             <Route path="/presentations" element={<Presentations />} />
+            <Route path="/billing"       element={<Billing />} />
           </Route>
           {/* Admin — platform_admin only, own layout, direct URL access */}
           <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>

@@ -9,9 +9,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'],
       manifest: {
-        name: 'GradeAssist',
-        short_name: 'GradeAssist',
-        description: 'ИИ-ассистент для проверки работ и создания учебных презентаций',
+        name: 'ИСПУМ — Интеллектуальная Система Проверки и Подготовки Учебных Материалов',
+        short_name: 'ИСПУМ',
+        description: 'Интеллектуальная система автоматизированной проверки заданий и подготовки лекционных материалов для преподавателей',
         theme_color: '#C8860A',
         background_color: '#F7F5F0',
         display: 'standalone',

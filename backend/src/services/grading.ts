@@ -133,7 +133,7 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
 
 function applyWatermark(feedback: string, planTier: string): string {
   if (!canUseFeature(planTier, 'watermark')) return feedback
-  return feedback + '\n\n---\nСгенерировано с GradeAssist (бесплатный тариф) · gradeassist.ru'
+  return feedback + '\n\n---\nСгенерировано с ИСПУМ (бесплатный тариф) · ispum.ru'
 }
 
 // ─── Approve ─────────────────────────────────────────────────────────────────

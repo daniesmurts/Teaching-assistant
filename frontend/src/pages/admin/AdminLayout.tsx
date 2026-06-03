@@ -20,7 +20,7 @@ export default function AdminLayout() {
       <aside className="w-[210px] min-h-screen bg-sidebar flex flex-col flex-shrink-0">
         <div className="px-4 py-4 border-b border-white/5">
           <span className="font-display text-[19px] font-bold text-ink-inverse tracking-tight">
-            Grade<span className="text-amber-mid">Admin</span>
+            ИСПУМ <span className="text-amber-mid">Admin</span>
           </span>
           <div className="text-[10px] font-sans text-ink-inv-muted mt-0.5 uppercase tracking-wider">
             Платформа

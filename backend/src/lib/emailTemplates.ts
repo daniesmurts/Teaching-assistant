@@ -10,14 +10,14 @@ function wrap(body: string): string {
   <div style="max-width:560px;margin:32px auto;background:#fff;border:1px solid rgba(0,0,0,0.08);border-radius:10px;overflow:hidden">
     <div style="padding:20px 28px;border-bottom:1px solid rgba(0,0,0,0.08)">
       <span style="font-size:18px;font-weight:700;color:#1A1A1A;font-family:Georgia,serif">
-        Grade<span style="color:#C8860A">Assist</span>
+        ИС<span style="color:#C8860A">ПУМ</span>
       </span>
     </div>
     <div style="padding:28px;font-size:15px;line-height:1.7;color:#1A1A1A">
       ${body}
     </div>
     <div style="padding:16px 28px;border-top:1px solid rgba(0,0,0,0.08);font-size:12px;color:#A09890">
-      GradeAssist · gradeassist.ru<br>
+      ИСПУМ · ispum.ru<br>
       Если вы не ожидали это письмо, просто проигнорируйте его.
     </div>
   </div>
@@ -45,19 +45,19 @@ export function registrationEmail(name: string): Omit<EmailPayload, 'to'> {
   const fn  = firstName(name)
   const url = `${process.env.FRONTEND_URL ?? ''}/dashboard`
   return {
-    subject: 'Добро пожаловать в GradeAssist',
+    subject: 'Добро пожаловать в ИСПУМ',
     html: wrap(`
       <p>Здравствуйте, ${fn}!</p>
-      <p>Ваш аккаунт GradeAssist создан. Вы готовы приступить к работе.</p>
-      ${btn(url, 'Перейти в GradeAssist')}
+      <p>Ваш аккаунт ИСПУМ создан. Вы готовы приступить к работе.</p>
+      ${btn(url, 'Перейти в ИСПУМ')}
       <p style="color:#6B6560;font-size:13px">
         Бесплатный план включает 20 проверок работ и 3 презентации в месяц.<br>
         Перейдите на Pro для неограниченного доступа.
       </p>
     `),
     text:
-      `Здравствуйте, ${fn}!\n\nВаш аккаунт GradeAssist создан.\n\n` +
-      `Перейти в GradeAssist: ${url}\n\nGradeAssist · gradeassist.ru`,
+      `Здравствуйте, ${fn}!\n\nВаш аккаунт ИСПУМ создан.\n\n` +
+      `Перейти в ИСПУМ: ${url}\n\nИСПУМ · ispum.ru`,
   }
 }
 
@@ -69,7 +69,7 @@ export function passwordResetEmail(
 ): Omit<EmailPayload, 'to'> {
   const fn = firstName(name)
   return {
-    subject: 'Сброс пароля GradeAssist',
+    subject: 'Сброс пароля ИСПУМ',
     html: wrap(`
       <p>Здравствуйте, ${fn}!</p>
       <p>Мы получили запрос на сброс пароля для вашего аккаунта.</p>
@@ -83,7 +83,7 @@ export function passwordResetEmail(
     text:
       `Здравствуйте, ${fn}!\n\n` +
       `Для сброса пароля перейдите по ссылке:\n${resetUrl}\n\n` +
-      `Ссылка действительна 1 час.\n\nGradeAssist · gradeassist.ru`,
+      `Ссылка действительна 1 час.\n\nИСПУМ · ispum.ru`,
   }
 }
 
@@ -92,18 +92,18 @@ export function passwordResetEmail(
 export function passwordChangedEmail(name: string): Omit<EmailPayload, 'to'> {
   const fn = firstName(name)
   return {
-    subject: 'Пароль GradeAssist изменён',
+    subject: 'Пароль ИСПУМ изменён',
     html: wrap(`
       <p>Здравствуйте, ${fn}!</p>
-      <p>Пароль вашего аккаунта GradeAssist был успешно изменён.</p>
+      <p>Пароль вашего аккаунта ИСПУМ был успешно изменён.</p>
       <p style="color:#6B6560;font-size:13px">
         Если это были не вы, немедленно свяжитесь с нами:
-        <a href="mailto:support@gradeassist.ru" style="color:#C8860A">support@gradeassist.ru</a>
+        <a href="mailto:support@ispum.ru" style="color:#C8860A">support@ispum.ru</a>
       </p>
     `),
     text:
       `Здравствуйте, ${fn}!\n\n` +
-      `Пароль вашего аккаунта GradeAssist изменён.\n\n` +
-      `Если это были не вы, напишите нам: support@gradeassist.ru\n\nGradeAssist · gradeassist.ru`,
+      `Пароль вашего аккаунта ИСПУМ изменён.\n\n` +
+      `Если это были не вы, напишите нам: support@ispum.ru\n\nИСПУМ · ispum.ru`,
   }
 }

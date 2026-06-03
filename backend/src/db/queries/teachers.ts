@@ -72,6 +72,28 @@ export async function updateTeacherPassword(
   )
 }
 
+/**
+ * Upgrade (or extend) a teacher's Pro subscription. If they still have time
+ * left, the new period stacks on top of the existing expiry; otherwise it
+ * starts now.
+ */
+export async function upgradeTeacherToPro(
+  teacherId: string,
+  days: number,
+  subscriptionId: string
+): Promise<void> {
+  await pool.query(
+    `UPDATE teachers
+     SET plan_tier       = 'pro',
+         plan_started_at  = COALESCE(plan_started_at, NOW()),
+         plan_expires_at  = GREATEST(COALESCE(plan_expires_at, NOW()), NOW())
+                            + ($2 || ' days')::interval,
+         subscription_id  = $3
+     WHERE id = $1`,
+    [teacherId, days, subscriptionId]
+  )
+}
+
 export async function createTeacher(
   email: string,
   passwordHash: string,

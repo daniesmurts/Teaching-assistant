@@ -15,7 +15,7 @@ export default function Institutions() {
             Стандартизируйте проверку. Повысьте качество образования.
           </h1>
           <p className="text-lg text-ink-secondary mb-10 leading-relaxed max-w-[600px] mx-auto">
-            GradeAssist для институтов предлагает централизованное управление рубриками, углубленную аналитику успеваемости по всему потоку и выделенную поддержку для вашей кафедры.
+            ИСПУМ для институтов предлагает централизованное управление рубриками, углубленную аналитику успеваемости по всему потоку и выделенную поддержку для вашей кафедры.
           </p>
           <div className="flex flex-col sm:flex-row justify-center gap-4">
             <Link to="/contact" className="px-8 py-3 rounded-md bg-amber text-white font-medium hover:opacity-90 transition-opacity">

@@ -9,7 +9,7 @@ export default function Changelog() {
       <main className="flex-1 max-w-[800px] mx-auto w-full px-6 py-16 md:py-24">
         <h1 className="font-display text-4xl font-bold mb-4 text-center">Обновления платформы</h1>
         <p className="text-ink-secondary text-center mb-16 max-w-[500px] mx-auto">
-          Мы постоянно улучшаем GradeAssist, чтобы сэкономить ваше время. Здесь вы найдете историю последних изменений и новых функций.
+          Мы постоянно улучшаем ИСПУМ, чтобы сэкономить ваше время. Здесь вы найдете историю последних изменений и новых функций.
         </p>
 
         <div className="space-y-12 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
@@ -43,7 +43,7 @@ export default function Changelog() {
               </div>
               <time className="block text-sm text-ink-secondary mb-3">Сентябрь 2026</time>
               <div className="text-sm text-ink-secondary space-y-2">
-                <p><strong>Публичный запуск.</strong> Платформа GradeAssist открыта для регистрации первых пользователей.</p>
+                <p><strong>Публичный запуск.</strong> Платформа ИСПУМ открыта для регистрации первых пользователей.</p>
                 <p><strong>Конструктор рубрик.</strong> Полноценный инструмент для создания кастомных критериев оценки (логика, стиль, аргументация и т.д.).</p>
                 <p><strong>Архитектура Human-in-the-loop.</strong> Внедрена система проверки RAG для исключения ИИ-галлюцинаций.</p>
               </div>

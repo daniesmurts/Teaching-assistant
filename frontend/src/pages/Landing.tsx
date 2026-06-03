@@ -23,7 +23,7 @@ export default function Landing() {
           Верните себе выходные.<br/>Доверьте проверку работ ИИ.
         </h1>
         <p className="text-lg text-ink-secondary mb-10 max-w-[600px] mx-auto leading-relaxed">
-          GradeAssist помогает преподавателям проверять студенческие работы с высокой точностью и генерировать структурированные лекции за минуты. Создано для современного академического сообщества.
+          ИСПУМ помогает преподавателям проверять студенческие работы с высокой точностью и генерировать структурированные лекции за минуты. Создано для современного академического сообщества.
         </p>
         <div className="flex items-center justify-center gap-4">
           <Link to="/register" className="px-6 py-3 rounded-md bg-amber text-white font-medium hover:opacity-90 transition-opacity">Попробовать бесплатно</Link>
@@ -44,7 +44,7 @@ export default function Landing() {
               <div className="font-display text-4xl font-bold text-success leading-none">5-</div>
               <div>
                 <div className="text-xs font-semibold text-success uppercase tracking-wide">Одобрено</div>
-                <div className="text-xs text-ink-tertiary mt-0.5">GradeAssist AI</div>
+                <div className="text-xs text-ink-tertiary mt-0.5">ИСПУМ AI</div>
               </div>
             </div>
             <div className="space-y-4">
@@ -69,7 +69,7 @@ export default function Landing() {
             Преподаватели тратят десятки часов еженедельно на проверку эссе, отчетов и курсовых работ. Это время отнимается от исследовательской работы, подготовки к лекциям и, самое главное, отдыха.
           </p>
           <p>
-            GradeAssist сокращает время первичной проверки на 80%. Вы задаете критерии оценки, а наш специализированный ИИ анализирует текст, выявляет сильные и слабые стороны, и предлагает развернутый отзыв. Вам остается только просмотреть, при необходимости скорректировать и утвердить результат.
+            ИСПУМ сокращает время первичной проверки на 80%. Вы задаете критерии оценки, а наш специализированный ИИ анализирует текст, выявляет сильные и слабые стороны, и предлагает развернутый отзыв. Вам остается только просмотреть, при необходимости скорректировать и утвердить результат.
           </p>
         </div>
       </section>
@@ -84,7 +84,7 @@ export default function Landing() {
               <div className="text-xs font-bold text-amber uppercase tracking-wider">Интеллектуальная проверка</div>
               <h3 className="font-display text-3xl font-bold">Обучается на ваших оценках</h3>
               <p className="text-ink-secondary leading-relaxed">
-                GradeAssist не использует шаблонные ответы. Как только вы утверждаете оценку, система запоминает ваш стиль и требования. С каждой проверенной работой (благодаря технологии RAG) рекомендации ИИ становятся всё более точными и персонализированными.
+                ИСПУМ не использует шаблонные ответы. Как только вы утверждаете оценку, система запоминает ваш стиль и требования. С каждой проверенной работой (благодаря технологии RAG) рекомендации ИИ становятся всё более точными и персонализированными.
               </p>
             </div>
             <div className="flex-1 w-full bg-surface border border-border rounded-xl p-6 shadow-sm">
@@ -109,7 +109,7 @@ export default function Landing() {
               <div className="text-xs font-bold text-info uppercase tracking-wider">Генератор лекций</div>
               <h3 className="font-display text-3xl font-bold">От силлабуса до слайдов</h3>
               <p className="text-ink-secondary leading-relaxed">
-                Загрузите рабочую программу или план курса, укажите тему и аудиторию. GradeAssist сгенерирует структурированный план презентации со смысловыми блоками и заметками для спикера, готовый к переносу в PowerPoint.
+                Загрузите рабочую программу или план курса, укажите тему и аудиторию. ИСПУМ сгенерирует структурированный план презентации со смысловыми блоками и заметками для спикера, готовый к переносу в PowerPoint.
               </p>
             </div>
             <div className="flex-1 w-full bg-surface border border-border rounded-xl p-6 shadow-sm flex text-sm">

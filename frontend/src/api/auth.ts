@@ -1,5 +1,5 @@
 import client from './client'
-import type { AuthResponse, Teacher } from '../types'
+import type { AuthResponse, Teacher, PlanState } from '../types'
 
 export async function register(data: {
   email: string; password: string; name?: string; university?: string
@@ -15,9 +15,11 @@ export async function login(data: {
   return res.data
 }
 
-export async function getMe(): Promise<Teacher> {
-  const res = await client.get<{ teacher: Teacher }>('/api/auth/me')
-  return res.data.teacher
+// GET /api/auth/me returns the teacher fields flat, with `plan` as a sibling.
+export async function getMe(): Promise<{ teacher: Teacher; plan: PlanState }> {
+  const res = await client.get<Teacher & { plan: PlanState }>('/api/auth/me')
+  const { plan, ...teacher } = res.data
+  return { teacher, plan }
 }
 
 export async function forgotPassword(email: string): Promise<void> {
