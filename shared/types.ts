@@ -6,6 +6,8 @@ export type PlanTier    = 'free' | 'pro' | 'institution'
 export interface PlanState {
   tier:               PlanTier
   expiresAt:          string | null
+  autoRenew:          boolean
+  renewalFailedAt:    string | null
   gradesUsed:         number
   gradesLimit:        number | null   // null = unlimited
   presentationsUsed:  number

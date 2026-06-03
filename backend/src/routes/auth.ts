@@ -71,7 +71,7 @@ router.post(
 
     const token = signToken({ id: row.id, email: row.email })
 
-    const plan = await buildPlanData(row.id, row.plan_tier ?? 'free', row.plan_expires_at)
+    const plan = await buildPlanData(row.id, row.plan_tier ?? 'free', row.plan_expires_at, row.auto_renew, row.renewal_failed_at)
 
     res.json({
       token,
@@ -94,7 +94,7 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
   const row = await findTeacherRowById(req.teacher.id)
   if (!row) throw new NotFoundError('Пользователь')
 
-  const plan = await buildPlanData(row.id, req.teacher.plan_tier, row.plan_expires_at)
+  const plan = await buildPlanData(row.id, req.teacher.plan_tier, row.plan_expires_at, row.auto_renew, row.renewal_failed_at)
 
   res.json({
     id:         row.id,
@@ -184,7 +184,13 @@ export default router
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
-async function buildPlanData(teacherId: string, planTier: string, planExpiresAt: Date | null) {
+async function buildPlanData(
+  teacherId: string,
+  planTier: string,
+  planExpiresAt: Date | null,
+  autoRenew = false,
+  renewalFailedAt: Date | null = null,
+) {
   const tier    = planTier ?? 'free'
   const limits  = getLimits(tier)
   const counter = await getOrCreateCounter(teacherId)
@@ -196,6 +202,8 @@ async function buildPlanData(teacherId: string, planTier: string, planExpiresAt:
   return {
     tier,
     expiresAt:          planExpiresAt?.toISOString() ?? null,
+    autoRenew,
+    renewalFailedAt:    renewalFailedAt?.toISOString() ?? null,
     gradesUsed,
     gradesLimit:        limits.gradesPerMonth        === Infinity ? null : limits.gradesPerMonth,
     presentationsUsed,

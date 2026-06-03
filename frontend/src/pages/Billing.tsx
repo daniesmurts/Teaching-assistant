@@ -1,9 +1,10 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import { usePlan } from '../hooks/usePlan'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
-import { getPaymentHistory } from '../api/payments'
+import { getPaymentHistory, setAutoRenew } from '../api/payments'
+import { getMe } from '../api/auth'
 
 const PLAN_LABEL: Record<string, string> = {
   pro_monthly: 'Pro — месяц',
@@ -22,13 +23,28 @@ function fmtDate(d: string | null) {
 
 export default function Billing() {
   const plan = useAuthStore((s) => s.plan)
+  const updatePlan = useAuthStore((s) => s.updatePlan)
   const { tier, isFree, gradesUsed, gradesLimit, presentationsUsed, presentationsLimit } = usePlan()
   const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
+  const addToast = useUIStore((s) => s.addToast)
+  const qc = useQueryClient()
 
   const { data: history = [] } = useQuery({ queryKey: ['payment-history'], queryFn: getPaymentHistory })
 
+  const autoRenewMut = useMutation({
+    mutationFn: (enabled: boolean) => setAutoRenew(enabled),
+    onSuccess: async (_d, enabled) => {
+      // refresh plan so the toggle reflects server state
+      try { const { plan: p } = await getMe(); updatePlan(p) } catch { /* ignore */ }
+      qc.invalidateQueries({ queryKey: ['payment-history'] })
+      addToast(enabled ? 'Автопродление включено' : 'Автопродление выключено', 'success')
+    },
+    onError: () => addToast('Не удалось изменить автопродление', 'error'),
+  })
+
   const expiresAt = plan?.expiresAt ? new Date(plan.expiresAt) : null
   const daysLeft  = expiresAt ? Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / 86400000)) : null
+  const inGrace   = Boolean(plan?.renewalFailedAt)
 
   const tierName = tier === 'pro' ? 'Pro' : tier === 'institution' ? 'Institution' : 'Бесплатный'
 
@@ -50,7 +66,8 @@ export default function Billing() {
                 </div>
                 {tier !== 'free' && expiresAt && (
                   <div className="text-sm font-sans text-ink-secondary mt-2">
-                    Активен до <strong className="text-ink">{fmtDate(plan?.expiresAt ?? null)}</strong>
+                    {plan?.autoRenew && !inGrace ? 'Продлится' : 'Активен до'}{' '}
+                    <strong className="text-ink">{fmtDate(plan?.expiresAt ?? null)}</strong>
                     {daysLeft !== null && <span className="text-ink-tertiary"> · осталось {daysLeft} дн.</span>}
                   </div>
                 )}
@@ -62,6 +79,32 @@ export default function Billing() {
                 {isFree ? 'Перейти на Pro' : 'Продлить'}
               </button>
             </div>
+
+            {/* Grace warning */}
+            {inGrace && (
+              <div className="mt-4 px-3 py-2 rounded-md bg-danger-bg text-danger text-xs font-sans">
+                Не удалось списать оплату за продление. Обновите карту, нажав «Продлить» —
+                доступ сохраняется до {fmtDate(plan?.expiresAt ?? null)}.
+              </div>
+            )}
+
+            {/* Auto-renewal toggle (Pro only) */}
+            {tier !== 'free' && plan && (
+              <div className="mt-4 pt-4 border-t border-amber/20 flex items-center justify-between">
+                <div className="text-sm font-sans text-ink">
+                  Автопродление
+                  <span className="text-ink-tertiary"> · {plan.autoRenew ? 'списываем автоматически' : 'выключено'}</span>
+                </div>
+                <button
+                  onClick={() => autoRenewMut.mutate(!plan.autoRenew)}
+                  disabled={autoRenewMut.isPending}
+                  className={`relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 ${plan.autoRenew ? 'bg-amber' : 'bg-border-mid'}`}
+                  aria-label="Переключить автопродление"
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${plan.autoRenew ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Free-tier usage */}

@@ -52,12 +52,35 @@ export async function confirmPayment(orderId: string, rebillId?: string): Promis
   return rows.length > 0
 }
 
+/**
+ * Pending payments that have a T-Bank PaymentId, are old enough that the
+ * redirect flow has had time to finish (>2 min), but recent enough to still
+ * be worth checking (<3 h). Used by the reconciliation sweep to settle
+ * "paid but tab closed" cases without relying on the webhook.
+ */
+export async function findStalePendingPayments(): Promise<PaymentRow[]> {
+  const { rows } = await pool.query<PaymentRow>(
+    `SELECT * FROM payments
+     WHERE status = 'pending'
+       AND payment_id IS NOT NULL
+       AND created_at < NOW() - INTERVAL '2 minutes'
+       AND created_at > NOW() - INTERVAL '3 hours'
+     ORDER BY created_at ASC
+     LIMIT 100`
+  )
+  return rows
+}
+
 export async function findPaymentsByTeacher(teacherId: string): Promise<PaymentRow[]> {
   const { rows } = await pool.query<PaymentRow>(
     `SELECT * FROM payments WHERE teacher_id = $1 ORDER BY created_at DESC LIMIT 50`,
     [teacherId]
   )
   return rows
+}
+
+export async function markPaymentRefunded(orderId: string): Promise<void> {
+  await pool.query(`UPDATE payments SET status = 'refunded' WHERE order_id = $1`, [orderId])
 }
 
 export async function rejectPayment(orderId: string): Promise<void> {

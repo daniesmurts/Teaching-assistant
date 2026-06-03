@@ -123,3 +123,33 @@ export async function createRubricTemplate(data: {
 export async function deleteRubricTemplate(id: string): Promise<void> {
   await client.delete(`/api/admin/rubrics/templates/${id}`)
 }
+
+// ─── Subscription management ──────────────────────────────────────────────────
+
+export interface AdminPayment {
+  order_id:       string
+  plan:           string
+  amount_kopecks: number
+  status:         string
+  payment_id:     string | null
+  created_at:     string
+  confirmed_at:   string | null
+}
+
+export async function getTeacherPayments(teacherId: string): Promise<AdminPayment[]> {
+  const res = await client.get<AdminPayment[]>(`/api/admin/teachers/${teacherId}/payments`)
+  return res.data
+}
+
+export async function grantSubscription(teacherId: string, days: number): Promise<void> {
+  await client.post(`/api/admin/teachers/${teacherId}/subscription/grant`, { days })
+}
+
+export async function cancelSubscription(teacherId: string): Promise<void> {
+  await client.post(`/api/admin/teachers/${teacherId}/subscription/cancel`, {})
+}
+
+export async function refundPayment(orderId: string): Promise<{ status: string }> {
+  const res = await client.post<{ status: string }>(`/api/admin/payments/${orderId}/refund`, {})
+  return res.data
+}

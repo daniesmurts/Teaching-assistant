@@ -35,3 +35,7 @@ export async function getPaymentHistory(): Promise<PaymentHistoryItem[]> {
   const res = await client.get<PaymentHistoryItem[]>('/api/payments/history')
   return res.data
 }
+
+export async function setAutoRenew(enabled: boolean): Promise<void> {
+  await client.post('/api/payments/auto-renew', { enabled })
+}

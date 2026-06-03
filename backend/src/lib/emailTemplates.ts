@@ -39,6 +39,56 @@ function firstName(name: string): string {
   return name.split(' ').find(w => w.length > 1) ?? name.split(' ')[0] ?? name
 }
 
+function billingBtn(): string {
+  return btn(`${process.env.FRONTEND_URL ?? ''}/billing`, 'Обновить способ оплаты')
+}
+
+function fmtRu(d: Date): string {
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
+// ─── Renewal failed (grace period) ────────────────────────────────────────────
+
+export function renewalFailedEmail(name: string, accessUntil: Date): Omit<EmailPayload, 'to'> {
+  const fn = firstName(name)
+  return {
+    subject: 'Не удалось продлить подписку ИСПУМ',
+    html: wrap(`
+      <p>Здравствуйте, ${fn}!</p>
+      <p>Мы не смогли списать оплату за продление подписки <strong>ИСПУМ Pro</strong> —
+         возможно, у карты истёк срок действия или недостаточно средств.</p>
+      <p>Доступ к Pro сохраняется до <strong>${fmtRu(accessUntil)}</strong>.
+         Пожалуйста, обновите способ оплаты, чтобы не потерять доступ.</p>
+      ${billingBtn()}
+      <p style="color:#6B6560;font-size:13px">
+        Мы повторим попытку списания автоматически в течение следующих дней.
+      </p>
+    `),
+    text:
+      `Здравствуйте, ${fn}!\n\nНе удалось списать оплату за продление ИСПУМ Pro.\n` +
+      `Доступ сохраняется до ${fmtRu(accessUntil)}. Обновите карту: ${process.env.FRONTEND_URL ?? ''}/billing\n\nИСПУМ · ispum.ru`,
+  }
+}
+
+// ─── Subscription ended ───────────────────────────────────────────────────────
+
+export function subscriptionEndedEmail(name: string): Omit<EmailPayload, 'to'> {
+  const fn = firstName(name)
+  return {
+    subject: 'Подписка ИСПУМ Pro завершена',
+    html: wrap(`
+      <p>Здравствуйте, ${fn}!</p>
+      <p>Подписка <strong>ИСПУМ Pro</strong> завершена, так как не удалось продлить оплату.
+         Ваш аккаунт переведён на бесплатный тариф.</p>
+      <p>Вы можете вернуться к Pro в любой момент — все ваши данные сохранены.</p>
+      ${btn(`${process.env.FRONTEND_URL ?? ''}/billing`, 'Возобновить Pro')}
+    `),
+    text:
+      `Здравствуйте, ${fn}!\n\nПодписка ИСПУМ Pro завершена. Аккаунт переведён на бесплатный тариф.\n` +
+      `Возобновить: ${process.env.FRONTEND_URL ?? ''}/billing\n\nИСПУМ · ispum.ru`,
+  }
+}
+
 // ─── Registration confirmation ────────────────────────────────────────────────
 
 export function registrationEmail(name: string): Omit<EmailPayload, 'to'> {

@@ -18,6 +18,10 @@ export interface TeacherRow {
   plan_expires_at:     Date | null
   subscription_id:     string | null
   password_changed_at: Date | null
+  rebill_id:           string | null
+  auto_renew:          boolean
+  subscription_plan:   string | null
+  renewal_failed_at:   Date | null
   created_at:          Date
 }
 
@@ -91,6 +95,113 @@ export async function upgradeTeacherToPro(
          subscription_id  = $3
      WHERE id = $1`,
     [teacherId, days, subscriptionId]
+  )
+}
+
+/** Immediately revoke Pro — downgrade to free and clear all subscription state. */
+export async function cancelTeacherSubscription(teacherId: string): Promise<void> {
+  await pool.query(
+    `UPDATE teachers
+     SET plan_tier         = 'free',
+         plan_expires_at   = NOW(),
+         subscription_id   = NULL,
+         auto_renew        = FALSE,
+         rebill_id         = NULL,
+         subscription_plan = NULL,
+         renewal_failed_at = NULL
+     WHERE id = $1`,
+    [teacherId]
+  )
+}
+
+// ─── Recurring subscription state ─────────────────────────────────────────────
+
+/** Store the saved-card token + plan and enable auto-renewal (after first payment). */
+export async function setRecurringInfo(
+  teacherId: string,
+  rebillId: string,
+  plan: string
+): Promise<void> {
+  await pool.query(
+    `UPDATE teachers
+     SET rebill_id = $2, subscription_plan = $3, auto_renew = TRUE, renewal_failed_at = NULL
+     WHERE id = $1`,
+    [teacherId, rebillId, plan]
+  )
+}
+
+export async function setAutoRenew(teacherId: string, enabled: boolean): Promise<void> {
+  await pool.query('UPDATE teachers SET auto_renew = $2 WHERE id = $1', [teacherId, enabled])
+}
+
+export interface RenewalCandidate {
+  id:                string
+  email:             string
+  name:              string | null
+  rebill_id:         string
+  subscription_plan: string
+  plan_expires_at:   Date
+  renewal_failed_at: Date | null
+}
+
+/** Teachers whose subscription is due to renew within ~1 day (or already in grace). */
+export async function findTeachersDueForRenewal(): Promise<RenewalCandidate[]> {
+  const { rows } = await pool.query<RenewalCandidate>(
+    `SELECT id, email, name, rebill_id, subscription_plan, plan_expires_at, renewal_failed_at
+     FROM teachers
+     WHERE auto_renew = TRUE
+       AND rebill_id IS NOT NULL
+       AND subscription_plan IS NOT NULL
+       AND (plan_expires_at <= NOW() + INTERVAL '1 day'   -- due soon
+            OR renewal_failed_at IS NOT NULL)              -- or in grace (retry daily)
+       -- throttle: never attempt the same teacher more than once per ~20h,
+       -- so PM2 restarts can't cause repeat charges / email spam
+       AND (renewal_last_attempt_at IS NULL
+            OR renewal_last_attempt_at < NOW() - INTERVAL '20 hours')`
+  )
+  return rows
+}
+
+/** Stamp a renewal attempt (called before each charge) — drives the throttle. */
+export async function markRenewalAttempted(teacherId: string): Promise<void> {
+  await pool.query('UPDATE teachers SET renewal_last_attempt_at = NOW() WHERE id = $1', [teacherId])
+}
+
+/** Successful renewal — extend the period and clear any failure flag. */
+export async function applyRenewalSuccess(teacherId: string, days: number): Promise<void> {
+  await pool.query(
+    `UPDATE teachers
+     SET plan_tier       = 'pro',
+         plan_expires_at  = GREATEST(COALESCE(plan_expires_at, NOW()), NOW()) + ($2 || ' days')::interval,
+         renewal_failed_at = NULL
+     WHERE id = $1`,
+    [teacherId, days]
+  )
+}
+
+/** First renewal failure — enter the grace window (keep access until grace ends). */
+export async function enterRenewalGrace(teacherId: string, graceDays: number): Promise<void> {
+  await pool.query(
+    `UPDATE teachers
+     SET renewal_failed_at = NOW(),
+         plan_expires_at   = NOW() + ($2 || ' days')::interval
+     WHERE id = $1`,
+    [teacherId, graceDays]
+  )
+}
+
+/** Grace exhausted — downgrade to free and clear subscription state. */
+export async function endSubscriptionAfterGrace(teacherId: string): Promise<void> {
+  await pool.query(
+    `UPDATE teachers
+     SET plan_tier         = 'free',
+         plan_expires_at   = NOW(),
+         auto_renew        = FALSE,
+         rebill_id         = NULL,
+         subscription_plan = NULL,
+         renewal_failed_at = NULL
+     WHERE id = $1`,
+    [teacherId]
   )
 }
 

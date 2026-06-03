@@ -3,10 +3,16 @@ import { authenticate } from '../middleware/authenticate'
 import { requireAdmin } from '../middleware/requireRole'
 import { asyncHandler } from '../lib/asyncHandler'
 import { pool } from '../db/connection'
+import { ValidationError, NotFoundError } from '../errors/AppError'
 import {
   getDailyUsage, getUsageByTeacher, getTodayCost,
   getUsageByFeature, getRecentErrors,
 } from '../db/queries/usageLog'
+import { upgradeTeacherToPro, cancelTeacherSubscription } from '../db/queries/teachers'
+import {
+  findPaymentsByTeacher, findPaymentByOrderId, markPaymentRefunded,
+} from '../db/queries/payments'
+import { refundPayment } from '../services/tbank'
 
 const router = Router()
 router.use(authenticate)
@@ -160,6 +166,65 @@ router.patch('/teachers/:id', asyncHandler(async (req, res) => {
   )
   if (!rows[0]) { res.status(404).json({ error: 'Преподаватель не найден' }); return }
   res.json(rows[0])
+}))
+
+// ─── Subscription management ──────────────────────────────────────────────────
+
+// Grant or extend Pro by N days (no payment) — used for comps, support, etc.
+router.post('/teachers/:id/subscription/grant', asyncHandler(async (req, res) => {
+  const days = Number((req.body as { days?: unknown }).days)
+  if (!Number.isInteger(days) || days < 1 || days > 3650) {
+    throw new ValidationError('Укажите число дней от 1 до 3650')
+  }
+  const { rows } = await pool.query('SELECT id FROM teachers WHERE id = $1', [req.params.id])
+  if (!rows[0]) throw new NotFoundError('Преподаватель')
+
+  await upgradeTeacherToPro(req.params.id, days, 'admin_grant')
+  const { rows: fresh } = await pool.query(
+    'SELECT id, email, plan_tier, plan_expires_at FROM teachers WHERE id = $1',
+    [req.params.id]
+  )
+  res.json(fresh[0])
+}))
+
+// Cancel a subscription — immediate downgrade to free.
+router.post('/teachers/:id/subscription/cancel', asyncHandler(async (req, res) => {
+  const { rows } = await pool.query('SELECT id FROM teachers WHERE id = $1', [req.params.id])
+  if (!rows[0]) throw new NotFoundError('Преподаватель')
+
+  await cancelTeacherSubscription(req.params.id)
+  res.json({ id: req.params.id, plan_tier: 'free' })
+}))
+
+// List a teacher's payments (so the admin can pick one to refund).
+router.get('/teachers/:id/payments', asyncHandler(async (req, res) => {
+  const rows = await findPaymentsByTeacher(req.params.id)
+  res.json(rows.map((p) => ({
+    order_id:       p.order_id,
+    plan:           p.plan,
+    amount_kopecks: p.amount_kopecks,
+    status:         p.status,
+    payment_id:     p.payment_id,
+    created_at:     p.created_at,
+    confirmed_at:   p.confirmed_at,
+  })))
+}))
+
+// Refund a confirmed payment via T-Bank. Money only — does NOT auto-cancel
+// access (admin decides separately whether to cancel the subscription).
+router.post('/payments/:orderId/refund', asyncHandler(async (req, res) => {
+  const payment = await findPaymentByOrderId(req.params.orderId)
+  if (!payment) throw new NotFoundError('Платёж')
+  if (payment.status !== 'confirmed') {
+    throw new ValidationError('Возврат возможен только для оплаченного платежа')
+  }
+  if (!payment.payment_id) {
+    throw new ValidationError('У платежа нет идентификатора T-Bank')
+  }
+
+  const status = await refundPayment(payment.payment_id)   // REFUNDED | PARTIAL_REFUNDED
+  await markPaymentRefunded(payment.order_id)
+  res.json({ order_id: payment.order_id, status })
 }))
 
 export default router

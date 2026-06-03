@@ -113,6 +113,7 @@ export interface InitParams {
   failURL:        string
   customerKey?:   string   // enables saving the card for future recurring charges
   receipt?:       Receipt  // 54-ФЗ fiscal receipt
+  recurrent?:     boolean  // Recurrent:"Y" — registers the card for off-session charges
 }
 
 export interface InitResult {
@@ -133,6 +134,7 @@ export async function initPayment(p: InitParams): Promise<InitResult> {
     SuccessURL:      p.successURL,
     FailURL:         p.failURL,
     ...(p.customerKey ? { CustomerKey: p.customerKey } : {}),
+    ...(p.recurrent ? { Recurrent: 'Y' } : {}),
   }
   // Token is computed BEFORE attaching nested objects (Receipt is excluded anyway)
   request.Token = computeToken(request, password)
@@ -157,6 +159,25 @@ export async function initPayment(p: InitParams): Promise<InitResult> {
 
 // ─── GetState — query a payment's current status ──────────────────────────────
 
+// ─── Cancel — full refund of a CONFIRMED payment ──────────────────────────────
+
+export async function refundPayment(paymentId: string): Promise<string> {
+  const { terminalKey, password } = credentials()
+  // No Amount → full refund of the original amount.
+  const request: Record<string, unknown> = { TerminalKey: terminalKey, PaymentId: paymentId }
+  request.Token = computeToken(request, password)
+
+  const { data } = await axios.post(`${BASE_URL}/Cancel`, request, {
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 20_000,
+  })
+  if (!data.Success) {
+    logger.error({ message: 'T-Bank Cancel failed', errorCode: data.ErrorCode, details: data.Message, paymentId })
+    throw new AppError('Не удалось оформить возврат', 502, 'REFUND_FAILED')
+  }
+  return String(data.Status)   // REFUNDED | PARTIAL_REFUNDED | CANCELED
+}
+
 export async function getPaymentState(paymentId: string): Promise<string> {
   const { terminalKey, password } = credentials()
   const request: Record<string, unknown> = { TerminalKey: terminalKey, PaymentId: paymentId }
@@ -170,4 +191,71 @@ export async function getPaymentState(paymentId: string): Promise<string> {
     throw new AppError('Не удалось получить статус платежа', 502, 'PAYMENT_STATE_FAILED')
   }
   return String(data.Status)
+}
+
+// ─── Recurring ─────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch the RebillId for a customer's saved card (registered via a Recurrent
+ * payment). Webhook-independent way to obtain the rebill token. Returns the
+ * RebillId of the first active card, or null if none.
+ */
+export async function getRebillId(customerKey: string): Promise<string | null> {
+  const { terminalKey, password } = credentials()
+  const request: Record<string, unknown> = { TerminalKey: terminalKey, CustomerKey: customerKey }
+  request.Token = computeToken(request, password)
+
+  const { data } = await axios.post(`${BASE_URL}/GetCardList`, request, {
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 20_000,
+  })
+  // GetCardList returns an array of cards (not the usual {Success} envelope)
+  const cards: Array<{ Status?: string; RebillId?: string }> = Array.isArray(data) ? data : []
+  const active = cards.find((c) => c.Status === 'A' && c.RebillId) ?? cards.find((c) => c.RebillId)
+  return active?.RebillId ? String(active.RebillId) : null
+}
+
+/**
+ * Charge a saved card off-session. Does Init (no Recurrent) → Charge(RebillId).
+ * Returns the resulting status (CONFIRMED on success for one-stage terminals).
+ */
+export async function chargeRecurrent(params: {
+  orderId:       string
+  amountKopecks: number
+  description:   string
+  customerKey:   string
+  rebillId:      string
+  receipt?:      Receipt
+}): Promise<{ status: string; success: boolean; paymentId: string }> {
+  const { terminalKey, password } = credentials()
+
+  // 1. Init a new payment (no Recurrent flag; reuse the saved customer + receipt)
+  const initReq: Record<string, unknown> = {
+    TerminalKey: terminalKey,
+    Amount:      params.amountKopecks,
+    OrderId:     params.orderId,
+    Description: params.description,
+    CustomerKey: params.customerKey,
+  }
+  initReq.Token = computeToken(initReq, password)
+  if (params.receipt) initReq.Receipt = params.receipt
+
+  const initRes = await axios.post(`${BASE_URL}/Init`, initReq, {
+    headers: { 'Content-Type': 'application/json' }, timeout: 20_000,
+  })
+  if (!initRes.data.Success) {
+    return { status: 'INIT_FAILED', success: false, paymentId: '' }
+  }
+  const paymentId = String(initRes.data.PaymentId)
+
+  // 2. Charge the saved card off-session
+  const chargeReq: Record<string, unknown> = { TerminalKey: terminalKey, PaymentId: paymentId, RebillId: params.rebillId }
+  chargeReq.Token = computeToken(chargeReq, password)
+
+  const chargeRes = await axios.post(`${BASE_URL}/Charge`, chargeReq, {
+    headers: { 'Content-Type': 'application/json' }, timeout: 20_000,
+  })
+
+  const status = String(chargeRes.data.Status ?? (chargeRes.data.Success ? 'CONFIRMED' : 'REJECTED'))
+  return { status, success: Boolean(chargeRes.data.Success) && (status === 'CONFIRMED' || status === 'AUTHORIZED'), paymentId }
 }

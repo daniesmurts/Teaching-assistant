@@ -2,13 +2,17 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getAdminTeachers, patchTeacher } from '../../api/admin'
 import { useUIStore } from '../../store/uiStore'
+import SubscriptionModal from './SubscriptionModal'
 
 const PLANS = ['free', 'pro', 'institution']
 const ROLES = ['teacher', 'institution_admin', 'platform_admin']
 
+interface SubTeacher { id: string; name: string | null; email: string; plan_tier: string }
+
 export default function AdminTeachers() {
   const [search, setSearch] = useState('')
   const [page, setPage]     = useState(1)
+  const [subTeacher, setSubTeacher] = useState<SubTeacher | null>(null)
   const qc = useQueryClient()
   const addToast = useUIStore((s) => s.addToast)
 
@@ -48,6 +52,7 @@ export default function AdminTeachers() {
               <th className="text-left px-3 py-2 text-ink-secondary font-medium">Тариф</th>
               <th className="text-left px-3 py-2 text-ink-secondary font-medium">Роль</th>
               <th className="text-center px-3 py-2 text-ink-secondary font-medium">Активен</th>
+              <th className="text-right px-3 py-2 text-ink-secondary font-medium">Подписка</th>
             </tr></thead>
             <tbody>
               {teachers.map((t) => (
@@ -85,9 +90,17 @@ export default function AdminTeachers() {
                       {t.is_active ? 'да' : 'нет'}
                     </button>
                   </td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => setSubTeacher({ id: t.id, name: t.name, email: t.email, plan_tier: t.plan_tier })}
+                      className="text-xs text-amber hover:underline"
+                    >
+                      Управление
+                    </button>
+                  </td>
                 </tr>
               ))}
-              {teachers.length === 0 && <tr><td colSpan={5} className="px-3 py-6 text-center text-ink-tertiary">Ничего не найдено</td></tr>}
+              {teachers.length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-ink-tertiary">Ничего не найдено</td></tr>}
             </tbody>
           </table>
         </div>
@@ -100,6 +113,10 @@ export default function AdminTeachers() {
           </div>
         )}
       </div>
+
+      {subTeacher && (
+        <SubscriptionModal teacher={subTeacher} onClose={() => setSubTeacher(null)} />
+      )}
     </div>
   )
 }

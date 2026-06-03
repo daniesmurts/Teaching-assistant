@@ -14,6 +14,7 @@ import presentationsRouter from './routes/presentations'
 import documentsRouter from './routes/documents'
 import adminRouter from './routes/admin'
 import paymentsRouter from './routes/payments'
+import { startRenewalScheduler } from './services/renewals'
 
 // Validate environment before anything else — crash early on misconfig
 validateConfig()
@@ -100,6 +101,7 @@ app.use(errorHandler)
 
 app.listen(PORT, () => {
   logger.info({ message: `Backend running on port ${PORT}`, env: process.env.NODE_ENV })
+  startRenewalScheduler()   // daily auto-renewal sweep
 })
 
 // ─── Safety net — catch anything that slips through ───────────────────────────

@@ -11,27 +11,17 @@ import {
   initPayment, verifyNotificationToken, buildSubscriptionReceipt,
   getPaymentState, paymentsConfigured,
 } from '../services/tbank'
+import { fulfillPayment } from '../services/paymentFulfillment'
 import {
-  createPayment, setPaymentId, findPaymentByOrderId, confirmPayment, rejectPayment,
-  findPaymentsByTeacher, type PaymentRow,
+  createPayment, setPaymentId, findPaymentByOrderId, rejectPayment,
+  findPaymentsByTeacher,
 } from '../db/queries/payments'
-import { upgradeTeacherToPro } from '../db/queries/teachers'
+import { setAutoRenew } from '../db/queries/teachers'
 
 const router = Router()
 
-// Confirm a payment + upgrade the teacher — idempotent, shared by the webhook
-// and the GetState fallback. Returns true only on the first confirmation.
-async function applyConfirmation(payment: PaymentRow, rebillId?: string): Promise<boolean> {
-  const firstTime = await confirmPayment(payment.order_id, rebillId)
-  if (firstTime) {
-    const spec = PURCHASABLE_PLANS[payment.plan as keyof typeof PURCHASABLE_PLANS]
-    if (spec) {
-      await upgradeTeacherToPro(payment.teacher_id, spec.days, payment.payment_id ?? payment.order_id)
-      logger.info({ message: 'Teacher upgraded to Pro', teacherId: payment.teacher_id, plan: payment.plan, orderId: payment.order_id })
-    }
-  }
-  return firstTime
-}
+// Idempotent confirm + upgrade (shared with the webhook & GetState fallback).
+const applyConfirmation = fulfillPayment
 
 // ─── POST /api/payments/create ─ authenticated; returns a T-Bank PaymentURL ───
 
@@ -64,6 +54,7 @@ router.post(
       successURL:      `${base}/payment/result?order=${orderId}`,
       failURL:         `${base}/payment/result?order=${orderId}`,
       customerKey:     req.teacher.id,   // bind card to teacher for future recurring
+      recurrent:       true,             // register the card for auto-renewal
       receipt:         buildSubscriptionReceipt(req.teacher.email, spec.label, spec.amountKopecks),
     })
 
@@ -136,6 +127,18 @@ router.get(
     }
 
     res.json({ status: payment.status, plan: payment.plan })
+  })
+)
+
+// ─── POST /api/payments/auto-renew ─ toggle auto-renewal ──────────────────────
+
+router.post(
+  '/auto-renew',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const enabled = Boolean((req.body as { enabled?: unknown }).enabled)
+    await setAutoRenew(req.teacher.id, enabled)
+    res.json({ auto_renew: enabled })
   })
 )
 
