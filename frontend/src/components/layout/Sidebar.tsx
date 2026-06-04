@@ -7,6 +7,8 @@ const NAV: NavItem[] = [
   { icon: '⊞', label: 'Главная',        to: '/dashboard' },
   { icon: '◫', label: 'Курсы',          to: '/courses' },
   { icon: '✦', label: 'Проверка работ', to: '/grading' },
+  { icon: '☰', label: 'Критерии',       to: '/rubrics' },
+  { icon: '☺', label: 'Студенты',       to: '/students' },
   { icon: '▤', label: 'Презентации',    to: '/presentations' },
   { icon: '◆', label: 'Тариф',          to: '/billing' },
   { icon: '⚙', label: 'Настройки',      to: '/settings' },

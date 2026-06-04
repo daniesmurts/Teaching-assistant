@@ -24,6 +24,7 @@ interface GradeParams {
   courseId?: string
   studentName?: string
   studentEmail?: string
+  studentGroup?: string
 }
 
 interface AIGradingResult {
@@ -105,6 +106,7 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     rubricId: params.rubricId,
     studentName: params.studentName,
     studentEmail: params.studentEmail,
+    studentGroup: params.studentGroup,
     submissionText: params.submissionText,
     aiScore: clampScore(result.score),
     aiGrade: normaliseGrade(result.grade),

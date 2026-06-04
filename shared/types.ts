@@ -91,6 +91,7 @@ export interface Assignment {
   rubric_id: string | null
   student_name: string | null
   student_email: string | null
+  student_group: string | null
   submission_text: string
   ai_score: number | null
   ai_grade: GradeLetter | null

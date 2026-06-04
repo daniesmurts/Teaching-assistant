@@ -23,18 +23,29 @@ function toRubric(row: RubricRow): Rubric {
   }
 }
 
+/** Global template rubrics (created by platform admin) — starting points for teachers. */
+export async function findGlobalTemplates(): Promise<Array<Rubric & { template_subject: string | null }>> {
+  const { rows } = await pool.query<RubricRow & { template_subject: string | null }>(
+    `SELECT * FROM rubrics WHERE is_global_template = TRUE ORDER BY template_subject, name`
+  )
+  return rows.map((r) => ({ ...toRubric(r), template_subject: r.template_subject }))
+}
+
 export async function findRubricsByTeacher(teacherId: string, courseId?: string): Promise<Rubric[]> {
   if (courseId) {
     const { rows } = await pool.query<RubricRow>(
       `SELECT * FROM rubrics
-       WHERE teacher_id = $1 AND (course_id = $2 OR course_id IS NULL)
+       WHERE teacher_id = $1 AND is_global_template = FALSE
+         AND (course_id = $2 OR course_id IS NULL)
        ORDER BY is_default DESC, created_at DESC`,
       [teacherId, courseId]
     )
     return rows.map(toRubric)
   }
   const { rows } = await pool.query<RubricRow>(
-    'SELECT * FROM rubrics WHERE teacher_id = $1 ORDER BY is_default DESC, created_at DESC',
+    `SELECT * FROM rubrics
+     WHERE teacher_id = $1 AND is_global_template = FALSE
+     ORDER BY is_default DESC, created_at DESC`,
     [teacherId]
   )
   return rows.map(toRubric)

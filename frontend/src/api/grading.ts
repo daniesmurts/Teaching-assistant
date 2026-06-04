@@ -7,6 +7,7 @@ export interface GradeRequest {
   course_id?: string
   student_name?: string
   student_email?: string
+  student_group?: string
 }
 
 export interface GradeResponse {
@@ -57,9 +58,24 @@ export async function getGradingStats(): Promise<GradingStats> {
 
 export async function getGradingHistory(params?: {
   course_id?: string
+  student_name?: string
+  student_group?: string
   page?: number
   limit?: number
 }): Promise<{ assignments: Assignment[]; total: number }> {
   const res = await client.get<{ assignments: Assignment[]; total: number }>('/api/grading/history', { params })
+  return res.data
+}
+
+export interface StudentSummary {
+  student_name:    string
+  student_group:   string | null
+  submissions:     number
+  avg_score:       number | null
+  last_submission: string
+}
+
+export async function getStudents(courseId?: string): Promise<StudentSummary[]> {
+  const res = await client.get<StudentSummary[]>('/api/grading/students', { params: { course_id: courseId } })
   return res.data
 }

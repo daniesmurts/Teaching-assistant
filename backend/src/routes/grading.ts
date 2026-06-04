@@ -7,7 +7,7 @@ import { asyncHandler } from '../lib/asyncHandler'
 import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
 import { grade, approve } from '../services/grading'
 import { generateEmailDraft } from '../services/email'
-import { findAssignmentsByTeacher } from '../db/queries/assignments'
+import { findAssignmentsByTeacher, findStudentsByTeacher } from '../db/queries/assignments'
 import { pool } from '../db/connection'
 import type { GradeLetter } from '../../../shared/types'
 
@@ -21,12 +21,13 @@ router.post(
   checkMonthlyLimit('gradesPerMonth'),
   validate(gradeRules),
   asyncHandler(async (req, res) => {
-    const { submission_text, rubric_id, course_id, student_name, student_email } = req.body as {
+    const { submission_text, rubric_id, course_id, student_name, student_email, student_group } = req.body as {
       submission_text: string
       rubric_id?: string
       course_id?: string
       student_name?: string
       student_email?: string
+      student_group?: string
     }
     const result = await grade({
       teacherId:      req.teacher.id,
@@ -36,6 +37,7 @@ router.post(
       courseId:       course_id,
       studentName:    student_name,
       studentEmail:   student_email,
+      studentGroup:   student_group,
     })
     res.json(result)
   })
@@ -72,17 +74,28 @@ router.post(
   })
 )
 
-// GET /api/grading/history
+// GET /api/grading/history  (optional student_name / student_group filters)
 router.get(
   '/history',
   asyncHandler(async (req, res) => {
-    const { course_id, page, limit } = req.query as Record<string, string>
+    const { course_id, student_name, student_group, page, limit } = req.query as Record<string, string>
     const result = await findAssignmentsByTeacher(req.teacher.id, {
-      courseId: course_id,
-      page:     page  ? parseInt(page,  10) : undefined,
-      limit:    limit ? parseInt(limit, 10) : undefined,
+      courseId:     course_id,
+      studentName:  student_name,
+      studentGroup: student_group,   // '' matches ungrouped (NULL)
+      page:         page  ? parseInt(page,  10) : undefined,
+      limit:        limit ? parseInt(limit, 10) : undefined,
     })
     res.json(result)
+  })
+)
+
+// GET /api/grading/students  — aggregated roster (denormalized from assignments)
+router.get(
+  '/students',
+  asyncHandler(async (req, res) => {
+    const courseId = req.query.course_id as string | undefined
+    res.json(await findStudentsByTeacher(req.teacher.id, courseId))
   })
 )
 

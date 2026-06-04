@@ -10,6 +10,8 @@ import PaymentResult from './pages/PaymentResult'
 import Dashboard from './pages/Dashboard'
 import Courses from './pages/Courses'
 import Grading from './pages/Grading'
+import Rubrics from './pages/Rubrics'
+import Students from './pages/Students'
 import Presentations from './pages/Presentations'
 import Billing from './pages/Billing'
 import Settings from './pages/Settings'
@@ -76,6 +78,8 @@ export default function App() {
             <Route path="/dashboard"     element={<Dashboard />} />
             <Route path="/courses"       element={<Courses />} />
             <Route path="/grading"       element={<Grading />} />
+            <Route path="/rubrics"       element={<Rubrics />} />
+            <Route path="/students"      element={<Students />} />
             <Route path="/presentations" element={<Presentations />} />
             <Route path="/billing"       element={<Billing />} />
             <Route path="/settings"      element={<Settings />} />

@@ -7,6 +7,7 @@ import { checkResourceLimit } from '../middleware/checkPlan'
 import { createRubricRules, updateRubricRules } from '../validation/rubricValidation'
 import {
   findRubricsByTeacher, findRubricById, createRubric, updateRubric, deleteRubric,
+  findGlobalTemplates,
 } from '../db/queries/rubrics'
 import type { RubricCriterion } from '../../../shared/types'
 
@@ -16,6 +17,11 @@ router.use(authenticate)
 router.get('/', asyncHandler(async (req, res) => {
   const courseId = req.query.course_id as string | undefined
   res.json(await findRubricsByTeacher(req.teacher.id, courseId))
+}))
+
+// Global template rubrics teachers can start from (read-only). MUST be before '/:id'.
+router.get('/templates', asyncHandler(async (_req, res) => {
+  res.json(await findGlobalTemplates())
 }))
 
 router.post(

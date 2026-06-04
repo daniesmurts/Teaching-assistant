@@ -71,7 +71,10 @@ export default function Grading() {
                   Работа студента
                 </div>
                 {submission?.student_name && (
-                  <div className="text-sm font-sans font-medium text-ink">{submission.student_name}</div>
+                  <div className="text-sm font-sans font-medium text-ink">
+                    {submission.student_name}
+                    {submission.student_group && <span className="text-ink-tertiary font-normal"> · {submission.student_group}</span>}
+                  </div>
                 )}
               </div>
               <pre className="flex-1 px-4 py-3 font-mono text-[13px] leading-[1.8] text-ink whitespace-pre-wrap overflow-y-auto">

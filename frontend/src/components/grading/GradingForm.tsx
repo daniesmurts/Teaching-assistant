@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import Button from '../ui/Button'
 import { Textarea } from '../ui/Input'
 import { getCourses } from '../../api/courses'
+import { getStudents } from '../../api/grading'
 import DocumentUpload from '../ui/DocumentUpload'
 import { useUIStore } from '../../store/uiStore'
 import { usePlan } from '../../hooks/usePlan'
@@ -15,7 +16,7 @@ interface Props {
 }
 
 export default function GradingForm({ onResult }: Props) {
-  const [form, setForm] = useState<GradeRequest>({ submission_text: '', rubric_id: '', course_id: '', student_name: '', student_email: '' })
+  const [form, setForm] = useState<GradeRequest>({ submission_text: '', rubric_id: '', course_id: '', student_name: '', student_email: '', student_group: '' })
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
   const { atGradeLimit, gradesUsed, gradesLimit } = usePlan()
@@ -27,6 +28,14 @@ export default function GradingForm({ onResult }: Props) {
     queryFn: () =>
       client.get<Rubric[]>('/api/rubrics', { params: { course_id: form.course_id || undefined } }).then((r) => r.data),
   })
+
+  // Autocomplete suggestions — previously-used names & groups (keeps spelling consistent)
+  const { data: students = [] } = useQuery({
+    queryKey: ['students', form.course_id],
+    queryFn: () => getStudents(form.course_id || undefined),
+  })
+  const nameSuggestions  = Array.from(new Set(students.map((s) => s.student_name).filter(Boolean)))
+  const groupSuggestions = Array.from(new Set(students.map((s) => s.student_group).filter((g): g is string => !!g)))
 
   const set = (field: keyof GradeRequest) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
@@ -44,6 +53,7 @@ export default function GradingForm({ onResult }: Props) {
         ...(form.course_id  ? { course_id:  form.course_id  } : {}),
         ...(form.rubric_id  ? { rubric_id:  form.rubric_id  } : {}),
         ...(form.student_name  ? { student_name:  form.student_name  } : {}),
+        ...(form.student_group ? { student_group: form.student_group } : {}),
         ...(form.student_email ? { student_email: form.student_email } : {}),
       }
       const res = await client.post<GradeResponse>('/api/grading/grade', payload)
@@ -69,16 +79,30 @@ export default function GradingForm({ onResult }: Props) {
           <input
             className={selectClass}
             placeholder="Имя студента"
+            list="student-name-list"
             value={form.student_name}
             onChange={set('student_name')}
           />
           <input
             className={selectClass}
-            placeholder="Email (необязательно)"
-            value={form.student_email}
-            onChange={set('student_email')}
+            placeholder="Группа (напр. БИ-201)"
+            list="student-group-list"
+            value={form.student_group}
+            onChange={set('student_group')}
           />
         </div>
+        <input
+          className={`${selectClass} mt-2`}
+          placeholder="Email (необязательно)"
+          value={form.student_email}
+          onChange={set('student_email')}
+        />
+        <datalist id="student-name-list">
+          {nameSuggestions.map((n) => <option key={n} value={n} />)}
+        </datalist>
+        <datalist id="student-group-list">
+          {groupSuggestions.map((g) => <option key={g} value={g} />)}
+        </datalist>
       </div>
 
       {/* Course + Rubric */}
