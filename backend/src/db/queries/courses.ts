@@ -70,6 +70,11 @@ export async function updateCourse(
   return rows[0] ? toCourse(rows[0]) : null
 }
 
+/** Set a course's syllabus text — used after a syllabus document is extracted. */
+export async function setCourseSyllabusText(courseId: string, text: string): Promise<void> {
+  await pool.query('UPDATE courses SET syllabus_text = $2 WHERE id = $1', [courseId, text])
+}
+
 export async function deleteCourse(id: string, teacherId: string): Promise<boolean> {
   const { rowCount } = await pool.query(
     'DELETE FROM courses WHERE id = $1 AND teacher_id = $2',

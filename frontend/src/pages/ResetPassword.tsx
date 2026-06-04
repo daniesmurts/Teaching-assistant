@@ -96,6 +96,7 @@ export default function ResetPassword() {
               <Input
                 label="Новый пароль"
                 type="password"
+                reveal
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="8+ символов, заглавная буква и цифра"

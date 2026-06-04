@@ -5,6 +5,7 @@ import Button from '../components/ui/Button'
 import { Input, Textarea } from '../components/ui/Input'
 import DocumentUpload from '../components/ui/DocumentUpload'
 import { getCourses, createCourse, updateCourse, deleteCourse } from '../api/courses'
+import { uploadAndWait } from '../api/documents'
 import { useUIStore } from '../store/uiStore'
 import type { Course } from '../types'
 
@@ -27,6 +28,8 @@ export default function Courses() {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing]   = useState<Course | null>(null)
   const [form, setForm]         = useState<FormState>(emptyForm)
+  const [syllabusFile, setSyllabusFile] = useState<File | null>(null)
+  const [submitting, setSubmitting]     = useState(false)
 
   const { data: courses = [], isLoading } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
 
@@ -46,7 +49,7 @@ export default function Courses() {
     onError:   () => addToast('Не удалось удалить курс', 'error'),
   })
 
-  function close() { setShowForm(false); setEditing(null); setForm(emptyForm) }
+  function close() { setShowForm(false); setEditing(null); setForm(emptyForm); setSyllabusFile(null) }
 
   function openEdit(c: Course) {
     setEditing(c)
@@ -54,14 +57,36 @@ export default function Courses() {
     setShowForm(true)
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const payload = { ...form, code: form.code || undefined, level: form.level || undefined, syllabus_text: form.syllabus_text || undefined }
-    if (editing) updateMut.mutate({ id: editing.id, data: payload })
-    else createMut.mutate(payload)
+
+    if (editing) { updateMut.mutate({ id: editing.id, data: payload }); return }
+
+    // New course: create first, then (if a syllabus file was picked) upload it to the new course
+    setSubmitting(true)
+    try {
+      const course = await createCourse(payload)
+      if (syllabusFile) {
+        try {
+          await uploadAndWait(syllabusFile, 'syllabus', course.id)
+          addToast('Курс создан, программа загружена и проиндексирована', 'success')
+        } catch {
+          addToast('Курс создан, но не удалось обработать документ', 'error')
+        }
+      } else {
+        addToast('Курс создан', 'success')
+      }
+      qc.invalidateQueries({ queryKey: ['courses'] })
+      close()
+    } catch {
+      addToast('Не удалось создать курс', 'error')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
-  const busy = createMut.isPending || updateMut.isPending
+  const busy = submitting || createMut.isPending || updateMut.isPending
 
   return (
     <div className="flex-1 flex flex-col">
@@ -111,30 +136,33 @@ export default function Courses() {
                 rows={4}
               />
 
-              {/* Syllabus upload — only when editing (chunks need a course id) */}
-              {editing && (
-                <div>
-                  <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">
-                    Загрузить программу или материалы
-                  </label>
+              {/* Syllabus upload — PDF/Word */}
+              <div>
+                <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">
+                  Загрузить программу курса (PDF / Word)
+                </label>
+                {editing ? (
                   <DocumentUpload
                     documentType="syllabus"
                     courseId={editing.id}
-                    hint="PDF или Word — будет проиндексировано для подготовки лекций"
+                    hint="Будет проиндексировано для подготовки лекций"
                     onReady={(doc) => {
-                      if (doc.extractedText) {
-                        setForm((f) => ({ ...f, syllabus_text: doc.extractedText! }))
-                      }
+                      if (doc.extractedText) setForm((f) => ({ ...f, syllabus_text: doc.extractedText! }))
                       addToast(
-                        doc.chunkCount
-                          ? `Документ проиндексирован (${doc.chunkCount} фрагментов)`
-                          : 'Документ обработан',
+                        doc.chunkCount ? `Документ проиндексирован (${doc.chunkCount} фрагментов)` : 'Документ обработан',
                         'success'
                       )
                     }}
                   />
-                </div>
-              )}
+                ) : (
+                  <DocumentUpload
+                    documentType="syllabus"
+                    defer
+                    onFile={setSyllabusFile}
+                    hint="Текст распознается автоматически при создании курса"
+                  />
+                )}
+              </div>
               <div className="flex gap-2 pt-1">
                 <Button type="submit" loading={busy}>{editing ? 'Сохранить' : 'Создать курс'}</Button>
                 <Button type="button" variant="secondary" onClick={close}>Отмена</Button>

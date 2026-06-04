@@ -9,6 +9,7 @@ const NAV: NavItem[] = [
   { icon: '✦', label: 'Проверка работ', to: '/grading' },
   { icon: '▤', label: 'Презентации',    to: '/presentations' },
   { icon: '◆', label: 'Тариф',          to: '/billing' },
+  { icon: '⚙', label: 'Настройки',      to: '/settings' },
 ]
 
 interface Props {

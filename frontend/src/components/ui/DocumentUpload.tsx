@@ -17,14 +17,18 @@ const STATUS_LABEL: Record<ProcessingStatus, string> = {
 interface Props {
   documentType: DocumentType
   courseId?:    string
-  onReady:      (doc: DocumentStatus) => void
+  onReady?:     (doc: DocumentStatus) => void
   hint?:        string
+  /** Defer mode: capture the file without uploading (parent uploads after it has a course id). */
+  defer?:       boolean
+  onFile?:      (file: File | null) => void
 }
 
-export default function DocumentUpload({ documentType, courseId, onReady, hint }: Props) {
+export default function DocumentUpload({ documentType, courseId, onReady, hint, defer, onFile }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [status, setStatus] = useState<ProcessingStatus | null>(null)
   const [fileName, setFileName] = useState('')
+  const [selected, setSelected] = useState(false)
   const [dragOver, setDragOver] = useState(false)
 
   const { can } = usePlan()
@@ -40,9 +44,17 @@ export default function DocumentUpload({ documentType, courseId, onReady, hint }
       return
     }
     setFileName(file.name)
+
+    // Deferred — capture only; the parent uploads once it has a course id
+    if (defer) {
+      setSelected(true)
+      onFile?.(file)
+      return
+    }
+
     try {
       const doc = await uploadAndWait(file, documentType, courseId, setStatus)
-      onReady(doc)
+      onReady?.(doc)
     } catch (err) {
       setStatus('failed')
       addToast((err as Error).message || 'Не удалось обработать документ', 'error')
@@ -90,6 +102,13 @@ export default function DocumentUpload({ documentType, courseId, onReady, hint }
             <span className="text-lg">✓</span>
             <span className="text-xs font-sans text-success">Документ обработан</span>
             <span className="text-[11px] font-sans text-ink-tertiary truncate max-w-[200px]">{fileName}</span>
+          </>
+        ) : selected ? (
+          <>
+            <span className="text-lg">📎</span>
+            <span className="text-xs font-sans text-ink">Файл выбран</span>
+            <span className="text-[11px] font-sans text-ink-tertiary truncate max-w-[200px]">{fileName}</span>
+            <span className="text-[11px] font-sans text-amber">обработается при создании курса</span>
           </>
         ) : (
           <>

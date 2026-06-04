@@ -2,6 +2,14 @@ import axios from 'axios'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 
+// Per-request opt-out of the global error toast — used by forms that show
+// the error inline instead (login, register, password reset, account delete).
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    skipErrorToast?: boolean
+  }
+}
+
 const client = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? '',
   timeout: 60_000, // AI calls can be slow
@@ -33,6 +41,11 @@ client.interceptors.response.use(
     // Plan limit or feature gate → show upgrade modal
     if (upgrade) {
       useUIStore.getState().showUpgradeModal(code)
+      return Promise.reject(err)
+    }
+
+    // Forms that render the error inline opt out of the global toast
+    if (err.config?.skipErrorToast) {
       return Promise.reject(err)
     }
 

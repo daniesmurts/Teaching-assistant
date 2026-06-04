@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useLogin } from '../hooks/useAuth'
+import { authErrorMessage } from '../api/auth'
 import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 
@@ -13,6 +14,8 @@ export default function Login() {
     e.preventDefault()
     login.mutate({ email, password })
   }
+
+  const errorMsg = login.isError ? authErrorMessage(login.error) : ''
 
   return (
     <div className="min-h-screen bg-bg flex items-center justify-center p-4">
@@ -37,6 +40,7 @@ export default function Login() {
               <Input
                 label="Пароль"
                 type="password"
+                reveal
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
@@ -51,6 +55,13 @@ export default function Login() {
                 </Link>
               </div>
             </div>
+
+            {errorMsg && (
+              <div className="px-3 py-2 bg-danger-bg text-danger text-xs font-sans rounded-md">
+                {errorMsg}
+              </div>
+            )}
+
             <Button type="submit" className="w-full" loading={login.isPending}>
               Войти
             </Button>

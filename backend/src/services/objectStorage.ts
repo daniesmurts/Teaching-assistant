@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { logger } from '../lib/logger'
@@ -42,6 +42,23 @@ export async function uploadObject(
     Body:        buffer,
     ContentType: contentType,
   }))
+}
+
+/** Delete an object. Best-effort — never throws (used during account erasure). */
+export async function deleteObject(storagePath: string): Promise<void> {
+  try {
+    const client = s3()
+    if (!client) {
+      await fs.unlink(path.join(LOCAL_DIR, storagePath)).catch(() => null)
+      return
+    }
+    await client.send(new DeleteObjectCommand({
+      Bucket: process.env.YANDEX_STORAGE_BUCKET!,
+      Key:    storagePath,
+    }))
+  } catch (err) {
+    logger.warn({ message: '[storage] delete failed', storagePath, error: (err as Error).message })
+  }
 }
 
 export async function downloadObject(storagePath: string): Promise<Buffer> {

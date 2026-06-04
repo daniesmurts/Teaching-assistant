@@ -54,6 +54,15 @@ export async function getDocumentById(id: string): Promise<DocumentRow | null> {
   return rows[0] ?? null
 }
 
+/** All object-storage keys for a teacher's uploads (to wipe files on account deletion). */
+export async function getStoragePathsByTeacher(teacherId: string): Promise<string[]> {
+  const { rows } = await pool.query<{ storage_path: string }>(
+    'SELECT storage_path FROM documents WHERE teacher_id = $1',
+    [teacherId]
+  )
+  return rows.map((r) => r.storage_path)
+}
+
 export async function setDocumentStatus(id: string, status: ProcessingStatus): Promise<void> {
   await pool.query('UPDATE documents SET processing_status = $2 WHERE id = $1', [id, status])
 }

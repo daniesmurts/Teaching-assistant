@@ -8,6 +8,7 @@ import {
   type DocumentRow, type DocumentType,
 } from '../db/queries/documents'
 import { createChunk } from '../db/queries/chunks'
+import { setCourseSyllabusText } from '../db/queries/courses'
 import { logger } from '../lib/logger'
 
 function fileTypeFromMime(mime: string): string {
@@ -80,6 +81,12 @@ async function processDocument(
 
     const doc = await getDocumentById(documentId)
     if (doc?.course_id) {
+      // A syllabus becomes the course's program text (used by the presentation generator)
+      if (documentType === 'syllabus' && text.trim()) {
+        await setCourseSyllabusText(doc.course_id, text).catch((err) =>
+          logger.warn({ message: 'Could not set course syllabus_text', documentId, error: (err as Error).message })
+        )
+      }
       const chunks = chunkDocument(text, documentId, doc.course_id)
       for (const chunk of chunks) {
         try {

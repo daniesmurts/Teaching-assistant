@@ -45,7 +45,7 @@ export async function uploadAndWait(
   file: File,
   documentType: DocumentType,
   courseId: string | undefined,
-  onProgress: (status: ProcessingStatus) => void
+  onProgress: (status: ProcessingStatus) => void = () => {},
 ): Promise<DocumentStatus> {
   const { id } = await uploadDocument(file, documentType, courseId)
   onProgress('pending')

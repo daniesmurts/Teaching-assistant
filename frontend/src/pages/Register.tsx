@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useRegister } from '../hooks/useAuth'
+import { authErrorMessage } from '../api/auth'
 import { validatePassword } from '../lib/validatePassword'
 import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
@@ -79,6 +80,7 @@ export default function Register() {
                 label="Пароль"
                 type="password"
                 value={form.password}
+                reveal
                 onChange={(e) => { set('password')(e); if (pwError) setPwError(null) }}
                 placeholder="8+ символов, заглавная буква и цифра"
                 required
@@ -126,6 +128,12 @@ export default function Register() {
                 </p>
               )}
             </div>
+
+            {register.isError && (
+              <div className="px-3 py-2 bg-danger-bg text-danger text-xs font-sans rounded-md">
+                {authErrorMessage(register.error)}
+              </div>
+            )}
 
             <Button type="submit" className="w-full" loading={register.isPending}>
               Создать аккаунт

@@ -14,6 +14,7 @@ import presentationsRouter from './routes/presentations'
 import documentsRouter from './routes/documents'
 import adminRouter from './routes/admin'
 import paymentsRouter from './routes/payments'
+import accountRouter from './routes/account'
 import { startRenewalScheduler } from './services/renewals'
 
 // Validate environment before anything else — crash early on misconfig
@@ -21,6 +22,10 @@ validateConfig()
 
 const app = express()
 const PORT = config.port
+
+// Behind nginx (one proxy hop) — trust X-Forwarded-For so req.ip is the real
+// client IP. Without this, all IP-keyed rate limiters bucket on 127.0.0.1.
+app.set('trust proxy', 1)
 
 // ─── Security headers ─────────────────────────────────────────────────────────
 
@@ -92,6 +97,7 @@ app.use('/api/presentations', presentationsRouter)
 app.use('/api/documents',     documentsRouter)
 app.use('/api/admin',         adminRouter)
 app.use('/api/payments',      paymentsRouter)
+app.use('/api/account',       accountRouter)
 
 // ─── Global error handler (must be last) ──────────────────────────────────────
 

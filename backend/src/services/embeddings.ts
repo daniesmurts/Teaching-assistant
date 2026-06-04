@@ -1,5 +1,6 @@
 import { embed } from './deepseek'
 import { updateEmbedding } from '../db/queries/assignments'
+import { logger } from '../lib/logger'
 
 /**
  * Generate an embedding for the given text and store it on the assignment.
@@ -14,6 +15,6 @@ export async function generateAndStoreEmbedding(
     await updateEmbedding(assignmentId, vector)
   } catch (err) {
     // Non-fatal — RAG will just miss this example until a retry
-    console.error(`Embedding failed for assignment ${assignmentId}:`, err)
+    logger.warn({ message: 'Embedding failed', assignmentId, error: (err as Error).message })
   }
 }

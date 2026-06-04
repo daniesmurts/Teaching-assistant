@@ -12,6 +12,7 @@ import Courses from './pages/Courses'
 import Grading from './pages/Grading'
 import Presentations from './pages/Presentations'
 import Billing from './pages/Billing'
+import Settings from './pages/Settings'
 import AdminLayout from './pages/admin/AdminLayout'
 import AdminOverview from './pages/admin/AdminOverview'
 import AdminUsage from './pages/admin/AdminUsage'
@@ -77,6 +78,7 @@ export default function App() {
             <Route path="/grading"       element={<Grading />} />
             <Route path="/presentations" element={<Presentations />} />
             <Route path="/billing"       element={<Billing />} />
+            <Route path="/settings"      element={<Settings />} />
           </Route>
           {/* Admin — platform_admin only, own layout, direct URL access */}
           <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>

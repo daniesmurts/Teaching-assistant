@@ -114,6 +114,16 @@ export async function cancelTeacherSubscription(teacherId: string): Promise<void
   )
 }
 
+/**
+ * Permanently delete a teacher and all associated data (152-ФЗ right to erasure).
+ * FK cascades remove courses, rubrics, assignments, presentations, documents,
+ * chunks, payments, usage counters, reset tokens; api_usage_log is anonymised
+ * (teacher_id → NULL, no PII in that table).
+ */
+export async function deleteTeacher(teacherId: string): Promise<void> {
+  await pool.query('DELETE FROM teachers WHERE id = $1', [teacherId])
+}
+
 // ─── Recurring subscription state ─────────────────────────────────────────────
 
 /** Store the saved-card token + plan and enable auto-renewal (after first payment). */
