@@ -1,6 +1,8 @@
+import { useEffect, useRef } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
+import { initMetrica, metricaHit, isPublicPath } from './lib/metrica'
 import AppShell from './components/layout/AppShell'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -40,6 +42,23 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
 })
 
+// Drive Yandex Metrica for logged-out visitors on public pages only.
+// Authenticated pages show student PII, so we never init the counter there
+// (and a hard reload on login tears down any replay session — see useAuth.ts).
+// initMetrica() counts the first view itself, so the initial mount skips the hit.
+function RouteTracker() {
+  const location = useLocation()
+  const token = useAuthStore((s) => s.token)
+  const first = useRef(true)
+  useEffect(() => {
+    if (token || !isPublicPath(location.pathname)) return
+    initMetrica()
+    if (first.current) { first.current = false; return }
+    metricaHit(window.location.href)
+  }, [location, token])
+  return null
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
   return token ? <>{children}</> : <Navigate to="/login" replace />
@@ -56,6 +75,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <RouteTracker />
         <Routes>
           <Route path="/"         element={<Landing />} />
           <Route path="/about"    element={<About />} />
