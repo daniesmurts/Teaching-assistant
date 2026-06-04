@@ -1,4 +1,4 @@
-import { chatJSON, embed } from './deepseek'
+import { chatJSON, embed, REASONER_MODEL } from './deepseek'
 import { findRubricById } from '../db/queries/rubrics'
 import {
   createAssignment,
@@ -25,6 +25,8 @@ interface GradeParams {
   studentName?: string
   studentEmail?: string
   studentGroup?: string
+  referenceSolution?: string                  // эталонное решение / правильный ответ
+  assignmentType?: 'essay' | 'calculation'    // 'calculation' → reasoning model + STEM guidance
 }
 
 interface AIGradingResult {
@@ -83,13 +85,30 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
       : Promise.resolve([]),
   ])
 
-  const systemPrompt =
-    `Вы опытный преподаватель-эксперт. Ваша задача — объективно оценивать студенческие работы ` +
-    `и давать конструктивную обратную связь на русском языке. Всегда отвечайте только валидным JSON.`
+  const isCalc = params.assignmentType === 'calculation'
 
-  const userPrompt = rubric
-    ? buildRubricPrompt(params.submissionText, rubric.name, rubric.criteria, examples)
-    : buildHolisticPrompt(params.submissionText, examples)
+  const systemPrompt = isCalc
+    ? `Вы опытный преподаватель точных наук (математика, физика, инженерные дисциплины). ` +
+      `Проверяйте расчётные задачи строго: пошагово пересчитывайте решение, проверяйте формулы, ` +
+      `единицы измерения, размерности и числовой ответ. Отличайте ошибку метода от арифметической описки ` +
+      `и справедливо начисляйте частичный балл за верный ход решения. ` +
+      `Давайте обратную связь на русском языке. Всегда отвечайте только валидным JSON-объектом.`
+    : `Вы опытный преподаватель-эксперт. Ваша задача — объективно оценивать студенческие работы ` +
+      `и давать конструктивную обратную связь на русском языке. Всегда отвечайте только валидным JSON.`
+
+  const reference = params.referenceSolution?.trim()
+    ? `## Эталонное решение / правильный ответ
+Сравнивайте работу студента с этим эталоном. Если ответ студента совпадает по существу — засчитывайте, даже если оформление отличается.
+<reference_solution>
+${sanitiseForPrompt(params.referenceSolution.trim())}
+</reference_solution>
+
+`
+    : ''
+
+  const userPrompt = reference + (rubric
+    ? buildRubricPrompt(params.submissionText, rubric.name, rubric.criteria, examples, isCalc)
+    : buildHolisticPrompt(params.submissionText, examples, isCalc))
 
   const result = await chatJSON<AIGradingResult>(
     [
@@ -97,7 +116,8 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
       { role: 'user',   content: userPrompt },
     ],
     'результат оценивания',
-    { teacherId: params.teacherId, feature: 'grading' }
+    { teacherId: params.teacherId, feature: 'grading' },
+    isCalc ? REASONER_MODEL : undefined,   // calculation grading → reasoning model
   )
 
   const assignment = await createAssignment({
@@ -178,11 +198,16 @@ ${items}
 `
 }
 
+const CALC_GUIDANCE =
+  `\nЭто расчётная задача: пересчитайте решение пошагово, проверьте формулы, единицы измерения и числовой ответ. ` +
+  `За верный метод с арифметической опиской начисляйте частичный балл.\n`
+
 function buildRubricPrompt(
   text: string,
   rubricName: string,
   criteria: RubricCriterion[],
-  examples: SimilarAssignment[]
+  examples: SimilarAssignment[],
+  isCalc = false,
 ): string {
   const criteriaBlock = criteria
     .map((c) => `- ${c.name} (вес: ${c.weight}, максимум: ${c.max_score}): ${c.description}`)
@@ -197,7 +222,7 @@ ${criteriaBlock}
 ${sanitiseForPrompt(text)}
 </student_submission>
 
-## Инструкция
+## Инструкция${isCalc ? CALC_GUIDANCE : ''}
 Оцените работу по каждому критерию рубрики. Верните JSON-объект со следующими полями:
 - "score": итоговый взвешенный балл от 0 до 100
 - "grade": одно из "A", "B", "C", "D", "F"  (A≥90, B≥75, C≥60, D≥50, F<50)
@@ -210,13 +235,13 @@ ${sanitiseForPrompt(text)}
 Ответьте ТОЛЬКО JSON-объектом, без пояснений.`
 }
 
-function buildHolisticPrompt(text: string, examples: SimilarAssignment[]): string {
+function buildHolisticPrompt(text: string, examples: SimilarAssignment[], isCalc = false): string {
   return `${buildExamplesBlock(examples)}## Работа студента
 <student_submission>
 ${sanitiseForPrompt(text)}
 </student_submission>
 
-## Инструкция
+## Инструкция${isCalc ? CALC_GUIDANCE : ''}
 Оцените работу в целом по академическим стандартам. Верните JSON-объект со следующими полями:
 - "score": итоговый балл от 0 до 100
 - "grade": одно из "A", "B", "C", "D", "F"  (A≥90, B≥75, C≥60, D≥50, F<50)

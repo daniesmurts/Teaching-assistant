@@ -8,6 +8,8 @@ export interface GradeRequest {
   student_name?: string
   student_email?: string
   student_group?: string
+  reference_solution?: string
+  assignment_type?: 'essay' | 'calculation'
 }
 
 export interface GradeResponse {

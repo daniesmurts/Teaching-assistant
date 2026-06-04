@@ -21,23 +21,27 @@ router.post(
   checkMonthlyLimit('gradesPerMonth'),
   validate(gradeRules),
   asyncHandler(async (req, res) => {
-    const { submission_text, rubric_id, course_id, student_name, student_email, student_group } = req.body as {
+    const { submission_text, rubric_id, course_id, student_name, student_email, student_group, reference_solution, assignment_type } = req.body as {
       submission_text: string
       rubric_id?: string
       course_id?: string
       student_name?: string
       student_email?: string
       student_group?: string
+      reference_solution?: string
+      assignment_type?: 'essay' | 'calculation'
     }
     const result = await grade({
-      teacherId:      req.teacher.id,
-      planTier:       req.teacher.plan_tier,
-      submissionText: submission_text,
-      rubricId:       rubric_id,
-      courseId:       course_id,
-      studentName:    student_name,
-      studentEmail:   student_email,
-      studentGroup:   student_group,
+      teacherId:         req.teacher.id,
+      planTier:          req.teacher.plan_tier,
+      submissionText:    submission_text,
+      rubricId:          rubric_id,
+      courseId:          course_id,
+      studentName:       student_name,
+      studentEmail:      student_email,
+      studentGroup:      student_group,
+      referenceSolution: reference_solution,
+      assignmentType:    assignment_type === 'calculation' ? 'calculation' : 'essay',
     })
     res.json(result)
   })

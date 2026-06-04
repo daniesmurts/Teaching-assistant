@@ -15,6 +15,7 @@ import Students from './pages/Students'
 import Presentations from './pages/Presentations'
 import Billing from './pages/Billing'
 import Settings from './pages/Settings'
+import Help from './pages/Help'
 import AdminLayout from './pages/admin/AdminLayout'
 import AdminOverview from './pages/admin/AdminOverview'
 import AdminUsage from './pages/admin/AdminUsage'
@@ -83,6 +84,7 @@ export default function App() {
             <Route path="/presentations" element={<Presentations />} />
             <Route path="/billing"       element={<Billing />} />
             <Route path="/settings"      element={<Settings />} />
+            <Route path="/help"          element={<Help />} />
           </Route>
           {/* Admin — platform_admin only, own layout, direct URL access */}
           <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>

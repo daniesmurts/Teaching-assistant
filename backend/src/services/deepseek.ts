@@ -5,6 +5,7 @@ import { logger } from '../lib/logger'
 
 const BASE_URL = 'https://api.deepseek.com'
 const MODEL    = 'deepseek-chat'
+export const REASONER_MODEL = 'deepseek-reasoner'   // R1 — step-by-step, far better at math/physics
 
 function apiKey(): string {
   const key = process.env.DEEPSEEK_API_KEY
@@ -29,26 +30,28 @@ interface ChatMessage {
 
 export async function chat(
   messages: ChatMessage[],
-  opts: { jsonMode?: boolean; context?: CallContext } = {}
+  opts: { jsonMode?: boolean; context?: CallContext; model?: string } = {}
 ): Promise<string> {
   const start = Date.now()
-  let success   = true
+  const model = opts.model ?? MODEL
+  const isReasoner = model === REASONER_MODEL
   let errorCode: string | undefined
 
   try {
     const response = await axios.post(
       `${BASE_URL}/chat/completions`,
       {
-        model: MODEL,
+        model,
         messages,
-        ...(opts.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+        // The reasoner (R1) does NOT support response_format — only the chat model gets JSON mode
+        ...(opts.jsonMode && !isReasoner ? { response_format: { type: 'json_object' } } : {}),
       },
       {
         headers: {
           Authorization:  `Bearer ${apiKey()}`,
           'Content-Type': 'application/json',
         },
-        timeout: 60_000,
+        timeout: isReasoner ? 110_000 : 60_000,   // reasoning is slower
       }
     )
 
@@ -59,38 +62,32 @@ export async function chat(
     if (opts.context) {
       createUsageLog({
         ...opts.context,
-        model:        MODEL,
+        model,
         inputTokens,
         outputTokens,
-        costUsd:      calculateDeepSeekCost(inputTokens, outputTokens),
+        costUsd:      calculateDeepSeekCost(inputTokens, outputTokens, model),
         durationMs:   Date.now() - start,
         success:      true,
       }).catch((e) => logger.warn({ message: 'Failed to write usage log', error: e.message }))
     }
 
+    // Reasoner returns the final answer in `content` (reasoning is in `reasoning_content`)
     return response.data.choices[0].message.content as string
 
   } catch (err) {
-    success   = false
-    errorCode = axios.isAxiosError(err)
-      ? `HTTP_${err.response?.status ?? 0}`
-      : 'UNKNOWN'
+    errorCode = axios.isAxiosError(err) ? `HTTP_${err.response?.status ?? 0}` : 'UNKNOWN'
 
     if (opts.context) {
       createUsageLog({
         ...opts.context,
-        model:        MODEL,
-        inputTokens:  0,
-        outputTokens: 0,
-        costUsd:      0,
+        model,
+        inputTokens:  0, outputTokens: 0, costUsd: 0,
         durationMs:   Date.now() - start,
         success:      false,
         errorCode,
-      }).catch(() => null) // never let logging failure cascade
-
-      logger.warn({ message: 'DeepSeek call failed', feature: opts.context.feature, errorCode })
+      }).catch(() => null)
+      logger.warn({ message: 'DeepSeek call failed', feature: opts.context.feature, model, errorCode })
     }
-
     throw err
   }
 }
@@ -141,27 +138,37 @@ export async function embed(text: string, context?: CallContext): Promise<number
   }
 }
 
-// ─── JSON parse with one retry ────────────────────────────────────────────────
+// Extract a JSON object from a model response that may wrap it in ```fences```
+// or surrounding prose (the reasoner doesn't have a strict JSON mode).
+function extractJSON(raw: string): string {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const candidate = (fenced ? fenced[1] : raw).trim()
+  const first = candidate.indexOf('{')
+  const last  = candidate.lastIndexOf('}')
+  return first !== -1 && last > first ? candidate.slice(first, last + 1) : candidate
+}
+
+// ─── JSON parse with one retry (works for both chat and reasoner models) ──────
 
 export async function chatJSON<T>(
   messages: ChatMessage[],
   retryLabel = 'response',
-  context?: CallContext
+  context?: CallContext,
+  model?: string,
 ): Promise<T> {
-  const raw = await chat(messages, { jsonMode: true, context })
+  const raw = await chat(messages, { jsonMode: true, context, model })
   try {
-    return JSON.parse(raw) as T
+    return JSON.parse(extractJSON(raw)) as T
   } catch {
     const retryMessages: ChatMessage[] = [
       ...messages,
       { role: 'assistant', content: raw },
       {
         role:    'user',
-        content: `Your ${retryLabel} was not valid JSON. Respond ONLY with a valid JSON object, no markdown, no explanation.`,
+        content: `Ваш ${retryLabel} не был валидным JSON. Ответьте ТОЛЬКО валидным JSON-объектом, без markdown и пояснений.`,
       },
     ]
-    // Retry — log separately so we can see retry rate in admin
-    const retryRaw = await chat(retryMessages, { jsonMode: true, context })
-    return JSON.parse(retryRaw) as T
+    const retryRaw = await chat(retryMessages, { jsonMode: true, context, model })
+    return JSON.parse(extractJSON(retryRaw)) as T
   }
 }

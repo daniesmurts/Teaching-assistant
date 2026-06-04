@@ -56,12 +56,13 @@ export function canUseFeature(
 
 // ─── DeepSeek V3 pricing (update if rates change) ─────────────────────────────
 
-const INPUT_COST_PER_1M  = 0.14   // USD per 1M input tokens
-const OUTPUT_COST_PER_1M = 0.28   // USD per 1M output tokens
+// USD per 1M tokens — update if DeepSeek rates change.
+const RATES: Record<string, { in: number; out: number }> = {
+  'deepseek-chat':     { in: 0.14, out: 0.28 },
+  'deepseek-reasoner': { in: 0.55, out: 2.19 },   // R1 — pricier, used for calculation grading
+}
 
-export function calculateDeepSeekCost(inputTokens: number, outputTokens: number): number {
-  return (
-    (inputTokens  / 1_000_000) * INPUT_COST_PER_1M +
-    (outputTokens / 1_000_000) * OUTPUT_COST_PER_1M
-  )
+export function calculateDeepSeekCost(inputTokens: number, outputTokens: number, model = 'deepseek-chat'): number {
+  const r = RATES[model] ?? RATES['deepseek-chat']
+  return (inputTokens / 1_000_000) * r.in + (outputTokens / 1_000_000) * r.out
 }

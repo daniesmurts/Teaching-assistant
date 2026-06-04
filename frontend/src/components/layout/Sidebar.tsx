@@ -12,6 +12,7 @@ const NAV: NavItem[] = [
   { icon: '▤', label: 'Презентации',    to: '/presentations' },
   { icon: '◆', label: 'Тариф',          to: '/billing' },
   { icon: '⚙', label: 'Настройки',      to: '/settings' },
+  { icon: '?', label: 'Помощь',         to: '/help' },
 ]
 
 interface Props {

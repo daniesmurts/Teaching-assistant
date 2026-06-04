@@ -16,7 +16,8 @@ interface Props {
 }
 
 export default function GradingForm({ onResult }: Props) {
-  const [form, setForm] = useState<GradeRequest>({ submission_text: '', rubric_id: '', course_id: '', student_name: '', student_email: '', student_group: '' })
+  const [form, setForm] = useState<GradeRequest>({ submission_text: '', rubric_id: '', course_id: '', student_name: '', student_email: '', student_group: '', reference_solution: '', assignment_type: 'essay' })
+  const isCalc = form.assignment_type === 'calculation'
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
   const { atGradeLimit, gradesUsed, gradesLimit } = usePlan()
@@ -55,6 +56,8 @@ export default function GradingForm({ onResult }: Props) {
         ...(form.student_name  ? { student_name:  form.student_name  } : {}),
         ...(form.student_group ? { student_group: form.student_group } : {}),
         ...(form.student_email ? { student_email: form.student_email } : {}),
+        ...(isCalc ? { assignment_type: 'calculation' as const } : {}),
+        ...(form.reference_solution ? { reference_solution: form.reference_solution } : {}),
       }
       const res = await client.post<GradeResponse>('/api/grading/grade', payload)
       onResult(payload, res.data)
@@ -119,6 +122,30 @@ export default function GradingForm({ onResult }: Props) {
             <option value="">Без критериев (общая оценка)</option>
             {rubrics.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
+
+          {/* Calculation mode → reasoning model + STEM checking */}
+          <label className="flex items-start gap-2.5 cursor-pointer select-none pt-1">
+            <input
+              type="checkbox"
+              checked={isCalc}
+              onChange={(e) => setForm((f) => ({ ...f, assignment_type: e.target.checked ? 'calculation' : 'essay' }))}
+              className="mt-0.5 h-4 w-4 rounded border-border-mid accent-amber cursor-pointer flex-shrink-0"
+            />
+            <span className="text-xs font-sans text-ink-secondary leading-relaxed">
+              <span className="text-ink font-medium">Расчётная задача</span> (физика, математика, инженерия) —
+              использовать модель с пошаговыми вычислениями
+            </span>
+          </label>
+
+          {isCalc && (
+            <textarea
+              className={`${selectClass} resize-none font-mono text-[12.5px]`}
+              rows={3}
+              placeholder="Эталонное решение / правильный ответ (необязательно) — повышает точность проверки"
+              value={form.reference_solution}
+              onChange={set('reference_solution')}
+            />
+          )}
         </div>
       </div>
 
@@ -171,14 +198,21 @@ export default function GradingForm({ onResult }: Props) {
             </Button>
           </>
         ) : (
-          <Button type="submit" className="w-full" loading={loading} disabled={atGradeLimit}>
-            Проверить с ИИ
-            {gradesLimit !== null && (
-              <span className="ml-2 opacity-60 text-xs">
-                ({gradesUsed}/{gradesLimit})
-              </span>
+          <>
+            <Button type="submit" className="w-full" loading={loading} disabled={atGradeLimit}>
+              {loading && isCalc ? 'Пошаговая проверка…' : 'Проверить с ИИ'}
+              {!loading && gradesLimit !== null && (
+                <span className="ml-2 opacity-60 text-xs">
+                  ({gradesUsed}/{gradesLimit})
+                </span>
+              )}
+            </Button>
+            {isCalc && (
+              <p className="text-[11px] font-sans text-ink-tertiary text-center">
+                Расчётные задачи проверяются тщательнее — это может занять до минуты.
+              </p>
             )}
-          </Button>
+          </>
         )}
       </div>
     </form>

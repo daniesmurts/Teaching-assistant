@@ -12,7 +12,7 @@ declare module 'axios' {
 
 const client = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? '',
-  timeout: 60_000, // AI calls can be slow
+  timeout: 120_000, // AI calls can be slow — the reasoning model (calc grading) especially
 })
 
 // Attach JWT to every request

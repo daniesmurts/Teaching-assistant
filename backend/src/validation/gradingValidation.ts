@@ -24,6 +24,14 @@ export const gradeRules = [
     .optional({ nullable: true, checkFalsy: true })
     .isEmail().withMessage('Неверный адрес эл. почты студента')
     .normalizeEmail(),
+
+  body('reference_solution')
+    .optional()
+    .isLength({ max: 50_000 }).withMessage('Эталонное решение слишком длинное'),
+
+  body('assignment_type')
+    .optional()
+    .isIn(['essay', 'calculation']).withMessage('Неверный тип задания'),
 ]
 
 export const approveRules = [
