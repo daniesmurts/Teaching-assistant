@@ -9,6 +9,8 @@ import {
   getUsageByFeature, getRecentErrors,
 } from '../db/queries/usageLog'
 import { upgradeTeacherToPro, cancelTeacherSubscription } from '../db/queries/teachers'
+import { listInstitutionsWithCounts, createInstitution, updateInstitution } from '../db/queries/institutions'
+import { listFeedback } from '../db/queries/feedback'
 import {
   findPaymentsByTeacher, findPaymentByOrderId, markPaymentRefunded,
 } from '../db/queries/payments'
@@ -130,12 +132,13 @@ router.get('/teachers', asyncHandler(async (req, res) => {
   const [{ rows }, { rows: countRows }] = await Promise.all([
     pool.query(
       `SELECT t.id, t.email, t.name, t.university, t.role, t.plan_tier,
-              t.is_active, t.created_at,
+              t.is_active, t.created_at, t.institution_id, i.name AS institution_name,
               COUNT(a.id)::int AS grade_count
        FROM teachers t
-       LEFT JOIN assignments a ON a.teacher_id = t.id
+       LEFT JOIN assignments a  ON a.teacher_id = t.id
+       LEFT JOIN institutions i ON i.id = t.institution_id
        ${where}
-       GROUP BY t.id
+       GROUP BY t.id, i.name
        ORDER BY t.created_at DESC
        LIMIT $1 OFFSET $2`,
       params
@@ -152,17 +155,23 @@ router.get('/teachers', asyncHandler(async (req, res) => {
 // ─── PATCH /api/admin/teachers/:id ───────────────────────────────────────────
 
 router.patch('/teachers/:id', asyncHandler(async (req, res) => {
-  const { role, plan_tier, is_active } = req.body as {
-    role?: string; plan_tier?: string; is_active?: boolean
+  const body = req.body as {
+    role?: string; plan_tier?: string; is_active?: boolean; institution_id?: string | null
   }
+  const { role, plan_tier, is_active } = body
+  // institution_id is explicit: '' / null → unassign, uuid → assign, absent → leave
+  const hasInstitution = Object.prototype.hasOwnProperty.call(body, 'institution_id')
+  const institutionId  = body.institution_id ? body.institution_id : null
+
   const { rows } = await pool.query(
     `UPDATE teachers
-     SET role        = COALESCE($2, role),
-         plan_tier   = COALESCE($3, plan_tier),
-         is_active   = COALESCE($4, is_active)
+     SET role           = COALESCE($2, role),
+         plan_tier      = COALESCE($3, plan_tier),
+         is_active      = COALESCE($4, is_active),
+         institution_id = CASE WHEN $5 THEN $6 ELSE institution_id END
      WHERE id = $1
-     RETURNING id, email, name, role, plan_tier, is_active`,
-    [req.params.id, role ?? null, plan_tier ?? null, is_active ?? null]
+     RETURNING id, email, name, role, plan_tier, is_active, institution_id`,
+    [req.params.id, role ?? null, plan_tier ?? null, is_active ?? null, hasInstitution, institutionId]
   )
   if (!rows[0]) { res.status(404).json({ error: 'Преподаватель не найден' }); return }
   res.json(rows[0])
@@ -225,6 +234,59 @@ router.post('/payments/:orderId/refund', asyncHandler(async (req, res) => {
   const status = await refundPayment(payment.payment_id)   // REFUNDED | PARTIAL_REFUNDED
   await markPaymentRefunded(payment.order_id)
   res.json({ order_id: payment.order_id, status })
+}))
+
+// ─── Feedback ─────────────────────────────────────────────────────────────────
+
+router.get('/feedback', asyncHandler(async (req, res) => {
+  const limit = Math.min(parseInt((req.query.limit as string) ?? '100', 10) || 100, 500)
+  res.json(await listFeedback(limit))
+}))
+
+// ─── Institutions ─────────────────────────────────────────────────────────────
+
+const PLAN_TIERS = ['free', 'pro', 'institution']
+
+router.get('/institutions', asyncHandler(async (_req, res) => {
+  res.json(await listInstitutionsWithCounts())
+}))
+
+// Normalize a user-entered domain ("@MGU.ru", "https://mgu.ru/") → "mgu.ru"
+function normalizeDomain(v: unknown): string | null {
+  if (v == null || v === '') return null
+  return String(v).trim().toLowerCase().replace(/^@/, '').replace(/^https?:\/\//, '').replace(/\/.*$/, '') || null
+}
+
+router.post('/institutions', asyncHandler(async (req, res) => {
+  const { name, planTier, maxTeachers, emailDomain } = req.body as { name?: string; planTier?: string; maxTeachers?: unknown; emailDomain?: unknown }
+  if (!name?.trim()) throw new ValidationError('Укажите название организации')
+  const tier = planTier && PLAN_TIERS.includes(planTier) ? planTier : 'institution'
+  const max  = maxTeachers === null || maxTeachers === undefined || maxTeachers === ''
+    ? null : Number(maxTeachers)
+  if (max !== null && (!Number.isInteger(max) || max < 1)) throw new ValidationError('Лимит мест должен быть положительным числом')
+
+  res.status(201).json(await createInstitution({
+    name: name.trim(), planTier: tier, maxTeachers: max, emailDomain: normalizeDomain(emailDomain),
+  }))
+}))
+
+router.patch('/institutions/:id', asyncHandler(async (req, res) => {
+  const { name, planTier, maxTeachers, emailDomain } = req.body as { name?: string; planTier?: string; maxTeachers?: unknown; emailDomain?: unknown }
+  if (planTier && !PLAN_TIERS.includes(planTier)) throw new ValidationError('Неверный тариф')
+  const patch: { name?: string; planTier?: string; maxTeachers?: number | null; emailDomain?: string | null } = {}
+  if (name !== undefined)     patch.name = name.trim()
+  if (planTier !== undefined) patch.planTier = planTier
+  if (emailDomain !== undefined) patch.emailDomain = normalizeDomain(emailDomain)
+  if (maxTeachers !== undefined) {
+    patch.maxTeachers = maxTeachers === null || maxTeachers === '' ? null : Number(maxTeachers)
+    if (patch.maxTeachers !== null && (!Number.isInteger(patch.maxTeachers) || patch.maxTeachers < 1)) {
+      throw new ValidationError('Лимит мест должен быть положительным числом')
+    }
+  }
+
+  const updated = await updateInstitution(req.params.id, patch)
+  if (!updated) throw new NotFoundError('Организация')
+  res.json(updated)
 }))
 
 export default router

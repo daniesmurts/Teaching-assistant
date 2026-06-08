@@ -20,10 +20,10 @@ export default function Landing() {
       {/* Hero Section */}
       <section className="max-w-[800px] mx-auto px-6 pt-24 pb-20 text-center">
         <h1 className="font-display text-4xl sm:text-5xl font-bold leading-[1.1] tracking-tight mb-6">
-          Верните себе выходные.<br/>Доверьте проверку работ ИИ.
+          Вы стали преподавателем, чтобы учить — не проверять.
         </h1>
         <p className="text-lg text-ink-secondary mb-10 max-w-[600px] mx-auto leading-relaxed">
-          ИСПУМ помогает преподавателям проверять студенческие работы с высокой точностью и генерировать структурированные лекции за минуты. Создано для современного академического сообщества.
+          ИСПУМ берёт рутину на себя: точная проверка работ, лекции под уровень каждого студента, глубокая аналитика успеваемости. Больше студентов, больше пользы для каждого из них — и наконец время на то, что вас вдохновляет.
         </p>
         <div className="flex items-center justify-center gap-4">
           <Link to="/register" className="px-6 py-3 rounded-md bg-amber text-white font-medium hover:opacity-90 transition-opacity">Попробовать бесплатно</Link>
@@ -66,10 +66,7 @@ export default function Landing() {
         <h2 className="font-display text-2xl font-bold mb-4">Академическое выгорание — это реальность</h2>
         <div className="prose prose-sm text-ink-secondary leading-relaxed space-y-4">
           <p>
-            Преподаватели тратят десятки часов еженедельно на проверку эссе, отчетов и курсовых работ. Это время отнимается от исследовательской работы, подготовки к лекциям и, самое главное, отдыха.
-          </p>
-          <p>
-            ИСПУМ сокращает время первичной проверки на 80%. Вы задаете критерии оценки, а наш специализированный ИИ анализирует текст, выявляет сильные и слабые стороны, и предлагает развернутый отзыв. Вам остается только просмотреть, при необходимости скорректировать и утвердить результат.
+            Десятки часов в неделю уходят на проверку студенческих работ — вместо исследований, живых лекций и отдыха. ИСПУМ сокращает это время на 80%: вы задаёте критерии, ИИ анализирует и даёт развёрнутый отзыв, вы — просматриваете и утверждаете.
           </p>
         </div>
       </section>
@@ -84,7 +81,7 @@ export default function Landing() {
               <div className="text-xs font-bold text-amber uppercase tracking-wider">Интеллектуальная проверка</div>
               <h3 className="font-display text-3xl font-bold">Обучается на ваших оценках</h3>
               <p className="text-ink-secondary leading-relaxed">
-                ИСПУМ не использует шаблонные ответы. Как только вы утверждаете оценку, система запоминает ваш стиль и требования. С каждой проверенной работой (благодаря технологии RAG) рекомендации ИИ становятся всё более точными и персонализированными.
+                ИСПУМ не даёт шаблонных ответов. Каждая утверждённая оценка — это сигнал: система запоминает ваши стандарты и требования. Чем больше работ вы проверяете, тем точнее ИИ понимает именно ваш стиль.
               </p>
             </div>
             <div className="flex-1 w-full bg-surface border border-border rounded-xl p-6 shadow-sm">
@@ -107,9 +104,9 @@ export default function Landing() {
           <div className="flex flex-col md:flex-row-reverse items-center gap-12">
             <div className="flex-1 space-y-4">
               <div className="text-xs font-bold text-info uppercase tracking-wider">Генератор лекций</div>
-              <h3 className="font-display text-3xl font-bold">От силлабуса до слайдов</h3>
+              <h3 className="font-display text-3xl font-bold">Программа загружена. Лекция готова.</h3>
               <p className="text-ink-secondary leading-relaxed">
-                Загрузите рабочую программу или план курса, укажите тему и аудиторию. ИСПУМ сгенерирует структурированный план презентации со смысловыми блоками и заметками для спикера, готовый к переносу в PowerPoint.
+                Загрузите план курса, укажите тему и уровень аудитории. ИСПУМ создаст структурированную презентацию с заметками для спикера — готовую к использованию. Обновляется при появлении новых данных. Адаптируется под уровень группы за один клик.
               </p>
             </div>
             <div className="flex-1 w-full bg-surface border border-border rounded-xl p-6 shadow-sm flex text-sm">
@@ -132,7 +129,43 @@ export default function Landing() {
               </div>
             </div>
           </div>
-          
+
+          {/* Feature 3 — Analytics */}
+          <div className="flex flex-col md:flex-row items-center gap-12">
+            <div className="flex-1 space-y-4">
+              <div className="text-xs font-bold text-success uppercase tracking-wider">Аналитика успеваемости</div>
+              <h3 className="font-display text-3xl font-bold">Видно, кто растёт, а кому нужна помощь</h3>
+              <p className="text-ink-secondary leading-relaxed">
+                Успеваемость собирается автоматически из проверенных работ: профиль каждого студента, динамика оценок по времени и средний балл по группе. Вы видите картину всего потока — и вовремя поддерживаете тех, кто отстаёт.
+              </p>
+            </div>
+            <div className="flex-1 w-full bg-surface border border-border rounded-xl p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-xs font-semibold text-ink-tertiary uppercase tracking-wider">Динамика оценок</div>
+                <div className="text-xs text-ink-tertiary">средний балл <span className="font-display font-bold text-ink text-sm">4.3</span></div>
+              </div>
+              <div className="flex items-end gap-2 h-28 border-b border-border-mid pb-1">
+                {[
+                  { h: 50, c: 'bg-warning', g: 'C' },
+                  { h: 62, c: 'bg-amber',   g: 'B' },
+                  { h: 58, c: 'bg-amber',   g: 'B' },
+                  { h: 80, c: 'bg-success', g: 'A' },
+                  { h: 92, c: 'bg-success', g: 'A' },
+                ].map((b, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center justify-end">
+                    <span className="text-[10px] font-display font-bold text-ink-secondary mb-1">{b.g}</span>
+                    <div className={`w-full max-w-[34px] rounded-t-sm ${b.c}`} style={{ height: `${b.h}%`, opacity: 0.85 }}></div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-1">
+                {['окт', 'ноя', 'дек', 'фев', 'апр'].map((m) => (
+                  <div key={m} className="flex-1 text-center text-[9px] text-ink-tertiary">{m}</div>
+                ))}
+              </div>
+            </div>
+          </div>
+
         </div>
       </section>
 

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
+import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { getCourses } from '../api/courses'
@@ -95,6 +96,20 @@ export default function Rubrics() {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 md:px-6 py-6">
 
+          {!showForm && (
+            <FeatureIntro
+              id="rubrics"
+              title="Критерии оценки — по каким правилам ИИ ставит оценку"
+              description="Рубрика — это набор критериев с весами в процентах. Вес показывает, насколько критерий влияет на итоговую оценку: например «Аргументация — 40%», «Структура — 20%». ИИ оценивает работу по каждому критерию отдельно и выводит общий балл. Без рубрики проверка идёт по общим академическим стандартам."
+              steps={[
+                'Создайте рубрику с нуля или начните с готового шаблона по вашей дисциплине.',
+                'Задайте критерии и их веса в процентах — в сумме они должны давать 100%.',
+                'Добавьте краткое описание того, что считается хорошим ответом по каждому критерию.',
+                'Выбирайте рубрику при проверке работы — её можно переиспользовать для всего курса.',
+              ]}
+            />
+          )}
+
           {showForm ? (
             <div className="bg-surface border border-border rounded-lg p-5 space-y-4">
               <h2 className="font-display text-lg font-bold text-ink">
@@ -119,20 +134,19 @@ export default function Rubrics() {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">Критерии</span>
-                  <span className={`text-xs font-sans ${totalWeight === 100 ? 'text-success' : 'text-ink-tertiary'}`}>
-                    Сумма весов: {totalWeight}{totalWeight !== 100 && ' (обычно 100)'}
+                  <span className={`text-xs font-sans ${totalWeight === 100 ? 'text-success' : 'text-warning'}`}>
+                    Сумма весов: {totalWeight}%{totalWeight !== 100 && ' — должно быть 100%'}
                   </span>
                 </div>
-                <div className="grid grid-cols-[1fr_70px_70px_28px] gap-2 mb-1 text-[10px] font-sans text-ink-tertiary uppercase">
-                  <span>Название</span><span className="text-center">Вес</span><span className="text-center">Макс</span><span />
+                <div className="grid grid-cols-[1fr_80px_28px] gap-2 mb-1 text-[10px] font-sans text-ink-tertiary uppercase">
+                  <span>Название</span><span className="text-center">Вес, %</span><span />
                 </div>
                 <div className="space-y-3">
                   {form.criteria.map((c, i) => (
                     <div key={i} className="space-y-1">
-                      <div className="grid grid-cols-[1fr_70px_70px_28px] gap-2 items-center">
+                      <div className="grid grid-cols-[1fr_80px_28px] gap-2 items-center">
                         <input className={inputClass} placeholder="Напр. Анализ источников" value={c.name} onChange={(e) => setCrit(i, 'name', e.target.value)} />
-                        <input className={inputClass + ' text-center'} type="number" value={c.weight} onChange={(e) => setCrit(i, 'weight', Number(e.target.value))} />
-                        <input className={inputClass + ' text-center'} type="number" value={c.max_score} onChange={(e) => setCrit(i, 'max_score', Number(e.target.value))} />
+                        <input className={inputClass + ' text-center'} type="number" min={0} max={100} value={c.weight} onChange={(e) => setCrit(i, 'weight', Number(e.target.value))} />
                         <button onClick={() => setForm((f) => ({ ...f, criteria: f.criteria.filter((_, idx) => idx !== i) }))}
                           disabled={form.criteria.length === 1}
                           className="text-ink-tertiary hover:text-danger disabled:opacity-30">×</button>
@@ -188,7 +202,7 @@ export default function Rubrics() {
                           {r.course_id && <span className="text-[10px] bg-amber-light text-amber px-1.5 py-0.5 rounded-sm">{courseName(r.course_id) ?? 'курс'}</span>}
                         </div>
                         <div className="text-xs font-sans text-ink-tertiary mt-1">
-                          {r.criteria.map((c) => `${c.name} (${c.weight})`).join(' · ')}
+                          {r.criteria.map((c) => `${c.name} (${c.weight}%)`).join(' · ')}
                         </div>
                       </div>
                       <div className="flex gap-2 flex-shrink-0 ml-3">

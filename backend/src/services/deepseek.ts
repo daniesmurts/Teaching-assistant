@@ -94,12 +94,18 @@ export async function chat(
 
 // ─── Embeddings ───────────────────────────────────────────────────────────────
 
+// The embedding model has a token limit; cap very long inputs (e.g. a whole ВКР)
+// to a safe prefix. The leading section is the most semantically representative
+// for RAG retrieval, and this keeps the call from failing on huge documents.
+const EMBED_MAX_CHARS = 24_000
+
 export async function embed(text: string, context?: CallContext): Promise<number[]> {
   const start = Date.now()
+  const input = text.length > EMBED_MAX_CHARS ? text.slice(0, EMBED_MAX_CHARS) : text
   try {
     const response = await axios.post(
       `${BASE_URL}/embeddings`,
-      { model: 'deepseek-embedding', input: text },
+      { model: 'deepseek-embedding', input },
       {
         headers: {
           Authorization:  `Bearer ${apiKey()}`,

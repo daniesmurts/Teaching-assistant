@@ -60,15 +60,17 @@ export async function getUsageByFeature(days = 30): Promise<FeatureUsage[]> {
 }
 
 export interface AdminTeacher {
-  id:         string
-  email:      string
-  name:       string | null
-  university: string | null
-  role:       string
-  plan_tier:  string
-  is_active:  boolean
-  grade_count: number
-  created_at: string
+  id:               string
+  email:            string
+  name:             string | null
+  university:       string | null
+  role:             string
+  plan_tier:        string
+  is_active:        boolean
+  institution_id:   string | null
+  institution_name: string | null
+  grade_count:      number
+  created_at:       string
 }
 
 export async function getAdminTeachers(params: { page?: number; search?: string } = {}): Promise<{ teachers: AdminTeacher[]; total: number }> {
@@ -78,10 +80,53 @@ export async function getAdminTeachers(params: { page?: number; search?: string 
 
 export async function patchTeacher(
   id: string,
-  data: { role?: string; plan_tier?: string; is_active?: boolean }
+  data: { role?: string; plan_tier?: string; is_active?: boolean; institution_id?: string | null }
 ): Promise<AdminTeacher> {
   const res = await client.patch<AdminTeacher>(`/api/admin/teachers/${id}`, data)
   return res.data
+}
+
+// ─── Institutions ─────────────────────────────────────────────────────────────
+
+export interface AdminInstitution {
+  id:            string
+  name:          string
+  plan_tier:     string
+  max_teachers:  number | null
+  email_domain:  string | null
+  teacher_count: number
+  created_at:    string
+}
+
+export interface AdminFeedback {
+  id:            string
+  category:      string
+  message:       string
+  page:          string | null
+  created_at:    string
+  teacher_email: string | null
+  teacher_name:  string | null
+}
+
+export async function getFeedback(limit = 100): Promise<AdminFeedback[]> {
+  return (await client.get<AdminFeedback[]>('/api/admin/feedback', { params: { limit } })).data
+}
+
+export async function getInstitutions(): Promise<AdminInstitution[]> {
+  return (await client.get<AdminInstitution[]>('/api/admin/institutions')).data
+}
+
+export async function createInstitution(data: {
+  name: string; planTier: string; maxTeachers: number | null; emailDomain?: string | null
+}): Promise<AdminInstitution> {
+  return (await client.post<AdminInstitution>('/api/admin/institutions', data)).data
+}
+
+export async function updateInstitution(
+  id: string,
+  data: { name?: string; planTier?: string; maxTeachers?: number | null; emailDomain?: string | null }
+): Promise<AdminInstitution> {
+  return (await client.patch<AdminInstitution>(`/api/admin/institutions/${id}`, data)).data
 }
 
 export interface AdminError {

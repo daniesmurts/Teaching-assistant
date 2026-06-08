@@ -1,25 +1,40 @@
 import { useState } from 'react'
 import TopBar from '../components/layout/TopBar'
+import FeatureIntro from '../components/ui/FeatureIntro'
 import GradingForm from '../components/grading/GradingForm'
 import GradingResult from '../components/grading/GradingResult'
+import ReviewResult from '../components/grading/ReviewResult'
 import type { GradeRequest, GradeResponse } from '../api/grading'
+import type { LongReview } from '../types'
 
 type MobileTab = 'form' | 'result'
 
 export default function Grading() {
   const [submission, setSubmission] = useState<GradeRequest | null>(null)
   const [result, setResult]         = useState<GradeResponse | null>(null)
+  const [review, setReview]         = useState<LongReview | null>(null)
   const [mobileTab, setMobileTab]   = useState<MobileTab>('form')
+
+  const hasOutput = result !== null || review !== null
 
   function handleResult(req: GradeRequest, res: GradeResponse) {
     setSubmission(req)
+    setReview(null)
     setResult(res)
+    setMobileTab('result')
+  }
+
+  function handleReview(rev: LongReview, req: GradeRequest) {
+    setSubmission(req)
+    setResult(null)
+    setReview(rev)
     setMobileTab('result')
   }
 
   function reset() {
     setSubmission(null)
     setResult(null)
+    setReview(null)
     setMobileTab('form')
   }
 
@@ -34,15 +49,33 @@ export default function Grading() {
     <div className="flex-1 flex flex-col min-h-0">
       <TopBar
         title="Проверка работ"
-        actions={result && (
+        actions={hasOutput && (
           <button onClick={reset} className="text-xs font-sans text-ink-secondary hover:text-ink transition-colors">
             ← Новая работа
           </button>
         )}
       />
 
+      {/* How-it-works intro — only before the first grading */}
+      {!hasOutput && (
+        <div className="px-4 md:px-6 pt-5 flex-shrink-0">
+          <div className="max-w-[960px] mx-auto">
+            <FeatureIntro
+              id="grading"
+              title="Проверка работ — ИИ оценивает и даёт обратную связь"
+              description="Вставьте текст работы (или загрузите PDF, Word, скан), при желании выберите критерии — и ИИ поставит оценку с разбором по пунктам, сильными сторонами и рекомендациями. Вы проверяете результат и подтверждаете его — финальное слово всегда за вами."
+              steps={[
+                'Вставьте работу студента слева или загрузите файл — текст подставится автоматически.',
+                'По желанию выберите курс и рубрику; для задач по физике/математике включите «Расчётная задача».',
+                'Проверьте оценку и отзыв, при необходимости отредактируйте и нажмите «Подтвердить».',
+              ]}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Mobile tab switcher — only visible after grading */}
-      {result && (
+      {hasOutput && (
         <div className="md:hidden flex border-b border-border bg-surface flex-shrink-0">
           <button className={tabClass('form')} onClick={() => setMobileTab('form')}>
             Работа
@@ -59,11 +92,11 @@ export default function Grading() {
         {/* Left panel */}
         <div className={`
           md:w-[38%] md:border-r md:border-border md:flex bg-surface-warm overflow-y-auto flex-col
-          ${result ? (mobileTab === 'form' ? 'flex w-full' : 'hidden') : 'flex w-full'}
+          ${hasOutput ? (mobileTab === 'form' ? 'flex w-full' : 'hidden') : 'flex w-full'}
           md:flex md:w-[38%]
         `}>
-          {!result ? (
-            <GradingForm onResult={handleResult} />
+          {!hasOutput ? (
+            <GradingForm onResult={handleResult} onReview={handleReview} />
           ) : (
             <div className="flex flex-col h-full">
               <div className="px-4 py-3 border-b border-border">
@@ -87,10 +120,14 @@ export default function Grading() {
         {/* Right panel */}
         <div className={`
           flex-1 bg-surface overflow-y-auto flex-col
-          ${result ? (mobileTab === 'result' ? 'flex' : 'hidden') : 'hidden'}
+          ${hasOutput ? (mobileTab === 'result' ? 'flex' : 'hidden') : 'hidden'}
           md:flex
         `}>
-          {!result ? (
+          {result ? (
+            <GradingResult result={result} onApproved={() => {}} />
+          ) : review ? (
+            <ReviewResult review={review} onApproved={() => {}} />
+          ) : (
             <div className="flex-1 flex items-center justify-center p-8 text-center">
               <div>
                 <div className="font-display text-5xl text-ink-tertiary mb-3">✦</div>
@@ -100,8 +137,6 @@ export default function Grading() {
                 </p>
               </div>
             </div>
-          ) : (
-            <GradingResult result={result} onApproved={() => {}} />
           )}
         </div>
 

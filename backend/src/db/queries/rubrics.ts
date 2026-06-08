@@ -51,6 +51,23 @@ export async function findRubricsByTeacher(teacherId: string, courseId?: string)
   return rows.map(toRubric)
 }
 
+/** Institution-shared rubrics (created via the institution admin panel). */
+export async function findRubricsByInstitution(
+  institutionId: string
+): Promise<Array<Rubric & { author_name: string | null }>> {
+  const { rows } = await pool.query<RubricRow & { author_name: string | null }>(
+    `SELECT r.*, t.name AS author_name
+       FROM rubrics r
+       JOIN teachers t ON t.id = r.teacher_id
+      WHERE t.institution_id = $1
+        AND r.is_institution_shared = TRUE
+        AND r.is_global_template = FALSE
+      ORDER BY r.created_at DESC`,
+    [institutionId]
+  )
+  return rows.map((r) => ({ ...toRubric(r), author_name: r.author_name }))
+}
+
 export async function findRubricById(id: string, teacherId: string): Promise<Rubric | null> {
   const { rows } = await pool.query<RubricRow>(
     'SELECT * FROM rubrics WHERE id = $1 AND teacher_id = $2 LIMIT 1',
@@ -61,13 +78,17 @@ export async function findRubricById(id: string, teacherId: string): Promise<Rub
 
 export async function createRubric(
   teacherId: string,
-  data: { name: string; course_id?: string; criteria: RubricCriterion[]; is_default?: boolean }
+  data: {
+    name: string; course_id?: string; criteria: RubricCriterion[]
+    is_default?: boolean; is_institution_shared?: boolean
+  }
 ): Promise<Rubric> {
   const { rows } = await pool.query<RubricRow>(
-    `INSERT INTO rubrics (teacher_id, course_id, name, criteria, is_default)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO rubrics (teacher_id, course_id, name, criteria, is_default, is_institution_shared)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
-    [teacherId, data.course_id ?? null, data.name, JSON.stringify(data.criteria), data.is_default ?? false]
+    [teacherId, data.course_id ?? null, data.name, JSON.stringify(data.criteria),
+     data.is_default ?? false, data.is_institution_shared ?? false]
   )
   return toRubric(rows[0])
 }

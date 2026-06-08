@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
+import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
 import { Input, Textarea } from '../components/ui/Input'
 import DocumentUpload from '../components/ui/DocumentUpload'
@@ -97,6 +98,16 @@ export default function Courses() {
       />
 
       <div className="flex-1 p-6 max-w-4xl w-full mx-auto">
+        <FeatureIntro
+          id="courses"
+          title="Курсы — основа для проверки работ и презентаций"
+          description="Курс хранит контекст вашего предмета: уровень студентов и программу (силлабус). ИИ использует его, чтобы точнее проверять работы и готовить лекции под ваш курс."
+          steps={[
+            'Создайте курс: укажите название, уровень и при желании загрузите силлабус (PDF или Word).',
+            'Привяжите к курсу критерии оценки и работы студентов — так система накапливает примеры.',
+            'Чем больше проверенных работ в курсе, тем точнее ИИ оценивает новые (на тарифе Pro).',
+          ]}
+        />
         {showForm && (
           <div className="bg-surface border border-border rounded-lg p-5 mb-6">
             <h3 className="font-sans text-sm font-medium text-ink mb-4">

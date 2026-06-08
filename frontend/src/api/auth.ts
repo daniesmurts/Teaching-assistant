@@ -3,8 +3,20 @@ import type { AuthResponse, Teacher, PlanState } from '../types'
 
 export async function register(data: {
   email: string; password: string; name?: string; university?: string; phone?: string
+  invite_token?: string
 }): Promise<AuthResponse> {
   const res = await client.post<AuthResponse>('/api/auth/register', data, { skipErrorToast: true })
+  return res.data
+}
+
+// Public — look up an institution invite to prefill the register form.
+export interface InviteInfo {
+  valid:            boolean
+  email?:           string
+  institution_name?: string | null
+}
+export async function getInvite(token: string): Promise<InviteInfo> {
+  const res = await client.get<InviteInfo>(`/api/auth/invite/${token}`, { skipErrorToast: true })
   return res.data
 }
 

@@ -108,6 +108,50 @@ export interface Assignment {
   created_at: string
 }
 
+// ─── Long-document review (ВКР / диплом / большие работы) ─────────────────────
+
+// Documents at or below this many characters are graded in a single DeepSeek
+// call. Above it, we switch to the section-aware map-reduce review pipeline.
+// 120 000 chars ≈ ~34k tokens — comfortably inside DeepSeek's context window,
+// leaving room for the rubric, RAG examples and the model's output.
+export const SINGLE_PASS_CHAR_LIMIT = 120_000
+
+// Hard ceiling for the review pipeline (a ~300-page ВКР). Beyond this we ask the
+// teacher to split the work — quality and cost stop being defensible.
+export const MAX_REVIEW_CHARS = 1_000_000
+
+export type LongReviewStatus = 'pending' | 'analyzing' | 'synthesizing' | 'ready' | 'failed'
+
+export interface ChapterReview {
+  title: string
+  assessment: string      // 1–2 paragraphs on this section
+  strengths: string[]
+  gaps: string[]
+}
+
+export interface LongReviewResult {
+  overall_summary:   string
+  suggested_score:   number | null
+  suggested_grade:   GradeLetter | null
+  grade_label:       string | null
+  chapter_reviews:   ChapterReview[]
+  overall_strengths: string[]
+  overall_gaps:      string[]
+  defense_questions: string[]   // questions a committee might ask at the defence
+}
+
+// Returned by POST /api/grading/review and polled via GET /api/grading/review/:id
+export interface LongReview {
+  id:             string
+  status:         LongReviewStatus
+  progress_done:  number
+  progress_total: number
+  assignment_id:  string | null    // set once a draft assignment row is created
+  result:         LongReviewResult | null
+  error_message:  string | null
+  created_at:     string
+}
+
 // ─── Presentation ─────────────────────────────────────────────────────────────
 
 export type PresentationStyle =

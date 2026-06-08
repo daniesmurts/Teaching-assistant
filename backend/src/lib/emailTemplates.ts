@@ -157,3 +157,107 @@ export function passwordChangedEmail(name: string): Omit<EmailPayload, 'to'> {
       `Если это были не вы, напишите нам: support@ispum.ru\n\nИСПУМ · ispum.ru`,
   }
 }
+
+// ─── Admin notifications (to the platform owner) ──────────────────────────────
+
+export function adminSignupEmail(data: {
+  name?: string | null; email: string; university?: string | null; viaInvite?: boolean
+}): Omit<EmailPayload, 'to'> {
+  const when = fmtRu(new Date())
+  return {
+    subject: `🎉 Новая регистрация — ${data.email}`,
+    html: wrap(`
+      <p><strong>Новый преподаватель зарегистрировался в ИСПУМ.</strong></p>
+      <p>
+        Имя: ${data.name || '—'}<br>
+        Эл. почта: ${data.email}<br>
+        Организация: ${data.university || '—'}<br>
+        ${data.viaInvite ? 'Источник: по приглашению организации<br>' : ''}
+        Дата: ${when}
+      </p>
+    `),
+    text:
+      `Новая регистрация в ИСПУМ\n\n` +
+      `Имя: ${data.name || '—'}\nEmail: ${data.email}\n` +
+      `Организация: ${data.university || '—'}\n${data.viaInvite ? 'Источник: приглашение организации\n' : ''}` +
+      `Дата: ${when}`,
+  }
+}
+
+export function adminPurchaseEmail(data: {
+  email: string; planLabel: string; amountRub: number; orderId: string
+}): Omit<EmailPayload, 'to'> {
+  const when = fmtRu(new Date())
+  return {
+    subject: `💰 Оплата — ${data.planLabel} (${data.email})`,
+    html: wrap(`
+      <p><strong>Поступила оплата в ИСПУМ.</strong></p>
+      <p>
+        Преподаватель: ${data.email}<br>
+        Тариф: ${data.planLabel}<br>
+        Сумма: ${data.amountRub.toLocaleString('ru-RU')} ₽<br>
+        Заказ: ${data.orderId}<br>
+        Дата: ${when}
+      </p>
+    `),
+    text:
+      `Поступила оплата в ИСПУМ\n\n` +
+      `Преподаватель: ${data.email}\nТариф: ${data.planLabel}\n` +
+      `Сумма: ${data.amountRub} ₽\nЗаказ: ${data.orderId}\nДата: ${when}`,
+  }
+}
+
+export function feedbackEmail(data: {
+  name?: string | null; email: string; plan: string; category: string; message: string; page?: string | null
+}): Omit<EmailPayload, 'to'> {
+  const labels: Record<string, string> = { bug: 'Проблема', idea: 'Идея', question: 'Вопрос', other: 'Другое' }
+  const cat = labels[data.category] ?? data.category
+  const safe = data.message.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return {
+    subject: `💬 Отзыв (${cat}) — ${data.email}`,
+    html: wrap(`
+      <p><strong>Новый отзыв в ИСПУМ.</strong></p>
+      <p style="color:#6B6560;font-size:13px">
+        От: ${data.name || '—'} (${data.email})<br>
+        Тариф: ${data.plan}${data.page ? `<br>Страница: ${data.page}` : ''}<br>
+        Категория: ${cat}
+      </p>
+      <div style="margin-top:12px;padding:14px 16px;background:#FAF8F4;border:1px solid rgba(0,0,0,0.08);border-radius:8px;white-space:pre-wrap">${safe}</div>
+      <p style="margin-top:16px"><a href="mailto:${data.email}" style="color:#C8860A">Ответить ${data.email}</a></p>
+    `),
+    text:
+      `Новый отзыв в ИСПУМ\n\n` +
+      `От: ${data.name || '—'} (${data.email})\nТариф: ${data.plan}\n` +
+      `${data.page ? `Страница: ${data.page}\n` : ''}Категория: ${cat}\n\n${data.message}`,
+  }
+}
+
+// ─── Institution teacher invite ───────────────────────────────────────────────
+
+export function teacherInviteEmail(
+  inviterName:     string,
+  institutionName: string,
+  inviteUrl:       string
+): Omit<EmailPayload, 'to'> {
+  const inviter = firstName(inviterName)
+  return {
+    subject: `Приглашение в ИСПУМ — ${institutionName}`,
+    html: wrap(`
+      <p>Здравствуйте!</p>
+      <p><strong>${inviter}</strong> приглашает вас присоединиться к ИСПУМ
+         в рамках организации <strong>${institutionName}</strong>.</p>
+      <p>ИСПУМ — платформа для преподавателей: проверка студенческих работ с ИИ
+         и подготовка материалов к лекциям.</p>
+      ${btn(inviteUrl, 'Принять приглашение')}
+      <p style="color:#6B6560;font-size:13px">
+        Приглашение действительно 7 дней. Если ссылка не открывается, скопируйте её в браузер:<br>
+        <span style="color:#C8860A;word-break:break-all">${inviteUrl}</span>
+      </p>
+    `),
+    text:
+      `Здравствуйте!\n\n` +
+      `${inviter} приглашает вас в ИСПУМ (${institutionName}).\n\n` +
+      `Примите приглашение: ${inviteUrl}\n\n` +
+      `Приглашение действительно 7 дней.\n\nИСПУМ · ispum.ru`,
+  }
+}

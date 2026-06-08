@@ -67,10 +67,9 @@ export default function AdminRubrics() {
 
             <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider pt-1">Критерии</div>
             {criteria.map((c, i) => (
-              <div key={i} className="grid grid-cols-[1fr_80px_80px_28px] gap-2 items-center">
+              <div key={i} className="grid grid-cols-[1fr_80px_28px] gap-2 items-center">
                 <input className={inputClass} placeholder="Название критерия" value={c.name} onChange={(e) => setCrit(i, 'name', e.target.value)} />
-                <input className={inputClass} type="number" placeholder="вес" value={c.weight} onChange={(e) => setCrit(i, 'weight', Number(e.target.value))} />
-                <input className={inputClass} type="number" placeholder="макс" value={c.max_score} onChange={(e) => setCrit(i, 'max_score', Number(e.target.value))} />
+                <input className={inputClass + ' text-center'} type="number" min={0} max={100} placeholder="вес %" value={c.weight} onChange={(e) => setCrit(i, 'weight', Number(e.target.value))} />
                 <button onClick={() => setCriteria((cs) => cs.filter((_, idx) => idx !== i))} className="text-ink-tertiary hover:text-danger">×</button>
               </div>
             ))}

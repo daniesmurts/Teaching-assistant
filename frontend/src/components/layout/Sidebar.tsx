@@ -9,6 +9,7 @@ const NAV: NavItem[] = [
   { icon: '✦', label: 'Проверка работ', to: '/grading' },
   { icon: '☰', label: 'Критерии',       to: '/rubrics' },
   { icon: '☺', label: 'Студенты',       to: '/students' },
+  { icon: '◷', label: 'Журнал',         to: '/history' },
   { icon: '▤', label: 'Презентации',    to: '/presentations' },
   { icon: '◆', label: 'Тариф',          to: '/billing' },
   { icon: '⚙', label: 'Настройки',      to: '/settings' },
@@ -27,6 +28,8 @@ export default function Sidebar({ onClose }: Props) {
   const initials = teacher?.name
     ? teacher.name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
     : teacher?.email?.[0]?.toUpperCase() ?? '?'
+
+  const isInstitutionAdmin = teacher?.role === 'institution_admin' || teacher?.role === 'platform_admin'
 
   function logout() { clearAuth(); navigate('/login') }
 
@@ -68,11 +71,40 @@ export default function Sidebar({ onClose }: Props) {
             )}
           </NavLink>
         ))}
+
+        {/* Feedback — visually distinct (amber) so early users notice it */}
+        <NavLink to="/feedback">
+          {({ isActive }) => (
+            <div className={`flex items-center gap-2.5 px-3 py-2.5 rounded-md cursor-pointer transition-colors mt-2 border ${
+              isActive
+                ? 'bg-amber/20 border-amber-mid/40'
+                : 'bg-amber/10 border-amber-mid/25 hover:bg-amber/20'
+            }`}>
+              <span className="text-sm w-4 text-center select-none text-amber-mid">✉</span>
+              <span className="text-sm font-sans font-medium text-amber-mid">Обратная связь</span>
+            </div>
+          )}
+        </NavLink>
+
+        {isInstitutionAdmin && (
+          <NavLink to="/institution">
+            {({ isActive }) => (
+              <div className={`flex items-center gap-2.5 px-3 py-2.5 rounded-md cursor-pointer transition-colors mt-1 border-t border-white/5 pt-3 ${
+                isActive ? 'bg-sidebar-active' : 'hover:bg-sidebar-hover'
+              }`}>
+                <span className={`text-sm w-4 text-center select-none ${isActive ? 'text-amber-mid' : 'text-ink-inv-muted'}`}>◉</span>
+                <span className={`text-sm font-sans ${isActive ? 'font-medium text-ink-inverse' : 'font-normal text-ink-inv-muted'}`}>
+                  Организация
+                </span>
+              </div>
+            )}
+          </NavLink>
+        )}
       </nav>
 
       {/* Teacher profile */}
-      <div className="px-3 py-3 border-t border-white/5">
-        <div className="flex items-center gap-2.5">
+      <div className="px-3 py-3 border-t border-white/5 space-y-1">
+        <div className="flex items-center gap-2.5 px-1">
           <div className="w-8 h-8 rounded-full bg-amber flex items-center justify-center text-xs font-semibold text-white font-sans flex-shrink-0">
             {initials}
           </div>
@@ -84,10 +116,14 @@ export default function Sidebar({ onClose }: Props) {
               <div className="text-[10px] font-sans text-ink-inv-muted truncate">{teacher.university}</div>
             )}
           </div>
-          <button onClick={logout} title="Выйти" className="text-ink-inv-muted hover:text-ink-inverse transition-colors text-xs ml-1">
-            ⎋
-          </button>
         </div>
+        <button
+          onClick={logout}
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-ink-inv-muted hover:bg-sidebar-hover hover:text-ink-inverse transition-colors"
+        >
+          <span className="text-sm w-4 text-center select-none leading-none">⎋</span>
+          <span className="text-sm font-sans">Выйти</span>
+        </button>
       </div>
     </aside>
   )

@@ -1,5 +1,5 @@
 import client from './client'
-import type { Assignment, GradeLetter } from '../types'
+import type { Assignment, GradeLetter, LongReview } from '../types'
 
 export interface GradeRequest {
   submission_text: string
@@ -62,6 +62,8 @@ export async function getGradingHistory(params?: {
   course_id?: string
   student_name?: string
   student_group?: string
+  search?: string
+  status?: string
   page?: number
   limit?: number
 }): Promise<{ assignments: Assignment[]; total: number }> {
@@ -80,4 +82,31 @@ export interface StudentSummary {
 export async function getStudents(courseId?: string): Promise<StudentSummary[]> {
   const res = await client.get<StudentSummary[]>('/api/grading/students', { params: { course_id: courseId } })
   return res.data
+}
+
+// ─── Long-document review (ВКР / диплом) ───────────────────────────────────────
+
+export interface ReviewRequest {
+  submission_text: string
+  rubric_id?:    string
+  course_id?:    string
+  student_name?: string
+  student_email?: string
+  student_group?: string
+}
+
+export async function startReview(data: ReviewRequest): Promise<LongReview> {
+  const res = await client.post<LongReview>('/api/grading/review', data)
+  return res.data
+}
+
+export async function getReview(id: string): Promise<LongReview> {
+  const res = await client.get<LongReview>(`/api/grading/review/${id}`)
+  return res.data
+}
+
+// Revisit the long review behind an assignment (null if it was a normal grade).
+export async function getReviewByAssignment(assignmentId: string): Promise<LongReview | null> {
+  const res = await client.get<{ review: LongReview | null }>(`/api/grading/assignment/${assignmentId}/review`)
+  return res.data.review
 }

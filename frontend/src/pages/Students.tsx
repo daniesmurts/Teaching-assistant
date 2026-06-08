@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
+import FeatureIntro from '../components/ui/FeatureIntro'
 import Badge from '../components/ui/Badge'
+import AssignmentDetailModal from '../components/grading/AssignmentDetailModal'
 import { getStudents, getGradingHistory, type StudentSummary } from '../api/grading'
 import { getCourses } from '../api/courses'
-import type { AssignmentStatus } from '../types'
+import type { Assignment, AssignmentStatus } from '../types'
 
 function gradeColor(grade: string | null): string {
   return { A: 'var(--color-success)', B: 'var(--color-amber)', C: 'var(--color-warning)', D: 'var(--color-danger)', F: 'var(--color-danger)' }[grade ?? ''] ?? 'var(--color-ink-tertiary)'
@@ -14,6 +16,7 @@ const fmt = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: 'numer
 // ─── Per-student detail (assignments + grade-over-time) ───────────────────────
 
 function StudentDetail({ student, courseId, onBack }: { student: StudentSummary; courseId?: string; onBack: () => void }) {
+  const [openAssignment, setOpenAssignment] = useState<Assignment | null>(null)
   const { data } = useQuery({
     queryKey: ['student-history', student.student_name, student.student_group, courseId],
     queryFn: () => getGradingHistory({
@@ -66,7 +69,11 @@ function StudentDetail({ student, courseId, onBack }: { student: StudentSummary;
       <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">Работы</div>
       <div className="bg-surface border border-border rounded-lg overflow-hidden">
         {(data?.assignments ?? []).map((a, i, arr) => (
-          <div key={a.id} className={`flex items-center gap-3 px-4 py-3 ${i < arr.length - 1 ? 'border-b border-border' : ''}`}>
+          <button
+            key={a.id}
+            onClick={() => setOpenAssignment(a)}
+            className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-warm transition-colors ${i < arr.length - 1 ? 'border-b border-border' : ''}`}
+          >
             <div className="flex-1 min-w-0">
               <div className="text-sm font-sans text-ink">{fmt(a.created_at)}</div>
               <div className="text-xs font-sans text-ink-tertiary truncate">{a.submission_text.slice(0, 80)}…</div>
@@ -77,9 +84,14 @@ function StudentDetail({ student, courseId, onBack }: { student: StudentSummary;
               </div>
             )}
             <Badge variant={a.status as AssignmentStatus} />
-          </div>
+            <span className="text-ink-tertiary text-xs flex-shrink-0">→</span>
+          </button>
         ))}
       </div>
+
+      {openAssignment && (
+        <AssignmentDetailModal assignment={openAssignment} onClose={() => setOpenAssignment(null)} />
+      )}
     </div>
   )
 }
@@ -98,6 +110,18 @@ export default function Students() {
       <TopBar title="Студенты" />
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 md:px-6 py-6">
+          {!selected && (
+            <FeatureIntro
+              id="students"
+              title="Студенты — успеваемость собирается автоматически"
+              description="Здесь нет ручного ввода: список формируется сам из проверенных работ. Указывайте имя и группу студента при проверке — и система сама соберёт его профиль с историей оценок и динамикой по времени."
+              steps={[
+                'Проверяя работу, заполните поля «Имя студента» и «Группа».',
+                'Откройте профиль студента, чтобы увидеть все его работы и график оценок.',
+                'Фильтруйте по курсу, чтобы смотреть успеваемость в рамках конкретного предмета.',
+              ]}
+            />
+          )}
           {selected ? (
             <StudentDetail student={selected} courseId={courseId || undefined} onBack={() => setSelected(null)} />
           ) : (

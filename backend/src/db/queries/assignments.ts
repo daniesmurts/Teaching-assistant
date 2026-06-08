@@ -155,7 +155,11 @@ export async function findSimilarAssignments(
 
 export async function findAssignmentsByTeacher(
   teacherId: string,
-  options: { courseId?: string; studentName?: string; studentGroup?: string; page?: number; limit?: number }
+  options: {
+    courseId?: string; studentName?: string; studentGroup?: string
+    search?: string; status?: string
+    page?: number; limit?: number
+  }
 ): Promise<{ assignments: Assignment[]; total: number }> {
   const page = Math.max(1, options.page ?? 1)
   const limit = Math.min(100, options.limit ?? 20)
@@ -174,6 +178,13 @@ export async function findAssignmentsByTeacher(
       params.push(options.studentGroup); conds.push(`student_group = $${params.length}`)
     }
   }
+  // Free-text search (История page) — partial, case-insensitive over name + group
+  if (options.search) {
+    params.push(`%${options.search}%`)
+    const p = `$${params.length}`
+    conds.push(`(student_name ILIKE ${p} OR student_group ILIKE ${p})`)
+  }
+  if (options.status) { params.push(options.status); conds.push(`status = $${params.length}`) }
   const whereClause = `WHERE ${conds.join(' AND ')}`
 
   const [{ rows }, { rows: countRows }] = await Promise.all([
@@ -191,6 +202,38 @@ export async function findAssignmentsByTeacher(
     assignments: rows.map(toAssignment),
     total: parseInt(countRows[0].count, 10),
   }
+}
+
+// Flat export for CSV / Moodle — all assignments for the teacher (optionally a course).
+export interface AssignmentExportRow {
+  student_name:    string | null
+  student_email:   string | null
+  student_group:   string | null
+  approved_score:  number | null
+  ai_score:        number | null
+  approved_grade:  string | null
+  ai_grade:        string | null
+  approved_feedback: string | null
+  ai_feedback:     string | null
+  status:          string
+  created_at:      Date
+}
+
+export async function findAssignmentsForExport(
+  teacherId: string,
+  courseId?: string
+): Promise<AssignmentExportRow[]> {
+  const params: unknown[] = [teacherId]
+  let where = 'teacher_id = $1'
+  if (courseId) { params.push(courseId); where += ` AND course_id = $${params.length}` }
+  const { rows } = await pool.query<AssignmentExportRow>(
+    `SELECT student_name, student_email, student_group,
+            approved_score, ai_score, approved_grade, ai_grade,
+            approved_feedback, ai_feedback, status, created_at
+       FROM assignments WHERE ${where} ORDER BY created_at DESC`,
+    params
+  )
+  return rows
 }
 
 // ─── Students aggregation (denormalized — grouped by name + group) ────────────

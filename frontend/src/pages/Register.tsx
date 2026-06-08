@@ -1,12 +1,16 @@
-import { useState, FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect, FormEvent } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useRegister } from '../hooks/useAuth'
-import { authErrorMessage } from '../api/auth'
+import { authErrorMessage, getInvite } from '../api/auth'
 import { validatePassword } from '../lib/validatePassword'
 import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 
 export default function Register() {
+  const [params] = useSearchParams()
+  const inviteToken = params.get('invite') ?? undefined
+
   const [form, setForm] = useState({
     name: '', university: '', phone: '', email: '', password: '',
   })
@@ -14,6 +18,17 @@ export default function Register() {
   const [tosError, setTosError]       = useState(false)
   const [pwError, setPwError]         = useState<string | null>(null)
   const register = useRegister()
+
+  // If arriving via an institution invite, look it up and prefill/lock the email.
+  const { data: invite } = useQuery({
+    queryKey: ['invite', inviteToken],
+    queryFn: () => getInvite(inviteToken!),
+    enabled: !!inviteToken,
+  })
+  useEffect(() => {
+    if (invite?.valid && invite.email) setForm((f) => ({ ...f, email: invite.email! }))
+  }, [invite])
+  const invited = invite?.valid === true
 
   const set = (field: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -29,7 +44,7 @@ export default function Register() {
     if (!tosAccepted) { setTosError(true); return }
     setTosError(false)
 
-    register.mutate(form)
+    register.mutate({ ...form, invite_token: inviteToken })
   }
 
   return (
@@ -39,6 +54,17 @@ export default function Register() {
           <h1 className="font-display text-3xl font-bold text-ink tracking-tight">ИСПУМ</h1>
           <p className="font-sans text-sm text-ink-secondary mt-2">Создайте аккаунт</p>
         </div>
+
+        {invited && (
+          <div className="mb-4 px-4 py-3 bg-amber-light/60 border border-amber/20 rounded-lg text-center">
+            <p className="text-sm font-sans text-ink">
+              Вас пригласили в <strong>{invite?.institution_name ?? 'организацию'}</strong>
+            </p>
+            <p className="text-xs font-sans text-ink-secondary mt-0.5">
+              Зарегистрируйтесь, чтобы присоединиться к команде.
+            </p>
+          </div>
+        )}
 
         <div className="bg-surface border border-border rounded-lg p-6">
           <form onSubmit={handleSubmit} className="space-y-4">

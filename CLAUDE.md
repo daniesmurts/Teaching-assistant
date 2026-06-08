@@ -12,6 +12,16 @@ GradeAssist is a PWA (Progressive Web App) for university lecturers and teachers
 
 **Business model:** Freemium SaaS. Free tier (limited grades/month), Pro tier (unlimited + presentation generator), Institution tier (admin dashboard + bulk seats).
 
+> **Maintenance rule — keep `FEATURES.md` and `CHANGELOG.md` current.**
+> - `FEATURES.md` (repo root) is the single source of truth for shipped features by
+>   user type. On any user-facing feature add/change/remove, update it in the **same
+>   change** (move items between ✅/🚧/📋, add under the right role, bump "Last updated").
+> - `CHANGELOG.md` (repo root) is the internal dated engineering log. Add new work
+>   under **[Unreleased]** (Added/Changed/Fixed); when it deploys, move it to a dated
+>   section. The *public* changelog (`frontend/src/pages/Changelog.tsx`) is curated
+>   separately — promote only user-visible highlights there, in benefit language.
+> - Treat both as part of "done," like tests or types.
+
 ---
 
 ## Tech Stack — Final Decisions (Do Not Change)

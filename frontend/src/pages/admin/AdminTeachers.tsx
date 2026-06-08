@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getAdminTeachers, patchTeacher } from '../../api/admin'
+import { getAdminTeachers, patchTeacher, getInstitutions } from '../../api/admin'
 import { useUIStore } from '../../store/uiStore'
 import SubscriptionModal from './SubscriptionModal'
 
@@ -20,9 +20,10 @@ export default function AdminTeachers() {
     queryKey: ['admin-teachers', page, search],
     queryFn: () => getAdminTeachers({ page, search: search || undefined }),
   })
+  const { data: institutions = [] } = useQuery({ queryKey: ['admin-institutions'], queryFn: getInstitutions })
 
   const patchMut = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { plan_tier?: string; role?: string; is_active?: boolean } }) =>
+    mutationFn: ({ id, data }: { id: string; data: { plan_tier?: string; role?: string; is_active?: boolean; institution_id?: string | null } }) =>
       patchTeacher(id, data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-teachers'] }); addToast('Сохранено', 'success') },
     onError:   () => addToast('Не удалось сохранить', 'error'),
@@ -51,6 +52,7 @@ export default function AdminTeachers() {
               <th className="text-right px-3 py-2 text-ink-secondary font-medium">Проверок</th>
               <th className="text-left px-3 py-2 text-ink-secondary font-medium">Тариф</th>
               <th className="text-left px-3 py-2 text-ink-secondary font-medium">Роль</th>
+              <th className="text-left px-3 py-2 text-ink-secondary font-medium">Организация</th>
               <th className="text-center px-3 py-2 text-ink-secondary font-medium">Активен</th>
               <th className="text-right px-3 py-2 text-ink-secondary font-medium">Подписка</th>
             </tr></thead>
@@ -80,6 +82,16 @@ export default function AdminTeachers() {
                       {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </td>
+                  <td className="px-3 py-2">
+                    <select
+                      value={t.institution_id ?? ''}
+                      onChange={(e) => patchMut.mutate({ id: t.id, data: { institution_id: e.target.value || null } })}
+                      className="text-xs bg-transparent border border-border rounded px-1.5 py-1 max-w-[140px]"
+                    >
+                      <option value="">— нет —</option>
+                      {institutions.map((inst) => <option key={inst.id} value={inst.id}>{inst.name}</option>)}
+                    </select>
+                  </td>
                   <td className="px-3 py-2 text-center">
                     <button
                       onClick={() => patchMut.mutate({ id: t.id, data: { is_active: !t.is_active } })}
@@ -100,7 +112,7 @@ export default function AdminTeachers() {
                   </td>
                 </tr>
               ))}
-              {teachers.length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-ink-tertiary">Ничего не найдено</td></tr>}
+              {teachers.length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-ink-tertiary">Ничего не найдено</td></tr>}
             </tbody>
           </table>
         </div>

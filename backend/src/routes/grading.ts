@@ -2,12 +2,15 @@ import { Router } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { aiLimiter } from '../middleware/rateLimits'
-import { gradeRules, approveRules } from '../validation/gradingValidation'
+import { gradeRules, approveRules, reviewRules } from '../validation/gradingValidation'
 import { asyncHandler } from '../lib/asyncHandler'
 import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
 import { grade, approve } from '../services/grading'
+import { runLongReview } from '../services/longReview'
+import { createLongReview, getLongReviewById, getLongReviewByAssignmentId } from '../db/queries/longReviews'
 import { generateEmailDraft } from '../services/email'
-import { findAssignmentsByTeacher, findStudentsByTeacher } from '../db/queries/assignments'
+import { findAssignmentsByTeacher, findStudentsByTeacher, findAssignmentsForExport } from '../db/queries/assignments'
+import { toCsv, csvFilename } from '../lib/csv'
 import { pool } from '../db/connection'
 import type { GradeLetter } from '../../../shared/types'
 
@@ -47,6 +50,101 @@ router.post(
   })
 )
 
+// POST /api/grading/review  — large works (ВКР/диплом) → async section-aware review.
+// Pro-gated (same access as document upload) and counts toward the monthly grade quota.
+router.post(
+  '/review',
+  aiLimiter,
+  checkFeatureAccess('documentUpload'),
+  checkMonthlyLimit('gradesPerMonth'),
+  validate(reviewRules),
+  asyncHandler(async (req, res) => {
+    const { submission_text, rubric_id, course_id, student_name, student_email, student_group } = req.body as {
+      submission_text: string
+      rubric_id?: string
+      course_id?: string
+      student_name?: string
+      student_email?: string
+      student_group?: string
+    }
+
+    const review = await createLongReview({
+      teacherId:     req.teacher.id,
+      courseId:      course_id,
+      rubricId:      rubric_id,
+      studentName:   student_name,
+      studentEmail:  student_email,
+      studentGroup:  student_group,
+      submissionText: submission_text,
+    })
+
+    // Process asynchronously — do not await. The client polls GET /review/:id.
+    runLongReview({
+      reviewId:      review.id,
+      teacherId:     req.teacher.id,
+      courseId:      course_id,
+      rubricId:      rubric_id,
+      studentName:   student_name,
+      studentEmail:  student_email,
+      studentGroup:  student_group,
+      submissionText: submission_text,
+    }).catch(() => null)
+
+    res.status(202).json({
+      id:             review.id,
+      status:         review.status,
+      progress_done:  0,
+      progress_total: 0,
+      assignment_id:  null,
+      result:         null,
+      error_message:  null,
+      created_at:     review.created_at,
+    })
+  })
+)
+
+// GET /api/grading/review/:id  — poll job status / fetch the finished review.
+router.get(
+  '/review/:id',
+  asyncHandler(async (req, res) => {
+    const review = await getLongReviewById(req.params.id, req.teacher.id)
+    if (!review) return res.status(404).json({ error: 'Рецензия не найдена', code: 'NOT_FOUND' })
+    res.json({
+      id:             review.id,
+      status:         review.status,
+      progress_done:  review.progress_done,
+      progress_total: review.progress_total,
+      assignment_id:  review.assignment_id,
+      result:         review.result,
+      error_message:  review.error_message,
+      created_at:     review.created_at,
+    })
+  })
+)
+
+// GET /api/grading/assignment/:id/review  — the long review (if any) behind an assignment.
+// Returns { review: null } rather than 404 so the client can quietly skip the chapter view.
+router.get(
+  '/assignment/:id/review',
+  asyncHandler(async (req, res) => {
+    const review = await getLongReviewByAssignmentId(req.params.id, req.teacher.id)
+    res.json({
+      review: review
+        ? {
+            id:             review.id,
+            status:         review.status,
+            progress_done:  review.progress_done,
+            progress_total: review.progress_total,
+            assignment_id:  review.assignment_id,
+            result:         review.result,
+            error_message:  review.error_message,
+            created_at:     review.created_at,
+          }
+        : null,
+    })
+  })
+)
+
 // POST /api/grading/:id/approve
 router.post(
   '/:id/approve',
@@ -82,15 +180,42 @@ router.post(
 router.get(
   '/history',
   asyncHandler(async (req, res) => {
-    const { course_id, student_name, student_group, page, limit } = req.query as Record<string, string>
+    const { course_id, student_name, student_group, search, status, page, limit } = req.query as Record<string, string>
     const result = await findAssignmentsByTeacher(req.teacher.id, {
       courseId:     course_id,
       studentName:  student_name,
       studentGroup: student_group,   // '' matches ungrouped (NULL)
+      search:       search || undefined,
+      status:       ['pending', 'approved', 'sent'].includes(status) ? status : undefined,
       page:         page  ? parseInt(page,  10) : undefined,
       limit:        limit ? parseInt(limit, 10) : undefined,
     })
     res.json(result)
+  })
+)
+
+// GET /api/grading/export  — CSV of grades (Moodle-compatible: matches users by email)
+router.get(
+  '/export',
+  asyncHandler(async (req, res) => {
+    const courseId = req.query.course_id as string | undefined
+    const rows = await findAssignmentsForExport(req.teacher.id, courseId)
+    const csv = toCsv(
+      ['Email address', 'Полное имя', 'Группа', 'Балл', 'Оценка', 'Статус', 'Дата', 'Отзыв'],
+      rows.map((r) => [
+        r.student_email ?? '',
+        r.student_name ?? '',
+        r.student_group ?? '',
+        r.approved_score ?? r.ai_score ?? '',
+        r.approved_grade ?? r.ai_grade ?? '',
+        r.status,
+        new Date(r.created_at).toISOString().slice(0, 10),
+        (r.approved_feedback ?? r.ai_feedback ?? '').replace(/\s+/g, ' ').trim(),
+      ])
+    )
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="${csvFilename('ispum_grades')}"`)
+    res.send(csv)
   })
 )
 

@@ -5,7 +5,9 @@ const NAV = [
   { to: '/admin',          label: 'Обзор',          end: true },
   { to: '/admin/usage',    label: 'Использование',  end: false },
   { to: '/admin/teachers', label: 'Преподаватели',  end: false },
+  { to: '/admin/institutions', label: 'Организации', end: false },
   { to: '/admin/rubrics',  label: 'Шаблоны рубрик', end: false },
+  { to: '/admin/feedback', label: 'Отзывы',         end: false },
   { to: '/admin/errors',   label: 'Ошибки',         end: false },
 ]
 

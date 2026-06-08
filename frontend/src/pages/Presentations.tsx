@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
+import FeatureIntro from '../components/ui/FeatureIntro'
 import PresentationForm from '../components/presentations/PresentationForm'
 import SlideContent from '../components/presentations/SlideContent'
 import Button from '../components/ui/Button'
@@ -104,6 +105,19 @@ export default function Presentations() {
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-[960px] mx-auto px-6 py-6 space-y-6">
+
+          {!result && !openHistory && (
+            <FeatureIntro
+              id="presentations"
+              title="Генератор презентаций — структура лекции за минуту"
+              description="Опишите параметры лекции (тема, длительность, цели, уровень аудитории), и ИИ построит её послайдово: заголовки, тезисы и заметки для выступления. Это готовый текст — скопируйте его в PowerPoint, Google Slides или Canva."
+              steps={[
+                'Выберите курс и задайте тему лекции, её длительность и учебные цели.',
+                'Сгенерируйте структуру — каждый слайд с пунктами и заметками для докладчика.',
+                'Копируйте слайды по одному и вставляйте в любой редактор презентаций.',
+              ]}
+            />
+          )}
 
           {/* Form section */}
           {!openHistory && (

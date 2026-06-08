@@ -18,10 +18,12 @@ import {
   generateRawToken, hashToken, createResetToken,
   invalidateExistingTokens, findValidToken, markTokenUsed,
 } from '../db/queries/passwordReset'
-import { sendEmail } from '../services/emailTransport'
+import { sendEmail, adminNotifyTo } from '../services/emailTransport'
 import {
-  registrationEmail, passwordResetEmail, passwordChangedEmail,
+  registrationEmail, passwordResetEmail, passwordChangedEmail, adminSignupEmail,
 } from '../lib/emailTemplates'
+import { findValidInviteByToken, markInviteAccepted } from '../db/queries/teacherInvites'
+import { getInstitutionById, findInstitutionByEmailDomain, countInstitutionTeachers } from '../db/queries/institutions'
 
 const router = Router()
 
@@ -32,15 +34,44 @@ router.post(
   authLimiter,
   validate(registerRules),
   asyncHandler(async (req, res) => {
-    const { email, password, name, university, phone } = req.body as {
+    const { email, password, name, university, phone, invite_token } = req.body as {
       email: string; password: string; name?: string; university?: string; phone?: string
+      invite_token?: string
     }
 
     const existing = await findTeacherByEmail(email)
     if (existing) throw new ValidationError('Этот адрес эл. почты уже зарегистрирован')
 
+    // Institution invite — attaches the new teacher to the institution.
+    // Plan stays free per product decision; an admin upgrades seats separately.
+    let institutionId: string | undefined
+    let inviteId: string | undefined
+    if (invite_token) {
+      const invite = await findValidInviteByToken(invite_token)
+      if (invite) {
+        institutionId = invite.institution_id
+        inviteId = invite.id
+      }
+      // An invalid/expired token is ignored — registration still succeeds as a normal teacher
+    }
+
+    // Email-domain auto-join — if no invite, place the teacher into an institution
+    // that claims their email domain (respecting its seat cap).
+    if (!institutionId) {
+      const domain = email.split('@')[1]
+      if (domain) {
+        const inst = await findInstitutionByEmailDomain(domain)
+        if (inst) {
+          const hasSeat = inst.max_teachers == null || (await countInstitutionTeachers(inst.id)) < inst.max_teachers
+          if (hasSeat) institutionId = inst.id
+        }
+      }
+    }
+
     const passwordHash = await bcrypt.hash(password, 12)
-    const teacher = await createTeacher(email, passwordHash, name, university, phone)
+    const teacher = await createTeacher(email, passwordHash, name, university, phone, institutionId)
+
+    if (inviteId) await markInviteAccepted(inviteId)
 
     const token = signToken({ id: teacher.id, email: teacher.email })
 
@@ -49,10 +80,29 @@ router.post(
       sendEmail({ ...registrationEmail(name ?? email), to: email })
     }
 
+    // Owner notification — fire-and-forget
+    const adminTo = adminNotifyTo()
+    if (adminTo) {
+      sendEmail({ ...adminSignupEmail({ name, email, university, viaInvite: !!institutionId }), to: adminTo })
+    }
+
     const plan = await buildPlanData(teacher.id, 'free', null)
     res.status(201).json({ token, teacher, plan })
   })
 )
+
+// ─── GET /api/auth/invite/:token ──────────────────────────────────────────────
+// Public — lets the register page show who invited the teacher and prefill email.
+router.get('/invite/:token', asyncHandler(async (req, res) => {
+  const invite = await findValidInviteByToken(req.params.token)
+  if (!invite) return res.json({ valid: false })
+  const institution = await getInstitutionById(invite.institution_id)
+  res.json({
+    valid:            true,
+    email:            invite.email,
+    institution_name: institution?.name ?? null,
+  })
+}))
 
 // ─── POST /api/auth/login ─────────────────────────────────────────────────────
 

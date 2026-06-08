@@ -1,11 +1,15 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import TopBar from '../components/layout/TopBar'
+import OnboardingChecklist from '../components/onboarding/OnboardingChecklist'
+import WelcomeModal from '../components/onboarding/WelcomeModal'
+import AssignmentDetailModal from '../components/grading/AssignmentDetailModal'
 import { useAuthStore } from '../store/authStore'
 import { getGradingStats, getGradingHistory } from '../api/grading'
 import { getCourses } from '../api/courses'
 import Badge from '../components/ui/Badge'
-import type { AssignmentStatus } from '../types'
+import type { Assignment, AssignmentStatus } from '../types'
 
 // ─── Stat card ────────────────────────────────────────────────────────────────
 
@@ -78,9 +82,11 @@ export default function Dashboard() {
   const greeting  = firstName ? `Добрый день, ${firstName}` : 'Добрый день'
 
   const monthDelta = stats ? stats.this_month - stats.last_month : 0
+  const [openAssignment, setOpenAssignment] = useState<Assignment | null>(null)
 
   return (
     <div className="flex-1 flex flex-col">
+      <WelcomeModal />
       <TopBar title="Главная" />
 
       <div className="flex-1 overflow-y-auto">
@@ -98,6 +104,8 @@ export default function Dashboard() {
               </p>
             )}
           </div>
+
+          <OnboardingChecklist />
 
           {/* Stats grid */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
@@ -148,9 +156,10 @@ export default function Dashboard() {
               {recent && recent.assignments.length > 0 ? (
                 <div className="bg-surface border border-border rounded-lg overflow-hidden">
                   {recent.assignments.map((a, i) => (
-                    <div
+                    <button
                       key={a.id}
-                      className={`flex items-center gap-3 px-4 py-3 ${
+                      onClick={() => setOpenAssignment(a)}
+                      className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-warm transition-colors ${
                         i < recent.assignments.length - 1 ? 'border-b border-border' : ''
                       }`}
                     >
@@ -173,7 +182,7 @@ export default function Dashboard() {
                         </div>
                       )}
                       <Badge variant={a.status as AssignmentStatus} />
-                    </div>
+                    </button>
                   ))}
                 </div>
               ) : (
@@ -220,6 +229,10 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {openAssignment && (
+        <AssignmentDetailModal assignment={openAssignment} onClose={() => setOpenAssignment(null)} />
+      )}
     </div>
   )
 }

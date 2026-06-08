@@ -22,6 +22,7 @@ export interface TeacherRow {
   auto_renew:          boolean
   subscription_plan:   string | null
   renewal_failed_at:   Date | null
+  institution_plan_tier: string | null   // tier of the teacher's institution (if any)
   created_at:          Date
 }
 
@@ -57,7 +58,10 @@ export async function findTeacherById(id: string): Promise<Teacher | null> {
 /** Returns the full row (including role, plan_tier etc.) — used by authenticate middleware */
 export async function findTeacherRowById(id: string): Promise<TeacherRow | null> {
   const { rows } = await pool.query<TeacherRow>(
-    'SELECT * FROM teachers WHERE id = $1 LIMIT 1',
+    `SELECT t.*, i.plan_tier AS institution_plan_tier
+       FROM teachers t
+       LEFT JOIN institutions i ON i.id = t.institution_id
+      WHERE t.id = $1 LIMIT 1`,
     [id]
   )
   return rows[0] ?? null
@@ -220,13 +224,14 @@ export async function createTeacher(
   passwordHash: string,
   name?: string,
   university?: string,
-  phone?: string
+  phone?: string,
+  institutionId?: string,   // set when registering via an institution invite
 ): Promise<Teacher> {
   const { rows } = await pool.query<TeacherRow>(
-    `INSERT INTO teachers (email, password_hash, name, university, phone)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO teachers (email, password_hash, name, university, phone, institution_id)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
-    [email.toLowerCase(), passwordHash, name ?? null, university ?? null, phone ?? null]
+    [email.toLowerCase(), passwordHash, name ?? null, university ?? null, phone ?? null, institutionId ?? null]
   )
   return toTeacher(rows[0])
 }

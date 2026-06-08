@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import Button from '../ui/Button'
 import { Input } from '../ui/Input'
 import { getCourses } from '../../api/courses'
+import NoCourseHint from '../onboarding/NoCourseHint'
 import { generatePresentation, type GenerateResponse } from '../../api/presentations'
 
 const AUDIENCE_LEVELS = [
@@ -102,6 +103,7 @@ export default function PresentationForm({ onResult }: Props) {
             <option value="">Без курса</option>
             {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
+          <NoCourseHint />
         </div>
         <Input
           label="№ лекции"

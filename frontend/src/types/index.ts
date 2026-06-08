@@ -12,7 +12,13 @@ export type {
   AssignmentStatus,
   GradeLetter,
   CriterionScore,
+  LongReview,
+  LongReviewResult,
+  LongReviewStatus,
+  ChapterReview,
   Presentation,
   PresentationStyle,
   ApiError,
 } from '../../../shared/types'
+
+export { SINGLE_PASS_CHAR_LIMIT, MAX_REVIEW_CHARS } from '../../../shared/types'

@@ -13,6 +13,8 @@ import gradingRouter from './routes/grading'
 import presentationsRouter from './routes/presentations'
 import documentsRouter from './routes/documents'
 import adminRouter from './routes/admin'
+import institutionRouter from './routes/institution'
+import feedbackRouter from './routes/feedback'
 import paymentsRouter from './routes/payments'
 import accountRouter from './routes/account'
 import { startRenewalScheduler } from './services/renewals'
@@ -96,6 +98,8 @@ app.use('/api/grading',       gradingRouter)
 app.use('/api/presentations', presentationsRouter)
 app.use('/api/documents',     documentsRouter)
 app.use('/api/admin',         adminRouter)
+app.use('/api/institution',   institutionRouter)
+app.use('/api/feedback',      feedbackRouter)
 app.use('/api/payments',      paymentsRouter)
 app.use('/api/account',       accountRouter)
 

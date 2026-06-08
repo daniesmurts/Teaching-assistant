@@ -7,16 +7,25 @@ import { checkResourceLimit } from '../middleware/checkPlan'
 import { createRubricRules, updateRubricRules } from '../validation/rubricValidation'
 import {
   findRubricsByTeacher, findRubricById, createRubric, updateRubric, deleteRubric,
-  findGlobalTemplates,
+  findGlobalTemplates, findRubricsByInstitution,
 } from '../db/queries/rubrics'
-import type { RubricCriterion } from '../../../shared/types'
+import type { Rubric, RubricCriterion } from '../../../shared/types'
 
 const router = Router()
 router.use(authenticate)
 
 router.get('/', asyncHandler(async (req, res) => {
   const courseId = req.query.course_id as string | undefined
-  res.json(await findRubricsByTeacher(req.teacher.id, courseId))
+  const own = await findRubricsByTeacher(req.teacher.id, courseId)
+
+  // Institution members also see rubrics shared across their institution.
+  if (!req.teacher.institution_id) { res.json(own); return }
+
+  const shared = await findRubricsByInstitution(req.teacher.institution_id)
+  // Merge, de-duping by id (the admin's own shared rubrics appear in both lists)
+  const byId = new Map<string, Rubric>()
+  for (const r of [...own, ...shared]) byId.set(r.id, r)
+  res.json(Array.from(byId.values()))
 }))
 
 // Global template rubrics teachers can start from (read-only). MUST be before '/:id'.

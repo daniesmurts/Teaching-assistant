@@ -9,6 +9,9 @@ interface AuthState {
   setAuth:    (token: string, teacher: Teacher, plan: PlanState) => void
   clearAuth:  () => void
   updatePlan: (plan: PlanState) => void
+  // Reconcile cached teacher + plan with the server (e.g. after an upgrade
+  // confirmed outside this tab) without touching the token.
+  updateAccount: (teacher: Teacher, plan: PlanState) => void
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -20,6 +23,7 @@ export const useAuthStore = create<AuthState>()(
       setAuth:   (token, teacher, plan) => set({ token, teacher, plan }),
       clearAuth: () => set({ token: null, teacher: null, plan: null }),
       updatePlan: (plan) => set({ plan }),
+      updateAccount: (teacher, plan) => set({ teacher, plan }),
     }),
     { name: 'ga_token' }
   )
