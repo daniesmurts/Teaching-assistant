@@ -27,6 +27,7 @@ export interface Teacher {
   university:  string | null
   phone:       string | null
   role?:       TeacherRole
+  institution_id?: string | null
   created_at:  string
 }
 

@@ -14,6 +14,11 @@ export default function InstitutionLayout() {
   const clearAuth = useAuthStore((s) => s.clearAuth)
   const navigate  = useNavigate()
 
+  // A teacher can only reach this panel via institution_admin/platform_admin.
+  // If they aren't attached to an institution (e.g. a platform admin), don't
+  // fire the scoped queries — they'd 400. Show a pointer instead.
+  const noInstitution = !teacher?.institution_id
+
   return (
     <div className="flex min-h-screen bg-bg">
       <aside className="w-[210px] min-h-screen bg-sidebar flex flex-col flex-shrink-0">
@@ -57,7 +62,27 @@ export default function InstitutionLayout() {
       </aside>
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <Outlet />
+        {noInstitution ? (
+          <div className="flex-1 flex items-center justify-center p-6">
+            <div className="max-w-sm text-center">
+              <div className="text-4xl mb-3">🏛️</div>
+              <h2 className="font-display text-xl font-bold text-ink mb-2">Эта панель — для администраторов организаций</h2>
+              <p className="font-sans text-sm text-ink-secondary mb-5">
+                Ваш аккаунт не привязан к организации. Управление организациями и их администраторами доступно в админ-панели платформы.
+              </p>
+              {teacher?.role === 'platform_admin' && (
+                <button
+                  onClick={() => navigate('/admin/institutions')}
+                  className="px-5 py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity"
+                >
+                  Перейти к организациям →
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <Outlet />
+        )}
       </div>
     </div>
   )

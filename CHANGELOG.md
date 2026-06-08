@@ -31,7 +31,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 - Public changelog page refreshed with real shipped features + correct dates (1.0–1.3)
 
 ### Fixed
-- (none outstanding)
+- Institution panel: shows a friendly pointer instead of 400 console errors when the
+  signed-in admin has no institution (platform-admin edge case). `institution_id` now
+  returned on login + `/me`.
 
 ---
 

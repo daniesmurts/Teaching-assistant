@@ -126,12 +126,13 @@ router.post(
     res.json({
       token,
       teacher: {
-        id:         row.id,
-        email:      row.email,
-        name:       row.name,
-        university: row.university,
-        role:       row.role ?? 'teacher',
-        created_at: row.created_at.toISOString(),
+        id:             row.id,
+        email:          row.email,
+        name:           row.name,
+        university:     row.university,
+        role:           row.role ?? 'teacher',
+        institution_id: row.institution_id ?? null,
+        created_at:     row.created_at.toISOString(),
       },
       plan,
     })
@@ -147,11 +148,12 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
   const plan = await buildPlanData(row.id, req.teacher.plan_tier, row.plan_expires_at, row.auto_renew, row.renewal_failed_at)
 
   res.json({
-    id:         row.id,
-    email:      row.email,
-    name:       row.name,
-    university: row.university,
-    role:       req.teacher.role,
+    id:             row.id,
+    email:          row.email,
+    name:           row.name,
+    university:     row.university,
+    role:           req.teacher.role,
+    institution_id: row.institution_id ?? null,
     plan,
   })
 }))
