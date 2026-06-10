@@ -13,6 +13,7 @@ import {
   findTeacherByEmail, findTeacherRowById, createTeacher, updateTeacherPassword,
 } from '../db/queries/teachers'
 import { getOrCreateCounter } from '../db/queries/usageCounters'
+import { countTopicsThisMonth } from '../db/queries/topics'
 import { getLimits, canUseFeature } from '../config/planLimits'
 import {
   generateRawToken, hashToken, createResetToken,
@@ -250,6 +251,8 @@ async function buildPlanData(
   const currentMonth      = new Date().toISOString().slice(0, 7)
   const gradesUsed        = counter.month_year === currentMonth ? counter.grades_this_month        : 0
   const presentationsUsed = counter.month_year === currentMonth ? counter.presentations_this_month : 0
+  // Topics use a count-based limit (no pre-aggregated counter)
+  const topicsUsed        = limits.topicsPerMonth === Infinity ? 0 : await countTopicsThisMonth(teacherId)
 
   return {
     tier,
@@ -260,6 +263,8 @@ async function buildPlanData(
     gradesLimit:        limits.gradesPerMonth        === Infinity ? null : limits.gradesPerMonth,
     presentationsUsed,
     presentationsLimit: limits.presentationsPerMonth === Infinity ? null : limits.presentationsPerMonth,
+    topicsUsed,
+    topicsLimit:        limits.topicsPerMonth === Infinity ? null : limits.topicsPerMonth,
     features: {
       documentUpload:      canUseFeature(tier, 'documentUpload'),
       ragFlywheel:         canUseFeature(tier, 'ragFlywheel'),

@@ -4,6 +4,7 @@ import FeedbackEmail from './FeedbackEmail'
 import { useApprove } from '../../hooks/useGrading'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
+import { GRADES, gradeColor } from '../../lib/grades'
 import type { GradeResponse } from '../../api/grading'
 import type { GradeLetter } from '../../types'
 
@@ -13,14 +14,6 @@ interface Props {
 }
 
 type Tab = 'feedback' | 'criteria' | 'email'
-
-const GRADE_COLORS: Record<GradeLetter, string> = {
-  A: 'var(--color-success)',
-  B: 'var(--color-amber)',
-  C: 'var(--color-warning)',
-  D: 'var(--color-danger)',
-  F: 'var(--color-danger)',
-}
 
 export default function GradingResult({ result, onApproved }: Props) {
   const [tab, setTab] = useState<Tab>('feedback')
@@ -33,7 +26,7 @@ export default function GradingResult({ result, onApproved }: Props) {
   const [approved, setApproved]         = useState(false)
   const approveMut = useApprove()
 
-  const gradeColor = GRADE_COLORS[editGrade] ?? 'var(--color-ink)'
+  const gradeClr = gradeColor(editGrade)
 
   function handleApprove() {
     approveMut.mutate(
@@ -61,13 +54,11 @@ export default function GradingResult({ result, onApproved }: Props) {
         : 'border-transparent text-ink-secondary hover:text-ink'
     }`
 
-  const GRADES: GradeLetter[] = ['A', 'B', 'C', 'D', 'F']
-
   return (
     <div className="flex flex-col h-full">
       {/* Score header */}
       <div className="px-5 py-4 border-b border-border flex items-center gap-4">
-        <div className="font-display text-5xl font-bold leading-none" style={{ color: gradeColor }}>
+        <div className="font-display text-5xl font-bold leading-none" style={{ color: gradeClr }}>
           {editGrade}
         </div>
         <div className="flex-1">

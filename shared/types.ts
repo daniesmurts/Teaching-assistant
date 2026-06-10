@@ -12,6 +12,8 @@ export interface PlanState {
   gradesLimit:        number | null   // null = unlimited
   presentationsUsed:  number
   presentationsLimit: number | null
+  topicsUsed:         number
+  topicsLimit:        number | null
   features: {
     documentUpload:      boolean
     ragFlywheel:         boolean
@@ -77,7 +79,9 @@ export interface Rubric {
 // ─── Assignment ───────────────────────────────────────────────────────────────
 
 export type AssignmentStatus = 'pending' | 'approved' | 'sent'
-export type GradeLetter = 'A' | 'B' | 'C' | 'D' | 'F'
+// Russian 5-point scale: 5 (отлично), 4 (хорошо), 3 (удовл.), 2 (неудовл.).
+// Type name kept as GradeLetter to avoid churn across imports.
+export type GradeLetter = '5' | '4' | '3' | '2'
 
 export interface CriterionScore {
   name: string
@@ -151,6 +155,35 @@ export interface LongReview {
   result:         LongReviewResult | null
   error_message:  string | null
   created_at:     string
+}
+
+// ─── Topic generator (темы для исследований / практик) ───────────────────────
+
+export type StudentLevel = 'bachelor' | 'specialist' | 'master' | 'postgraduate'
+export type TopicWorkType = 'coursework' | 'thesis' | 'internship' | 'pre_diploma' | 'article'
+
+export interface TopicItem {
+  title:     string
+  rationale: string   // чем ценна / актуальность
+  scope:     string   // что предстоит сделать
+  site_link?: string  // связь с местом практики (if given)
+  outcome?:  string   // ожидаемый результат / новизна
+}
+
+export interface TopicSet {
+  id:            string
+  teacher_id:    string
+  course_id:     string | null
+  level:         string
+  work_type:     string
+  field:         string | null
+  interests:     string | null
+  practice_site: string | null
+  student_name:  string | null
+  student_group: string | null
+  topics:        TopicItem[]
+  used_search:   boolean
+  created_at:    string
 }
 
 // ─── Presentation ─────────────────────────────────────────────────────────────

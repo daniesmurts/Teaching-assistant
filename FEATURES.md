@@ -47,6 +47,7 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 - Watermark on output (free tier only)
 - Limits: 20 grades/mo, 3 presentations/mo, 3 courses, 5 rubrics, 30-day history
 
+**Topics** — AI topic generator for research/practicals: student level + field + interests + practice site → level-appropriate, valuable topics (with rationale, scope, novelty). Yandex Search grounding. Free: 3/mo, Pro: unlimited
 **Courses** — CRUD, level, syllabus text/upload
 **Rubrics** — builder (weights as %, live sum check), start from global templates
 **Students** — auto-collected roster from graded work, per-student grade-over-time chart, groups

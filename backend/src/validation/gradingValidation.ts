@@ -69,7 +69,7 @@ export const approveRules = [
     .isInt({ min: 0, max: 100 }).withMessage('Оценка должна быть числом от 0 до 100'),
 
   body('approved_grade')
-    .isIn(['A', 'B', 'C', 'D', 'F']).withMessage('Неверная буквенная оценка'),
+    .isIn(['5', '4', '3', '2']).withMessage('Неверная оценка (5, 4, 3 или 2)'),
 
   body('approved_feedback')
     .trim()

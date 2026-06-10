@@ -301,8 +301,8 @@ ${analysisBlock}
 Составьте итоговую рецензию. Верните JSON со следующими полями:
 - "overall_summary": общее заключение по работе (2–3 абзаца)
 - "suggested_score": рекомендуемый балл 0–100
-- "suggested_grade": одна из "A","B","C","D","F" (A≥90, B≥75, C≥60, D≥50, F<50)
-- "grade_label": "Отлично"|"Хорошо"|"Удовлетворительно"|"Плохо"|"Неудовлетворительно"
+- "suggested_grade": одна из "5","4","3","2" (5: 87–100, 4: 73–86, 3: 60–72, 2: ниже 60)
+- "grade_label": "Отлично"|"Хорошо"|"Удовлетворительно"|"Неудовлетворительно"
 - "chapter_reviews": массив {"title": string, "assessment": "1–2 абзаца", "strengths": [..], "gaps": [..]} по каждому разделу
 - "overall_strengths": 3–6 ключевых достоинств работы
 - "overall_gaps": 3–6 ключевых недостатков
@@ -377,11 +377,11 @@ function clampScore(n: unknown): number {
 }
 
 function normaliseGrade(g: unknown): GradeLetter {
-  const valid: GradeLetter[] = ['A', 'B', 'C', 'D', 'F']
-  const s = String(g).toUpperCase().trim() as GradeLetter
-  return valid.includes(s) ? s : 'C'
+  const valid: GradeLetter[] = ['5', '4', '3', '2']
+  const s = String(g).trim() as GradeLetter
+  return valid.includes(s) ? s : '3'
 }
 
 function gradeToLabel(g: GradeLetter): string {
-  return { A: 'Отлично', B: 'Хорошо', C: 'Удовлетворительно', D: 'Плохо', F: 'Неудовлетворительно' }[g] ?? '—'
+  return { '5': 'Отлично', '4': 'Хорошо', '3': 'Удовлетворительно', '2': 'Неудовлетворительно' }[g] ?? '—'
 }

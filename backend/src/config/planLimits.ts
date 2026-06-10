@@ -4,6 +4,7 @@
 export const PLAN_LIMITS = {
   free: {
     gradesPerMonth:        20,
+    topicsPerMonth:        3,
     presentationsPerMonth: 3,
     maxCourses:            3,
     maxRubrics:            5,
@@ -16,6 +17,7 @@ export const PLAN_LIMITS = {
   },
   pro: {
     gradesPerMonth:        Infinity,
+    topicsPerMonth:        Infinity,
     presentationsPerMonth: Infinity,
     maxCourses:            Infinity,
     maxRubrics:            Infinity,
@@ -28,6 +30,7 @@ export const PLAN_LIMITS = {
   },
   institution: {
     gradesPerMonth:        Infinity,
+    topicsPerMonth:        Infinity,
     presentationsPerMonth: Infinity,
     maxCourses:            Infinity,
     maxRubrics:            Infinity,

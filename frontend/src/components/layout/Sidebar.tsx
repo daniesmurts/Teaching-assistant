@@ -2,19 +2,52 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 
 interface NavItem { icon: string; label: string; to: string }
+interface NavGroup { label?: string; items: NavItem[] }
 
-const NAV: NavItem[] = [
-  { icon: '⊞', label: 'Главная',        to: '/dashboard' },
-  { icon: '◫', label: 'Курсы',          to: '/courses' },
-  { icon: '✦', label: 'Проверка работ', to: '/grading' },
-  { icon: '☰', label: 'Критерии',       to: '/rubrics' },
-  { icon: '☺', label: 'Студенты',       to: '/students' },
-  { icon: '◷', label: 'Журнал',         to: '/history' },
-  { icon: '▤', label: 'Презентации',    to: '/presentations' },
-  { icon: '◆', label: 'Тариф',          to: '/billing' },
-  { icon: '⚙', label: 'Настройки',      to: '/settings' },
-  { icon: '?', label: 'Помощь',         to: '/help' },
+// Grouped by what the teacher is trying to do — top to bottom: overview →
+// grading → AI generation → setup → account.
+const NAV_GROUPS: NavGroup[] = [
+  { items: [
+    { icon: '⊞', label: 'Главная', to: '/dashboard' },
+  ]},
+  { label: 'Проверка', items: [
+    { icon: '✦', label: 'Проверка работ', to: '/grading' },
+    { icon: '◷', label: 'Журнал',         to: '/history' },
+    { icon: '☺', label: 'Студенты',       to: '/students' },
+  ]},
+  { label: 'Генерация', items: [
+    { icon: '▤', label: 'Презентации', to: '/presentations' },
+    { icon: '◇', label: 'Темы',        to: '/topics' },
+  ]},
+  { label: 'Управление', items: [
+    { icon: '◫', label: 'Курсы',     to: '/courses' },
+    { icon: '☰', label: 'Критерии',  to: '/rubrics' },
+  ]},
+  { label: 'Аккаунт', items: [
+    { icon: '◆', label: 'Тариф',     to: '/billing' },
+    { icon: '⚙', label: 'Настройки', to: '/settings' },
+    { icon: '?', label: 'Помощь',    to: '/help' },
+  ]},
 ]
+
+function NavRow({ item }: { item: NavItem }) {
+  return (
+    <NavLink to={item.to}>
+      {({ isActive }) => (
+        <div className={`flex items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer transition-colors ${
+          isActive ? 'bg-sidebar-active' : 'hover:bg-sidebar-hover'
+        }`}>
+          <span className={`text-sm w-4 text-center select-none ${isActive ? 'text-amber-mid' : 'text-ink-inv-muted'}`}>
+            {item.icon}
+          </span>
+          <span className={`text-sm font-sans ${isActive ? 'font-medium text-ink-inverse' : 'font-normal text-ink-inv-muted'}`}>
+            {item.label}
+          </span>
+        </div>
+      )}
+    </NavLink>
+  )
+}
 
 interface Props {
   onClose?: () => void
@@ -51,31 +84,25 @@ export default function Sidebar({ onClose }: Props) {
         )}
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-2 py-3 space-y-0.5">
-        {NAV.map((item) => (
-          <NavLink key={item.to} to={item.to}>
-            {({ isActive }) => (
-              <div
-                className={`flex items-center gap-2.5 px-3 py-2.5 rounded-md cursor-pointer transition-colors ${
-                  isActive ? 'bg-sidebar-active' : 'hover:bg-sidebar-hover'
-                }`}
-              >
-                <span className={`text-sm w-4 text-center select-none ${isActive ? 'text-amber-mid' : 'text-ink-inv-muted'}`}>
-                  {item.icon}
-                </span>
-                <span className={`text-sm font-sans ${isActive ? 'font-medium text-ink-inverse' : 'font-normal text-ink-inv-muted'}`}>
-                  {item.label}
-                </span>
+      {/* Nav — grouped into labeled sections */}
+      <nav className="flex-1 overflow-y-auto px-2 py-3">
+        {NAV_GROUPS.map((group, gi) => (
+          <div key={gi} className={gi > 0 ? 'mt-3' : ''}>
+            {group.label && (
+              <div className="px-3 pb-1 text-[10px] font-sans font-semibold uppercase tracking-wider text-amber-mid">
+                {group.label}
               </div>
             )}
-          </NavLink>
+            <div className="space-y-0.5">
+              {group.items.map((item) => <NavRow key={item.to} item={item} />)}
+            </div>
+          </div>
         ))}
 
         {/* Feedback — visually distinct (amber) so early users notice it */}
         <NavLink to="/feedback">
           {({ isActive }) => (
-            <div className={`flex items-center gap-2.5 px-3 py-2.5 rounded-md cursor-pointer transition-colors mt-2 border ${
+            <div className={`flex items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer transition-colors mt-3 border ${
               isActive
                 ? 'bg-amber/20 border-amber-mid/40'
                 : 'bg-amber/10 border-amber-mid/25 hover:bg-amber/20'
@@ -86,19 +113,11 @@ export default function Sidebar({ onClose }: Props) {
           )}
         </NavLink>
 
+        {/* Institution admin — only for institution/platform admins */}
         {isInstitutionAdmin && (
-          <NavLink to="/institution">
-            {({ isActive }) => (
-              <div className={`flex items-center gap-2.5 px-3 py-2.5 rounded-md cursor-pointer transition-colors mt-1 border-t border-white/5 pt-3 ${
-                isActive ? 'bg-sidebar-active' : 'hover:bg-sidebar-hover'
-              }`}>
-                <span className={`text-sm w-4 text-center select-none ${isActive ? 'text-amber-mid' : 'text-ink-inv-muted'}`}>◉</span>
-                <span className={`text-sm font-sans ${isActive ? 'font-medium text-ink-inverse' : 'font-normal text-ink-inv-muted'}`}>
-                  Организация
-                </span>
-              </div>
-            )}
-          </NavLink>
+          <div className="mt-3 pt-3 border-t border-white/5">
+            <NavRow item={{ icon: '◉', label: 'Организация', to: '/institution' }} />
+          </div>
         )}
       </nav>
 

@@ -51,8 +51,17 @@ export default function Register() {
     <div className="min-h-screen bg-bg flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="font-display text-3xl font-bold text-ink tracking-tight">ИСПУМ</h1>
-          <p className="font-sans text-sm text-ink-secondary mt-2">Создайте аккаунт</p>
+          <Link
+            to="/"
+            title="ИСПУМ — Интеллектуальная Система Проверки и Подготовки Учебных Материалов"
+            className="inline-block font-display text-3xl font-bold text-ink tracking-tight hover:text-amber transition-colors"
+          >
+            ИСПУМ
+          </Link>
+          <p className="font-sans text-[11px] text-ink-tertiary mt-1 leading-snug px-4">
+            Интеллектуальная Система Проверки и Подготовки Учебных Материалов
+          </p>
+          <p className="font-sans text-sm text-ink-secondary mt-3">Создайте аккаунт</p>
         </div>
 
         {invited && (
@@ -172,6 +181,10 @@ export default function Register() {
           Уже есть аккаунт?{' '}
           <Link to="/login" className="text-amber hover:underline">
             Войти
+          </Link>
+          <span className="mx-2 text-ink-tertiary">·</span>
+          <Link to="/" className="text-ink-secondary hover:text-amber transition-colors">
+            На главную
           </Link>
         </p>
       </div>

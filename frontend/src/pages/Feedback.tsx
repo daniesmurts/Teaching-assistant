@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import Button from '../components/ui/Button'
+import SuccessMark from '../components/ui/SuccessMark'
 import { submitFeedback, type FeedbackCategory } from '../api/feedback'
 
 const CATEGORIES: { value: FeedbackCategory; label: string; hint: string }[] = [
@@ -34,7 +35,7 @@ export default function Feedback() {
         <div className="max-w-xl mx-auto px-4 md:px-6 py-6">
           {sent ? (
             <div className="bg-surface border border-border rounded-lg p-8 text-center">
-              <div className="text-4xl mb-3">🙏</div>
+              <SuccessMark />
               <h2 className="font-display text-xl font-bold text-ink mb-2">Спасибо за отзыв!</h2>
               <p className="font-sans text-sm text-ink-secondary mb-5">
                 Мы читаем каждое сообщение. На этапе раннего развития ваш голос напрямую влияет на продукт.

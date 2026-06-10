@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Button from '../ui/Button'
 import { useApprove } from '../../hooks/useGrading'
+import { GRADES, gradeColor } from '../../lib/grades'
 import type { LongReview, GradeLetter } from '../../types'
 
 interface Props {
@@ -8,25 +9,16 @@ interface Props {
   onApproved: () => void
 }
 
-const GRADE_COLORS: Record<GradeLetter, string> = {
-  A: 'var(--color-success)',
-  B: 'var(--color-amber)',
-  C: 'var(--color-warning)',
-  D: 'var(--color-danger)',
-  F: 'var(--color-danger)',
-}
-const GRADES: GradeLetter[] = ['A', 'B', 'C', 'D', 'F']
-
 export default function ReviewResult({ review, onApproved }: Props) {
   const r = review.result!
   const [editScore, setEditScore]       = useState(String(r.suggested_score ?? 75))
-  const [editGrade, setEditGrade]       = useState<GradeLetter>(r.suggested_grade ?? 'C')
+  const [editGrade, setEditGrade]       = useState<GradeLetter>(r.suggested_grade ?? '3')
   const [editFeedback, setEditFeedback] = useState(r.overall_summary)
   const [approved, setApproved]         = useState(false)
   const [openChapter, setOpenChapter]   = useState<number | null>(0)
   const approveMut = useApprove()
 
-  const gradeColor = GRADE_COLORS[editGrade] ?? 'var(--color-ink)'
+  const gradeClr = gradeColor(editGrade)
 
   function handleApprove() {
     if (!review.assignment_id) return
@@ -40,7 +32,7 @@ export default function ReviewResult({ review, onApproved }: Props) {
     <div className="flex flex-col h-full">
       {/* Suggested grade header — explicitly a recommendation */}
       <div className="px-5 py-4 border-b border-border flex items-center gap-4">
-        <div className="font-display text-5xl font-bold leading-none" style={{ color: gradeColor }}>
+        <div className="font-display text-5xl font-bold leading-none" style={{ color: gradeClr }}>
           {editGrade}
         </div>
         <div className="flex-1">

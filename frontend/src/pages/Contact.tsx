@@ -41,11 +41,6 @@ export default function Contact() {
                 <div className="font-bold text-ink mb-1">Телефон</div>
                 <a href="tel:+79179040998" className="hover:text-amber transition-colors">+7 (917) 904-09-98</a>
               </div>
-              <div className="pt-6 border-t border-border">
-                <div className="font-bold text-ink mb-1">Реквизиты</div>
-                <p className="text-sm">ИП Бугембе Даниел</p>
-                <p className="text-sm">ИНН: 165510859142</p>
-              </div>
             </div>
           </div>
 

@@ -4,13 +4,11 @@ import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Badge from '../components/ui/Badge'
 import AssignmentDetailModal from '../components/grading/AssignmentDetailModal'
+import { gradeColor } from '../lib/grades'
 import { getStudents, getGradingHistory, type StudentSummary } from '../api/grading'
 import { getCourses } from '../api/courses'
 import type { Assignment, AssignmentStatus } from '../types'
 
-function gradeColor(grade: string | null): string {
-  return { A: 'var(--color-success)', B: 'var(--color-amber)', C: 'var(--color-warning)', D: 'var(--color-danger)', F: 'var(--color-danger)' }[grade ?? ''] ?? 'var(--color-ink-tertiary)'
-}
 const fmt = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
 
 // ─── Per-student detail (assignments + grade-over-time) ───────────────────────

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Badge from '../ui/Badge'
 import { getReviewByAssignment } from '../../api/grading'
+import { gradeColor } from '../../lib/grades'
 import type { Assignment, GradeLetter, AssignmentStatus } from '../../types'
 
 interface Props {
@@ -9,10 +10,6 @@ interface Props {
   onClose: () => void
 }
 
-const GRADE_COLORS: Record<string, string> = {
-  A: 'var(--color-success)', B: 'var(--color-amber)', C: 'var(--color-warning)',
-  D: 'var(--color-danger)', F: 'var(--color-danger)',
-}
 const fmt = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
 function scoreColor(s: number): string {
   if (s >= 75) return 'var(--color-success)'
@@ -34,7 +31,7 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
   const grade    = (a.approved_grade ?? a.ai_grade) as GradeLetter | null
   const score    = a.approved_score ?? a.ai_score
   const feedback = a.approved_feedback ?? a.ai_feedback
-  const color    = GRADE_COLORS[grade ?? ''] ?? 'var(--color-ink)'
+  const color    = gradeColor(grade)
 
   return (
     <div

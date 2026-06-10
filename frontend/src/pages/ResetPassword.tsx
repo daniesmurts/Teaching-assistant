@@ -4,6 +4,7 @@ import { resetPassword } from '../api/auth'
 import { validatePassword } from '../lib/validatePassword'
 import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
+import SuccessMark from '../components/ui/SuccessMark'
 
 type PageState = 'form' | 'success' | 'invalid'
 
@@ -62,7 +63,13 @@ export default function ResetPassword() {
     <div className="min-h-screen bg-bg flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="font-display text-3xl font-bold text-ink tracking-tight">ИСПУМ</h1>
+          <Link
+            to="/"
+            title="ИСПУМ — Интеллектуальная Система Проверки и Подготовки Учебных Материалов"
+            className="inline-block font-display text-3xl font-bold text-ink tracking-tight hover:text-amber transition-colors"
+          >
+            ИСПУМ
+          </Link>
           <p className="font-sans text-sm text-ink-secondary mt-2">Новый пароль</p>
         </div>
 
@@ -125,7 +132,7 @@ export default function ResetPassword() {
           {/* ── Success ── */}
           {state === 'success' && (
             <div className="text-center py-4">
-              <div className="text-4xl mb-3">✅</div>
+              <SuccessMark />
               <h2 className="font-sans text-sm font-medium text-ink mb-2">
                 Пароль успешно изменён
               </h2>
@@ -141,6 +148,10 @@ export default function ResetPassword() {
           <p className="text-center text-sm font-sans text-ink-secondary mt-4">
             <Link to="/login" className="text-amber hover:underline">
               ← Вернуться ко входу
+            </Link>
+            <span className="mx-2 text-ink-tertiary">·</span>
+            <Link to="/" className="text-ink-secondary hover:text-amber transition-colors">
+              На главную
             </Link>
           </p>
         )}

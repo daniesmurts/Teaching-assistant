@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { getPaymentStatus } from '../api/payments'
 import { getMe } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
+import SuccessMark from '../components/ui/SuccessMark'
 
 type View = 'checking' | 'success' | 'pending' | 'failed' | 'error'
 
@@ -70,7 +71,7 @@ export default function PaymentResult() {
 
           {view === 'success' && (
             <>
-              <div className="text-4xl mb-3">🎉</div>
+              <SuccessMark tone="amber" />
               <h2 className="font-display text-xl font-bold text-ink mb-2">Добро пожаловать в Pro!</h2>
               <p className="font-sans text-sm text-ink-secondary mb-5">
                 Оплата прошла успешно. Все возможности ИСПУМ Pro теперь доступны.

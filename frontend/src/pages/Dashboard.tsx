@@ -5,6 +5,7 @@ import TopBar from '../components/layout/TopBar'
 import OnboardingChecklist from '../components/onboarding/OnboardingChecklist'
 import WelcomeModal from '../components/onboarding/WelcomeModal'
 import AssignmentDetailModal from '../components/grading/AssignmentDetailModal'
+import { gradeColor } from '../lib/grades'
 import { useAuthStore } from '../store/authStore'
 import { getGradingStats, getGradingHistory } from '../api/grading'
 import { getCourses } from '../api/courses'
@@ -54,13 +55,6 @@ function Delta({ current, previous }: { current: number; previous: number }) {
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
-
-function gradeColor(grade: string): string {
-  return (
-    { A: 'var(--color-success)', B: 'var(--color-amber)', C: 'var(--color-warning)', D: 'var(--color-danger)', F: 'var(--color-danger)' }
-      [grade] ?? 'var(--color-ink)'
-  )
-}
 
 export default function Dashboard() {
   const teacher = useAuthStore((s) => s.teacher)

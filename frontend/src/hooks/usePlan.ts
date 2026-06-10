@@ -24,6 +24,11 @@ export function usePlan() {
     gradesLimit:        plan?.gradesLimit        ?? 20,   // default to free limit
     presentationsUsed:  plan?.presentationsUsed  ?? 0,
     presentationsLimit: plan?.presentationsLimit ?? 3,
+    topicsUsed:         plan?.topicsUsed         ?? 0,
+    topicsLimit:        plan?.topicsLimit        ?? 3,
+
+    atTopicLimit: plan?.topicsLimit !== null &&
+      (plan?.topicsUsed ?? 0) >= (plan?.topicsLimit ?? 3),
 
     /** Remaining grades (Infinity when on unlimited plan) */
     gradesRemaining: plan?.gradesLimit === null

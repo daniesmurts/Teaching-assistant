@@ -7,91 +7,98 @@ export default function About() {
     <div className="min-h-screen bg-bg text-ink selection:bg-amber-light selection:text-ink font-sans">
       <PublicHeader />
 
-      {/* Hero & Mission Statement */}
-      <section className="max-w-[800px] mx-auto px-6 pt-24 pb-20 text-center">
-        <h1 className="font-display text-4xl sm:text-5xl font-bold leading-[1.1] tracking-tight mb-6">
-          Технологии должны помогать преподавателям, а не заменять их.
+      {/* Hero — manifesto statement */}
+      <section className="max-w-[820px] mx-auto px-6 pt-24 pb-20 text-center">
+        <div className="text-xs font-semibold text-amber uppercase tracking-[0.15em] mb-6">
+          О платформе
+        </div>
+        <h1 className="font-display text-4xl sm:text-5xl font-bold leading-[1.1] tracking-tight mb-8">
+          Образование держится на преподавателях. ИСПУМ — на этой простой мысли.
         </h1>
-        <p className="text-xs font-semibold text-amber uppercase tracking-[0.15em] mb-8">
-          ИСПУМ — Интеллектуальная Система Проверки и Подготовки Учебных Материалов
+        <p className="text-lg text-ink-secondary leading-relaxed max-w-[640px] mx-auto">
+          Профессия преподавателя слишком важна, чтобы её тратили на рутину. Мы делаем инструменты, которые возвращают преподавателю время — и оставляют все ключевые решения за ним.
         </p>
-        <p className="text-lg text-ink-secondary mb-10 leading-relaxed max-w-[600px] mx-auto">
-          <strong className="text-ink font-semibold">ИСПУМ</strong> был создан, чтобы решить самую болезненную проблему академической среды — бесконечные часы, уходящие на проверку работ. Мы создали инструмент, который уважает вашу экспертизу и возвращает вам время для исследований, лекций и личной жизни.
-        </p>
-        <Link to="/register" className="inline-block px-8 py-3 rounded-md bg-amber text-white font-medium hover:opacity-90 transition-opacity">
-          Начать использовать бесплатно
-        </Link>
       </section>
 
-      {/* Feature Block 1: Smart Grading Engine */}
+      {/* Origin / Why we exist */}
       <section className="bg-surface-warm py-24 border-y border-border">
-        <div className="max-w-[1000px] mx-auto px-6">
-          <div className="flex flex-col md:flex-row items-center gap-12">
-            <div className="flex-1 space-y-6">
-              <div className="text-xs font-bold text-amber uppercase tracking-wider">Интеллектуальная проверка</div>
-              <h2 className="font-display text-3xl font-bold">Обучается на ваших оценках</h2>
-              <p className="text-ink-secondary leading-relaxed">
-                Система обучается на ваших оценках. Чем больше вы проверяете, тем точнее становятся рекомендации. ИСПУМ не просто использует шаблоны — наша технология RAG (Retrieval-Augmented Generation) анализирует ваши предыдущие вердикты и подстраивается под ваш уникальный стиль преподавания и требования к студентам.
-              </p>
-              <Link to="/register" className="inline-block px-6 py-2 rounded-md border border-border-mid bg-transparent text-ink font-medium hover:bg-surface transition-colors mt-2">
-                Проверить первую работу
-              </Link>
-            </div>
-            
-            {/* Visual */}
-            <div className="flex-1 w-full bg-surface border border-border rounded-xl p-8 shadow-sm flex flex-col items-center justify-center min-h-[300px]">
-              <div className="w-full max-w-[300px] space-y-4">
-                <div className="flex items-center gap-3 opacity-50">
-                  <div className="w-8 h-8 rounded border border-border-mid flex items-center justify-center text-xs">1</div>
-                  <div className="flex-1 h-2 bg-border-mid rounded-sm"></div>
-                </div>
-                <div className="flex items-center gap-3 opacity-75">
-                  <div className="w-8 h-8 rounded border border-border-mid flex items-center justify-center text-xs">2</div>
-                  <div className="flex-1 h-2 bg-border-mid rounded-sm"></div>
-                </div>
-                <div className="flex items-center gap-3 bg-amber-light/20 p-3 rounded-lg border border-amber/30">
-                  <div className="w-8 h-8 rounded bg-amber text-white flex items-center justify-center text-xs font-bold">3</div>
-                  <div className="flex-1 space-y-1.5">
-                    <div className="h-2 w-full bg-amber/50 rounded-sm"></div>
-                    <div className="h-2 w-4/5 bg-amber/50 rounded-sm"></div>
-                  </div>
-                </div>
-                <div className="text-center text-xs text-ink-tertiary mt-2">Синхронизация паттернов...</div>
-              </div>
-            </div>
+        <div className="max-w-[760px] mx-auto px-6">
+          <h2 className="font-display text-3xl font-bold mb-8 leading-tight">Зачем мы это делаем</h2>
+          <div className="space-y-5 text-ink-secondary leading-relaxed">
+            <p>
+              Идея ИСПУМ появилась из простого наблюдения: российский преподаватель тратит на рутину — проверку работ, подготовку слайдов, оформление документов — десятки часов в месяц. Время, которое могло бы уйти на исследования, наставничество и на саму преподавательскую работу.
+            </p>
+            <p>
+              При этом готовые инструменты от зарубежных компаний либо не работают в России без VPN, либо не учитывают специфику российского образования: ФГОС, формат рецензирования ВКР, требования аккредитации, привычку к 5-балльной шкале, реальные процессы в кафедрах и деканатах.
+            </p>
+            <p className="text-ink font-medium">
+              ИСПУМ построен в России для российской высшей школы. Не «адаптирован», не «локализован» — а спроектирован с нуля под то, как реально работают наши вузы.
+            </p>
           </div>
         </div>
       </section>
 
-      {/* Feature Block 1.5: Student Progress */}
+      {/* Principles */}
       <section className="py-24">
         <div className="max-w-[1000px] mx-auto px-6">
+          <h2 className="font-display text-3xl font-bold text-center mb-4">Во что мы верим</h2>
+          <p className="text-ink-secondary text-center mb-14 max-w-[600px] mx-auto">
+            Четыре принципа, которые определяют каждое решение в продукте — от архитектуры до интерфейса.
+          </p>
+          <div className="grid md:grid-cols-2 gap-6">
+            <Principle
+              number="01"
+              title="Преподаватель решает. ИИ помогает."
+              body="Финальное слово — всегда за человеком. ИСПУМ готовит черновик оценки, разбор, рекомендации — но не выставляет отметку самостоятельно. Преподаватель проверяет, редактирует и утверждает. Если ИИ ошибается — это видно, и это поправимо."
+            />
+            <Principle
+              number="02"
+              title="Данные остаются в России."
+              body="Все работы, оценки, презентации и материалы хранятся в дата-центрах Яндекс.Облака на территории РФ. Без зарубежных подрядчиков для хранения, без необходимости VPN для доступа из университетских сетей."
+            />
+            <Principle
+              number="03"
+              title="Мы не учимся на ваших студентах."
+              body="Загруженные работы не используются для тренировки публичных моделей ИИ. Данные изолированы в вашем аккаунте — или, в случае института, в рамках вашей кафедры. Никто, кроме вас, к ним доступа не имеет."
+            />
+            <Principle
+              number="04"
+              title="ИИ учится у вас, а не наоборот."
+              body="Каждая утверждённая вами оценка делает рекомендации точнее именно для вашего стиля преподавания. Технология RAG не навязывает «правильный» ответ — она калибруется под ваши стандарты и требования к студентам."
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Analytics — kept visual, rewritten copy */}
+      <section className="bg-surface-warm py-24 border-y border-border">
+        <div className="max-w-[1000px] mx-auto px-6">
           <div className="flex flex-col md:flex-row-reverse items-center gap-12">
-            <div className="flex-1 space-y-6">
-              <div className="text-xs font-bold text-success uppercase tracking-wider">Аналитика успеваемости</div>
-              <h2 className="font-display text-3xl font-bold">История прогресса студентов</h2>
+            <div className="flex-1 space-y-5">
+              <div className="text-xs font-bold text-success uppercase tracking-wider">Что значит «учиться у вас»</div>
+              <h2 className="font-display text-3xl font-bold leading-tight">Аналитика помогает преподавателю — не наблюдает за ним.</h2>
               <p className="text-ink-secondary leading-relaxed">
-                Принимайте взвешенные решения на основе данных. Система сохраняет историю оценок каждого студента, позволяя отслеживать динамику его успеваемости на протяжении всего семестра. Это помогает выявлять пробелы в знаниях и оказывать своевременную поддержку.
+                История оценок каждого студента собирается автоматически и остаётся в руках преподавателя. Это инструмент для того, чтобы вовремя увидеть, кому из ребят нужна поддержка, — а не цифровой надсмотрщик, фиксирующий «эффективность» преподавательской работы для отчёта в деканат.
               </p>
-              <Link to="/register" className="inline-block px-6 py-2 rounded-md border border-border-mid bg-transparent text-ink font-medium hover:bg-surface transition-colors mt-2">
-                Смотреть аналитику
-              </Link>
+              <p className="text-ink-secondary leading-relaxed">
+                Мы намеренно не строили «дашборд для администрации, который следит за каждым преподавателем». Аналитика принадлежит тому, кто ведёт занятия.
+              </p>
             </div>
-            
+
             {/* Visual */}
             <div className="flex-1 w-full bg-surface border border-border rounded-xl p-8 shadow-sm flex flex-col justify-center min-h-[300px]">
-              <div className="text-xs font-semibold text-ink-tertiary uppercase tracking-wider mb-6">Иванов Иван — Динамика (Семестр)</div>
+              <div className="text-xs font-semibold text-ink-tertiary uppercase tracking-wider mb-6">Иванов И. И. — Динамика семестра</div>
               <div className="flex items-end gap-3 h-32 border-b border-border-mid pb-2">
-                <div className="w-1/4 bg-amber/40 hover:bg-amber/60 transition-colors rounded-t-sm h-[40%] relative group">
+                <div className="w-1/4 bg-amber/40 rounded-t-sm h-[40%] relative group">
                   <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-ink opacity-0 group-hover:opacity-100 transition-opacity">3</div>
                 </div>
-                <div className="w-1/4 bg-amber hover:bg-amber/80 transition-colors rounded-t-sm h-[60%] relative group">
-                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-ink opacity-0 group-hover:opacity-100 transition-opacity">4-</div>
+                <div className="w-1/4 bg-amber rounded-t-sm h-[60%] relative group">
+                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-ink opacity-0 group-hover:opacity-100 transition-opacity">4</div>
                 </div>
-                <div className="w-1/4 bg-success/70 hover:bg-success transition-colors rounded-t-sm h-[80%] relative group">
-                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-ink opacity-0 group-hover:opacity-100 transition-opacity">4+</div>
+                <div className="w-1/4 bg-success/70 rounded-t-sm h-[80%] relative group">
+                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-ink opacity-0 group-hover:opacity-100 transition-opacity">4</div>
                 </div>
-                <div className="w-1/4 bg-success hover:bg-success/90 transition-colors rounded-t-sm h-[100%] relative group">
+                <div className="w-1/4 bg-success rounded-t-sm h-[100%] relative group">
                   <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-ink opacity-0 group-hover:opacity-100 transition-opacity">5</div>
                 </div>
               </div>
@@ -106,83 +113,55 @@ export default function About() {
         </div>
       </section>
 
-      {/* Feature Block 2: Lecture Generator */}
-      <section className="bg-surface-warm py-24 border-y border-border">
-        <div className="max-w-[1000px] mx-auto px-6">
-          <div className="flex flex-col md:flex-row items-center gap-12">
-            <div className="flex-1 space-y-6">
-              <div className="text-xs font-bold text-info uppercase tracking-wider">Ваш личный ассистент</div>
-              <h2 className="font-display text-3xl font-bold">От силлабуса до слайдов за 30 секунд</h2>
-              <p className="text-ink-secondary leading-relaxed">
-                Тратьте время на подачу материала, а не на форматирование слайдов. Просто загрузите план вашей лекции, и система автоматически разобьет его на логические блоки, сгенерирует тезисы для студентов и подробные заметки для спикера.
-              </p>
-              <Link to="/register" className="inline-block px-6 py-2 rounded-md border border-border-mid bg-transparent text-ink font-medium hover:bg-surface-warm transition-colors mt-2">
-                Сгенерировать лекцию
-              </Link>
-            </div>
-            
-            {/* Visual */}
-            <div className="flex-1 w-full bg-surface border border-border rounded-xl p-8 shadow-sm flex">
-              <div className="w-1/2 pr-6 border-r border-border text-ink-tertiary">
-                <div className="text-[10px] uppercase tracking-wider mb-4 font-bold text-ink-secondary">План (Ввод)</div>
-                <div className="space-y-2">
-                  <div className="h-1.5 w-full bg-border rounded-full"></div>
-                  <div className="h-1.5 w-5/6 bg-border rounded-full"></div>
-                  <div className="h-1.5 w-full bg-border rounded-full"></div>
-                  <div className="h-1.5 w-4/6 bg-border rounded-full"></div>
-                  <div className="h-1.5 w-full bg-border rounded-full"></div>
-                </div>
-              </div>
-              <div className="w-1/2 pl-6">
-                <div className="text-[10px] uppercase tracking-wider mb-4 font-bold text-info">Слайды (Вывод)</div>
-                <div className="border border-info/30 rounded bg-info/5 p-3 mb-3">
-                  <div className="h-2 w-2/3 bg-info/40 rounded-sm mb-2"></div>
-                  <div className="h-1.5 w-full bg-info/20 rounded-sm mb-1"></div>
-                  <div className="h-1.5 w-4/5 bg-info/20 rounded-sm"></div>
-                </div>
-                <div className="border border-border-mid rounded bg-bg p-3">
-                  <div className="h-2 w-1/2 bg-border rounded-sm mb-2"></div>
-                  <div className="h-1.5 w-full bg-border-mid rounded-sm"></div>
-                </div>
-              </div>
-            </div>
+      {/* Team — modest founder paragraph */}
+      <section className="py-24">
+        <div className="max-w-[760px] mx-auto px-6">
+          <h2 className="font-display text-3xl font-bold mb-8 leading-tight">Команда</h2>
+          <p className="text-ink-secondary leading-relaxed mb-5">
+            ИСПУМ создаётся небольшой командой инженеров и методистов. Мы строим платформу итеративно — выпускаем функции небольшими шагами, прислушиваемся к преподавателям, которые ими пользуются, и быстро исправляем то, что работает не так, как должно.
+          </p>
+          <p className="text-ink-secondary leading-relaxed mb-8">
+            Если у вас есть идея, обратная связь или сложный сценарий, который не получается решить в ИСПУМ — напишите нам. Каждое сообщение от преподавателя читается живым человеком, обычно в течение суток.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Link to="/contact" className="inline-block px-6 py-2.5 rounded-md border border-border-mid bg-transparent text-ink font-medium hover:bg-surface-warm transition-colors">
+              Связаться с командой
+            </Link>
+            <Link to="/feedback" className="inline-block px-6 py-2.5 rounded-md border border-border-mid bg-transparent text-ink font-medium hover:bg-surface-warm transition-colors">
+              Поделиться обратной связью
+            </Link>
           </div>
         </div>
       </section>
 
-      {/* Security & Core Values */}
-      <section className="py-24 border-b border-border">
-        <div className="max-w-[800px] mx-auto px-6 text-center">
-          <h2 className="font-display text-3xl font-bold mb-12">Безопасность и Приватность</h2>
-          <div className="grid md:grid-cols-2 gap-8 text-left">
-            <div className="bg-surface p-6 rounded-xl border border-border">
-              <h3 className="font-bold text-lg mb-3">Ваши данные — только ваши</h3>
-              <p className="text-sm text-ink-secondary leading-relaxed">
-                Мы никогда не используем загруженные вами студенческие работы для тренировки публичных моделей ИИ. Вся информация изолирована в рамках вашего аккаунта или института.
-              </p>
-            </div>
-            <div className="bg-surface p-6 rounded-xl border border-border">
-              <h3 className="font-bold text-lg mb-3">Российская инфраструктура</h3>
-              <p className="text-sm text-ink-secondary leading-relaxed">
-                Система разработана для бесперебойной работы в РФ без использования VPN. Мы соблюдаем местные стандарты защиты данных и конфиденциальности.
-              </p>
-            </div>
-          </div>
+      {/* CTA — calmer than landing */}
+      <section className="bg-surface-warm border-t border-border py-24">
+        <div className="max-w-[700px] mx-auto px-6 text-center">
+          <h2 className="font-display text-3xl font-bold mb-5 leading-tight">
+            Если эта философия близка — заходите.
+          </h2>
+          <p className="text-ink-secondary mb-10 leading-relaxed">
+            Бесплатный тариф позволит спокойно посмотреть, как ИСПУМ работает с вашими задачами. Без обязательств, без привязки карты.
+          </p>
+          <Link to="/register" className="inline-block px-8 py-3 rounded-md bg-amber text-white font-medium hover:opacity-90 transition-opacity">
+            Попробовать ИСПУМ
+          </Link>
         </div>
-      </section>
-
-      {/* Final Inspiring CTA */}
-      <section className="max-w-[800px] mx-auto px-6 py-24 text-center">
-        <h2 className="font-display text-4xl font-bold mb-6">Верните себе 15 часов в неделю.</h2>
-        <p className="text-lg text-ink-secondary mb-10 max-w-[500px] mx-auto">
-          Присоединяйтесь к преподавателям, которые уже оптимизировали свою рутину с помощью ИСПУМ.
-        </p>
-        <Link to="/register" className="inline-block px-10 py-4 rounded-md bg-amber text-white font-bold text-lg shadow-sm hover:opacity-90 hover:shadow transition-all">
-          Зарегистрироваться бесплатно
-        </Link>
       </section>
 
       <PublicFooter />
+    </div>
+  )
+}
+
+// ─── Building blocks ──────────────────────────────────────────────────────────
+
+function Principle({ number, title, body }: { number: string; title: string; body: string }) {
+  return (
+    <div className="bg-surface border border-border rounded-xl p-7">
+      <div className="text-xs font-mono text-amber mb-3 tracking-wider">{number}</div>
+      <h3 className="font-display text-xl font-bold mb-3 leading-snug">{title}</h3>
+      <p className="text-sm text-ink-secondary leading-relaxed">{body}</p>
     </div>
   )
 }

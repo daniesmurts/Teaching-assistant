@@ -3,9 +3,14 @@ import { Link } from 'react-router-dom'
 export default function PublicFooter() {
   return (
     <footer className="max-w-[1000px] mx-auto px-6 py-12 flex flex-col items-center justify-between border-t border-border mt-auto">
-      <div className="w-full flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-        <div className="text-sm text-ink-secondary text-center md:text-left">
-          © {new Date().getFullYear()} ИСПУМ. Создано для современного образования.
+      <div className="w-full flex flex-col md:flex-row justify-between items-start mb-8 gap-4">
+        <div className="text-center md:text-left">
+          <div className="text-sm text-ink-secondary">
+            © {new Date().getFullYear()} ИСПУМ — Интеллектуальная Система Проверки и Подготовки Учебных Материалов
+          </div>
+          <div className="text-xs text-ink-tertiary mt-1">
+            Создано для современного образования
+          </div>
         </div>
         <div className="text-ink-tertiary text-xs text-center md:text-right">
           ИП Бугембе Даниел (ИНН 165510859142)<br/>

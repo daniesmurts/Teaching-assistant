@@ -7,14 +7,12 @@ import AssignmentDetailModal from '../components/grading/AssignmentDetailModal'
 import { getGradingHistory } from '../api/grading'
 import { getCourses } from '../api/courses'
 import { downloadCsv } from '../api/download'
+import { gradeColor } from '../lib/grades'
 import { useUIStore } from '../store/uiStore'
 import type { Assignment, AssignmentStatus } from '../types'
 
 const PAGE_SIZE = 20
 
-function gradeColor(grade: string | null): string {
-  return { A: 'var(--color-success)', B: 'var(--color-amber)', C: 'var(--color-warning)', D: 'var(--color-danger)', F: 'var(--color-danger)' }[grade ?? ''] ?? 'var(--color-ink-tertiary)'
-}
 const fmt = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
 
 const STATUS_TABS: { value: string; label: string }[] = [

@@ -133,6 +133,16 @@ export function startRenewalScheduler(): void {
     logger.info({ message: 'Payment schedulers not started — payments not configured' })
     return
   }
+
+  // In PM2 cluster mode every worker would otherwise run the scheduler. Gate
+  // to worker 0 only so renewals + reconciliation fire exactly once per VM.
+  // (NODE_APP_INSTANCE is set by PM2; unset in dev or fork mode → defaults to '0'.)
+  const instanceId = process.env.NODE_APP_INSTANCE ?? '0'
+  if (instanceId !== '0') {
+    logger.info({ message: 'Payment schedulers skipped on this worker', instanceId })
+    return
+  }
+
   const DAY = 24 * 60 * 60 * 1000
   setTimeout(() => { void runRenewals() }, 60_000)     // first renewal run 1 min after boot
   setInterval(() => { void runRenewals() }, DAY)        // then daily

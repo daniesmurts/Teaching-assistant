@@ -6,7 +6,10 @@ module.exports = {
     // rootDir is the repo root, so tsc preserves structure: backend/src → dist/backend/src
     script:             'dist/backend/src/index.js',
     cwd:                '/var/www/gradeassist/backend',
-    instances:          1,            // single instance for MVP
+    // Cluster mode — two Node workers to use both vCPUs. PM2 load-balances
+    // HTTP requests across workers. Bump proportionally when you grow the VM.
+    instances:          2,
+    exec_mode:          'cluster',
     autorestart:        true,
     watch:              false,        // never watch in production
     max_memory_restart: '512M',
