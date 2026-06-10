@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import Badge from '../ui/Badge'
+import RevisionCheckList from './RevisionCheckList'
 import { getReviewByAssignment } from '../../api/grading'
 import { gradeColor } from '../../lib/grades'
 import type { Assignment, GradeLetter, AssignmentStatus } from '../../types'
@@ -18,8 +20,14 @@ function scoreColor(s: number): string {
 }
 
 export default function AssignmentDetailModal({ assignment: a, onClose }: Props) {
+  const navigate = useNavigate()
   const [openChapter, setOpenChapter] = useState<number | null>(0)
   const [showText, setShowText]       = useState(false)
+
+  function gradeRevision() {
+    onClose()
+    navigate(`/grading?revision_of=${a.id}`)
+  }
 
   // A long review may sit behind this assignment — fetch it (null for normal grades).
   const { data: review } = useQuery({
@@ -56,6 +64,14 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
                   Рецензия ВКР
                 </span>
               )}
+              {a.revision_number > 1 && (
+                <span
+                  className="text-[10px] font-sans font-medium bg-amber-light text-amber px-1.5 py-0.5 rounded-sm"
+                  title="Эта работа — переработка предыдущей версии"
+                >
+                  ↻ Переработка №{a.revision_number}
+                </span>
+              )}
             </div>
             <div className="text-xs font-sans text-ink-tertiary">
               {fmt(a.created_at)}
@@ -64,6 +80,15 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
             </div>
           </div>
           <Badge variant={a.status as AssignmentStatus} />
+          {(a.status === 'approved' || a.status === 'sent') && (
+            <button
+              onClick={gradeRevision}
+              className="text-xs font-sans font-medium px-3 py-1.5 rounded-md bg-amber text-white hover:opacity-90 transition-opacity flex-shrink-0"
+              title="Открыть форму проверки для переработанной версии"
+            >
+              ↻ Оценить переработку
+            </button>
+          )}
           <button
             onClick={onClose}
             className="text-ink-tertiary hover:text-ink transition-colors text-lg leading-none ml-1"
@@ -82,27 +107,37 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
             </section>
           )}
 
-          {/* Strengths / improvements */}
-          {((a.ai_strengths?.length ?? 0) > 0 || (a.ai_improvements?.length ?? 0) > 0) && (
-            <div className="grid grid-cols-2 gap-2.5">
-              <div className="bg-success-bg border border-success/15 rounded-lg p-3">
-                <div className="text-xs font-semibold text-success uppercase tracking-wide mb-2">Сильные стороны</div>
-                {(a.ai_strengths ?? []).map((s) => (
-                  <div key={s} className="flex gap-1.5 text-xs text-success mb-1 leading-relaxed">
-                    <span className="flex-shrink-0">·</span><span>{s}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="bg-warning-bg border border-warning/15 rounded-lg p-3">
-                <div className="text-xs font-semibold text-warning uppercase tracking-wide mb-2">Что улучшить</div>
-                {(a.ai_improvements ?? []).map((imp) => (
-                  <div key={imp} className="flex gap-1.5 text-xs text-warning mb-1 leading-relaxed">
-                    <span className="flex-shrink-0">·</span><span>{imp}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+          {/* Revision check — only present when this was graded as a revision */}
+          {a.ai_revision_check && a.ai_revision_check.length > 0 && (
+            <RevisionCheckList items={a.ai_revision_check} />
           )}
+
+          {/* Strengths / improvements — prefer teacher-edited values when present */}
+          {(() => {
+            const strengths    = a.approved_strengths    ?? a.ai_strengths    ?? []
+            const improvements = a.approved_improvements ?? a.ai_improvements ?? []
+            if (!strengths.length && !improvements.length) return null
+            return (
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="bg-success-bg border border-success/15 rounded-lg p-3">
+                  <div className="text-xs font-semibold text-success uppercase tracking-wide mb-2">Сильные стороны</div>
+                  {strengths.map((s) => (
+                    <div key={s} className="flex gap-1.5 text-xs text-success mb-1 leading-relaxed">
+                      <span className="flex-shrink-0">·</span><span>{s}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="bg-warning-bg border border-warning/15 rounded-lg p-3">
+                  <div className="text-xs font-semibold text-warning uppercase tracking-wide mb-2">Что улучшить</div>
+                  {improvements.map((imp) => (
+                    <div key={imp} className="flex gap-1.5 text-xs text-warning mb-1 leading-relaxed">
+                      <span className="flex-shrink-0">·</span><span>{imp}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Criteria (normal grades) */}
           {(a.ai_criteria_scores?.length ?? 0) > 0 && (

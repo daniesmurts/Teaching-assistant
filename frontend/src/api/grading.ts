@@ -1,5 +1,5 @@
 import client from './client'
-import type { Assignment, GradeLetter, LongReview } from '../types'
+import type { Assignment, GradeLetter, LongReview, RevisionCheckItem } from '../types'
 
 export interface GradeRequest {
   submission_text: string
@@ -10,6 +10,7 @@ export interface GradeRequest {
   student_group?: string
   reference_solution?: string
   assignment_type?: 'essay' | 'calculation'
+  parent_assignment_id?: string   // when grading a revision of a previous work
 }
 
 export interface GradeResponse {
@@ -21,7 +22,16 @@ export interface GradeResponse {
   ai_criteria_scores: { name: string; score: number; feedback: string }[]
   ai_strengths: string[]
   ai_improvements: string[]
+  ai_revision_check: RevisionCheckItem[] | null
   used_examples: number
+  revision_number: number
+  parent_assignment_id: string | null
+}
+
+// Fetch a single assignment (used to pre-fill the form when grading a revision)
+export async function getAssignment(id: string): Promise<Assignment> {
+  const res = await client.get<Assignment>(`/api/grading/assignment/${id}`)
+  return res.data
 }
 
 export async function gradeSubmission(data: GradeRequest): Promise<GradeResponse> {
@@ -31,7 +41,13 @@ export async function gradeSubmission(data: GradeRequest): Promise<GradeResponse
 
 export async function approveGrade(
   id: string,
-  data: { approved_score: number; approved_grade: GradeLetter; approved_feedback: string }
+  data: {
+    approved_score: number
+    approved_grade: GradeLetter
+    approved_feedback: string
+    approved_strengths?:    string[]
+    approved_improvements?: string[]
+  }
 ): Promise<{ assignment: Assignment }> {
   const res = await client.post<{ assignment: Assignment }>(`/api/grading/${id}/approve`, data)
   return res.data

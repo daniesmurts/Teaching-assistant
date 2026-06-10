@@ -34,6 +34,10 @@ export const gradeRules = [
   body('assignment_type')
     .optional()
     .isIn(['essay', 'calculation']).withMessage('Неверный тип задания'),
+
+  body('parent_assignment_id')
+    .optional({ nullable: true, checkFalsy: true })
+    .isUUID().withMessage('Неверный идентификатор предыдущей версии'),
 ]
 
 // Long-document review pipeline — accepts much larger submissions (chunked).
@@ -75,4 +79,14 @@ export const approveRules = [
     .trim()
     .notEmpty().withMessage('Отзыв обязателен')
     .isLength({ max: 10_000 }).withMessage('Отзыв слишком длинный'),
+
+  body('approved_strengths').optional().isArray({ max: 20 })
+    .withMessage('Слишком много пунктов сильных сторон'),
+  body('approved_strengths.*').optional().isString()
+    .isLength({ max: 500 }).withMessage('Пункт слишком длинный'),
+
+  body('approved_improvements').optional().isArray({ max: 20 })
+    .withMessage('Слишком много пунктов «что улучшить»'),
+  body('approved_improvements.*').optional().isString()
+    .isLength({ max: 500 }).withMessage('Пункт слишком длинный'),
 ]

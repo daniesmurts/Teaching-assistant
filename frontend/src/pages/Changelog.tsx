@@ -14,15 +14,35 @@ export default function Changelog() {
 
         <div className="space-y-12 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
           
-          {/* Version 1.3 — latest */}
+          {/* Version 1.4 — latest */}
           <div className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
             <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-bg bg-amber text-white shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
               <svg className="w-4 h-4 fill-current" viewBox="0 0 16 16"><path d="M8 0a8 8 0 1 0 8 8 8.009 8.009 0 0 0-8-8Zm0 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z" /></svg>
             </div>
             <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] bg-surface p-6 rounded-xl border border-border shadow-sm">
               <div className="flex items-center justify-between mb-2">
-                <span className="font-bold text-ink">Версия 1.3</span>
+                <span className="font-bold text-ink">Версия 1.4</span>
                 <span className="text-xs font-medium text-amber px-2 py-1 rounded bg-amber-light/20">Новое</span>
+              </div>
+              <time className="block text-sm text-ink-secondary mb-3">Июль 2026</time>
+              <div className="text-sm text-ink-secondary space-y-2">
+                <p><strong>Переработка работ — с учётом прошлых замечаний.</strong> Когда студент сдаёт улучшенную версию, ИСПУМ сравнивает её с прошлой и по каждому замечанию явно отмечает: учтено, частично учтено или нет. Преподаватель сразу видит, что было сделано — без перечитывания обеих версий заново.</p>
+                <p><strong>Генератор тем для исследований и практик.</strong> Опишите студента — уровень обучения, направление, интересы, место практики. ИСПУМ предложит конкретные темы для ВКР, курсовых и производственной практики, грунтованные на актуальном поиске. Темы привязываются к студенту — можно вернуться к ним позже.</p>
+                <p><strong>Привычная российская шкала 5–4–3–2.</strong> Ушли от «университетских» A–B–C–D–F: оценки выставляются по понятной для всех российской пятибалльной шкале.</p>
+                <p><strong>Кафедра «под ключ» — массовое подключение.</strong> Приглашайте десятки преподавателей одним списком или автоматически по корпоративному домену (<code>@university.ru</code>). Все приглашённые получают полный Pro-доступ сразу, а действия администраторов фиксируются в журнале.</p>
+                <p><strong>Редактирование пунктов перед утверждением.</strong> Прежде чем подтвердить оценку, преподаватель может править, удалять и добавлять пункты «сильные стороны» и «что улучшить» — именно отредактированные пункты будут проверены при следующей версии работы.</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Version 1.3 */}
+          <div className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group">
+            <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-bg bg-surface-warm text-ink-tertiary shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
+              <svg className="w-4 h-4 fill-current" viewBox="0 0 16 16"><path d="M8 0a8 8 0 1 0 8 8 8.009 8.009 0 0 0-8-8Zm0 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z" /></svg>
+            </div>
+            <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] bg-surface p-6 rounded-xl border border-border shadow-sm opacity-80 transition-opacity hover:opacity-100">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-bold text-ink">Версия 1.3</span>
               </div>
               <time className="block text-sm text-ink-secondary mb-3">Июнь 2026</time>
               <div className="text-sm text-ink-secondary space-y-2">

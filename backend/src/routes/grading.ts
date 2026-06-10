@@ -9,7 +9,7 @@ import { grade, approve } from '../services/grading'
 import { runLongReview } from '../services/longReview'
 import { createLongReview, getLongReviewById, getLongReviewByAssignmentId } from '../db/queries/longReviews'
 import { generateEmailDraft } from '../services/email'
-import { findAssignmentsByTeacher, findStudentsByTeacher, findAssignmentsForExport } from '../db/queries/assignments'
+import { findAssignmentsByTeacher, findStudentsByTeacher, findAssignmentsForExport, findAssignmentById } from '../db/queries/assignments'
 import { toCsv, csvFilename } from '../lib/csv'
 import { pool } from '../db/connection'
 import type { GradeLetter } from '../../../shared/types'
@@ -24,7 +24,10 @@ router.post(
   checkMonthlyLimit('gradesPerMonth'),
   validate(gradeRules),
   asyncHandler(async (req, res) => {
-    const { submission_text, rubric_id, course_id, student_name, student_email, student_group, reference_solution, assignment_type } = req.body as {
+    const {
+      submission_text, rubric_id, course_id, student_name, student_email, student_group,
+      reference_solution, assignment_type, parent_assignment_id,
+    } = req.body as {
       submission_text: string
       rubric_id?: string
       course_id?: string
@@ -33,18 +36,20 @@ router.post(
       student_group?: string
       reference_solution?: string
       assignment_type?: 'essay' | 'calculation'
+      parent_assignment_id?: string
     }
     const result = await grade({
-      teacherId:         req.teacher.id,
-      planTier:          req.teacher.plan_tier,
-      submissionText:    submission_text,
-      rubricId:          rubric_id,
-      courseId:          course_id,
-      studentName:       student_name,
-      studentEmail:      student_email,
-      studentGroup:      student_group,
-      referenceSolution: reference_solution,
-      assignmentType:    assignment_type === 'calculation' ? 'calculation' : 'essay',
+      teacherId:          req.teacher.id,
+      planTier:           req.teacher.plan_tier,
+      submissionText:     submission_text,
+      rubricId:           rubric_id,
+      courseId:           course_id,
+      studentName:        student_name,
+      studentEmail:       student_email,
+      studentGroup:       student_group,
+      referenceSolution:  reference_solution,
+      assignmentType:     assignment_type === 'calculation' ? 'calculation' : 'essay',
+      parentAssignmentId: parent_assignment_id,
     })
     res.json(result)
   })
@@ -122,6 +127,17 @@ router.get(
   })
 )
 
+// GET /api/grading/assignment/:id  — single assignment by id (teacher-scoped).
+// Used by the frontend to pre-fill the form when starting a revision.
+router.get(
+  '/assignment/:id',
+  asyncHandler(async (req, res) => {
+    const assignment = await findAssignmentById(req.params.id, req.teacher.id)
+    if (!assignment) return res.status(404).json({ error: 'Работа не найдена', code: 'NOT_FOUND' })
+    res.json(assignment)
+  })
+)
+
 // GET /api/grading/assignment/:id/review  — the long review (if any) behind an assignment.
 // Returns { review: null } rather than 404 so the client can quietly skip the chapter view.
 router.get(
@@ -150,15 +166,22 @@ router.post(
   '/:id/approve',
   validate(approveRules),
   asyncHandler(async (req, res) => {
-    const { approved_score, approved_grade, approved_feedback } = req.body as {
+    const {
+      approved_score, approved_grade, approved_feedback,
+      approved_strengths, approved_improvements,
+    } = req.body as {
       approved_score: number
       approved_grade: GradeLetter
       approved_feedback: string
+      approved_strengths?: string[]
+      approved_improvements?: string[]
     }
     const assignment = await approve(req.params.id, req.teacher.id, {
-      approvedScore:    Number(approved_score),
-      approvedGrade:    approved_grade,
-      approvedFeedback: approved_feedback,
+      approvedScore:        Number(approved_score),
+      approvedGrade:        approved_grade,
+      approvedFeedback:     approved_feedback,
+      approvedStrengths:    approved_strengths,
+      approvedImprovements: approved_improvements,
     })
     res.json({ assignment })
   })

@@ -66,11 +66,30 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   History cards show «… · для {имя} · {группа}» when present. Student fields are stored
   for organisation only — not sent to the AI prompt (the model still uses field/interests/site
   to drive topic quality).
+- **Assignment revisions** — when a student resubmits an improved version, the new
+  grading run is linked to the previous one and the AI explicitly checks each prior
+  improvement point as `addressed | partial | not_addressed` with a note.
+  - Migration 018 adds `parent_assignment_id`, `revision_number`, `ai_revision_check` JSONB
+  - Past-work detail modal gets «↻ Оценить переработку» button → navigates to
+    `/grading?revision_of={id}` with form pre-filled (rubric, course, student name+group)
+  - Grading form shows a revision banner («Переработка №N · ИИ сравнит с прошлой версией»)
+  - Result + detail modal render a colour-coded revision-check list (success/warning/danger)
+  - New endpoint `GET /api/grading/assignment/:id` for prefill
+- **Editable strengths/improvements on approval** — teacher can now edit, remove, or add
+  bullets in the strengths/«что улучшить» lists before approving. Migration 019 adds
+  `approved_strengths` and `approved_improvements` columns. Only sent when different from
+  AI defaults (keeps the DB honest about what was edited). The revision-check prompt now
+  prefers `approved_improvements` over `ai_improvements` — so the AI checks v2 against
+  the teacher's standards, not the AI's draft. Verified live: editing improvements to 3
+  custom points results in the AI checking exactly those 3 on the next submission.
 - Grading scale switched A–F → Russian 5-point (5/4/3/2) everywhere: prompts, validation,
   UI, colours. Existing grades migrated (014). Grade colour/label centralized in `frontend/src/lib/grades.ts`.
 - Rubric builder simplified — removed redundant МАКС field; weights are now percentages with a live sum-to-100 check
 - Landing page copy + new analytics feature pillar
 - Public changelog page refreshed with real shipped features + correct dates (1.0–1.3)
+- Public changelog: added **Версия 1.4 (Июль 2026)** — Переработка работ, генератор тем,
+  российская 5-балльная шкала, расширение для кафедр, редактирование пунктов перед утверждением.
+  1.3 demoted from "Новое" to muted historical entry.
 
 ### Fixed
 - Institution panel: shows a friendly pointer instead of 400 console errors when the

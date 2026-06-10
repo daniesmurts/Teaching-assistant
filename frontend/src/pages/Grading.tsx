@@ -1,15 +1,33 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import GradingForm from '../components/grading/GradingForm'
 import GradingResult from '../components/grading/GradingResult'
 import ReviewResult from '../components/grading/ReviewResult'
-import type { GradeRequest, GradeResponse } from '../api/grading'
+import { getAssignment, type GradeRequest, type GradeResponse } from '../api/grading'
 import type { LongReview } from '../types'
 
 type MobileTab = 'form' | 'result'
 
 export default function Grading() {
+  // ?revision_of=<assignment id> means «open the form, pre-filled, ready to grade
+  // a re-submission of that work». Read once on mount; teacher can clear it.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const revisionOfId = searchParams.get('revision_of')
+
+  const { data: revisionOf } = useQuery({
+    queryKey: ['assignment', revisionOfId],
+    queryFn:  () => getAssignment(revisionOfId!),
+    enabled:  !!revisionOfId,
+  })
+
+  function clearRevision() {
+    searchParams.delete('revision_of')
+    setSearchParams(searchParams, { replace: true })
+  }
+
   const [submission, setSubmission] = useState<GradeRequest | null>(null)
   const [result, setResult]         = useState<GradeResponse | null>(null)
   const [review, setReview]         = useState<LongReview | null>(null)
@@ -36,6 +54,8 @@ export default function Grading() {
     setResult(null)
     setReview(null)
     setMobileTab('form')
+    // Also drop the ?revision_of= param so a fresh round isn't still pre-filled
+    if (revisionOfId) clearRevision()
   }
 
   const tabClass = (t: MobileTab) =>
@@ -96,7 +116,12 @@ export default function Grading() {
           md:flex md:w-[38%]
         `}>
           {!hasOutput ? (
-            <GradingForm onResult={handleResult} onReview={handleReview} />
+            <GradingForm
+              onResult={handleResult}
+              onReview={handleReview}
+              revisionOf={revisionOf ?? null}
+              onClearRevision={clearRevision}
+            />
           ) : (
             <div className="flex flex-col h-full">
               <div className="px-4 py-3 border-b border-border">

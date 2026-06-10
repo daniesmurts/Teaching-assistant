@@ -89,6 +89,14 @@ export interface CriterionScore {
   feedback: string
 }
 
+export type RevisionStatus = 'addressed' | 'partial' | 'not_addressed'
+
+export interface RevisionCheckItem {
+  point:  string         // the previous-version improvement being checked
+  status: RevisionStatus
+  note:   string         // 1-sentence justification
+}
+
 export interface Assignment {
   id: string
   teacher_id: string
@@ -105,11 +113,16 @@ export interface Assignment {
   ai_criteria_scores: CriterionScore[] | null
   ai_strengths: string[] | null
   ai_improvements: string[] | null
+  ai_revision_check: RevisionCheckItem[] | null   // present only on revisions
   approved_score: number | null
   approved_grade: GradeLetter | null
   approved_feedback: string | null
+  approved_strengths: string[] | null     // teacher-edited bullet list (null = AI default)
+  approved_improvements: string[] | null  // ditto — feeds the revision check on resubmission
   approved_at: string | null
   status: AssignmentStatus
+  parent_assignment_id: string | null              // linked previous version, if any
+  revision_number: number                          // 1 = original, 2+ = revision chain
   created_at: string
 }
 

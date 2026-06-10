@@ -3,6 +3,7 @@ import { findRubricById } from '../db/queries/rubrics'
 import {
   createAssignment,
   approveAssignment,
+  findAssignmentById,
   findSimilarAssignments,
   type SimilarAssignment,
 } from '../db/queries/assignments'
@@ -27,6 +28,13 @@ interface GradeParams {
   studentGroup?: string
   referenceSolution?: string                  // эталонное решение / правильный ответ
   assignmentType?: 'essay' | 'calculation'    // 'calculation' → reasoning model + STEM guidance
+  parentAssignmentId?: string                 // link to previous version (revision flow)
+}
+
+interface RevisionCheckItem {
+  point:  string
+  status: 'addressed' | 'partial' | 'not_addressed'
+  note:   string
 }
 
 interface AIGradingResult {
@@ -37,6 +45,7 @@ interface AIGradingResult {
   criteria_scores: CriterionScore[]
   strengths: string[]
   improvements: string[]
+  revision_check?: RevisionCheckItem[]   // present only when grading a revision
 }
 
 export interface GradeResponse {
@@ -48,7 +57,10 @@ export interface GradeResponse {
   ai_criteria_scores: CriterionScore[]
   ai_strengths: string[]
   ai_improvements: string[]
-  used_examples: number   // how many RAG examples were injected
+  ai_revision_check: RevisionCheckItem[] | null
+  used_examples: number          // how many RAG examples were injected
+  revision_number: number        // 1 = original, 2+ = revised version
+  parent_assignment_id: string | null
 }
 
 // ─── RAG retrieval ────────────────────────────────────────────────────────────
@@ -78,12 +90,21 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
   // RAG flywheel only available on Pro/Institution — free tier grades without examples
   const ragEnabled = canUseFeature(params.planTier, 'ragFlywheel')
 
-  const [rubric, examples] = await Promise.all([
+  const [rubric, examples, parent] = await Promise.all([
     params.rubricId ? findRubricById(params.rubricId, params.teacherId) : Promise.resolve(null),
     ragEnabled && params.courseId
       ? retrieveExamples(params.submissionText, params.courseId, params.teacherId)
       : Promise.resolve([]),
+    params.parentAssignmentId
+      ? findAssignmentById(params.parentAssignmentId, params.teacherId)
+      : Promise.resolve(null),
   ])
+
+  // Revision context — built only when the teacher explicitly linked a previous
+  // version. Prefer the teacher's approved values; fall back to the AI's draft
+  // (which is what's there if v1 wasn't approved before the resubmission).
+  const isRevision = parent != null
+  const revisionBlock = isRevision ? buildRevisionContext(parent) : ''
 
   const isCalc = params.assignmentType === 'calculation'
 
@@ -106,9 +127,9 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
 `
     : ''
 
-  const userPrompt = reference + (rubric
-    ? buildRubricPrompt(params.submissionText, rubric.name, rubric.criteria, examples, isCalc)
-    : buildHolisticPrompt(params.submissionText, examples, isCalc))
+  const userPrompt = revisionBlock + reference + (rubric
+    ? buildRubricPrompt(params.submissionText, rubric.name, rubric.criteria, examples, isCalc, isRevision)
+    : buildHolisticPrompt(params.submissionText, examples, isCalc, isRevision))
 
   const result = await chatJSON<AIGradingResult>(
     [
@@ -119,6 +140,11 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
     { teacherId: params.teacherId, feature: 'grading' },
     isCalc ? REASONER_MODEL : undefined,   // calculation grading → reasoning model
   )
+
+  // Revision check is only meaningful when this is a revision.
+  const revisionCheck = isRevision
+    ? normaliseRevisionCheck(result.revision_check)
+    : null
 
   const assignment = await createAssignment({
     teacherId: params.teacherId,
@@ -135,6 +161,8 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
     aiCriteriaScores: result.criteria_scores ?? [],
     aiStrengths: result.strengths ?? [],
     aiImprovements: result.improvements ?? [],
+    parentAssignmentId: parent?.id,
+    aiRevisionCheck: revisionCheck ?? undefined,
   })
 
   // Increment usage counter — fire-and-forget
@@ -149,8 +177,63 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
     ai_criteria_scores: assignment.ai_criteria_scores ?? [],
     ai_strengths: assignment.ai_strengths ?? [],
     ai_improvements: assignment.ai_improvements ?? [],
+    ai_revision_check: assignment.ai_revision_check,
     used_examples: examples.length,
+    revision_number: assignment.revision_number,
+    parent_assignment_id: assignment.parent_assignment_id,
   }
+}
+
+// ─── Revision helpers ─────────────────────────────────────────────────────────
+
+function buildRevisionContext(parent: Assignment): string {
+  // Prefer the teacher's approved values; fall back to AI draft if v1 wasn't approved yet.
+  const prevFeedback = parent.approved_feedback ?? parent.ai_feedback ?? ''
+  const prevGrade    = parent.approved_grade   ?? parent.ai_grade   ?? '—'
+  const prevScore    = parent.approved_score   ?? parent.ai_score   ?? '—'
+  // Teacher-edited improvements take precedence — they're what the teacher
+  // actually committed to as the v1 verdict. AI draft is the fallback for
+  // assignments that were graded before this feature shipped, or while v1
+  // was still pending approval.
+  const prevImprovements = parent.approved_improvements ?? parent.ai_improvements ?? []
+
+  const improvementsList = prevImprovements.length
+    ? prevImprovements.map((p, i) => `${i + 1}. ${sanitiseForPrompt(p)}`).join('\n')
+    : '(в предыдущей версии не было сформулированных пунктов улучшения)'
+
+  return `## Контекст: предыдущая версия работы
+Это переработанная версия (revision). Студент уже сдавал предыдущий вариант, и был дан следующий отзыв:
+
+**Предыдущая оценка:** ${prevGrade} (${prevScore}/100)
+
+**Общий отзыв на прошлую версию:**
+${sanitiseForPrompt(prevFeedback)}
+
+**Что было предложено улучшить в прошлой версии:**
+${improvementsList}
+
+При оценке текущей версии:
+1. Учитывайте, что это переработка — её следует сравнивать с прошлой версией, а не оценивать «с нуля».
+2. По каждому пункту из списка «что улучшить» выше явно укажите в поле "revision_check", был ли он учтён.
+
+`
+}
+
+function normaliseRevisionCheck(raw: unknown): Array<{ point: string; status: 'addressed' | 'partial' | 'not_addressed'; note: string }> | null {
+  if (!Array.isArray(raw)) return null
+  const valid = ['addressed', 'partial', 'not_addressed'] as const
+  type Status = typeof valid[number]
+  return raw
+    .map((item) => {
+      const i = item as { point?: unknown; status?: unknown; note?: unknown }
+      const status = String(i.status ?? '').trim() as Status
+      return {
+        point:  String(i.point  ?? '').trim(),
+        status: valid.includes(status) ? status : 'partial' as Status,
+        note:   String(i.note   ?? '').trim(),
+      }
+    })
+    .filter((i) => i.point)
 }
 
 function applyWatermark(feedback: string, planTier: string): string {
@@ -163,7 +246,13 @@ function applyWatermark(feedback: string, planTier: string): string {
 export async function approve(
   id: string,
   teacherId: string,
-  data: { approvedScore: number; approvedGrade: GradeLetter; approvedFeedback: string }
+  data: {
+    approvedScore: number
+    approvedGrade: GradeLetter
+    approvedFeedback: string
+    approvedStrengths?: string[]
+    approvedImprovements?: string[]
+  }
 ): Promise<Assignment> {
   const assignment = await approveAssignment(id, teacherId, data)
   if (!assignment) throw new NotFoundError('Работа')
@@ -202,12 +291,18 @@ const CALC_GUIDANCE =
   `\nЭто расчётная задача: пересчитайте решение пошагово, проверьте формулы, единицы измерения и числовой ответ. ` +
   `За верный метод с арифметической опиской начисляйте частичный балл.\n`
 
+const REVISION_FIELD_INSTRUCTION =
+  `- "revision_check": массив объектов по каждому пункту из списка «что было предложено улучшить» в прошлой версии. ` +
+  `Каждый объект: {"point": исходный пункт прошлой версии, "status": "addressed" | "partial" | "not_addressed", "note": 1-2 предложения с обоснованием — что именно изменилось/не изменилось}. ` +
+  `Включите КАЖДЫЙ пункт из прошлой версии, даже если он полностью учтён.`
+
 function buildRubricPrompt(
   text: string,
   rubricName: string,
   criteria: RubricCriterion[],
   examples: SimilarAssignment[],
   isCalc = false,
+  isRevision = false,
 ): string {
   const criteriaBlock = criteria
     .map((c) => `- ${c.name} (вес: ${c.weight}, максимум: ${c.max_score}): ${c.description}`)
@@ -230,12 +325,12 @@ ${sanitiseForPrompt(text)}
 - "feedback": общий отзыв на 2–3 абзаца на русском языке
 - "criteria_scores": массив {"name": string, "score": число 0–100, "feedback": string}
 - "strengths": массив из 3–5 конкретных достоинств работы
-- "improvements": массив из 3–5 конкретных областей для улучшения
+- "improvements": массив из 3–5 конкретных областей для улучшения${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}
 
 Ответьте ТОЛЬКО JSON-объектом, без пояснений.`
 }
 
-function buildHolisticPrompt(text: string, examples: SimilarAssignment[], isCalc = false): string {
+function buildHolisticPrompt(text: string, examples: SimilarAssignment[], isCalc = false, isRevision = false): string {
   return `${buildExamplesBlock(examples)}## Работа студента
 <student_submission>
 ${sanitiseForPrompt(text)}
@@ -249,7 +344,7 @@ ${sanitiseForPrompt(text)}
 - "feedback": общий отзыв на 2–3 абзаца на русском языке
 - "criteria_scores": [] (пустой массив — без рубрики)
 - "strengths": массив из 3–5 конкретных достоинств работы
-- "improvements": массив из 3–5 конкретных областей для улучшения
+- "improvements": массив из 3–5 конкретных областей для улучшения${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}
 
 Ответьте ТОЛЬКО JSON-объектом, без пояснений.`
 }

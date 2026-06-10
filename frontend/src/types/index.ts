@@ -12,6 +12,8 @@ export type {
   AssignmentStatus,
   GradeLetter,
   CriterionScore,
+  RevisionCheckItem,
+  RevisionStatus,
   LongReview,
   LongReviewResult,
   LongReviewStatus,

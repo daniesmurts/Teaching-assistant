@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Button from '../ui/Button'
 import FeedbackEmail from './FeedbackEmail'
+import RevisionCheckList from './RevisionCheckList'
 import { useApprove } from '../../hooks/useGrading'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
@@ -23,6 +24,8 @@ export default function GradingResult({ result, onApproved }: Props) {
   const [editScore, setEditScore]       = useState(String(result.ai_score))
   const [editGrade, setEditGrade]       = useState<GradeLetter>(result.ai_grade)
   const [editFeedback, setEditFeedback] = useState(result.ai_feedback)
+  const [editStrengths, setEditStrengths]       = useState<string[]>(result.ai_strengths ?? [])
+  const [editImprovements, setEditImprovements] = useState<string[]>(result.ai_improvements ?? [])
   const [approved, setApproved]         = useState(false)
   const approveMut = useApprove()
 
@@ -36,6 +39,10 @@ export default function GradingResult({ result, onApproved }: Props) {
           approved_score: Number(editScore),
           approved_grade: editGrade,
           approved_feedback: editFeedback,
+          // Only send these if they differ from the AI defaults — keeps the DB
+          // honest about what the teacher actually edited.
+          ...(arraysEqual(editStrengths,    result.ai_strengths    ?? []) ? {} : { approved_strengths:    editStrengths.filter((s) => s.trim()) }),
+          ...(arraysEqual(editImprovements, result.ai_improvements ?? []) ? {} : { approved_improvements: editImprovements.filter((s) => s.trim()) }),
         },
       },
       {
@@ -64,6 +71,14 @@ export default function GradingResult({ result, onApproved }: Props) {
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-xs font-sans text-ink-secondary">{result.ai_grade_label}</span>
+            {result.revision_number > 1 && (
+              <span
+                className="text-[10px] font-sans font-medium bg-amber-light text-amber px-1.5 py-0.5 rounded-sm"
+                title="Эта работа — переработка предыдущей версии"
+              >
+                ↻ Переработка №{result.revision_number}
+              </span>
+            )}
             {result.used_examples > 0 && (
               <span
                 className="text-[10px] font-sans font-medium bg-amber-light text-amber px-1.5 py-0.5 rounded-sm"
@@ -149,24 +164,26 @@ export default function GradingResult({ result, onApproved }: Props) {
               />
             </div>
 
-            {(result.ai_strengths?.length > 0 || result.ai_improvements?.length > 0) && (
+            {result.ai_revision_check && result.ai_revision_check.length > 0 && (
+              <RevisionCheckList items={result.ai_revision_check} />
+            )}
+
+            {(editStrengths.length > 0 || editImprovements.length > 0 || !approved) && (
               <div className="grid grid-cols-2 gap-2.5">
-                <div className="bg-success-bg border border-success/15 rounded-lg p-3">
-                  <div className="text-xs font-semibold text-success uppercase tracking-wide mb-2">Сильные стороны</div>
-                  {result.ai_strengths.map((s) => (
-                    <div key={s} className="flex gap-1.5 text-xs text-success mb-1 leading-relaxed">
-                      <span className="flex-shrink-0">·</span><span>{s}</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="bg-warning-bg border border-warning/15 rounded-lg p-3">
-                  <div className="text-xs font-semibold text-warning uppercase tracking-wide mb-2">Что улучшить</div>
-                  {result.ai_improvements.map((imp) => (
-                    <div key={imp} className="flex gap-1.5 text-xs text-warning mb-1 leading-relaxed">
-                      <span className="flex-shrink-0">·</span><span>{imp}</span>
-                    </div>
-                  ))}
-                </div>
+                <EditableBulletList
+                  title="Сильные стороны"
+                  items={editStrengths}
+                  onChange={setEditStrengths}
+                  disabled={approved}
+                  tone="success"
+                />
+                <EditableBulletList
+                  title="Что улучшить"
+                  items={editImprovements}
+                  onChange={setEditImprovements}
+                  disabled={approved}
+                  tone="warning"
+                />
               </div>
             )}
           </div>
@@ -208,4 +225,74 @@ function scoreColor(score: number): string {
   if (score >= 75) return 'var(--color-success)'
   if (score >= 55) return 'var(--color-amber)'
   return 'var(--color-danger)'
+}
+
+function arraysEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((v, i) => v === b[i])
+}
+
+// ─── Editable bullet list ─────────────────────────────────────────────────────
+// Used for the strengths + improvements blocks. Teacher can edit text inline,
+// remove a bullet, or add a new one — until the grade is approved, at which
+// point the list locks. The improvements list is what feeds the revision check
+// when the student resubmits — so editing here directly improves the next grade.
+
+const TONES: Record<'success' | 'warning', { bg: string; border: string; text: string; titleText: string }> = {
+  success: { bg: 'bg-success-bg', border: 'border-success/15', text: 'text-success', titleText: 'text-success' },
+  warning: { bg: 'bg-warning-bg', border: 'border-warning/15', text: 'text-warning', titleText: 'text-warning' },
+}
+
+function EditableBulletList({ title, items, onChange, disabled, tone }: {
+  title: string
+  items: string[]
+  onChange: (next: string[]) => void
+  disabled: boolean
+  tone: 'success' | 'warning'
+}) {
+  const t = TONES[tone]
+  function setAt(i: number, value: string) { onChange(items.map((v, idx) => idx === i ? value : v)) }
+  function removeAt(i: number) { onChange(items.filter((_, idx) => idx !== i)) }
+  function add() { onChange([...items, '']) }
+
+  return (
+    <div className={`${t.bg} border ${t.border} rounded-lg p-3`}>
+      <div className={`text-xs font-semibold ${t.titleText} uppercase tracking-wide mb-2`}>{title}</div>
+      <div className="space-y-1">
+        {items.map((value, i) => (
+          <div key={i} className={`flex gap-1.5 text-xs ${t.text} leading-relaxed items-start group`}>
+            <span className="flex-shrink-0 mt-1">·</span>
+            <textarea
+              value={value}
+              onChange={(e) => setAt(i, e.target.value)}
+              disabled={disabled}
+              rows={1}
+              className={`flex-1 bg-transparent ${t.text} text-xs leading-relaxed resize-none focus:outline-none focus:bg-surface/40 rounded px-1 py-0.5 disabled:opacity-90`}
+              style={{ minHeight: '1.4em' }}
+            />
+            {!disabled && (
+              <button
+                type="button"
+                onClick={() => removeAt(i)}
+                className={`flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${t.text} hover:opacity-100 text-sm leading-none mt-0.5`}
+                aria-label="Удалить пункт"
+                title="Удалить пункт"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {!disabled && (
+        <button
+          type="button"
+          onClick={add}
+          className={`mt-1.5 text-[11px] font-sans ${t.text} hover:underline`}
+        >
+          + Добавить
+        </button>
+      )}
+    </div>
+  )
 }

@@ -1,5 +1,5 @@
 import { pool } from '../connection'
-import type { Assignment, GradeLetter, CriterionScore } from '../../../../shared/types'
+import type { Assignment, GradeLetter, CriterionScore, RevisionCheckItem } from '../../../../shared/types'
 
 interface AssignmentRow {
   id: string
@@ -17,11 +17,16 @@ interface AssignmentRow {
   ai_criteria_scores: CriterionScore[] | null
   ai_strengths: string[] | null
   ai_improvements: string[] | null
+  ai_revision_check: RevisionCheckItem[] | null
   approved_score: number | null
   approved_grade: string | null
   approved_feedback: string | null
+  approved_strengths: string[] | null
+  approved_improvements: string[] | null
   approved_at: Date | null
   status: string
+  parent_assignment_id: string | null
+  revision_number: number
   created_at: Date
 }
 
@@ -42,11 +47,16 @@ function toAssignment(row: AssignmentRow): Assignment {
     ai_criteria_scores: row.ai_criteria_scores,
     ai_strengths: row.ai_strengths,
     ai_improvements: row.ai_improvements,
+    ai_revision_check: row.ai_revision_check,
     approved_score: row.approved_score,
     approved_grade: row.approved_grade as GradeLetter | null,
     approved_feedback: row.approved_feedback,
+    approved_strengths: row.approved_strengths,
+    approved_improvements: row.approved_improvements,
     approved_at: row.approved_at?.toISOString() ?? null,
     status: row.status as Assignment['status'],
+    parent_assignment_id: row.parent_assignment_id,
+    revision_number: row.revision_number,
     created_at: row.created_at.toISOString(),
   }
 }
@@ -66,13 +76,29 @@ export async function createAssignment(data: {
   aiCriteriaScores: CriterionScore[]
   aiStrengths: string[]
   aiImprovements: string[]
+  parentAssignmentId?: string                          // link to previous version
+  aiRevisionCheck?: Array<{ point: string; status: string; note: string }>
 }): Promise<Assignment> {
+  // revision_number is parent's + 1, or 1 if no parent.
+  // Single CTE does the lookup + insert in one round-trip and preserves
+  // atomicity if the parent disappears between two queries.
   const { rows } = await pool.query<AssignmentRow>(
-    `INSERT INTO assignments (
+    `WITH parent AS (
+       SELECT revision_number FROM assignments
+       WHERE id = $15::uuid AND teacher_id = $1
+     )
+     INSERT INTO assignments (
        teacher_id, course_id, rubric_id, student_name, student_email, student_group,
        submission_text, ai_score, ai_grade, ai_grade_label, ai_feedback,
-       ai_criteria_scores, ai_strengths, ai_improvements, status
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'pending')
+       ai_criteria_scores, ai_strengths, ai_improvements,
+       parent_assignment_id, ai_revision_check,
+       revision_number, status
+     ) VALUES (
+       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
+       $15,$16,
+       COALESCE((SELECT revision_number + 1 FROM parent), 1),
+       'pending'
+     )
      RETURNING *`,
     [
       data.teacherId,
@@ -89,6 +115,8 @@ export async function createAssignment(data: {
       JSON.stringify(data.aiCriteriaScores),
       data.aiStrengths,
       data.aiImprovements,
+      data.parentAssignmentId ?? null,
+      data.aiRevisionCheck ? JSON.stringify(data.aiRevisionCheck) : null,
     ]
   )
   return toAssignment(rows[0])
@@ -105,18 +133,31 @@ export async function findAssignmentById(id: string, teacherId: string): Promise
 export async function approveAssignment(
   id: string,
   teacherId: string,
-  data: { approvedScore: number; approvedGrade: GradeLetter; approvedFeedback: string }
+  data: {
+    approvedScore: number
+    approvedGrade: GradeLetter
+    approvedFeedback: string
+    approvedStrengths?: string[]      // null/undefined = keep AI's default
+    approvedImprovements?: string[]
+  }
 ): Promise<Assignment | null> {
   const { rows } = await pool.query<AssignmentRow>(
     `UPDATE assignments
-     SET approved_score    = $3,
-         approved_grade    = $4,
-         approved_feedback = $5,
-         approved_at       = NOW(),
-         status            = 'approved'
+     SET approved_score         = $3,
+         approved_grade         = $4,
+         approved_feedback      = $5,
+         approved_strengths     = $6,
+         approved_improvements  = $7,
+         approved_at            = NOW(),
+         status                 = 'approved'
      WHERE id = $1 AND teacher_id = $2
      RETURNING *`,
-    [id, teacherId, data.approvedScore, data.approvedGrade, data.approvedFeedback]
+    [
+      id, teacherId,
+      data.approvedScore, data.approvedGrade, data.approvedFeedback,
+      data.approvedStrengths    ?? null,
+      data.approvedImprovements ?? null,
+    ]
   )
   return rows[0] ? toAssignment(rows[0]) : null
 }

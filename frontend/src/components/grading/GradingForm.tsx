@@ -11,11 +11,15 @@ import { usePlan } from '../../hooks/usePlan'
 import client from '../../api/client'
 import type { GradeRequest, GradeResponse } from '../../api/grading'
 import { SINGLE_PASS_CHAR_LIMIT } from '../../types'
-import type { Rubric, LongReview } from '../../types'
+import type { Rubric, LongReview, Assignment } from '../../types'
 
 interface Props {
   onResult: (req: GradeRequest, res: GradeResponse) => void
   onReview: (review: LongReview, submission: GradeRequest) => void
+  // When grading a revision: the previous version, used to pre-fill student info,
+  // show context banner, and link the new assignment to the parent.
+  revisionOf?: Assignment | null
+  onClearRevision?: () => void
 }
 
 const REVIEW_STATUS_LABEL: Record<string, string> = {
@@ -26,8 +30,20 @@ const REVIEW_STATUS_LABEL: Record<string, string> = {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-export default function GradingForm({ onResult, onReview }: Props) {
-  const [form, setForm] = useState<GradeRequest>({ submission_text: '', rubric_id: '', course_id: '', student_name: '', student_email: '', student_group: '', reference_solution: '', assignment_type: 'essay' })
+export default function GradingForm({ onResult, onReview, revisionOf, onClearRevision }: Props) {
+  // When grading a revision: pre-fill the same student name/group/course/rubric
+  // from the parent so the teacher doesn't retype them, and lock the parent id.
+  const [form, setForm] = useState<GradeRequest>(() => ({
+    submission_text:     '',
+    rubric_id:           revisionOf?.rubric_id    ?? '',
+    course_id:           revisionOf?.course_id    ?? '',
+    student_name:        revisionOf?.student_name ?? '',
+    student_email:       revisionOf?.student_email ?? '',
+    student_group:       revisionOf?.student_group ?? '',
+    reference_solution:  '',
+    assignment_type:     'essay',
+    parent_assignment_id: revisionOf?.id,
+  }))
   const isCalc = form.assignment_type === 'calculation'
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
@@ -36,6 +52,24 @@ export default function GradingForm({ onResult, onReview }: Props) {
   // Stop polling if the teacher navigates away mid-review (the job still
   // finishes server-side and lands in history).
   useEffect(() => () => { cancelled.current = true }, [])
+
+  // Keep form in sync if the parent assignment changes (e.g. teacher came from
+  // a different past work). Don't overwrite submission_text — they may be typing.
+  useEffect(() => {
+    if (!revisionOf) {
+      setForm((f) => ({ ...f, parent_assignment_id: undefined }))
+      return
+    }
+    setForm((f) => ({
+      ...f,
+      parent_assignment_id: revisionOf.id,
+      rubric_id:            revisionOf.rubric_id    ?? f.rubric_id,
+      course_id:            revisionOf.course_id    ?? f.course_id,
+      student_name:         revisionOf.student_name ?? f.student_name,
+      student_email:        revisionOf.student_email ?? f.student_email,
+      student_group:        revisionOf.student_group ?? f.student_group,
+    }))
+  }, [revisionOf])
   const { atGradeLimit, gradesUsed, gradesLimit, can } = usePlan()
   const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
 
@@ -86,6 +120,7 @@ export default function GradingForm({ onResult, onReview }: Props) {
       ...(form.student_name  ? { student_name:  form.student_name  } : {}),
       ...(form.student_group ? { student_group: form.student_group } : {}),
       ...(form.student_email ? { student_email: form.student_email } : {}),
+      ...(form.parent_assignment_id ? { parent_assignment_id: form.parent_assignment_id } : {}),
     }
 
     if (isLong) {
@@ -138,6 +173,34 @@ export default function GradingForm({ onResult, onReview }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col h-full">
+      {/* Revision banner — visible whenever this is a re-submission */}
+      {revisionOf && (
+        <div className="mx-4 mt-4 px-3 py-2.5 bg-amber-light/60 border border-amber/25 rounded-md flex items-start gap-2.5">
+          <span className="text-amber text-sm mt-0.5 flex-shrink-0">↻</span>
+          <div className="flex-1 min-w-0 text-[12.5px] leading-relaxed">
+            <div className="font-medium text-ink">
+              Переработка №{(revisionOf.revision_number ?? 1) + 1}
+              {revisionOf.student_name && <span className="font-normal text-ink-secondary"> · {revisionOf.student_name}</span>}
+            </div>
+            <div className="text-ink-secondary text-[11.5px] mt-0.5">
+              ИИ сравнит работу с прошлой версией{(revisionOf.approved_grade ?? revisionOf.ai_grade)
+                ? ` (предыдущая оценка: ${revisionOf.approved_grade ?? revisionOf.ai_grade})`
+                : ''} и проверит, учтены ли замечания.
+            </div>
+          </div>
+          {onClearRevision && (
+            <button
+              type="button"
+              onClick={onClearRevision}
+              title="Отвязать от прошлой версии"
+              className="text-ink-tertiary hover:text-ink transition-colors text-sm leading-none flex-shrink-0"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Student info */}
       <div className="px-4 py-3 border-b border-border">
         <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">
