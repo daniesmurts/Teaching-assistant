@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { clearGradingDrafts } from '../hooks/usePersistedState'
 import type { Teacher, PlanState } from '../types'
 
 interface AuthState {
@@ -21,7 +22,10 @@ export const useAuthStore = create<AuthState>()(
       teacher:   null,
       plan:      null,
       setAuth:   (token, teacher, plan) => set({ token, teacher, plan }),
-      clearAuth: () => set({ token: null, teacher: null, plan: null }),
+      clearAuth: () => {
+        clearGradingDrafts()   // don't leave student PII on disk after logout
+        set({ token: null, teacher: null, plan: null })
+      },
       updatePlan: (plan) => set({ plan }),
       updateAccount: (teacher, plan) => set({ teacher, plan }),
     }),

@@ -46,12 +46,17 @@ export async function yandexVisionOCR(
   const data  = await response.json() as YandexVisionResponse
   const pages = data.results?.[0]?.results?.[0]?.textDetection?.pages ?? []
 
-  // Reconstruct reading order: blocks → lines → words
+  // Reconstruct reading order: blocks → lines → words.
+  // Page boundaries are kept as form-feed (\f) — downstream code converts that
+  // into "[стр. N]" markers in the grading prompt so the model can cite pages.
   return pages
-    .flatMap((page) => page.blocks ?? [])
-    .flatMap((block) => block.lines ?? [])
-    .map((line) => (line.words ?? []).map((w) => w.text).join(' '))
-    .join('\n')
+    .map((page) =>
+      (page.blocks ?? [])
+        .flatMap((block) => block.lines ?? [])
+        .map((line) => (line.words ?? []).map((w) => w.text).join(' '))
+        .join('\n')
+    )
+    .join('\f')
 }
 
 // ─── Minimal response typing ──────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import client from './client'
-import type { Presentation } from '../types'
+import type { Presentation, PresentationSource } from '../types'
 
 export interface GenerateRequest {
   topic: string
@@ -13,8 +13,9 @@ export interface GenerateRequest {
 }
 
 export interface GenerateResponse {
-  presentation_id: string
+  presentation_id:   string
   generated_content: string
+  sources:           PresentationSource[]
 }
 
 export async function generatePresentation(data: GenerateRequest): Promise<GenerateResponse> {

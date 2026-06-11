@@ -100,6 +100,11 @@ export interface CriterionScore {
   name: string
   score: number
   feedback: string
+  // Citation pointing at the passage the feedback is grounded in. Both fields
+  // are optional — quote is a short verbatim fragment from the submission,
+  // page is meaningful only when the submission came from a paginated upload.
+  quote?: string | null
+  page?:  number | null
 }
 
 export type RevisionStatus = 'addressed' | 'partial' | 'not_addressed'
@@ -219,6 +224,20 @@ export type PresentationStyle =
   | 'case_study'
   | 'discussion_based'
 
+// One citation surfaced next to a slide. The model emits inline [N] markers
+// in bullets/notes; this list resolves N → the original document, the chunk
+// the bullet was grounded in, and (when paginated) the page range. The
+// frontend joins [N] to this list to render clickable chips.
+export interface PresentationSource {
+  idx:         number              // matches the [N] marker in the slide text
+  document_id: string
+  file_name:   string
+  page_start:  number | null
+  page_end:    number | null
+  excerpt:     string              // first ~280 chars of the chunk, for the popover
+  chunk_type:  string | null
+}
+
 export interface Presentation {
   id: string
   teacher_id: string
@@ -231,6 +250,7 @@ export interface Presentation {
   style: PresentationStyle | null
   slide_count_target: number | null
   generated_content: string | null
+  sources: PresentationSource[] | null
   created_at: string
 }
 

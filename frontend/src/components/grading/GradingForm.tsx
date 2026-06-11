@@ -9,6 +9,7 @@ import DocumentUpload from '../ui/DocumentUpload'
 import NoCourseHint from '../onboarding/NoCourseHint'
 import { useUIStore } from '../../store/uiStore'
 import { usePlan } from '../../hooks/usePlan'
+import { usePersistedState } from '../../hooks/usePersistedState'
 import client from '../../api/client'
 import type { GradeRequest, GradeResponse } from '../../api/grading'
 import { SINGLE_PASS_CHAR_LIMIT } from '../../types'
@@ -45,31 +46,65 @@ function evenWeights(n: number): number[] {
 }
 
 export default function GradingForm({ onResult, onReview, revisionOf, onClearRevision }: Props) {
-  const [form, setForm] = useState<Omit<GradeRequest, 'criterion_ids' | 'weights'>>(() => ({
-    submission_text:     '',
-    course_id:           revisionOf?.course_id    ?? '',
-    student_name:        revisionOf?.student_name ?? '',
-    student_email:       revisionOf?.student_email ?? '',
-    student_group:       revisionOf?.student_group ?? '',
-    reference_solution:  '',
-    assignment_type:     'essay',
-    parent_assignment_id: revisionOf?.id,
-  }))
-  // Picked criteria with weights — managed independently so re-ordering keeps weights in sync.
-  const [picked, setPicked] = useState<PickedCriterion[]>(() => {
-    const snapshot = revisionOf?.criteria_snapshot
-    if (!snapshot || snapshot.length === 0) return []
-    return snapshot
-      .filter((s): s is typeof s & { criterion_id: string } => s.criterion_id != null)
-      .map((s) => ({ id: s.criterion_id, name: s.name, weight: s.weight }))
-  })
+  // Form fields persist across refresh under "form:draft.fields" — so a teacher
+  // doesn't lose half-typed text or uploaded OCR output to an accidental reload.
+  // Revision pre-fill is reapplied via the effect below, so an older draft
+  // doesn't override an explicit ?revision_of= link.
+  const [form, setForm] = usePersistedState<Omit<GradeRequest, 'criterion_ids' | 'weights'>>(
+    'form:draft.fields',
+    {
+      submission_text:     '',
+      course_id:           revisionOf?.course_id    ?? '',
+      student_name:        revisionOf?.student_name ?? '',
+      student_email:       revisionOf?.student_email ?? '',
+      student_group:       revisionOf?.student_group ?? '',
+      reference_solution:  '',
+      assignment_type:     'essay',
+      parent_assignment_id: revisionOf?.id,
+    },
+  )
+  // Picked criteria with weights — also persisted, separate key so a fresh
+  // round can clear just one or the other if we ever need to.
+  const [picked, setPicked] = usePersistedState<PickedCriterion[]>(
+    'form:draft.criteria',
+    (() => {
+      const snapshot = revisionOf?.criteria_snapshot
+      if (!snapshot || snapshot.length === 0) return []
+      return snapshot
+        .filter((s): s is typeof s & { criterion_id: string } => s.criterion_id != null)
+        .map((s) => ({ id: s.criterion_id, name: s.name, weight: s.weight }))
+    })(),
+  )
 
   const isCalc = form.assignment_type === 'calculation'
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
   const [reviewJob, setReviewJob] = useState<LongReview | null>(null)
+  // True while a review job picked up after a page refresh is still running.
+  // Reset to false once the job finishes (or fails) so the banner doesn't
+  // linger on a fresh run.
+  const [wasResumed, setWasResumed] = useState(false)
+  // Persist the in-flight long-review job so a page refresh during the long
+  // (multi-minute) processing window doesn't orphan it. We keep the original
+  // request alongside the id so the eventual onReview() call can hand the
+  // submission text up to Grading.tsx for display.
+  const [pendingReview, setPendingReview] = usePersistedState<{ id: string; request: GradeRequest } | null>(
+    'review:pending',
+    null,
+  )
   const cancelled = useRef(false)
   useEffect(() => () => { cancelled.current = true }, [])
+
+  // On mount, if there's a pending long review from a previous session, look
+  // up its current state and either resume polling, deliver the finished
+  // result, or surface the failure. Runs exactly once.
+  const resumedRef = useRef(false)
+  useEffect(() => {
+    if (resumedRef.current || !pendingReview) return
+    resumedRef.current = true
+    void resumeReview(pendingReview.id, pendingReview.request)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (!revisionOf) {
@@ -197,25 +232,77 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
 
   async function runReview(common: Record<string, unknown>) {
     cancelled.current = false
+    const request = { submission_text: form.submission_text, ...common } as GradeRequest
     try {
-      const job = await startReview({ submission_text: form.submission_text, ...common })
+      const job = await startReview(request)
       setReviewJob(job)
+      setPendingReview({ id: job.id, request })
+      await pollReview(job.id, request)
+    } catch (err: unknown) {
+      setError(errMsg(err, 'Не удалось запустить рецензирование'))
+      setLoading(false)
+      setReviewJob(null)
+      setPendingReview(null)
+    }
+  }
 
+  // Resume polling after a refresh. Looks up the current job state and either
+  // delivers the finished result, continues the poll, or surfaces a failure.
+  async function resumeReview(jobId: string, request: GradeRequest) {
+    cancelled.current = false
+    setLoading(true)
+    setWasResumed(true)
+    try {
+      const status = await getReview(jobId)
+      setReviewJob(status)
+      if (status.status === 'ready') {
+        onReview(status, request)
+        setPendingReview(null)
+        setWasResumed(false)
+        return
+      }
+      if (status.status === 'failed') {
+        setError(status.error_message || 'Не удалось выполнить рецензирование')
+        setPendingReview(null)
+        setWasResumed(false)
+        return
+      }
+      await pollReview(jobId, request)
+    } catch (err: unknown) {
+      // Treat 404 (job gone) as "nothing to resume" — wipe and let teacher try again.
+      const status = (err as { response?: { status?: number } }).response?.status
+      if (status === 404) {
+        setPendingReview(null)
+      } else {
+        setError(errMsg(err, 'Не удалось восстановить рецензирование'))
+      }
+      setWasResumed(false)
+    } finally {
+      setLoading(false)
+      setReviewJob(null)
+    }
+  }
+
+  // Shared poll loop — used by both fresh starts and post-refresh resumes.
+  async function pollReview(jobId: string, request: GradeRequest) {
+    try {
       for (let i = 0; i < 200 && !cancelled.current; i++) {
         await delay(3000)
-        const status = await getReview(job.id)
+        const status = await getReview(jobId)
         setReviewJob(status)
         if (status.status === 'ready') {
-          onReview(status, { submission_text: form.submission_text, ...common } as GradeRequest)
+          onReview(status, request)
+          setPendingReview(null)
+          setWasResumed(false)
           break
         }
         if (status.status === 'failed') {
           setError(status.error_message || 'Не удалось выполнить рецензирование')
+          setPendingReview(null)
+          setWasResumed(false)
           break
         }
       }
-    } catch (err: unknown) {
-      setError(errMsg(err, 'Не удалось запустить рецензирование'))
     } finally {
       setLoading(false)
       setReviewJob(null)
@@ -437,6 +524,17 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
           </>
         ) : (
           <>
+            {wasResumed && reviewJob && reviewJob.status !== 'ready' && reviewJob.status !== 'failed' && (
+              <div className="px-3 py-2 bg-amber-light/60 border border-amber/25 rounded-md flex items-start gap-2 text-[12px] font-sans text-ink leading-relaxed">
+                <span className="text-amber flex-shrink-0">↻</span>
+                <span>
+                  <span className="font-medium">Рецензирование продолжается.</span>{' '}
+                  <span className="text-ink-secondary">
+                    Мы восстановили задачу, которую вы запустили до обновления страницы — закрывать вкладку не нужно.
+                  </span>
+                </span>
+              </div>
+            )}
             {reviewJob && (
               <div className="px-3 py-2 bg-surface-warm border border-border rounded-md">
                 <div className="flex items-center justify-between text-xs font-sans text-ink-secondary mb-1.5">

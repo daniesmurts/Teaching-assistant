@@ -1,5 +1,5 @@
 import { pool } from '../connection'
-import type { Presentation, PresentationStyle } from '../../../../shared/types'
+import type { Presentation, PresentationStyle, PresentationSource } from '../../../../shared/types'
 
 interface PresentationRow {
   id: string
@@ -13,6 +13,7 @@ interface PresentationRow {
   style: string | null
   slide_count_target: number | null
   generated_content: string | null
+  sources: PresentationSource[] | null
   created_at: Date
 }
 
@@ -29,6 +30,7 @@ function toPresentation(row: PresentationRow): Presentation {
     style: row.style as PresentationStyle | null,
     slide_count_target: row.slide_count_target,
     generated_content: row.generated_content,
+    sources: row.sources,
     created_at: row.created_at.toISOString(),
   }
 }
@@ -44,12 +46,14 @@ export async function createPresentation(data: {
   style?: string
   slideCountTarget?: number
   generatedContent: string
+  sources?: PresentationSource[]
 }): Promise<Presentation> {
   const { rows } = await pool.query<PresentationRow>(
     `INSERT INTO presentations
        (teacher_id, course_id, lecture_number, topic, duration_minutes,
-        audience_level, learning_goals, style, slide_count_target, generated_content)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        audience_level, learning_goals, style, slide_count_target,
+        generated_content, sources)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      RETURNING *`,
     [
       data.teacherId,
@@ -62,6 +66,7 @@ export async function createPresentation(data: {
       data.style ?? null,
       data.slideCountTarget ?? null,
       data.generatedContent,
+      data.sources && data.sources.length > 0 ? JSON.stringify(data.sources) : null,
     ]
   )
   return toPresentation(rows[0])

@@ -85,6 +85,7 @@ export default function Presentations() {
   }
 
   const displayContent = result?.generated_content ?? openHistory?.generated_content ?? null
+  const displaySources = result?.sources ?? openHistory?.sources ?? []
   const displayTitle   = openHistory?.topic ?? null
 
   return (
@@ -171,7 +172,7 @@ export default function Presentations() {
                   {displayTitle}
                 </div>
               )}
-              <SlideContent content={displayContent} />
+              <SlideContent content={displayContent} sources={displaySources} />
             </div>
           )}
 

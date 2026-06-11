@@ -29,6 +29,13 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
     navigate(`/grading?revision_of=${a.id}`)
   }
 
+  // Open this pending assignment in the grading view to finish reviewing &
+  // approving it — used when the page was refreshed/closed before approval.
+  function resumeApproval() {
+    onClose()
+    navigate(`/grading?resume=${a.id}`)
+  }
+
   // A long review may sit behind this assignment — fetch it (null for normal grades).
   const { data: review } = useQuery({
     queryKey: ['assignment-review', a.id],
@@ -80,6 +87,15 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
             </div>
           </div>
           <Badge variant={a.status as AssignmentStatus} />
+          {a.status === 'pending' && (
+            <button
+              onClick={resumeApproval}
+              className="text-xs font-sans font-medium px-3 py-1.5 rounded-md bg-amber text-white hover:opacity-90 transition-opacity flex-shrink-0"
+              title="Открыть в режиме проверки и подтвердить оценку"
+            >
+              Подтвердить оценку
+            </button>
+          )}
           {(a.status === 'approved' || a.status === 'sent') && (
             <button
               onClick={gradeRevision}

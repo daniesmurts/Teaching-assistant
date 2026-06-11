@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import Button from '../ui/Button'
 import { useApprove } from '../../hooks/useGrading'
-import { GRADES, gradeColor } from '../../lib/grades'
+import { GRADES, gradeColor, gradeLabel, GRADE_BRACKETS, scoreToGrade, snapScoreToGrade } from '../../lib/grades'
 import type { LongReview, GradeLetter } from '../../types'
 
 interface Props {
@@ -19,6 +19,23 @@ export default function ReviewResult({ review, onApproved }: Props) {
   const approveMut = useApprove()
 
   const gradeClr = gradeColor(editGrade)
+
+  // Score and letter grade are two views of the same value — keep them aligned.
+  // See lib/grades.ts for the bracket logic shared with GradingResult.
+  function handleScoreChange(raw: string) {
+    setEditScore(raw)
+    const n = parseInt(raw, 10)
+    if (!Number.isNaN(n) && n >= 0 && n <= 100) {
+      const next = scoreToGrade(n)
+      if (next !== editGrade) setEditGrade(next)
+    }
+  }
+  function handleGradeChange(next: GradeLetter) {
+    setEditGrade(next)
+    const current = parseInt(editScore, 10)
+    const snapped = snapScoreToGrade(Number.isNaN(current) ? 0 : current, next)
+    if (snapped !== current) setEditScore(String(snapped))
+  }
 
   function handleApprove() {
     if (!review.assignment_id) return
@@ -40,17 +57,20 @@ export default function ReviewResult({ review, onApproved }: Props) {
             <span className="text-[10px] font-sans font-medium bg-amber-light text-amber px-1.5 py-0.5 rounded-sm uppercase tracking-wide">
               Рекомендуемая оценка
             </span>
-            {r.grade_label && <span className="text-xs font-sans text-ink-secondary">{r.grade_label}</span>}
+            <span className="text-xs font-sans text-ink-secondary">
+              {gradeLabel(editGrade)}
+              <span className="text-ink-tertiary"> · {GRADE_BRACKETS[editGrade][0]}–{GRADE_BRACKETS[editGrade][1]}</span>
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <input
               type="number" min={0} max={100} value={editScore}
-              onChange={(e) => setEditScore(e.target.value)} disabled={approved}
+              onChange={(e) => handleScoreChange(e.target.value)} disabled={approved}
               className="w-16 px-2 py-1 text-sm font-sans text-ink bg-surface border border-border rounded-md text-center"
             />
             <span className="text-sm text-ink-secondary font-sans">/ 100</span>
             <select
-              value={editGrade} onChange={(e) => setEditGrade(e.target.value as GradeLetter)} disabled={approved}
+              value={editGrade} onChange={(e) => handleGradeChange(e.target.value as GradeLetter)} disabled={approved}
               className="px-2 py-1 text-sm font-sans text-ink bg-surface border border-border rounded-md"
             >
               {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}

@@ -24,6 +24,7 @@ export type {
   StudentLevel,
   TopicWorkType,
   Presentation,
+  PresentationSource,
   PresentationStyle,
   ApiError,
 } from '../../../shared/types'

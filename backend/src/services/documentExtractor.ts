@@ -66,11 +66,14 @@ export function cleanText(raw: string): string {
   return raw
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
-    .replace(/\f/g, '\n')        // form feeds (page breaks)
+    // Preserve \f (page breaks) so downstream code can cite page numbers.
+    // pdf-parse emits them between pages by default; yandexVisionOCR inserts
+    // them explicitly. cleanText only trims surrounding whitespace.
+    .replace(/[ \t]*\f[ \t]*/g, '\f')
     .replace(/\t/g, ' ')
     .replace(/[ ]{2,}/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
-    .replace(/[^\S\n]+$/gm, '')  // trailing spaces per line
+    .replace(/[^\S\n]+$/gm, '')
     .trim()
 }
 

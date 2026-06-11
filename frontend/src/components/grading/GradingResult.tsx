@@ -5,27 +5,56 @@ import RevisionCheckList from './RevisionCheckList'
 import { useApprove } from '../../hooks/useGrading'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
-import { GRADES, gradeColor } from '../../lib/grades'
+import { usePersistedState, clearPersistedState } from '../../hooks/usePersistedState'
+import { GRADES, gradeColor, gradeLabel, GRADE_BRACKETS, scoreToGrade, snapScoreToGrade } from '../../lib/grades'
 import type { GradeResponse } from '../../api/grading'
 import type { GradeLetter } from '../../types'
 
 interface Props {
   result: GradeResponse
   onApproved: () => void
+  // When the teacher clicks a citation in the per-criterion feedback, the
+  // host page highlights and scrolls to the quote in the submission pane.
+  onCite?: (quote: string) => void
 }
 
 type Tab = 'feedback' | 'criteria' | 'email'
 
-export default function GradingResult({ result, onApproved }: Props) {
+export default function GradingResult({ result, onApproved, onCite }: Props) {
   const [tab, setTab] = useState<Tab>('feedback')
   const { can } = usePlan()
   const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
   const emailEnabled = can('emailGeneration')
-  const [editScore, setEditScore]       = useState(String(result.ai_score))
-  const [editGrade, setEditGrade]       = useState<GradeLetter>(result.ai_grade)
-  const [editFeedback, setEditFeedback] = useState(result.ai_feedback)
-  const [editStrengths, setEditStrengths]       = useState<string[]>(result.ai_strengths ?? [])
-  const [editImprovements, setEditImprovements] = useState<string[]>(result.ai_improvements ?? [])
+  // Teacher edits persist per-assignment across page refresh so an accidental
+  // reload doesn't drop a hand-edited score, grade, or feedback bullet.
+  // Cleared on approve (below) and on the "Новая проверка" reset in Grading.tsx.
+  const editKey = `edits:${result.assignment_id}`
+  const [editScore, setEditScore]       = usePersistedState<string>(`${editKey}:score`,    String(result.ai_score))
+  const [editGrade, setEditGrade]       = usePersistedState<GradeLetter>(`${editKey}:grade`, result.ai_grade)
+
+  // Keep score and letter grade in sync — they're two views of the same value.
+  // Score → grade: deterministic bracket lookup.
+  // Grade → score: only nudge the score when it falls outside the new bracket,
+  // so a teacher's "4 → 5" bump preserves a score of 85 by moving it to 87
+  // rather than jumping to the middle of the 5-bracket.
+  function handleScoreChange(raw: string) {
+    setEditScore(raw)
+    const n = parseInt(raw, 10)
+    if (!Number.isNaN(n) && n >= 0 && n <= 100) {
+      const next = scoreToGrade(n)
+      if (next !== editGrade) setEditGrade(next)
+    }
+  }
+
+  function handleGradeChange(next: GradeLetter) {
+    setEditGrade(next)
+    const current = parseInt(editScore, 10)
+    const snapped = snapScoreToGrade(Number.isNaN(current) ? 0 : current, next)
+    if (snapped !== current) setEditScore(String(snapped))
+  }
+  const [editFeedback, setEditFeedback] = usePersistedState<string>(`${editKey}:feedback`,        result.ai_feedback)
+  const [editStrengths, setEditStrengths]       = usePersistedState<string[]>(`${editKey}:strengths`,    result.ai_strengths    ?? [])
+  const [editImprovements, setEditImprovements] = usePersistedState<string[]>(`${editKey}:improvements`, result.ai_improvements ?? [])
   const [approved, setApproved]         = useState(false)
   const approveMut = useApprove()
 
@@ -48,6 +77,12 @@ export default function GradingResult({ result, onApproved }: Props) {
       {
         onSuccess: () => {
           setApproved(true)
+          // Once the grade is committed server-side, the local draft is junk.
+          clearPersistedState(`${editKey}:score`)
+          clearPersistedState(`${editKey}:grade`)
+          clearPersistedState(`${editKey}:feedback`)
+          clearPersistedState(`${editKey}:strengths`)
+          clearPersistedState(`${editKey}:improvements`)
           onApproved()
         },
       }
@@ -70,7 +105,10 @@ export default function GradingResult({ result, onApproved }: Props) {
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-sans text-ink-secondary">{result.ai_grade_label}</span>
+            <span className="text-xs font-sans text-ink-secondary">
+              {gradeLabel(editGrade)}
+              <span className="text-ink-tertiary"> · {GRADE_BRACKETS[editGrade][0]}–{GRADE_BRACKETS[editGrade][1]}</span>
+            </span>
             {result.revision_number > 1 && (
               <span
                 className="text-[10px] font-sans font-medium bg-amber-light text-amber px-1.5 py-0.5 rounded-sm"
@@ -94,14 +132,14 @@ export default function GradingResult({ result, onApproved }: Props) {
               min={0}
               max={100}
               value={editScore}
-              onChange={(e) => setEditScore(e.target.value)}
+              onChange={(e) => handleScoreChange(e.target.value)}
               className="w-16 px-2 py-1 text-sm font-sans text-ink bg-surface border border-border rounded-md text-center"
               disabled={approved}
             />
             <span className="text-sm text-ink-secondary font-sans">/ 100</span>
             <select
               value={editGrade}
-              onChange={(e) => setEditGrade(e.target.value as GradeLetter)}
+              onChange={(e) => handleGradeChange(e.target.value as GradeLetter)}
               className="px-2 py-1 text-sm font-sans text-ink bg-surface border border-border rounded-md"
               disabled={approved}
             >
@@ -207,6 +245,22 @@ export default function GradingResult({ result, onApproved }: Props) {
                     />
                   </div>
                   <p className="text-xs font-sans text-ink-secondary leading-relaxed">{cs.feedback}</p>
+                  {cs.quote && (
+                    <button
+                      type="button"
+                      onClick={() => onCite?.(cs.quote!)}
+                      title="Показать в работе"
+                      className="mt-1.5 group inline-flex items-start gap-1.5 text-left max-w-full"
+                    >
+                      <span className="text-[10px] font-sans font-medium text-amber mt-0.5 flex-shrink-0">↳</span>
+                      <span className="text-xs font-sans italic text-ink-secondary leading-relaxed border-l-2 border-amber/40 group-hover:border-amber pl-2 transition-colors">
+                        «{cs.quote}»
+                        {cs.page != null && (
+                          <span className="not-italic text-ink-tertiary font-normal"> · стр. {cs.page}</span>
+                        )}
+                      </span>
+                    </button>
+                  )}
                 </div>
               ))
             )}

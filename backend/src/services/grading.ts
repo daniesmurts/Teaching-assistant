@@ -154,9 +154,11 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
 `
     : ''
 
+  const { text: annotated, pageCount } = annotateWithPageMarkers(params.submissionText)
+
   const userPrompt = revisionBlock + reference + (snapshot.length > 0
-    ? buildCriteriaPrompt(params.submissionText, snapshot, examples, isCalc, isRevision)
-    : buildHolisticPrompt(params.submissionText, examples, isCalc, isRevision))
+    ? buildCriteriaPrompt(annotated, snapshot, examples, isCalc, isRevision, pageCount)
+    : buildHolisticPrompt(annotated, examples, isCalc, isRevision))
 
   const result = await chatJSON<AIGradingResult>(
     [
@@ -170,10 +172,14 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
 
   const revisionCheck = isRevision ? normaliseRevisionCheck(result.revision_check) : null
 
+  // Validate citations against the original submission — keep only quotes that
+  // actually appear, drop pages outside the document. Stops hallucinated cites.
+  const cleanedScores = normaliseCriteriaScores(result.criteria_scores ?? [], params.submissionText, pageCount)
+
   // Merge AI per-criterion scores back into the snapshot so the history view
   // can reconstruct exactly what was graded against what.
   const filledSnapshot: CriteriaSnapshotItem[] | null = snapshot.length > 0
-    ? mergeScoresIntoSnapshot(snapshot, result.criteria_scores ?? [])
+    ? mergeScoresIntoSnapshot(snapshot, cleanedScores)
     : null
 
   const assignment = await createAssignment({
@@ -187,7 +193,7 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
     aiGrade: normaliseGrade(result.grade),
     aiGradeLabel: result.grade_label ?? gradeToLabel(result.grade),
     aiFeedback: applyWatermark(result.feedback ?? '', params.planTier),
-    aiCriteriaScores: result.criteria_scores ?? [],
+    aiCriteriaScores: cleanedScores,
     aiStrengths: result.strengths ?? [],
     aiImprovements: result.improvements ?? [],
     criteriaSnapshot: filledSnapshot,
@@ -224,6 +230,56 @@ function mergeScoresIntoSnapshot(
     return match
       ? { ...item, score: match.score, feedback: match.feedback }
       : item
+  })
+}
+
+/**
+ * Convert form-feed page boundaries in the raw submission into "[стр. N]"
+ * headers the AI can cite. Page 1 is implicit (no header before the first
+ * page), subsequent pages are prefixed. Returns the annotated text plus the
+ * total page count so the prompt can constrain the citation field.
+ */
+function annotateWithPageMarkers(text: string): { text: string; pageCount: number } {
+  if (!text.includes('\f')) return { text, pageCount: 1 }
+  const pages = text.split('\f')
+  const annotated = pages
+    .map((page, i) => (i === 0 ? page : `\n\n[стр. ${i + 1}]\n${page}`))
+    .join('')
+  return { text: annotated, pageCount: pages.length }
+}
+
+/**
+ * Validate citations against the original (un-annotated) submission. A quote
+ * survives only if it actually appears in the source — otherwise the model
+ * hallucinated it. Pages are clamped to the document's real range.
+ */
+function normaliseCriteriaScores(
+  scores: CriterionScore[],
+  submissionText: string,
+  pageCount: number
+): CriterionScore[] {
+  const haystack = submissionText.toLowerCase().replace(/\s+/g, ' ').trim()
+  return scores.map((s) => {
+    const next: CriterionScore = {
+      name:     String(s.name ?? '').trim(),
+      score:    clampScore(s.score),
+      feedback: String(s.feedback ?? '').trim(),
+      quote:    null,
+      page:     null,
+    }
+    const quote = typeof s.quote === 'string' ? s.quote.trim() : ''
+    if (quote) {
+      const normalised = quote.toLowerCase().replace(/\s+/g, ' ').trim()
+      // Accept the quote only if it shows up verbatim (case- and whitespace-insensitive).
+      if (normalised.length >= 8 && haystack.includes(normalised)) {
+        next.quote = quote.slice(0, 200)
+      }
+    }
+    const page = typeof s.page === 'number' ? Math.round(s.page) : null
+    if (page != null && Number.isInteger(page) && page >= 1 && page <= pageCount) {
+      next.page = page
+    }
+    return next
   })
 }
 
@@ -339,16 +395,21 @@ function buildCriteriaPrompt(
   examples: SimilarAssignment[],
   isCalc = false,
   isRevision = false,
+  pageCount = 0,
 ): string {
   const criteriaBlock = snapshot
     .map((c) => `- ${c.name} (вес: ${c.weight}%)${c.description ? `: ${c.description}` : ''}`)
     .join('\n')
 
+  const pageInstruction = pageCount > 1
+    ? `номер страницы из маркера [стр. N], если фрагмент с этой страницы (целое число 1–${pageCount}); иначе null`
+    : `всегда null (работа однострочная, без страниц)`
+
   return `${buildExamplesBlock(examples)}## Критерии оценки
 
 ${criteriaBlock}
 
-## Работа студента
+## Работа студента${pageCount > 1 ? ` (страницы помечены маркерами [стр. N])` : ''}
 <student_submission>
 ${sanitiseForPrompt(text)}
 </student_submission>
@@ -359,7 +420,13 @@ ${sanitiseForPrompt(text)}
 - "grade": одно из "5", "4", "3", "2"  (5: 87–100, 4: 73–86, 3: 60–72, 2: ниже 60)
 - "grade_label": одно из "Отлично", "Хорошо", "Удовлетворительно", "Неудовлетворительно"
 - "feedback": общий отзыв на 2–3 абзаца на русском языке
-- "criteria_scores": массив {"name": точное название критерия, "score": число 0–100, "feedback": string} — по каждому критерию из списка выше
+- "criteria_scores": массив объектов по каждому критерию выше. КАЖДЫЙ объект:
+    {"name": точное название критерия,
+     "score": число 0–100,
+     "feedback": краткое обоснование оценки (2–4 предложения),
+     "quote": ДОСЛОВНАЯ цитата из работы студента (5–12 слов), на которую опирается ваш вывод — используйте её ТОЛЬКО если в работе действительно есть такой фрагмент. Если опереть вывод не на что — null,
+     "page": ${pageInstruction}}
+   Маркеры [стр. N] в цитату НЕ ВКЛЮЧАЙТЕ. Не выдумывайте цитаты — лучше null, чем неточная цитата.
 - "strengths": массив из 3–5 конкретных достоинств работы
 - "improvements": массив из 3–5 конкретных областей для улучшения${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}
 

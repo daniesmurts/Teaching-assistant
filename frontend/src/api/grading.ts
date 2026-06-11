@@ -1,6 +1,6 @@
 import client from './client'
 import type {
-  Assignment, GradeLetter, LongReview, RevisionCheckItem, CriteriaSnapshotItem,
+  Assignment, GradeLetter, LongReview, RevisionCheckItem, CriteriaSnapshotItem, CriterionScore,
 } from '../types'
 
 export interface GradeRequest {
@@ -22,7 +22,7 @@ export interface GradeResponse {
   ai_grade: GradeLetter
   ai_grade_label: string
   ai_feedback: string
-  ai_criteria_scores: { name: string; score: number; feedback: string }[]
+  ai_criteria_scores: CriterionScore[]
   ai_strengths: string[]
   ai_improvements: string[]
   ai_revision_check: RevisionCheckItem[] | null
