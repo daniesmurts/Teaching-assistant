@@ -1,32 +1,33 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import Icon, { type IconName } from '../ui/Icon'
 
-interface NavItem { icon: string; label: string; to: string }
+interface NavItem { icon: IconName; label: string; to: string }
 interface NavGroup { label?: string; items: NavItem[] }
 
 // Grouped by what the teacher is trying to do — top to bottom: overview →
 // grading → AI generation → setup → account.
 const NAV_GROUPS: NavGroup[] = [
   { items: [
-    { icon: '⊞', label: 'Главная', to: '/dashboard' },
+    { icon: 'home',         label: 'Главная',        to: '/dashboard' },
   ]},
   { label: 'Проверка', items: [
-    { icon: '✦', label: 'Проверка работ', to: '/grading' },
-    { icon: '◷', label: 'Журнал',         to: '/history' },
-    { icon: '☺', label: 'Студенты',       to: '/students' },
+    { icon: 'sparkle',      label: 'Проверка работ', to: '/grading' },
+    { icon: 'clock',        label: 'Журнал',         to: '/history' },
+    { icon: 'users',        label: 'Студенты',       to: '/students' },
   ]},
   { label: 'Генерация', items: [
-    { icon: '▤', label: 'Презентации', to: '/presentations' },
-    { icon: '◇', label: 'Темы',        to: '/topics' },
+    { icon: 'presentation', label: 'Презентации',    to: '/presentations' },
+    { icon: 'lightbulb',    label: 'Темы',           to: '/topics' },
   ]},
   { label: 'Управление', items: [
-    { icon: '◫', label: 'Курсы',     to: '/courses' },
-    { icon: '☰', label: 'Критерии',  to: '/rubrics' },
+    { icon: 'book',         label: 'Предметы',       to: '/courses' },
+    { icon: 'list-checks',  label: 'Критерии',       to: '/criteria' },
   ]},
   { label: 'Аккаунт', items: [
-    { icon: '◆', label: 'Тариф',     to: '/billing' },
-    { icon: '⚙', label: 'Настройки', to: '/settings' },
-    { icon: '?', label: 'Помощь',    to: '/help' },
+    { icon: 'diamond',      label: 'Тариф',          to: '/billing' },
+    { icon: 'settings',     label: 'Настройки',      to: '/settings' },
+    { icon: 'help-circle',  label: 'Помощь',         to: '/help' },
   ]},
 ]
 
@@ -37,9 +38,10 @@ function NavRow({ item }: { item: NavItem }) {
         <div className={`flex items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer transition-colors ${
           isActive ? 'bg-sidebar-active' : 'hover:bg-sidebar-hover'
         }`}>
-          <span className={`text-sm w-4 text-center select-none ${isActive ? 'text-amber-mid' : 'text-ink-inv-muted'}`}>
-            {item.icon}
-          </span>
+          <Icon
+            name={item.icon}
+            className={`flex-shrink-0 ${isActive ? 'text-amber-mid' : 'text-ink-inv-muted'}`}
+          />
           <span className={`text-sm font-sans ${isActive ? 'font-medium text-ink-inverse' : 'font-normal text-ink-inv-muted'}`}>
             {item.label}
           </span>
@@ -107,7 +109,7 @@ export default function Sidebar({ onClose }: Props) {
                 ? 'bg-amber/20 border-amber-mid/40'
                 : 'bg-amber/10 border-amber-mid/25 hover:bg-amber/20'
             }`}>
-              <span className="text-sm w-4 text-center select-none text-amber-mid">✉</span>
+              <Icon name="mail" className="flex-shrink-0 text-amber-mid" />
               <span className="text-sm font-sans font-medium text-amber-mid">Обратная связь</span>
             </div>
           )}
@@ -116,7 +118,7 @@ export default function Sidebar({ onClose }: Props) {
         {/* Institution admin — only for institution/platform admins */}
         {isInstitutionAdmin && (
           <div className="mt-3 pt-3 border-t border-white/5">
-            <NavRow item={{ icon: '◉', label: 'Организация', to: '/institution' }} />
+            <NavRow item={{ icon: 'building', label: 'Организация', to: '/institution' }} />
           </div>
         )}
       </nav>
@@ -140,7 +142,7 @@ export default function Sidebar({ onClose }: Props) {
           onClick={logout}
           className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-ink-inv-muted hover:bg-sidebar-hover hover:text-ink-inverse transition-colors"
         >
-          <span className="text-sm w-4 text-center select-none leading-none">⎋</span>
+          <Icon name="log-out" className="flex-shrink-0" />
           <span className="text-sm font-sans">Выйти</span>
         </button>
       </div>

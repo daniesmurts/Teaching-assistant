@@ -63,11 +63,11 @@ export function checkFeatureAccess(
   }
 }
 
-// ─── Resource count limits (courses, rubrics) ─────────────────────────────────
+// ─── Resource count limits (courses, criteria) ────────────────────────────────
 
 export function checkResourceLimit(
-  resource: 'courses' | 'rubrics',
-  limitKey:  'maxCourses' | 'maxRubrics'
+  resource: 'courses' | 'criteria',
+  limitKey:  'maxCourses' | 'maxCriteria'
 ) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
@@ -77,7 +77,7 @@ export function checkResourceLimit(
 
       if (limit === Infinity) { next(); return }
 
-      const table = resource === 'courses' ? 'courses' : 'rubrics'
+      const table = resource === 'courses' ? 'courses' : 'criteria'
       const { rows } = await pool.query<{ count: string }>(
         `SELECT COUNT(*)::text AS count FROM ${table} WHERE teacher_id = $1`,
         [req.teacher.id]
@@ -86,7 +86,7 @@ export function checkResourceLimit(
 
       if (count >= limit) {
         res.status(403).json({
-          error:    `Достигнут лимит ${resource === 'courses' ? 'курсов' : 'рубрик'} для вашего тарифа (${limit}).`,
+          error:    `Достигнут лимит ${resource === 'courses' ? 'предметов' : 'критериев'} для вашего тарифа (${limit}).`,
           code:     'RESOURCE_LIMIT_REACHED',
           resource,
           limit,

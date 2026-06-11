@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect, FormEvent } from 'react'
+import { useState, useRef, useEffect, useMemo, FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Button from '../ui/Button'
 import { Textarea } from '../ui/Input'
 import { getCourses } from '../../api/courses'
 import { getStudents, startReview, getReview } from '../../api/grading'
+import { getCriteria } from '../../api/criteria'
 import DocumentUpload from '../ui/DocumentUpload'
 import NoCourseHint from '../onboarding/NoCourseHint'
 import { useUIStore } from '../../store/uiStore'
@@ -11,15 +12,19 @@ import { usePlan } from '../../hooks/usePlan'
 import client from '../../api/client'
 import type { GradeRequest, GradeResponse } from '../../api/grading'
 import { SINGLE_PASS_CHAR_LIMIT } from '../../types'
-import type { Rubric, LongReview, Assignment } from '../../types'
+import type { LongReview, Assignment } from '../../types'
 
 interface Props {
   onResult: (req: GradeRequest, res: GradeResponse) => void
   onReview: (review: LongReview, submission: GradeRequest) => void
-  // When grading a revision: the previous version, used to pre-fill student info,
-  // show context banner, and link the new assignment to the parent.
   revisionOf?: Assignment | null
   onClearRevision?: () => void
+}
+
+interface PickedCriterion {
+  id:     string
+  name:   string
+  weight: number
 }
 
 const REVIEW_STATUS_LABEL: Record<string, string> = {
@@ -30,12 +35,18 @@ const REVIEW_STATUS_LABEL: Record<string, string> = {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+// Distribute 100 across N criteria as evenly as possible, putting the remainder
+// on the first item (e.g. 3 picks → [34, 33, 33]).
+function evenWeights(n: number): number[] {
+  if (n <= 0) return []
+  const base = Math.floor(100 / n)
+  const rem  = 100 - base * n
+  return Array.from({ length: n }, (_, i) => base + (i < rem ? 1 : 0))
+}
+
 export default function GradingForm({ onResult, onReview, revisionOf, onClearRevision }: Props) {
-  // When grading a revision: pre-fill the same student name/group/course/rubric
-  // from the parent so the teacher doesn't retype them, and lock the parent id.
-  const [form, setForm] = useState<GradeRequest>(() => ({
+  const [form, setForm] = useState<Omit<GradeRequest, 'criterion_ids' | 'weights'>>(() => ({
     submission_text:     '',
-    rubric_id:           revisionOf?.rubric_id    ?? '',
     course_id:           revisionOf?.course_id    ?? '',
     student_name:        revisionOf?.student_name ?? '',
     student_email:       revisionOf?.student_email ?? '',
@@ -44,17 +55,22 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
     assignment_type:     'essay',
     parent_assignment_id: revisionOf?.id,
   }))
+  // Picked criteria with weights — managed independently so re-ordering keeps weights in sync.
+  const [picked, setPicked] = useState<PickedCriterion[]>(() => {
+    const snapshot = revisionOf?.criteria_snapshot
+    if (!snapshot || snapshot.length === 0) return []
+    return snapshot
+      .filter((s): s is typeof s & { criterion_id: string } => s.criterion_id != null)
+      .map((s) => ({ id: s.criterion_id, name: s.name, weight: s.weight }))
+  })
+
   const isCalc = form.assignment_type === 'calculation'
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
   const [reviewJob, setReviewJob] = useState<LongReview | null>(null)
   const cancelled = useRef(false)
-  // Stop polling if the teacher navigates away mid-review (the job still
-  // finishes server-side and lands in history).
   useEffect(() => () => { cancelled.current = true }, [])
 
-  // Keep form in sync if the parent assignment changes (e.g. teacher came from
-  // a different past work). Don't overwrite submission_text — they may be typing.
   useEffect(() => {
     if (!revisionOf) {
       setForm((f) => ({ ...f, parent_assignment_id: undefined }))
@@ -63,29 +79,26 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
     setForm((f) => ({
       ...f,
       parent_assignment_id: revisionOf.id,
-      rubric_id:            revisionOf.rubric_id    ?? f.rubric_id,
       course_id:            revisionOf.course_id    ?? f.course_id,
       student_name:         revisionOf.student_name ?? f.student_name,
       student_email:        revisionOf.student_email ?? f.student_email,
       student_group:        revisionOf.student_group ?? f.student_group,
     }))
   }, [revisionOf])
+
   const { atGradeLimit, gradesUsed, gradesLimit, can } = usePlan()
   const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
 
-  // Documents beyond the single-pass cap are reviewed section-by-section (Pro feature).
   const charCount = form.submission_text.length
   const isLong = charCount > SINGLE_PASS_CHAR_LIMIT
   const approxPages = Math.round(charCount / 3000)
 
   const { data: courses = [] } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
-  const { data: rubrics = [] } = useQuery({
-    queryKey: ['rubrics', form.course_id],
-    queryFn: () =>
-      client.get<Rubric[]>('/api/rubrics', { params: { course_id: form.course_id || undefined } }).then((r) => r.data),
+  const { data: criteria = [] } = useQuery({
+    queryKey: ['criteria', form.course_id],
+    queryFn:  () => getCriteria(form.course_id || undefined),
   })
 
-  // Autocomplete suggestions — previously-used names & groups (keeps spelling consistent)
   const { data: students = [] } = useQuery({
     queryKey: ['students', form.course_id],
     queryFn: () => getStudents(form.course_id || undefined),
@@ -93,7 +106,38 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
   const nameSuggestions  = Array.from(new Set(students.map((s) => s.student_name).filter(Boolean)))
   const groupSuggestions = Array.from(new Set(students.map((s) => s.student_group).filter((g): g is string => !!g)))
 
-  const set = (field: keyof GradeRequest) => (
+  // Criteria available to pick = library minus already-picked
+  const pickedIds = useMemo(() => new Set(picked.map((p) => p.id)), [picked])
+  const available = criteria.filter((c) => !pickedIds.has(c.id))
+
+  const weightTotal = picked.reduce((s, p) => s + (Number(p.weight) || 0), 0)
+  const weightsValid = picked.length === 0 || weightTotal === 100
+
+  function addCriterion(id: string) {
+    if (!id) return
+    const c = criteria.find((x) => x.id === id)
+    if (!c) return
+    setPicked((prev) => {
+      const next = [...prev, { id: c.id, name: c.name, weight: 0 }]
+      const weights = evenWeights(next.length)
+      return next.map((item, i) => ({ ...item, weight: weights[i] }))
+    })
+  }
+
+  function removeCriterion(id: string) {
+    setPicked((prev) => {
+      const next = prev.filter((p) => p.id !== id)
+      if (next.length === 0) return next
+      const weights = evenWeights(next.length)
+      return next.map((item, i) => ({ ...item, weight: weights[i] }))
+    })
+  }
+
+  function setWeight(id: string, weight: number) {
+    setPicked((prev) => prev.map((p) => p.id === id ? { ...p, weight } : p))
+  }
+
+  const set = (field: keyof Omit<GradeRequest, 'criterion_ids' | 'weights'>) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => setForm((f) => ({ ...f, [field]: e.target.value }))
 
@@ -104,8 +148,11 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!form.submission_text.trim()) return
+    if (!weightsValid) {
+      setError(`Сумма весов критериев должна быть 100% (сейчас ${weightTotal}%)`)
+      return
+    }
 
-    // Large works require Pro and go through the section-aware review pipeline.
     if (isLong && !can('documentUpload')) {
       showUpgradeModal('FEATURE_NOT_IN_PLAN')
       return
@@ -114,13 +161,17 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
     setLoading(true)
     setError('')
 
+    const criterionFields = picked.length > 0
+      ? { criterion_ids: picked.map((p) => p.id), weights: picked.map((p) => p.weight) }
+      : {}
+
     const common = {
-      ...(form.course_id  ? { course_id:  form.course_id  } : {}),
-      ...(form.rubric_id  ? { rubric_id:  form.rubric_id  } : {}),
-      ...(form.student_name  ? { student_name:  form.student_name  } : {}),
+      ...(form.course_id     ? { course_id:     form.course_id  }     : {}),
+      ...(form.student_name  ? { student_name:  form.student_name  }  : {}),
       ...(form.student_group ? { student_group: form.student_group } : {}),
       ...(form.student_email ? { student_email: form.student_email } : {}),
       ...(form.parent_assignment_id ? { parent_assignment_id: form.parent_assignment_id } : {}),
+      ...criterionFields,
     }
 
     if (isLong) {
@@ -144,18 +195,20 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
     }
   }
 
-  // Kick off an async review job and poll it to completion.
-  async function runReview(common: Record<string, string>) {
+  async function runReview(common: Record<string, unknown>) {
     cancelled.current = false
     try {
       const job = await startReview({ submission_text: form.submission_text, ...common })
       setReviewJob(job)
 
-      for (let i = 0; i < 200 && !cancelled.current; i++) {   // up to ~10 min
+      for (let i = 0; i < 200 && !cancelled.current; i++) {
         await delay(3000)
         const status = await getReview(job.id)
         setReviewJob(status)
-        if (status.status === 'ready') { onReview(status, form); break }
+        if (status.status === 'ready') {
+          onReview(status, { submission_text: form.submission_text, ...common } as GradeRequest)
+          break
+        }
         if (status.status === 'failed') {
           setError(status.error_message || 'Не удалось выполнить рецензирование')
           break
@@ -170,10 +223,11 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
   }
 
   const selectClass = 'w-full px-3 py-2 text-sm font-sans text-ink bg-surface border border-border rounded-md focus:outline-none focus:border-border-strong'
+  const weightInputClass = 'w-14 px-1.5 py-1 text-xs font-mono text-center bg-surface border border-border rounded-md focus:outline-none focus:border-border-strong'
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col h-full">
-      {/* Revision banner — visible whenever this is a re-submission */}
+      {/* Revision banner */}
       {revisionOf && (
         <div className="mx-4 mt-4 px-3 py-2.5 bg-amber-light/60 border border-amber/25 rounded-md flex items-start gap-2.5">
           <span className="text-amber text-sm mt-0.5 flex-shrink-0">↻</span>
@@ -236,25 +290,71 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
         </datalist>
       </div>
 
-      {/* Course + Rubric */}
+      {/* Course + Criteria */}
       <div className="px-4 py-3 border-b border-border">
         <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">
-          Курс и критерии оценки
+          Предмет и критерии оценки
         </div>
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <div>
             <select className={selectClass} value={form.course_id} onChange={set('course_id')}>
-              <option value="">Курс не выбран</option>
+              <option value="">Предмет не выбран</option>
               {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <NoCourseHint />
           </div>
-          <select className={selectClass} value={form.rubric_id} onChange={set('rubric_id')}>
-            <option value="">Без критериев (общая оценка)</option>
-            {rubrics.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+
+          {/* Add criterion */}
+          <select
+            className={selectClass}
+            value=""
+            onChange={(e) => addCriterion(e.target.value)}
+          >
+            <option value="">
+              {picked.length === 0
+                ? 'Без критериев (общая оценка) — или выберите критерий для добавления'
+                : '+ Добавить критерий'}
+            </option>
+            {available.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+                {c.subject ? ` · ${c.subject}` : ''}
+              </option>
+            ))}
           </select>
 
-          {/* Calculation mode → reasoning model + STEM checking */}
+          {/* Picked criteria + weights */}
+          {picked.length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              {picked.map((p) => (
+                <div key={p.id} className="flex items-center gap-2 px-2.5 py-1.5 bg-surface-warm border border-border rounded-md">
+                  <span className="flex-1 text-sm font-sans text-ink truncate">{p.name}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={p.weight}
+                    onChange={(e) => setWeight(p.id, Number(e.target.value))}
+                    className={weightInputClass}
+                  />
+                  <span className="text-xs text-ink-tertiary">%</span>
+                  <button
+                    type="button"
+                    onClick={() => removeCriterion(p.id)}
+                    className="text-ink-tertiary hover:text-danger text-sm leading-none w-5 text-center"
+                    title="Убрать критерий"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <div className={`text-[11.5px] font-sans text-right pr-1 ${weightsValid ? 'text-success' : 'text-warning'}`}>
+                Сумма весов: {weightTotal}%{!weightsValid && ' — должно быть 100%'}
+              </div>
+            </div>
+          )}
+
+          {/* Calculation mode */}
           <label className="flex items-start gap-2.5 cursor-pointer select-none pt-1">
             <input
               type="checkbox"
@@ -286,7 +386,6 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
           Работа студента *
         </div>
 
-        {/* Optional document upload — auto-fills the textarea (editable for OCR fixes) */}
         <div className="mb-2">
           <DocumentUpload
             documentType="assignment"
@@ -308,7 +407,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
         />
       </div>
 
-      {/* Large work → review mode notice */}
+      {/* Large work notice */}
       {isLong && (
         <div className="mx-4 mb-2 px-3 py-2 bg-amber-light/60 border border-amber/20 text-[12px] font-sans text-ink-secondary rounded-md leading-relaxed">
           <span className="font-medium text-ink">Объёмная работа</span> (~{approxPages} стр.). Она будет проверена
@@ -338,7 +437,6 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
           </>
         ) : (
           <>
-            {/* Live progress while a long review is running */}
             {reviewJob && (
               <div className="px-3 py-2 bg-surface-warm border border-border rounded-md">
                 <div className="flex items-center justify-between text-xs font-sans text-ink-secondary mb-1.5">
@@ -362,7 +460,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
               </div>
             )}
 
-            <Button type="submit" className="w-full" loading={loading} disabled={atGradeLimit}>
+            <Button type="submit" className="w-full" loading={loading} disabled={atGradeLimit || !weightsValid}>
               {loading
                 ? (isLong ? 'Рецензируем…' : isCalc ? 'Пошаговая проверка…' : 'Проверяем…')
                 : (isLong ? 'Рецензировать работу' : 'Проверить с ИИ')}

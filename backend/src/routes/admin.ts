@@ -84,34 +84,35 @@ router.get('/errors', asyncHandler(async (req, res) => {
   res.json(await getRecentErrors(Math.min(days, 90)))
 }))
 
-// ─── Global template rubrics ──────────────────────────────────────────────────
+// ─── Global criteria templates ────────────────────────────────────────────────
 
-router.get('/rubrics/templates', asyncHandler(async (_req, res) => {
+router.get('/criteria/templates', asyncHandler(async (_req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, name, criteria, template_subject, created_at
-     FROM rubrics
-     WHERE is_global_template = TRUE
-     ORDER BY template_subject, name`
+    `SELECT id, name, description, subject, created_at
+       FROM criteria
+      WHERE is_global_template = TRUE
+      ORDER BY subject, name`
   )
   res.json(rows)
 }))
 
-router.post('/rubrics/templates', asyncHandler(async (req, res) => {
-  const { name, criteria, template_subject } = req.body as {
-    name: string; criteria: unknown; template_subject?: string
+router.post('/criteria/templates', asyncHandler(async (req, res) => {
+  const { name, description, subject } = req.body as {
+    name: string; description?: string; subject?: string
   }
+  if (!name?.trim()) throw new ValidationError('Название критерия обязательно')
   const { rows } = await pool.query(
-    `INSERT INTO rubrics (teacher_id, name, criteria, is_global_template, template_subject)
-     VALUES ($1, $2, $3, TRUE, $4)
-     RETURNING id, name, criteria, template_subject, created_at`,
-    [req.teacher.id, name, JSON.stringify(criteria), template_subject ?? 'general']
+    `INSERT INTO criteria (teacher_id, name, description, subject, is_global_template)
+     VALUES (NULL, $1, $2, $3, TRUE)
+     RETURNING id, name, description, subject, created_at`,
+    [name.trim(), description ?? null, subject ?? 'general']
   )
   res.status(201).json(rows[0])
 }))
 
-router.delete('/rubrics/templates/:id', asyncHandler(async (req, res) => {
+router.delete('/criteria/templates/:id', asyncHandler(async (req, res) => {
   const { rowCount } = await pool.query(
-    'DELETE FROM rubrics WHERE id = $1 AND is_global_template = TRUE',
+    'DELETE FROM criteria WHERE id = $1 AND is_global_template = TRUE',
     [req.params.id]
   )
   if (!rowCount) { res.status(404).json({ error: 'Шаблон не найден' }); return }

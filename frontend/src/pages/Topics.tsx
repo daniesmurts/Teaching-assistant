@@ -156,9 +156,9 @@ export default function Topics() {
               </Field>
 
               <div className="grid grid-cols-2 gap-3">
-                <Field label="Курс (необязательно)">
+                <Field label="Предмет (необязательно)">
                   <select className={selectClass} value={form.course_id} onChange={set('course_id')}>
-                    <option value="">Без курса</option>
+                    <option value="">Без предмета</option>
                     {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </Field>

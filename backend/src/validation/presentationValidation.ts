@@ -12,7 +12,7 @@ export const generatePresentationRules = [
 
   body('course_id')
     .optional({ nullable: true, checkFalsy: true })
-    .isUUID().withMessage('Неверный идентификатор курса'),
+    .isUUID().withMessage('Неверный идентификатор предмета'),
 
   body('lecture_number')
     .optional({ nullable: true, checkFalsy: true })

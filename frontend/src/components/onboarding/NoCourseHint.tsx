@@ -17,7 +17,7 @@ export default function NoCourseHint() {
       className="flex items-center gap-1.5 mt-1.5 text-xs font-sans text-amber hover:underline"
     >
       <span>＋</span>
-      <span>Создайте курс — это повысит точность и сохранит контекст</span>
+      <span>Создайте предмет — это повысит точность и сохранит контекст</span>
     </Link>
   )
 }

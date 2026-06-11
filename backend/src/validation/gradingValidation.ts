@@ -10,11 +10,36 @@ export const gradeRules = [
 
   body('course_id')
     .optional({ nullable: true, checkFalsy: true })
-    .isUUID().withMessage('Неверный идентификатор курса'),
+    .isUUID().withMessage('Неверный идентификатор предмета'),
 
-  body('rubric_id')
-    .optional({ nullable: true, checkFalsy: true })
-    .isUUID().withMessage('Неверный идентификатор рубрики'),
+  // Criteria selection — optional. Empty/absent → holistic grading (no rubric).
+  body('criterion_ids')
+    .optional({ nullable: true })
+    .isArray({ max: 10 }).withMessage('Можно выбрать не более 10 критериев'),
+  body('criterion_ids.*')
+    .isUUID().withMessage('Неверный идентификатор критерия'),
+
+  body('weights')
+    .optional({ nullable: true })
+    .isArray({ max: 10 }).withMessage('Слишком много весов'),
+  body('weights.*')
+    .isInt({ min: 0, max: 100 }).withMessage('Вес критерия: целое число 0–100'),
+
+  // Cross-field: if criteria are picked, weights must match in length and sum to 100.
+  body('criterion_ids').custom((ids: unknown, { req }) => {
+    const idsArr = Array.isArray(ids) ? ids : []
+    const weights = (req.body as { weights?: unknown }).weights
+    const weightsArr = Array.isArray(weights) ? (weights as number[]) : []
+    if (idsArr.length === 0) return true
+    if (idsArr.length !== weightsArr.length) {
+      throw new Error('Каждому критерию должен соответствовать вес')
+    }
+    const sum = weightsArr.reduce((s: number, w: number) => s + Number(w || 0), 0)
+    if (sum !== 100) {
+      throw new Error(`Сумма весов должна быть равна 100 (сейчас ${sum})`)
+    }
+    return true
+  }),
 
   body('student_name')
     .optional()
@@ -51,11 +76,34 @@ export const reviewRules = [
 
   body('course_id')
     .optional({ nullable: true, checkFalsy: true })
-    .isUUID().withMessage('Неверный идентификатор курса'),
+    .isUUID().withMessage('Неверный идентификатор предмета'),
 
-  body('rubric_id')
-    .optional({ nullable: true, checkFalsy: true })
-    .isUUID().withMessage('Неверный идентификатор рубрики'),
+  body('criterion_ids')
+    .optional({ nullable: true })
+    .isArray({ max: 10 }).withMessage('Можно выбрать не более 10 критериев'),
+  body('criterion_ids.*')
+    .isUUID().withMessage('Неверный идентификатор критерия'),
+
+  body('weights')
+    .optional({ nullable: true })
+    .isArray({ max: 10 }).withMessage('Слишком много весов'),
+  body('weights.*')
+    .isInt({ min: 0, max: 100 }).withMessage('Вес критерия: целое число 0–100'),
+
+  body('criterion_ids').custom((ids: unknown, { req }) => {
+    const idsArr = Array.isArray(ids) ? ids : []
+    const weights = (req.body as { weights?: unknown }).weights
+    const weightsArr = Array.isArray(weights) ? (weights as number[]) : []
+    if (idsArr.length === 0) return true
+    if (idsArr.length !== weightsArr.length) {
+      throw new Error('Каждому критерию должен соответствовать вес')
+    }
+    const sum = weightsArr.reduce((s: number, w: number) => s + Number(w || 0), 0)
+    if (sum !== 100) {
+      throw new Error(`Сумма весов должна быть равна 100 (сейчас ${sum})`)
+    }
+    return true
+  }),
 
   body('student_name')
     .optional().trim()

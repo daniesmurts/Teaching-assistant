@@ -127,7 +127,7 @@ export default function Dashboard() {
               sub={stats?.avg_score != null ? 'из 100' : 'нет данных'}
             />
             <StatCard
-              label="Курсы"
+              label="Предметы"
               value={courses.length}
               sub={courses.length > 0 ? courses[0].name : undefined}
             />
@@ -198,7 +198,7 @@ export default function Dashboard() {
                 {[
                   { to: '/grading',       icon: '✦', label: 'Проверить работу',    sub: 'ИИ + рубрика' },
                   { to: '/presentations', icon: '▤', label: 'Создать презентацию', sub: 'По теме лекции' },
-                  { to: '/courses',       icon: '◫', label: 'Управление курсами',  sub: `${courses.length} курс${courses.length === 1 ? '' : courses.length < 5 ? 'а' : 'ов'}` },
+                  { to: '/courses',       icon: '◫', label: 'Управление предметами', sub: `${courses.length} предмет${courses.length === 1 ? '' : courses.length < 5 ? 'а' : 'ов'}` },
                 ].map((item) => (
                   <Link
                     key={item.to}

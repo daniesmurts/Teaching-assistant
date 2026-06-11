@@ -32,7 +32,7 @@ router.post(
 
     // Knowledge docs must be tied to a course (they're chunked per-course)
     if ((document_type === 'syllabus' || document_type === 'material') && !course_id) {
-      throw new DocumentProcessingError('Для программы или материалов укажите курс')
+      throw new DocumentProcessingError('Для программы или материалов укажите предмет')
     }
 
     const document = await uploadAndProcess({

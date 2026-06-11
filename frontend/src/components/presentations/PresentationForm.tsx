@@ -98,9 +98,9 @@ export default function PresentationForm({ onResult }: Props) {
       {/* Row 2 — course + lecture number */}
       <div className="grid grid-cols-[1fr_120px] gap-3">
         <div>
-          <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">Курс</label>
+          <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">Предмет</label>
           <select className={selectClass} value={form.course_id} onChange={set('course_id')}>
-            <option value="">Без курса</option>
+            <option value="">Без предмета</option>
             {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <NoCourseHint />

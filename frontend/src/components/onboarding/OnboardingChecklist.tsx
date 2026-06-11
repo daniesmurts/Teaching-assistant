@@ -28,7 +28,7 @@ export default function OnboardingChecklist() {
   if (courses === undefined || stats === undefined || presentations === undefined) return null
 
   const steps: Step[] = [
-    { done: courses.length > 0,       title: 'Создайте первый курс',        desc: 'Курс задаёт контекст для проверки работ и презентаций.', to: '/courses',       cta: 'Создать курс' },
+    { done: courses.length > 0,       title: 'Создайте первый предмет',     desc: 'Предмет задаёт контекст для проверки работ и презентаций.', to: '/courses',       cta: 'Создать предмет' },
     { done: stats.total > 0,          title: 'Проверьте первую работу',     desc: 'Вставьте текст работы студента — ИИ оценит её и даст разбор.', to: '/grading',       cta: 'Проверить работу' },
     { done: presentations.length > 0, title: 'Сгенерируйте презентацию',    desc: 'Получите структуру лекции по теме за минуту.',           to: '/presentations', cta: 'Создать презентацию' },
   ]

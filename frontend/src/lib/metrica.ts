@@ -20,7 +20,7 @@ declare global {
 
 // Authenticated app areas — Metrica must never initialise while on these paths.
 const PRIVATE_PREFIXES = [
-  '/dashboard', '/courses', '/grading', '/rubrics', '/students',
+  '/dashboard', '/courses', '/grading', '/criteria', '/students',
   '/presentations', '/billing', '/settings', '/help', '/admin',
 ]
 

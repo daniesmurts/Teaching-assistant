@@ -68,7 +68,7 @@ export default function Settings() {
             <div className="p-5">
               <div className="text-sm font-sans font-medium text-ink mb-1">Удалить аккаунт</div>
               <p className="text-xs font-sans text-ink-secondary leading-relaxed mb-4">
-                Удаление аккаунта необратимо. Все ваши данные — курсы, рубрики, проверенные работы,
+                Удаление аккаунта необратимо. Все ваши данные — предметы, рубрики, проверенные работы,
                 презентации, загруженные документы и история платежей — будут безвозвратно удалены
                 в соответствии с ФЗ-152 «О персональных данных».
               </p>

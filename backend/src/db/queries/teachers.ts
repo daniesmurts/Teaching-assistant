@@ -120,7 +120,7 @@ export async function cancelTeacherSubscription(teacherId: string): Promise<void
 
 /**
  * Permanently delete a teacher and all associated data (152-ФЗ right to erasure).
- * FK cascades remove courses, rubrics, assignments, presentations, documents,
+ * FK cascades remove courses, criteria, assignments, presentations, documents,
  * chunks, payments, usage counters, reset tokens; api_usage_log is anonymised
  * (teacher_id → NULL, no PII in that table).
  */

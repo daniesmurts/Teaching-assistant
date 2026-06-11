@@ -1,9 +1,10 @@
 import { chatJSON } from './deepseek'
-import { findRubricById } from '../db/queries/rubrics'
+import { resolveCriteriaSnapshot } from './grading'
 import { createAssignment } from '../db/queries/assignments'
 import {
   setLongReviewStatus,
   setLongReviewProgress,
+  setLongReviewSnapshot,
   completeLongReview,
   failLongReview,
 } from '../db/queries/longReviews'
@@ -11,7 +12,7 @@ import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { logger } from '../lib/logger'
 import type { CallContext } from './deepseek'
-import type { LongReviewResult, ChapterReview, GradeLetter, RubricCriterion } from '../../../shared/types'
+import type { LongReviewResult, ChapterReview, GradeLetter, CriteriaSnapshotItem } from '../../../shared/types'
 
 // ─── Tuning ────────────────────────────────────────────────────────────────────
 
@@ -27,8 +28,10 @@ const VERBATIM_CHARS       = 6_000    // intro/conclusion kept in full for the r
 interface RunParams {
   reviewId:       string
   teacherId:      string
+  institutionId?: string | null
   courseId?:      string | null
-  rubricId?:      string | null
+  criterionIds?:  string[]
+  weights?:       number[]
   studentName?:   string | null
   studentEmail?:  string | null
   studentGroup?:  string | null
@@ -39,7 +42,15 @@ interface RunParams {
 export async function runLongReview(p: RunParams): Promise<void> {
   const ctx: CallContext = { teacherId: p.teacherId, feature: 'grading' }
   try {
-    const rubric = p.rubricId ? await findRubricById(p.rubricId, p.teacherId) : null
+    const snapshot = await resolveCriteriaSnapshot(
+      p.teacherId,
+      p.institutionId ?? null,
+      p.criterionIds ?? [],
+      p.weights ?? [],
+    )
+    if (snapshot.length > 0) {
+      await setLongReviewSnapshot(p.reviewId, snapshot).catch(() => null)
+    }
 
     const sections = splitIntoSections(p.submissionText)
     await setLongReviewStatus(p.reviewId, 'analyzing')
@@ -48,7 +59,7 @@ export async function runLongReview(p: RunParams): Promise<void> {
     // ── Map: analyse each section, with bounded concurrency + progress ──────────
     let done = 0
     const analyses = await mapWithConcurrency(sections, MAP_CONCURRENCY, async (sec) => {
-      const a = await analyzeSection(sec, rubric?.criteria ?? [], ctx)
+      const a = await analyzeSection(sec, snapshot, ctx)
       done += 1
       await setLongReviewProgress(p.reviewId, done, sections.length).catch(() => null)
       return a
@@ -56,13 +67,12 @@ export async function runLongReview(p: RunParams): Promise<void> {
 
     // ── Reduce: synthesise the overall review ───────────────────────────────────
     await setLongReviewStatus(p.reviewId, 'synthesizing')
-    const result = await synthesizeReview(sections, analyses, rubric?.name, rubric?.criteria, ctx)
+    const result = await synthesizeReview(sections, analyses, snapshot, ctx)
 
     // ── Draft assignment so it flows into history / approval / email / RAG ──────
     const assignment = await createAssignment({
       teacherId:     p.teacherId,
       courseId:      p.courseId ?? undefined,
-      rubricId:      p.rubricId ?? undefined,
       studentName:   p.studentName ?? undefined,
       studentEmail:  p.studentEmail ?? undefined,
       studentGroup:  p.studentGroup ?? undefined,
@@ -74,6 +84,7 @@ export async function runLongReview(p: RunParams): Promise<void> {
       aiCriteriaScores: [],
       aiStrengths:   result.overall_strengths ?? [],
       aiImprovements: result.overall_gaps ?? [],
+      criteriaSnapshot: snapshot.length > 0 ? snapshot : null,
     })
 
     await completeLongReview(p.reviewId, result, assignment.id)
@@ -222,7 +233,7 @@ interface SectionAnalysis {
 
 async function analyzeSection(
   section: Section,
-  criteria: RubricCriterion[],
+  criteria: CriteriaSnapshotItem[],
   ctx: CallContext
 ): Promise<SectionAnalysis> {
   const criteriaHint = criteria.length
@@ -266,15 +277,14 @@ ${sanitiseForPrompt(body)}
 async function synthesizeReview(
   sections: Section[],
   analyses: SectionAnalysis[],
-  rubricName: string | undefined,
-  criteria: RubricCriterion[] | undefined,
+  criteria: CriteriaSnapshotItem[],
   ctx: CallContext
 ): Promise<LongReviewResult> {
   const intro = sections.find((s) => s.kind === 'intro')
   const concl = sections.find((s) => s.kind === 'conclusion')
 
-  const rubricBlock = rubricName && criteria?.length
-    ? `## Рубрика: ${rubricName}\n${criteria.map((c) => `- ${c.name} (вес ${c.weight}): ${c.description}`).join('\n')}\n\n`
+  const criteriaBlock = criteria.length
+    ? `## Критерии оценки\n${criteria.map((c) => `- ${c.name} (вес ${c.weight}%)${c.description ? `: ${c.description}` : ''}`).join('\n')}\n\n`
     : ''
 
   const verbatim =
@@ -295,7 +305,7 @@ ${a.summary}
     `Отвечайте только валидным JSON на русском языке.`
 
   const user =
-    `${rubricBlock}${verbatim}## Поразделный анализ работы
+    `${criteriaBlock}${verbatim}## Поразделный анализ работы
 ${analysisBlock}
 
 Составьте итоговую рецензию. Верните JSON со следующими полями:

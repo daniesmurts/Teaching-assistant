@@ -57,23 +57,36 @@ export interface Course {
   created_at: string
 }
 
-// ─── Rubric ───────────────────────────────────────────────────────────────────
+// ─── Criterion ────────────────────────────────────────────────────────────────
+// A reusable atom of grading. Teachers pick one or more at grading time and
+// assign weights inline — weights live only on the assignment snapshot, not
+// here.
 
-export interface RubricCriterion {
-  name: string
-  weight: number
-  description: string
-  max_score: number
+export type CriterionSubject =
+  | 'business' | 'economics' | 'law' | 'medicine'
+  | 'engineering' | 'humanities' | 'general'
+
+export interface Criterion {
+  id:                    string
+  teacher_id:            string | null   // NULL for global templates
+  course_id:             string | null
+  name:                  string
+  description:           string | null
+  subject:               CriterionSubject | null
+  is_global_template:    boolean
+  is_institution_shared: boolean
+  created_at:            string
 }
 
-export interface Rubric {
-  id: string
-  teacher_id: string
-  course_id: string | null
-  name: string
-  criteria: RubricCriterion[]
-  is_default: boolean
-  created_at: string
+// Item shape inside assignments.criteria_snapshot. Weights/scores are filled in
+// at grading time; criterion_id is null for the holistic mode.
+export interface CriteriaSnapshotItem {
+  criterion_id: string | null
+  name:         string
+  weight:       number          // 0–100, sum across items must be 100
+  description:  string | null
+  score?:       number
+  feedback?:    string
 }
 
 // ─── Assignment ───────────────────────────────────────────────────────────────
@@ -101,7 +114,6 @@ export interface Assignment {
   id: string
   teacher_id: string
   course_id: string | null
-  rubric_id: string | null
   student_name: string | null
   student_email: string | null
   student_group: string | null
@@ -114,6 +126,7 @@ export interface Assignment {
   ai_strengths: string[] | null
   ai_improvements: string[] | null
   ai_revision_check: RevisionCheckItem[] | null   // present only on revisions
+  criteria_snapshot: CriteriaSnapshotItem[] | null   // the criteria + weights used for this grading
   approved_score: number | null
   approved_grade: GradeLetter | null
   approved_feedback: string | null

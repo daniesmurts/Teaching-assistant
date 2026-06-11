@@ -25,11 +25,13 @@ router.post(
   validate(gradeRules),
   asyncHandler(async (req, res) => {
     const {
-      submission_text, rubric_id, course_id, student_name, student_email, student_group,
+      submission_text, criterion_ids, weights, course_id,
+      student_name, student_email, student_group,
       reference_solution, assignment_type, parent_assignment_id,
     } = req.body as {
       submission_text: string
-      rubric_id?: string
+      criterion_ids?: string[]
+      weights?: number[]
       course_id?: string
       student_name?: string
       student_email?: string
@@ -40,9 +42,11 @@ router.post(
     }
     const result = await grade({
       teacherId:          req.teacher.id,
+      institutionId:      req.teacher.institution_id ?? null,
       planTier:           req.teacher.plan_tier,
       submissionText:     submission_text,
-      rubricId:           rubric_id,
+      criterionIds:       criterion_ids,
+      weights,
       courseId:           course_id,
       studentName:        student_name,
       studentEmail:       student_email,
@@ -64,9 +68,13 @@ router.post(
   checkMonthlyLimit('gradesPerMonth'),
   validate(reviewRules),
   asyncHandler(async (req, res) => {
-    const { submission_text, rubric_id, course_id, student_name, student_email, student_group } = req.body as {
+    const {
+      submission_text, criterion_ids, weights, course_id,
+      student_name, student_email, student_group,
+    } = req.body as {
       submission_text: string
-      rubric_id?: string
+      criterion_ids?: string[]
+      weights?: number[]
       course_id?: string
       student_name?: string
       student_email?: string
@@ -76,7 +84,6 @@ router.post(
     const review = await createLongReview({
       teacherId:     req.teacher.id,
       courseId:      course_id,
-      rubricId:      rubric_id,
       studentName:   student_name,
       studentEmail:  student_email,
       studentGroup:  student_group,
@@ -85,13 +92,15 @@ router.post(
 
     // Process asynchronously — do not await. The client polls GET /review/:id.
     runLongReview({
-      reviewId:      review.id,
-      teacherId:     req.teacher.id,
-      courseId:      course_id,
-      rubricId:      rubric_id,
-      studentName:   student_name,
-      studentEmail:  student_email,
-      studentGroup:  student_group,
+      reviewId:       review.id,
+      teacherId:      req.teacher.id,
+      institutionId:  req.teacher.institution_id ?? null,
+      courseId:       course_id,
+      criterionIds:   criterion_ids,
+      weights,
+      studentName:    student_name,
+      studentEmail:   student_email,
+      studentGroup:   student_group,
       submissionText: submission_text,
     }).catch(() => null)
 

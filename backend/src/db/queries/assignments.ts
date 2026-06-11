@@ -1,11 +1,12 @@
 import { pool } from '../connection'
-import type { Assignment, GradeLetter, CriterionScore, RevisionCheckItem } from '../../../../shared/types'
+import type {
+  Assignment, GradeLetter, CriterionScore, RevisionCheckItem, CriteriaSnapshotItem,
+} from '../../../../shared/types'
 
 interface AssignmentRow {
   id: string
   teacher_id: string
   course_id: string | null
-  rubric_id: string | null
   student_name: string | null
   student_email: string | null
   student_group: string | null
@@ -18,6 +19,7 @@ interface AssignmentRow {
   ai_strengths: string[] | null
   ai_improvements: string[] | null
   ai_revision_check: RevisionCheckItem[] | null
+  criteria_snapshot: CriteriaSnapshotItem[] | null
   approved_score: number | null
   approved_grade: string | null
   approved_feedback: string | null
@@ -35,7 +37,6 @@ function toAssignment(row: AssignmentRow): Assignment {
     id: row.id,
     teacher_id: row.teacher_id,
     course_id: row.course_id,
-    rubric_id: row.rubric_id,
     student_name: row.student_name,
     student_email: row.student_email,
     student_group: row.student_group,
@@ -48,6 +49,7 @@ function toAssignment(row: AssignmentRow): Assignment {
     ai_strengths: row.ai_strengths,
     ai_improvements: row.ai_improvements,
     ai_revision_check: row.ai_revision_check,
+    criteria_snapshot: row.criteria_snapshot,
     approved_score: row.approved_score,
     approved_grade: row.approved_grade as GradeLetter | null,
     approved_feedback: row.approved_feedback,
@@ -64,7 +66,6 @@ function toAssignment(row: AssignmentRow): Assignment {
 export async function createAssignment(data: {
   teacherId: string
   courseId?: string
-  rubricId?: string
   studentName?: string
   studentEmail?: string
   studentGroup?: string
@@ -76,21 +77,19 @@ export async function createAssignment(data: {
   aiCriteriaScores: CriterionScore[]
   aiStrengths: string[]
   aiImprovements: string[]
-  parentAssignmentId?: string                          // link to previous version
+  criteriaSnapshot?: CriteriaSnapshotItem[] | null
+  parentAssignmentId?: string
   aiRevisionCheck?: Array<{ point: string; status: string; note: string }>
 }): Promise<Assignment> {
-  // revision_number is parent's + 1, or 1 if no parent.
-  // Single CTE does the lookup + insert in one round-trip and preserves
-  // atomicity if the parent disappears between two queries.
   const { rows } = await pool.query<AssignmentRow>(
     `WITH parent AS (
        SELECT revision_number FROM assignments
        WHERE id = $15::uuid AND teacher_id = $1
      )
      INSERT INTO assignments (
-       teacher_id, course_id, rubric_id, student_name, student_email, student_group,
+       teacher_id, course_id, student_name, student_email, student_group,
        submission_text, ai_score, ai_grade, ai_grade_label, ai_feedback,
-       ai_criteria_scores, ai_strengths, ai_improvements,
+       ai_criteria_scores, ai_strengths, ai_improvements, criteria_snapshot,
        parent_assignment_id, ai_revision_check,
        revision_number, status
      ) VALUES (
@@ -103,7 +102,6 @@ export async function createAssignment(data: {
     [
       data.teacherId,
       data.courseId ?? null,
-      data.rubricId ?? null,
       data.studentName ?? null,
       data.studentEmail ?? null,
       data.studentGroup ?? null,
@@ -115,6 +113,7 @@ export async function createAssignment(data: {
       JSON.stringify(data.aiCriteriaScores),
       data.aiStrengths,
       data.aiImprovements,
+      data.criteriaSnapshot ? JSON.stringify(data.criteriaSnapshot) : null,
       data.parentAssignmentId ?? null,
       data.aiRevisionCheck ? JSON.stringify(data.aiRevisionCheck) : null,
     ]

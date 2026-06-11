@@ -1,49 +1,41 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  getRubricTemplates, createRubricTemplate, deleteRubricTemplate,
-  type RubricTemplateCriterion,
+  getCriterionTemplates, createCriterionTemplate, deleteCriterionTemplate,
 } from '../../api/admin'
 import Button from '../../components/ui/Button'
 import { useUIStore } from '../../store/uiStore'
 
-const SUBJECTS = ['business', 'economics', 'law', 'medicine', 'engineering', 'humanities', 'general']
-
-const emptyCriterion = (): RubricTemplateCriterion => ({ name: '', weight: 25, max_score: 100, description: '' })
+const SUBJECTS = ['general', 'business', 'economics', 'law', 'medicine', 'engineering', 'humanities']
 
 export default function AdminRubrics() {
   const qc = useQueryClient()
   const addToast = useUIStore((s) => s.addToast)
   const [showForm, setShowForm] = useState(false)
-  const [name, setName]         = useState('')
-  const [subject, setSubject]   = useState('general')
-  const [criteria, setCriteria] = useState<RubricTemplateCriterion[]>([emptyCriterion()])
+  const [name, setName]               = useState('')
+  const [description, setDescription] = useState('')
+  const [subject, setSubject]         = useState('general')
 
-  const { data: templates = [] } = useQuery({ queryKey: ['admin-templates'], queryFn: getRubricTemplates })
+  const { data: templates = [] } = useQuery({ queryKey: ['admin-templates'], queryFn: getCriterionTemplates })
 
   const createMut = useMutation({
-    mutationFn: createRubricTemplate,
+    mutationFn: createCriterionTemplate,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-templates'] })
       addToast('Шаблон создан', 'success')
-      setShowForm(false); setName(''); setSubject('general'); setCriteria([emptyCriterion()])
+      setShowForm(false); setName(''); setDescription(''); setSubject('general')
     },
     onError: () => addToast('Не удалось создать шаблон', 'error'),
   })
 
   const deleteMut = useMutation({
-    mutationFn: deleteRubricTemplate,
+    mutationFn: deleteCriterionTemplate,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-templates'] }),
   })
 
-  const setCrit = (i: number, field: keyof RubricTemplateCriterion, value: string | number) =>
-    setCriteria((cs) => cs.map((c, idx) => idx === i ? { ...c, [field]: value } : c))
-
   function submit() {
-    if (!name.trim() || criteria.some((c) => !c.name.trim())) {
-      addToast('Заполните название и все критерии', 'error'); return
-    }
-    createMut.mutate({ name, template_subject: subject, criteria })
+    if (!name.trim()) { addToast('Введите название критерия', 'error'); return }
+    createMut.mutate({ name: name.trim(), description: description.trim() || undefined, subject })
   }
 
   const inputClass = 'px-2 py-1.5 text-sm font-sans bg-surface border border-border rounded-md focus:outline-none focus:border-border-strong'
@@ -52,30 +44,26 @@ export default function AdminRubrics() {
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-3xl mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-5">
-          <h1 className="font-display text-2xl font-bold text-ink">Шаблоны рубрик</h1>
-          {!showForm && <Button size="sm" onClick={() => setShowForm(true)}>+ Новый шаблон</Button>}
+          <h1 className="font-display text-2xl font-bold text-ink">Шаблоны критериев</h1>
+          {!showForm && <Button size="sm" onClick={() => setShowForm(true)}>+ Новый критерий</Button>}
         </div>
 
         {showForm && (
           <div className="bg-surface border border-border rounded-lg p-5 mb-6 space-y-3">
             <div className="grid grid-cols-[1fr_180px] gap-3">
-              <input className={inputClass} placeholder="Название шаблона" value={name} onChange={(e) => setName(e.target.value)} />
+              <input className={inputClass} placeholder="Название критерия" value={name} onChange={(e) => setName(e.target.value)} />
               <select className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)}>
                 {SUBJECTS.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-
-            <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider pt-1">Критерии</div>
-            {criteria.map((c, i) => (
-              <div key={i} className="grid grid-cols-[1fr_80px_28px] gap-2 items-center">
-                <input className={inputClass} placeholder="Название критерия" value={c.name} onChange={(e) => setCrit(i, 'name', e.target.value)} />
-                <input className={inputClass + ' text-center'} type="number" min={0} max={100} placeholder="вес %" value={c.weight} onChange={(e) => setCrit(i, 'weight', Number(e.target.value))} />
-                <button onClick={() => setCriteria((cs) => cs.filter((_, idx) => idx !== i))} className="text-ink-tertiary hover:text-danger">×</button>
-              </div>
-            ))}
-            <button onClick={() => setCriteria((cs) => [...cs, emptyCriterion()])} className="text-xs text-amber hover:underline">+ критерий</button>
-
-            <div className="flex gap-2 pt-2">
+            <textarea
+              className={`${inputClass} w-full resize-none`}
+              rows={3}
+              placeholder="Описание — что именно оценивается (попадает в подсказку ИИ)"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+            <div className="flex gap-2 pt-1">
               <Button size="sm" loading={createMut.isPending} onClick={submit}>Создать</Button>
               <Button size="sm" variant="secondary" onClick={() => setShowForm(false)}>Отмена</Button>
             </div>
@@ -88,11 +76,11 @@ export default function AdminRubrics() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-sans text-sm font-medium text-ink">{t.name}</span>
-                  <span className="text-[10px] bg-amber-light text-amber px-1.5 py-0.5 rounded-sm font-sans">{t.template_subject}</span>
+                  {t.subject && <span className="text-[10px] bg-amber-light text-amber px-1.5 py-0.5 rounded-sm font-sans">{t.subject}</span>}
                 </div>
-                <div className="text-xs font-sans text-ink-tertiary mt-1">
-                  {t.criteria.map((c) => c.name).join(' · ')}
-                </div>
+                {t.description && (
+                  <div className="text-xs font-sans text-ink-tertiary mt-1">{t.description}</div>
+                )}
               </div>
               <button
                 onClick={() => { if (confirm(`Удалить шаблон «${t.name}»?`)) deleteMut.mutate(t.id) }}

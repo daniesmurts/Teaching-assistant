@@ -1,5 +1,5 @@
 import client from './client'
-import type { Rubric, RubricCriterion } from '../types'
+import type { Criterion, CriterionSubject } from '../types'
 
 export interface InstitutionOverview {
   institution:        { id: string; name: string; plan_tier: string; max_teachers: number | null } | null
@@ -34,7 +34,7 @@ export interface PendingInvite {
   created_at: string
 }
 
-export interface InstitutionRubric extends Rubric {
+export interface InstitutionCriterion extends Criterion {
   author_name: string | null
 }
 
@@ -86,12 +86,12 @@ export async function getAuditLog(): Promise<AuditEntry[]> {
   return (await client.get<AuditEntry[]>('/api/institution/audit', { params: { limit: 200 } })).data
 }
 
-export async function getInstitutionRubrics(): Promise<InstitutionRubric[]> {
-  return (await client.get<InstitutionRubric[]>('/api/institution/rubrics')).data
+export async function getInstitutionCriteria(): Promise<InstitutionCriterion[]> {
+  return (await client.get<InstitutionCriterion[]>('/api/institution/criteria')).data
 }
 
-export async function createInstitutionRubric(data: {
-  name: string; course_id?: string; criteria: RubricCriterion[]
-}): Promise<Rubric> {
-  return (await client.post<Rubric>('/api/institution/rubrics', data)).data
+export async function createInstitutionCriterion(data: {
+  name: string; description?: string; course_id?: string; subject?: CriterionSubject
+}): Promise<Criterion> {
+  return (await client.post<Criterion>('/api/institution/criteria', data)).data
 }

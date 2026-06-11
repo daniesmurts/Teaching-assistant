@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-06-06
+**Last updated:** 2026-06-11
 
 ---
 
@@ -15,8 +15,8 @@ commit** as any feature change.
 | **Public visitor** | unauthenticated | Marketing site, register/login, accept invite |
 | **Teacher — Free** | default on signup | Limited grading/presentations, no docs/RAG/email |
 | **Teacher — Pro** | paid (T-Bank) | Unlimited, document upload, RAG, email drafts, full history |
-| **Institution member** | invite or email-domain auto-join | Inherits full institution entitlements + shared rubrics |
-| **Institution admin** | set by platform admin | Manage own institution (teachers, invites, rubrics, usage, audit) |
+| **Institution member** | invite or email-domain auto-join | Inherits full institution entitlements + shared criteria |
+| **Institution admin** | set by platform admin | Manage own institution (teachers, invites, criteria, usage, audit) |
 | **Platform admin** | set in DB | Full platform: teachers, institutions, templates, billing, feedback, errors |
 
 Entitlements are computed as the **stronger of** the teacher's own tier and their
@@ -38,21 +38,23 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 ## Teacher — Free ✅
 
 **Grading**
-- AI grading via DeepSeek (rubric-based or holistic) — score, letter grade, per-criterion breakdown, strengths, improvements
+- AI grading via DeepSeek — pick one or more criteria at grading time + per-criterion weights (sum to 100%), or grade holistically with no criteria. 5-point Russian scale (5/4/3/2), per-criterion breakdown, strengths, improvements
 - Teacher review + approve flow (AI never final; approval feeds RAG)
+- **Editable strengths/improvements lists on approval** — teacher can add/remove/edit bullets before approving; teacher-edited improvements drive the revision check on the next resubmission
+- **Assignment revisions** — when a student resubmits an improved version, link from the past-work detail modal («↻ Оценить переработку») → AI sees v1's feedback as context and returns a per-point check (`addressed` / `partial` / `not_addressed`) with notes; revision badge + colour-coded list on the result
 - STEM / calculation mode (reasoning model + optional reference solution)
-- Grading history / **Журнал** (search by student/group, course + status filters, pagination)
-- Revisit any past grade (read-only detail modal, incl. ВКР chapter review)
+- Grading history / **Журнал** (search by student/group, subject + status filters, pagination)
+- Revisit any past grade (read-only detail modal, incl. ВКР chapter review + revision check)
 - Moodle-compatible **CSV grade export**
 - Watermark on output (free tier only)
-- Limits: 20 grades/mo, 3 presentations/mo, 3 courses, 5 rubrics, 30-day history
+- Limits: 20 grades/mo, 3 presentations/mo, 3 topic generations/mo, 3 subjects, 15 criteria, 30-day history
 
-**Topics** — AI topic generator for research/practicals: student level + field + interests + practice site → level-appropriate, valuable topics (with rationale, scope, novelty). Yandex Search grounding. Free: 3/mo, Pro: unlimited
-**Courses** — CRUD, level, syllabus text/upload
-**Rubrics** — builder (weights as %, live sum check), start from global templates
+**Topics** — AI topic generator for research/practicals: student level + field + interests + practice site → level-appropriate, valuable topics (with rationale, scope, novelty). Yandex Search grounding. Optional student attachment (name + group, autocomplete from existing students) for later lookup. Free: 3/mo, Pro: unlimited
+**Subjects (formerly «Курсы»)** — CRUD, level, syllabus text/upload. Renamed in UI per Russian-academic vocab («курс» = year of study; «предмет» = subject). URL `/courses` and DB `course_id` unchanged
+**Criteria** — library of reusable criteria (name + description + optional subject), start from global templates. Selected at grading time with per-criterion weights and a live sum-to-100 check
 **Students** — auto-collected roster from graded work, per-student grade-over-time chart, groups
 **Presentations** — slide-by-slide generator (title, bullets, speaker notes), copy-per-slide
-**Onboarding** — welcome modal (first login), getting-started checklist (tracks real progress), per-page "how it works" intros, no-course hints on grading/presentations
+**Onboarding** — welcome modal (first login), getting-started checklist (tracks real progress), per-page "how it works" intros, no-subject hints on grading/presentations
 **Account** — feedback page, in-app help center, settings, password change, account deletion (152-ФЗ cascade)
 
 ---
@@ -60,7 +62,7 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 ## Teacher — Pro ✅
 
 Everything in Free, plus:
-- **Unlimited** grades, presentations, courses, rubrics
+- **Unlimited** grades, presentations, courses, criteria
 - **Document upload** — PDF / DOCX / image with OCR (Yandex Vision), auto-fills submission
 - **RAG flywheel** — grading learns from approved grades (course-scoped few-shot)
 - **Long-document review** — ВКР/диплом section-aware map-reduce: chapter-by-chapter analysis, defense questions, suggested grade
@@ -75,7 +77,7 @@ Everything in Free, plus:
 
 A teacher in an institution-tier org (via invite or email-domain auto-join):
 - Automatically gets **full institution entitlements** (= Pro-level: unlimited, uploads, RAG, email)
-- Sees **institution-shared rubrics** in the grading rubric picker, alongside own + global templates
+- Sees **institution-shared criteria** in the grading criteria picker, alongside own + global templates
 
 ---
 
@@ -85,8 +87,8 @@ Panel at `/institution` (gated to `institution_admin` / `platform_admin`):
 - **Overview** — teacher / grade / presentation counts, 30-day activity chart
 - **Usage** — tokens + grade/presentation counts over time, **CSV export** (never shows cost)
 - **Teachers** — list, activate/deactivate (frees a seat), single invite, **bulk invite** (paste list), revoke invites
-- **Rubrics** — create institution-shared rubrics (appear in every member's grading picker)
-- **Audit log** — record of admin actions (invites, activations, shared-rubric creation)
+- **Criteria** — create institution-shared criteria (appear in every member's grading picker)
+- **Audit log** — record of admin actions (invites, activations, shared-criterion creation)
 - Invite flow: branded email (Unisender) → `/register?invite=` → auto-joins institution
 
 ---
@@ -98,7 +100,7 @@ Panel at `/admin` (direct URL only, `platform_admin`):
 - **Usage** — by day / feature / teacher (cost visible here only)
 - **Teachers** — search, change role / plan / institution assignment, activate/deactivate
 - **Institutions** — create/edit (tier, seat cap, **email auto-join domain**), teacher counts
-- **Rubric templates** — global templates teachers start from (incl. STEM)
+- **Criterion templates** — global templates teachers start from (incl. STEM)
 - **Feedback** — browse in-app user feedback (category filter, reply link)
 - **Errors** — recent AI/service errors
 - **Subscription management** — grant/extend Pro, cancel, refund (T-Bank)
@@ -111,7 +113,9 @@ Panel at `/admin` (direct URL only, `platform_admin`):
 - **Auth** — JWT (7-day), bcrypt-12, password-change token invalidation, role middleware
 - **Security** — helmet, CORS allowlist, rate limiting, express-validator, parameterized SQL, prompt-injection sanitisation, magic-byte file validation
 - **PWA** — installable, offline, Workbox service worker
-- **Infra** — Yandex Cloud VM (RU), nginx, PM2, PostgreSQL + pgvector, numbered SQL migrations, `/api/health`
+- **Infra** — Yandex Cloud VM (RU), nginx, **PM2 cluster (2 workers)**, PostgreSQL + pgvector with tuned config, numbered SQL migrations 001–019, `/api/health`
+- **Performance** — pg pool tuned (`max=25`), composite indexes on hot queries (migration 016), pm2-logrotate, Postgres 512 MB shared_buffers — sized for ~1000 users on current 2 GB VM (see `docs/scaling.md` for Tier 2/3 roadmap)
+- **Design system** — custom SVG `Icon` component (14 named icons, no library dep), brand-aligned `SuccessMark` for confirmation screens, replacing platform-dependent OS emojis
 - **Compliance docs** — `docs/legal/security-overview.md`, `docs/legal/152-fz-dpa.md` (templates, need legal review)
 
 ---

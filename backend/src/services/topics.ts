@@ -43,7 +43,7 @@ export async function generateTopics(p: GenerateParams): Promise<TopicSet> {
       const { rows } = await pool.query<{ syllabus_text: string | null; name: string }>(
         `SELECT name, syllabus_text FROM courses WHERE id = $1 AND teacher_id = $2`, [p.courseId, p.teacherId]
       )
-      if (rows[0]) syllabus = `Курс: ${rows[0].name}. ${(rows[0].syllabus_text ?? '').slice(0, 600)}`
+      if (rows[0]) syllabus = `Предмет: ${rows[0].name}. ${(rows[0].syllabus_text ?? '').slice(0, 600)}`
     } catch { /* non-fatal */ }
   }
 
@@ -108,7 +108,7 @@ ${LEVEL_GUIDANCE[p.level] ?? ''}
 ## Данные студента
 Направление/специальность: ${sanitiseForPrompt(p.field ?? '—')}
 Научные/практические интересы: ${sanitiseForPrompt(p.interests ?? '—')}
-${siteBlock}${p.syllabus ? `Контекст курса: ${sanitiseForPrompt(p.syllabus)}\n` : ''}
+${siteBlock}${p.syllabus ? `Контекст предмета: ${sanitiseForPrompt(p.syllabus)}\n` : ''}
 ${searchBlock}## Формат ответа
 Верните JSON: {"topics": [ ... ]}, где каждый элемент:
 - "title": конкретная формулировка темы

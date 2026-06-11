@@ -11,14 +11,16 @@ function describe(e: AuditEntry): string {
     case 'teacher.invite_revoked':  return 'Приглашение отозвано'
     case 'teacher.activated':       return 'Преподаватель активирован'
     case 'teacher.deactivated':     return 'Преподаватель деактивирован'
-    case 'rubric.shared_created':   return `Создана общая рубрика: ${e.target}`
+    case 'criterion.shared_created': return `Создан общий критерий: ${e.target}`
+    case 'rubric.shared_created':    return `Создана общая рубрика: ${e.target}`
     default:                        return `${e.action}${e.target ? ` · ${e.target}` : ''}`
   }
 }
 
 const ICON: Record<string, string> = {
   'teacher.invited': '✉', 'teacher.bulk_invited': '✉', 'teacher.invite_revoked': '✕',
-  'teacher.activated': '✓', 'teacher.deactivated': '⏸', 'rubric.shared_created': '☰',
+  'teacher.activated': '✓', 'teacher.deactivated': '⏸',
+  'criterion.shared_created': '☰', 'rubric.shared_created': '☰',
 }
 
 export default function InstitutionAudit() {

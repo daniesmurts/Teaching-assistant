@@ -108,7 +108,7 @@ export default function DocumentUpload({ documentType, courseId, onReady, hint, 
             <span className="text-lg">📎</span>
             <span className="text-xs font-sans text-ink">Файл выбран</span>
             <span className="text-[11px] font-sans text-ink-tertiary truncate max-w-[200px]">{fileName}</span>
-            <span className="text-[11px] font-sans text-amber">обработается при создании курса</span>
+            <span className="text-[11px] font-sans text-amber">обработается при создании предмета</span>
           </>
         ) : (
           <>

@@ -22,15 +22,17 @@ CREATE TABLE IF NOT EXISTS courses (
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Rubric templates (reusable across assignments)
-CREATE TABLE IF NOT EXISTS rubrics (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  teacher_id  UUID NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
-  course_id   UUID REFERENCES courses(id) ON DELETE SET NULL,
-  name        TEXT NOT NULL,
-  criteria    JSONB NOT NULL,      -- [{name, weight, description, max_score}]
-  is_default  BOOLEAN DEFAULT FALSE,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
+-- Reusable grading criteria (individual atoms — teachers mix-and-match at grading time)
+CREATE TABLE IF NOT EXISTS criteria (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  teacher_id            UUID REFERENCES teachers(id) ON DELETE CASCADE,  -- NULL for global templates
+  course_id             UUID REFERENCES courses(id) ON DELETE SET NULL,
+  name                  TEXT NOT NULL,
+  description           TEXT,
+  subject               TEXT,             -- 'business' | 'economics' | 'law' | 'medicine' | 'engineering' | 'humanities' | 'general'
+  is_global_template    BOOLEAN NOT NULL DEFAULT FALSE,
+  is_institution_shared BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Graded assignments (core data + RAG training signal)
@@ -38,19 +40,21 @@ CREATE TABLE IF NOT EXISTS assignments (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   teacher_id        UUID NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
   course_id         UUID REFERENCES courses(id) ON DELETE SET NULL,
-  rubric_id         UUID REFERENCES rubrics(id) ON DELETE SET NULL,
   student_name      TEXT,
   student_email     TEXT,
   submission_text   TEXT NOT NULL,
 
   -- AI output (before teacher review)
   ai_score          INTEGER,
-  ai_grade          TEXT,          -- 'A', 'B', 'C', 'D', 'F'
-  ai_grade_label    TEXT,          -- 'Excellent', 'Good', etc.
+  ai_grade          TEXT,
+  ai_grade_label    TEXT,
   ai_feedback       TEXT,
   ai_criteria_scores JSONB,        -- [{name, score, feedback}]
   ai_strengths      TEXT[],
   ai_improvements   TEXT[],
+
+  -- Criteria + weights actually used for this grading event
+  criteria_snapshot JSONB,         -- [{criterion_id, name, weight, description, score?, feedback?}]
 
   -- Approved output (after teacher review — this is the training signal)
   approved_score    INTEGER,

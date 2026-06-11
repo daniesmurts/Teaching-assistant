@@ -14,6 +14,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Changed
+- **Rubrics → Criteria model** — replaced the named-rubric "bundle" concept with
+  individual reusable criteria. Teachers now pick one or more criteria at grading
+  time and set weights inline (sum-to-100), instead of selecting a saved rubric.
+  - Migration `020_criteria_model.sql`: new `criteria` table, `assignments.criteria_snapshot` JSONB column, dropped `rubrics` table + `rubric_id` columns on `assignments` and `long_reviews`. Pre-launch cutover — no backfill.
+  - New `/api/criteria` CRUD; `/api/grading/grade` accepts `criterion_ids` + `weights`; institution & admin endpoints now manage criteria (was rubrics).
+  - Plan limit `maxRubrics: 5` → `maxCriteria: 15` (free tier).
+  - GradingForm: chip-style multi-pick + per-criterion weight inputs with live total indicator and auto-prefill to even weights.
+  - Holistic mode preserved — no criteria selected → AI grades by general academic standards (unchanged behaviour).
+  - Renamed page Rubrics → Criteria (`/criteria`), help article slug, sidebar nav, copy across admin/institution panels.
+
+---
+
+## [2026-06-10]
+
 ### Added
 - **Topic generator** — AI suggests research/practical topics from student level, field,
   interests, and practice site, calibrated to ФГОС level requirements. Yandex Search
@@ -87,6 +102,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 - Rubric builder simplified — removed redundant МАКС field; weights are now percentages with a live sum-to-100 check
 - Landing page copy + new analytics feature pillar
 - Public changelog page refreshed with real shipped features + correct dates (1.0–1.3)
+- Sidebar nav icons — replaced Unicode glyphs (⊞ ✦ ◷ ☺ ▤ ◇ ◫ ☰ ◆ ⚙ ? ✉ ◉ ⎋) with
+  custom inline SVG icons via new `Icon` component. Glyphs were getting hijacked by
+  emoji fonts on iOS and some Android/Windows configs; SVG renders identically
+  everywhere. Single component, 14 named icons, no library dep (~2 KB total).
+- **«Курс» → «Предмет» in all user-facing copy** (feedback from real teachers — in RU academic
+  vocab, «курс» = year of study, «предмет» = subject). Renamed sidebar nav, all labels, error
+  messages, help articles, AI prompts (so the model also outputs «предмет» in feedback), and
+  marketing pages. Preserved: «1–2 курс / 3–4 курс» (year of study), «Курсовая работа» (term
+  paper), DB column `course_id`, URL `/courses`, all code identifiers (internal-only).
 - Public changelog: added **Версия 1.4 (Июль 2026)** — Переработка работ, генератор тем,
   российская 5-балльная шкала, расширение для кафедр, редактирование пунктов перед утверждением.
   1.3 demoted from "Новое" to muted historical entry.

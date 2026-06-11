@@ -52,7 +52,7 @@ export default function WelcomeModal() {
 
           <div className="mt-5 px-3 py-2.5 bg-amber-light/50 border border-amber/20 rounded-lg">
             <p className="text-xs font-sans text-ink-secondary">
-              <span className="font-medium text-ink">С чего начать:</span> создайте курс — он нужен и для проверки работ, и для презентаций.
+              <span className="font-medium text-ink">С чего начать:</span> создайте предмет — он нужен и для проверки работ, и для презентаций.
             </p>
           </div>
         </div>
@@ -62,7 +62,7 @@ export default function WelcomeModal() {
             onClick={start}
             className="flex-1 px-4 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity"
           >
-            Создать первый курс →
+            Создать первый предмет →
           </button>
           <button
             onClick={close}

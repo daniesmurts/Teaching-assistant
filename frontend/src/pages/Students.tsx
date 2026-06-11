@@ -116,7 +116,7 @@ export default function Students() {
               steps={[
                 'Проверяя работу, заполните поля «Имя студента» и «Группа».',
                 'Откройте профиль студента, чтобы увидеть все его работы и график оценок.',
-                'Фильтруйте по курсу, чтобы смотреть успеваемость в рамках конкретного предмета.',
+                'Фильтруйте по предмету, чтобы смотреть успеваемость в рамках конкретной дисциплины.',
               ]}
             />
           )}
@@ -130,7 +130,7 @@ export default function Students() {
                   onChange={(e) => setCourseId(e.target.value)}
                   className="text-sm font-sans bg-surface border border-border rounded-md px-3 py-2"
                 >
-                  <option value="">Все курсы</option>
+                  <option value="">Все предметы</option>
                   {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 <span className="text-xs font-sans text-ink-tertiary">{students.length} студ.</span>

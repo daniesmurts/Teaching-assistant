@@ -109,13 +109,13 @@ export default function Landing() {
               <div className="text-xs font-bold text-info uppercase tracking-wider">Генератор лекций</div>
               <h3 className="font-display text-3xl font-bold">Программа загружена. Лекция готова.</h3>
               <p className="text-ink-secondary leading-relaxed">
-                Загрузите план курса, укажите тему и уровень аудитории. ИСПУМ создаст структурированную презентацию с заметками для спикера — готовую к использованию. Обновляется при появлении новых данных. Адаптируется под уровень группы за один клик.
+                Загрузите план предмета, укажите тему и уровень аудитории. ИСПУМ создаст структурированную презентацию с заметками для спикера — готовую к использованию. Обновляется при появлении новых данных. Адаптируется под уровень группы за один клик.
               </p>
             </div>
             <div className="flex-1 w-full bg-surface border border-border rounded-xl p-6 shadow-sm flex text-sm">
               <div className="w-1/3 pr-4 border-r border-border text-ink-tertiary font-mono text-[10px] space-y-2">
                 <div className="uppercase mb-2 font-sans font-bold text-ink-secondary">Силлабус</div>
-                <div>Цели курса...</div>
+                <div>Цели предмета...</div>
                 <div className="h-1 bg-border rounded-full w-full"></div>
                 <div className="h-1 bg-border rounded-full w-4/5"></div>
               </div>
@@ -179,7 +179,7 @@ export default function Landing() {
           <div className="space-y-3">
             <div className="w-10 h-10 rounded-full bg-amber-light text-amber flex items-center justify-center font-bold text-lg mb-4">1</div>
             <h4 className="font-bold text-lg">Настройте параметры</h4>
-            <p className="text-sm text-ink-secondary leading-relaxed">Загрузите свою рубрику (критерии оценки) или силлабус курса. Система адаптируется под ваши требования.</p>
+            <p className="text-sm text-ink-secondary leading-relaxed">Загрузите свою рубрику (критерии оценки) или силлабус предмета. Система адаптируется под ваши требования.</p>
           </div>
           <div className="space-y-3">
             <div className="w-10 h-10 rounded-full bg-amber-light text-amber flex items-center justify-center font-bold text-lg mb-4">2</div>
@@ -227,7 +227,7 @@ export default function Landing() {
                 <li className="flex gap-2"><span>•</span> До 20 проверок работ в месяц</li>
                 <li className="flex gap-2"><span>•</span> До 3 презентаций в месяц</li>
                 <li className="flex gap-2"><span>•</span> До 3 генераций тем для исследований</li>
-                <li className="flex gap-2"><span>•</span> До 3 курсов и 5 рубрик</li>
+                <li className="flex gap-2"><span>•</span> До 3 предметов и 5 рубрик</li>
                 <li className="flex gap-2"><span>•</span> 30 дней истории проверок</li>
                 <li className="flex gap-2"><span>•</span> Водяной знак на результатах</li>
               </ul>
@@ -320,7 +320,7 @@ export default function Landing() {
                   <td className="py-3 px-4 text-ink">Безлимитно</td>
                 </tr>
                 <tr className="border-b border-border hover:bg-surface transition-colors">
-                  <td className="py-3 px-4">Активных курсов</td>
+                  <td className="py-3 px-4">Активных предметов</td>
                   <td className="py-3 px-4">3</td>
                   <td className="py-3 px-4 text-ink">Безлимитно</td>
                   <td className="py-3 px-4 text-ink">Безлимитно</td>

@@ -31,7 +31,7 @@ router.post(
 
 router.get('/:id', asyncHandler(async (req, res) => {
   const course = await findCourseById(req.params.id, req.teacher.id)
-  if (!course) throw new NotFoundError('Курс')
+  if (!course) throw new NotFoundError('Предмет')
   res.json(course)
 }))
 
@@ -40,13 +40,13 @@ router.put('/:id', validate(updateCourseRules), asyncHandler(async (req, res) =>
     req.params.id, req.teacher.id,
     req.body as { name?: string; code?: string; level?: string; syllabus_text?: string }
   )
-  if (!course) throw new NotFoundError('Курс')
+  if (!course) throw new NotFoundError('Предмет')
   res.json(course)
 }))
 
 router.delete('/:id', asyncHandler(async (req, res) => {
   const deleted = await deleteCourse(req.params.id, req.teacher.id)
-  if (!deleted) throw new NotFoundError('Курс')
+  if (!deleted) throw new NotFoundError('Предмет')
   res.status(204).send()
 }))
 

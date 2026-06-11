@@ -141,32 +141,28 @@ export async function getAdminErrors(days = 7): Promise<AdminError[]> {
   return res.data
 }
 
-export interface RubricTemplateCriterion {
-  name: string; weight: number; max_score: number; description?: string
+export interface CriterionTemplate {
+  id:          string
+  name:        string
+  description: string | null
+  subject:     string | null
+  created_at:  string
 }
 
-export interface RubricTemplate {
-  id: string
-  name: string
-  criteria: RubricTemplateCriterion[]
-  template_subject: string | null
-  created_at: string
-}
-
-export async function getRubricTemplates(): Promise<RubricTemplate[]> {
-  const res = await client.get<RubricTemplate[]>('/api/admin/rubrics/templates')
+export async function getCriterionTemplates(): Promise<CriterionTemplate[]> {
+  const res = await client.get<CriterionTemplate[]>('/api/admin/criteria/templates')
   return res.data
 }
 
-export async function createRubricTemplate(data: {
-  name: string; criteria: RubricTemplateCriterion[]; template_subject: string
-}): Promise<RubricTemplate> {
-  const res = await client.post<RubricTemplate>('/api/admin/rubrics/templates', data)
+export async function createCriterionTemplate(data: {
+  name: string; description?: string; subject: string
+}): Promise<CriterionTemplate> {
+  const res = await client.post<CriterionTemplate>('/api/admin/criteria/templates', data)
   return res.data
 }
 
-export async function deleteRubricTemplate(id: string): Promise<void> {
-  await client.delete(`/api/admin/rubrics/templates/${id}`)
+export async function deleteCriterionTemplate(id: string): Promise<void> {
+  await client.delete(`/api/admin/criteria/templates/${id}`)
 }
 
 // ─── Subscription management ──────────────────────────────────────────────────

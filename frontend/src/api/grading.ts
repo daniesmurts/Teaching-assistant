@@ -1,16 +1,19 @@
 import client from './client'
-import type { Assignment, GradeLetter, LongReview, RevisionCheckItem } from '../types'
+import type {
+  Assignment, GradeLetter, LongReview, RevisionCheckItem, CriteriaSnapshotItem,
+} from '../types'
 
 export interface GradeRequest {
   submission_text: string
-  rubric_id?: string
+  criterion_ids?: string[]                   // 0–10 chosen criteria
+  weights?: number[]                         // same length, sum to 100
   course_id?: string
   student_name?: string
   student_email?: string
   student_group?: string
   reference_solution?: string
   assignment_type?: 'essay' | 'calculation'
-  parent_assignment_id?: string   // when grading a revision of a previous work
+  parent_assignment_id?: string
 }
 
 export interface GradeResponse {
@@ -23,6 +26,7 @@ export interface GradeResponse {
   ai_strengths: string[]
   ai_improvements: string[]
   ai_revision_check: RevisionCheckItem[] | null
+  criteria_snapshot: CriteriaSnapshotItem[] | null
   used_examples: number
   revision_number: number
   parent_assignment_id: string | null
@@ -104,9 +108,10 @@ export async function getStudents(courseId?: string): Promise<StudentSummary[]> 
 
 export interface ReviewRequest {
   submission_text: string
-  rubric_id?:    string
-  course_id?:    string
-  student_name?: string
+  criterion_ids?: string[]
+  weights?:       number[]
+  course_id?:     string
+  student_name?:  string
   student_email?: string
   student_group?: string
 }

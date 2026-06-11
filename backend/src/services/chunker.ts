@@ -78,7 +78,7 @@ function detectChunkType(text: string): ChunkType {
     return 'assessment'
   if (t.includes('литература') || t.includes('reading') || t.includes('библиография'))
     return 'reading_list'
-  if (t.includes('цели') || t.includes('objectives') || t.includes('описание курса'))
+  if (t.includes('цели') || t.includes('objectives') || t.includes('описание курса') || t.includes('описание предмета') || t.includes('описание дисциплины'))
     return 'overview'
   return 'general'
 }

@@ -82,7 +82,7 @@ export default function GradingResult({ result, onApproved }: Props) {
             {result.used_examples > 0 && (
               <span
                 className="text-[10px] font-sans font-medium bg-amber-light text-amber px-1.5 py-0.5 rounded-sm"
-                title={`Оценка основана на ${result.used_examples} похожих работах из архива курса`}
+                title={`Оценка основана на ${result.used_examples} похожих работах из архива предмета`}
               >
                 ✦ RAG ×{result.used_examples}
               </span>

@@ -13,7 +13,7 @@ import PaymentResult from './pages/PaymentResult'
 import Dashboard from './pages/Dashboard'
 import Courses from './pages/Courses'
 import Grading from './pages/Grading'
-import Rubrics from './pages/Rubrics'
+import Criteria from './pages/Criteria'
 import Students from './pages/Students'
 import History from './pages/History'
 import Presentations from './pages/Presentations'
@@ -137,7 +137,7 @@ export default function App() {
             <Route path="/dashboard"     element={<Dashboard />} />
             <Route path="/courses"       element={<Courses />} />
             <Route path="/grading"       element={<Grading />} />
-            <Route path="/rubrics"       element={<Rubrics />} />
+            <Route path="/criteria"      element={<Criteria />} />
             <Route path="/students"      element={<Students />} />
             <Route path="/history"       element={<History />} />
             <Route path="/presentations" element={<Presentations />} />

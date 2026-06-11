@@ -53,7 +53,7 @@ export default function Pricing() {
                   <li className="flex gap-2"><span>•</span> До 20 проверок работ в месяц</li>
                   <li className="flex gap-2"><span>•</span> До 3 презентаций в месяц</li>
                   <li className="flex gap-2"><span>•</span> До 3 генераций тем для исследований</li>
-                  <li className="flex gap-2"><span>•</span> До 3 курсов и 5 рубрик</li>
+                  <li className="flex gap-2"><span>•</span> До 3 предметов и 5 рубрик</li>
                   <li className="flex gap-2"><span>•</span> 30 дней истории проверок</li>
                   <li className="flex gap-2"><span>•</span> Водяной знак на результатах</li>
                 </ul>
@@ -146,7 +146,7 @@ export default function Pricing() {
                     <td className="py-3 px-4 text-ink">Безлимитно</td>
                   </tr>
                   <tr className="border-b border-border hover:bg-surface-warm transition-colors">
-                    <td className="py-3 px-4">Активных курсов</td>
+                    <td className="py-3 px-4">Активных предметов</td>
                     <td className="py-3 px-4">3</td>
                     <td className="py-3 px-4 text-ink">Безлимитно</td>
                     <td className="py-3 px-4 text-ink">Безлимитно</td>

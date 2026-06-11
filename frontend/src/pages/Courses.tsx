@@ -37,17 +37,17 @@ export default function Courses() {
   const createMut = useMutation({
     mutationFn: createCourse,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['courses'] }); close() },
-    onError:   () => addToast('Не удалось создать курс', 'error'),
+    onError:   () => addToast('Не удалось создать предмет', 'error'),
   })
   const updateMut = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<FormState> }) => updateCourse(id, data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['courses'] }); close() },
-    onError:   () => addToast('Не удалось обновить курс', 'error'),
+    onError:   () => addToast('Не удалось обновить предмет', 'error'),
   })
   const deleteMut = useMutation({
     mutationFn: deleteCourse,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['courses'] }),
-    onError:   () => addToast('Не удалось удалить курс', 'error'),
+    onError:   () => addToast('Не удалось удалить предмет', 'error'),
   })
 
   function close() { setShowForm(false); setEditing(null); setForm(emptyForm); setSyllabusFile(null) }
@@ -71,17 +71,17 @@ export default function Courses() {
       if (syllabusFile) {
         try {
           await uploadAndWait(syllabusFile, 'syllabus', course.id)
-          addToast('Курс создан, программа загружена и проиндексирована', 'success')
+          addToast('Предмет создан, программа загружена и проиндексирована', 'success')
         } catch {
-          addToast('Курс создан, но не удалось обработать документ', 'error')
+          addToast('Предмет создан, но не удалось обработать документ', 'error')
         }
       } else {
-        addToast('Курс создан', 'success')
+        addToast('Предмет создан', 'success')
       }
       qc.invalidateQueries({ queryKey: ['courses'] })
       close()
     } catch {
-      addToast('Не удалось создать курс', 'error')
+      addToast('Не удалось создать предмет', 'error')
     } finally {
       setSubmitting(false)
     }
@@ -92,38 +92,38 @@ export default function Courses() {
   return (
     <div className="flex-1 flex flex-col">
       <TopBar
-        title="Курсы"
-        subtitle={courses.length > 0 ? `${courses.length} ${courses.length === 1 ? 'курс' : courses.length < 5 ? 'курса' : 'курсов'}` : undefined}
-        actions={<Button size="sm" onClick={() => { setShowForm(true); setEditing(null); setForm(emptyForm) }}>+ Новый курс</Button>}
+        title="Предметы"
+        subtitle={courses.length > 0 ? `${courses.length} ${courses.length === 1 ? 'предмет' : courses.length < 5 ? 'предмета' : 'предметов'}` : undefined}
+        actions={<Button size="sm" onClick={() => { setShowForm(true); setEditing(null); setForm(emptyForm) }}>+ Новый предмет</Button>}
       />
 
       <div className="flex-1 p-6 max-w-4xl w-full mx-auto">
         <FeatureIntro
           id="courses"
-          title="Курсы — основа для проверки работ и презентаций"
-          description="Курс хранит контекст вашего предмета: уровень студентов и программу (силлабус). ИИ использует его, чтобы точнее проверять работы и готовить лекции под ваш курс."
+          title="Предметы — основа для проверки работ и презентаций"
+          description="Предмет хранит контекст вашей дисциплины: уровень студентов и программу (силлабус). ИИ использует его, чтобы точнее проверять работы и готовить лекции под ваш предмет."
           steps={[
-            'Создайте курс: укажите название, уровень и при желании загрузите силлабус (PDF или Word).',
-            'Привяжите к курсу критерии оценки и работы студентов — так система накапливает примеры.',
-            'Чем больше проверенных работ в курсе, тем точнее ИИ оценивает новые (на тарифе Pro).',
+            'Создайте предмет: укажите название, уровень и при желании загрузите силлабус (PDF или Word).',
+            'Привяжите к предмету критерии оценки и работы студентов — так система накапливает примеры.',
+            'Чем больше проверенных работ по предмету, тем точнее ИИ оценивает новые (на тарифе Pro).',
           ]}
         />
         {showForm && (
           <div className="bg-surface border border-border rounded-lg p-5 mb-6">
             <h3 className="font-sans text-sm font-medium text-ink mb-4">
-              {editing ? 'Редактировать курс' : 'Новый курс'}
+              {editing ? 'Редактировать предмет' : 'Новый предмет'}
             </h3>
             <form onSubmit={handleSubmit} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <Input
-                  label="Название курса *"
+                  label="Название предмета *"
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                   placeholder="Введение в программирование"
                   required
                 />
                 <Input
-                  label="Код курса"
+                  label="Код предмета"
                   value={form.code}
                   onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
                   placeholder="CS101"
@@ -140,17 +140,17 @@ export default function Courses() {
                 </select>
               </div>
               <Textarea
-                label="Программа курса (необязательно)"
+                label="Программа предмета (необязательно)"
                 value={form.syllabus_text}
                 onChange={(e) => setForm((f) => ({ ...f, syllabus_text: e.target.value }))}
-                placeholder="Вставьте текст программы курса…"
+                placeholder="Вставьте текст программы предмета…"
                 rows={4}
               />
 
               {/* Syllabus upload — PDF/Word */}
               <div>
                 <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">
-                  Загрузить программу курса (PDF / Word)
+                  Загрузить программу предмета (PDF / Word)
                 </label>
                 {editing ? (
                   <DocumentUpload
@@ -170,12 +170,12 @@ export default function Courses() {
                     documentType="syllabus"
                     defer
                     onFile={setSyllabusFile}
-                    hint="Текст распознается автоматически при создании курса"
+                    hint="Текст распознается автоматически при создании предмета"
                   />
                 )}
               </div>
               <div className="flex gap-2 pt-1">
-                <Button type="submit" loading={busy}>{editing ? 'Сохранить' : 'Создать курс'}</Button>
+                <Button type="submit" loading={busy}>{editing ? 'Сохранить' : 'Создать предмет'}</Button>
                 <Button type="button" variant="secondary" onClick={close}>Отмена</Button>
               </div>
             </form>
@@ -187,9 +187,9 @@ export default function Courses() {
         ) : courses.length === 0 ? (
           <div className="text-center py-16">
             <div className="font-display text-4xl text-ink-tertiary mb-3">◫</div>
-            <p className="font-sans text-sm text-ink-secondary">Курсов пока нет.</p>
+            <p className="font-sans text-sm text-ink-secondary">Предметов пока нет.</p>
             <button onClick={() => setShowForm(true)} className="text-amber text-sm mt-1 hover:underline">
-              Создать первый курс
+              Создать первый предмет
             </button>
           </div>
         ) : (
@@ -220,7 +220,7 @@ export default function Courses() {
                     size="sm"
                     variant="danger"
                     loading={deleteMut.isPending}
-                    onClick={() => { if (confirm(`Удалить курс «${course.name}»?`)) deleteMut.mutate(course.id) }}
+                    onClick={() => { if (confirm(`Удалить предмет «${course.name}»?`)) deleteMut.mutate(course.id) }}
                   >
                     Удалить
                   </Button>

@@ -1,11 +1,10 @@
 import { pool } from '../connection'
-import type { LongReviewResult, LongReviewStatus } from '../../../../shared/types'
+import type { LongReviewResult, LongReviewStatus, CriteriaSnapshotItem } from '../../../../shared/types'
 
 export interface LongReviewRow {
   id:              string
   teacher_id:      string
   course_id:       string | null
-  rubric_id:       string | null
   student_name:    string | null
   student_email:   string | null
   student_group:   string | null
@@ -16,13 +15,13 @@ export interface LongReviewRow {
   assignment_id:   string | null
   result:          LongReviewResult | null
   error_message:   string | null
+  criteria_snapshot: CriteriaSnapshotItem[] | null
   created_at:      string
 }
 
 export async function createLongReview(data: {
   teacherId:     string
   courseId?:     string
-  rubricId?:     string
   studentName?:  string
   studentEmail?: string
   studentGroup?: string
@@ -30,13 +29,12 @@ export async function createLongReview(data: {
 }): Promise<LongReviewRow> {
   const { rows } = await pool.query<LongReviewRow>(
     `INSERT INTO long_reviews
-       (teacher_id, course_id, rubric_id, student_name, student_email, student_group, submission_text)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
+       (teacher_id, course_id, student_name, student_email, student_group, submission_text)
+     VALUES ($1,$2,$3,$4,$5,$6)
      RETURNING *`,
     [
       data.teacherId,
       data.courseId    ?? null,
-      data.rubricId    ?? null,
       data.studentName ?? null,
       data.studentEmail ?? null,
       data.studentGroup ?? null,
@@ -44,6 +42,16 @@ export async function createLongReview(data: {
     ]
   )
   return rows[0]
+}
+
+export async function setLongReviewSnapshot(
+  id: string,
+  snapshot: CriteriaSnapshotItem[]
+): Promise<void> {
+  await pool.query(
+    `UPDATE long_reviews SET criteria_snapshot = $2 WHERE id = $1`,
+    [id, JSON.stringify(snapshot)]
+  )
 }
 
 export async function getLongReviewById(id: string, teacherId: string): Promise<LongReviewRow | null> {

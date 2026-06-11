@@ -1,5 +1,5 @@
 import { chatJSON, embed, REASONER_MODEL } from './deepseek'
-import { findRubricById } from '../db/queries/rubrics'
+import { findCriteriaByIds } from '../db/queries/criteria'
 import {
   createAssignment,
   approveAssignment,
@@ -11,24 +11,26 @@ import { generateAndStoreEmbedding } from './embeddings'
 import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { canUseFeature } from '../config/planLimits'
-import { NotFoundError } from '../errors/AppError'
+import { NotFoundError, ValidationError } from '../errors/AppError'
 import { logger } from '../lib/logger'
-import type { Assignment, GradeLetter, CriterionScore, RubricCriterion } from '../../../shared/types'
+import type { Assignment, GradeLetter, CriterionScore, CriteriaSnapshotItem } from '../../../shared/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface GradeParams {
   teacherId:  string
+  institutionId?: string | null
   planTier:   string   // 'free' | 'pro' | 'institution'
   submissionText: string
-  rubricId?: string
+  criterionIds?: string[]                     // 0–10 ids; empty/absent → holistic
+  weights?: number[]                          // same length as criterionIds, sum to 100
   courseId?: string
   studentName?: string
   studentEmail?: string
   studentGroup?: string
-  referenceSolution?: string                  // эталонное решение / правильный ответ
-  assignmentType?: 'essay' | 'calculation'    // 'calculation' → reasoning model + STEM guidance
-  parentAssignmentId?: string                 // link to previous version (revision flow)
+  referenceSolution?: string
+  assignmentType?: 'essay' | 'calculation'
+  parentAssignmentId?: string
 }
 
 interface RevisionCheckItem {
@@ -45,7 +47,7 @@ interface AIGradingResult {
   criteria_scores: CriterionScore[]
   strengths: string[]
   improvements: string[]
-  revision_check?: RevisionCheckItem[]   // present only when grading a revision
+  revision_check?: RevisionCheckItem[]
 }
 
 export interface GradeResponse {
@@ -58,17 +60,45 @@ export interface GradeResponse {
   ai_strengths: string[]
   ai_improvements: string[]
   ai_revision_check: RevisionCheckItem[] | null
-  used_examples: number          // how many RAG examples were injected
-  revision_number: number        // 1 = original, 2+ = revised version
+  criteria_snapshot: CriteriaSnapshotItem[] | null
+  used_examples: number
+  revision_number: number
   parent_assignment_id: string | null
+}
+
+// ─── Criteria resolution ──────────────────────────────────────────────────────
+
+/**
+ * Build the criteria snapshot for this grading event from the teacher's chosen
+ * criterion_ids + weights. Validates that every id resolves to a criterion the
+ * teacher is allowed to use; throws ValidationError otherwise.
+ */
+export async function resolveCriteriaSnapshot(
+  teacherId: string,
+  institutionId: string | null,
+  ids: string[],
+  weights: number[]
+): Promise<CriteriaSnapshotItem[]> {
+  if (ids.length === 0) return []
+  const criteria = await findCriteriaByIds(ids, teacherId, institutionId)
+  if (criteria.length !== ids.length) {
+    throw new ValidationError('Один или несколько критериев недоступны')
+  }
+  const byId = new Map(criteria.map((c) => [c.id, c]))
+  return ids.map((id, i) => {
+    const c = byId.get(id)!
+    return {
+      criterion_id: c.id,
+      name:         c.name,
+      weight:       weights[i],
+      description:  c.description,
+      max_score:    100,
+    } as CriteriaSnapshotItem & { max_score: number }
+  })
 }
 
 // ─── RAG retrieval ────────────────────────────────────────────────────────────
 
-/**
- * Embed the incoming submission and find the most similar approved assignments
- * for the same course. Returns [] silently if embeddings are unavailable.
- */
 async function retrieveExamples(
   submissionText: string,
   courseId: string,
@@ -78,7 +108,6 @@ async function retrieveExamples(
     const vector = await embed(submissionText, { teacherId, feature: 'embedding' })
     return await findSimilarAssignments(courseId, vector, 5)
   } catch (err) {
-    // Non-fatal — RAG is a quality boost, not a hard requirement
     logger.warn({ message: '[RAG] Could not retrieve similar examples', error: (err as Error).message })
     return []
   }
@@ -87,11 +116,12 @@ async function retrieveExamples(
 // ─── Grade ────────────────────────────────────────────────────────────────────
 
 export async function grade(params: GradeParams): Promise<GradeResponse> {
-  // RAG flywheel only available on Pro/Institution — free tier grades without examples
   const ragEnabled = canUseFeature(params.planTier, 'ragFlywheel')
+  const ids     = params.criterionIds ?? []
+  const weights = params.weights ?? []
 
-  const [rubric, examples, parent] = await Promise.all([
-    params.rubricId ? findRubricById(params.rubricId, params.teacherId) : Promise.resolve(null),
+  const [snapshot, examples, parent] = await Promise.all([
+    resolveCriteriaSnapshot(params.teacherId, params.institutionId ?? null, ids, weights),
     ragEnabled && params.courseId
       ? retrieveExamples(params.submissionText, params.courseId, params.teacherId)
       : Promise.resolve([]),
@@ -100,9 +130,6 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
       : Promise.resolve(null),
   ])
 
-  // Revision context — built only when the teacher explicitly linked a previous
-  // version. Prefer the teacher's approved values; fall back to the AI's draft
-  // (which is what's there if v1 wasn't approved before the resubmission).
   const isRevision = parent != null
   const revisionBlock = isRevision ? buildRevisionContext(parent) : ''
 
@@ -127,8 +154,8 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
 `
     : ''
 
-  const userPrompt = revisionBlock + reference + (rubric
-    ? buildRubricPrompt(params.submissionText, rubric.name, rubric.criteria, examples, isCalc, isRevision)
+  const userPrompt = revisionBlock + reference + (snapshot.length > 0
+    ? buildCriteriaPrompt(params.submissionText, snapshot, examples, isCalc, isRevision)
     : buildHolisticPrompt(params.submissionText, examples, isCalc, isRevision))
 
   const result = await chatJSON<AIGradingResult>(
@@ -138,18 +165,20 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
     ],
     'результат оценивания',
     { teacherId: params.teacherId, feature: 'grading' },
-    isCalc ? REASONER_MODEL : undefined,   // calculation grading → reasoning model
+    isCalc ? REASONER_MODEL : undefined,
   )
 
-  // Revision check is only meaningful when this is a revision.
-  const revisionCheck = isRevision
-    ? normaliseRevisionCheck(result.revision_check)
+  const revisionCheck = isRevision ? normaliseRevisionCheck(result.revision_check) : null
+
+  // Merge AI per-criterion scores back into the snapshot so the history view
+  // can reconstruct exactly what was graded against what.
+  const filledSnapshot: CriteriaSnapshotItem[] | null = snapshot.length > 0
+    ? mergeScoresIntoSnapshot(snapshot, result.criteria_scores ?? [])
     : null
 
   const assignment = await createAssignment({
     teacherId: params.teacherId,
     courseId: params.courseId,
-    rubricId: params.rubricId,
     studentName: params.studentName,
     studentEmail: params.studentEmail,
     studentGroup: params.studentGroup,
@@ -161,11 +190,11 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
     aiCriteriaScores: result.criteria_scores ?? [],
     aiStrengths: result.strengths ?? [],
     aiImprovements: result.improvements ?? [],
+    criteriaSnapshot: filledSnapshot,
     parentAssignmentId: parent?.id,
     aiRevisionCheck: revisionCheck ?? undefined,
   })
 
-  // Increment usage counter — fire-and-forget
   incrementUsage(params.teacherId, 'grade').catch(() => null)
 
   return {
@@ -178,23 +207,32 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
     ai_strengths: assignment.ai_strengths ?? [],
     ai_improvements: assignment.ai_improvements ?? [],
     ai_revision_check: assignment.ai_revision_check,
+    criteria_snapshot: assignment.criteria_snapshot,
     used_examples: examples.length,
     revision_number: assignment.revision_number,
     parent_assignment_id: assignment.parent_assignment_id,
   }
 }
 
+function mergeScoresIntoSnapshot(
+  snapshot: CriteriaSnapshotItem[],
+  aiScores: CriterionScore[]
+): CriteriaSnapshotItem[] {
+  const byName = new Map(aiScores.map((s) => [s.name.toLowerCase().trim(), s]))
+  return snapshot.map((item) => {
+    const match = byName.get(item.name.toLowerCase().trim())
+    return match
+      ? { ...item, score: match.score, feedback: match.feedback }
+      : item
+  })
+}
+
 // ─── Revision helpers ─────────────────────────────────────────────────────────
 
 function buildRevisionContext(parent: Assignment): string {
-  // Prefer the teacher's approved values; fall back to AI draft if v1 wasn't approved yet.
   const prevFeedback = parent.approved_feedback ?? parent.ai_feedback ?? ''
   const prevGrade    = parent.approved_grade   ?? parent.ai_grade   ?? '—'
   const prevScore    = parent.approved_score   ?? parent.ai_score   ?? '—'
-  // Teacher-edited improvements take precedence — they're what the teacher
-  // actually committed to as the v1 verdict. AI draft is the fallback for
-  // assignments that were graded before this feature shipped, or while v1
-  // was still pending approval.
   const prevImprovements = parent.approved_improvements ?? parent.ai_improvements ?? []
 
   const improvementsList = prevImprovements.length
@@ -257,7 +295,6 @@ export async function approve(
   const assignment = await approveAssignment(id, teacherId, data)
   if (!assignment) throw new NotFoundError('Работа')
 
-  // Fire-and-forget — store embedding so future gradings can use this as an example
   generateAndStoreEmbedding(id, assignment.submission_text).catch(() => null)
 
   return assignment
@@ -279,7 +316,7 @@ ${ex.submission_text.slice(0, 600)}${ex.submission_text.length > 600 ? '…' : '
     )
     .join('\n\n---\n\n')
 
-  return `## Примеры оценённых работ по этому курсу
+  return `## Примеры оценённых работ по этому предмету
 Используйте их как ориентир для калибровки своей оценки.
 
 ${items}
@@ -296,19 +333,18 @@ const REVISION_FIELD_INSTRUCTION =
   `Каждый объект: {"point": исходный пункт прошлой версии, "status": "addressed" | "partial" | "not_addressed", "note": 1-2 предложения с обоснованием — что именно изменилось/не изменилось}. ` +
   `Включите КАЖДЫЙ пункт из прошлой версии, даже если он полностью учтён.`
 
-function buildRubricPrompt(
+function buildCriteriaPrompt(
   text: string,
-  rubricName: string,
-  criteria: RubricCriterion[],
+  snapshot: CriteriaSnapshotItem[],
   examples: SimilarAssignment[],
   isCalc = false,
   isRevision = false,
 ): string {
-  const criteriaBlock = criteria
-    .map((c) => `- ${c.name} (вес: ${c.weight}, максимум: ${c.max_score}): ${c.description}`)
+  const criteriaBlock = snapshot
+    .map((c) => `- ${c.name} (вес: ${c.weight}%)${c.description ? `: ${c.description}` : ''}`)
     .join('\n')
 
-  return `${buildExamplesBlock(examples)}## Рубрика: ${rubricName}
+  return `${buildExamplesBlock(examples)}## Критерии оценки
 
 ${criteriaBlock}
 
@@ -318,12 +354,12 @@ ${sanitiseForPrompt(text)}
 </student_submission>
 
 ## Инструкция${isCalc ? CALC_GUIDANCE : ''}
-Оцените работу по каждому критерию рубрики. Верните JSON-объект со следующими полями:
+Оцените работу по каждому из перечисленных критериев. Верните JSON-объект со следующими полями:
 - "score": итоговый взвешенный балл от 0 до 100
 - "grade": одно из "5", "4", "3", "2"  (5: 87–100, 4: 73–86, 3: 60–72, 2: ниже 60)
 - "grade_label": одно из "Отлично", "Хорошо", "Удовлетворительно", "Неудовлетворительно"
 - "feedback": общий отзыв на 2–3 абзаца на русском языке
-- "criteria_scores": массив {"name": string, "score": число 0–100, "feedback": string}
+- "criteria_scores": массив {"name": точное название критерия, "score": число 0–100, "feedback": string} — по каждому критерию из списка выше
 - "strengths": массив из 3–5 конкретных достоинств работы
 - "improvements": массив из 3–5 конкретных областей для улучшения${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}
 
@@ -342,7 +378,7 @@ ${sanitiseForPrompt(text)}
 - "grade": одно из "5", "4", "3", "2"  (5: 87–100, 4: 73–86, 3: 60–72, 2: ниже 60)
 - "grade_label": одно из "Отлично", "Хорошо", "Удовлетворительно", "Неудовлетворительно"
 - "feedback": общий отзыв на 2–3 абзаца на русском языке
-- "criteria_scores": [] (пустой массив — без рубрики)
+- "criteria_scores": [] (пустой массив — без критериев)
 - "strengths": массив из 3–5 конкретных достоинств работы
 - "improvements": массив из 3–5 конкретных областей для улучшения${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}
 

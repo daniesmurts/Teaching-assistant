@@ -5,7 +5,7 @@ import { validate } from '../middleware/validate'
 import { asyncHandler } from '../lib/asyncHandler'
 import { ValidationError, NotFoundError } from '../errors/AppError'
 import { inviteRules, bulkInviteRules } from '../validation/institutionValidation'
-import { createRubricRules } from '../validation/rubricValidation'
+import { createCriterionRules } from '../validation/criteriaValidation'
 import {
   getInstitutionById, getInstitutionOverview, getInstitutionDailyUsage,
   listInstitutionTeachers, setInstitutionTeacherActive, countInstitutionTeachers,
@@ -14,13 +14,13 @@ import {
   createInvite, listPendingInvites, deleteInvite, findActiveInviteForEmail,
 } from '../db/queries/teacherInvites'
 import { findTeacherByEmail, findTeacherById } from '../db/queries/teachers'
-import { findRubricsByInstitution, createRubric } from '../db/queries/rubrics'
+import { findCriteriaByInstitution, createCriterion } from '../db/queries/criteria'
 import { recordAudit, listAuditByInstitution } from '../db/queries/audit'
 import { generateRawToken } from '../db/queries/passwordReset'
 import { sendEmail } from '../services/emailTransport'
 import { teacherInviteEmail } from '../lib/emailTemplates'
 import { toCsv, csvFilename } from '../lib/csv'
-import type { RubricCriterion } from '../../../shared/types'
+import type { CriterionSubject } from '../../../shared/types'
 
 const router = Router()
 router.use(authenticate)
@@ -197,20 +197,24 @@ router.get('/usage/export', asyncHandler(async (req, res) => {
   res.send(csv)
 }))
 
-// ─── Shared rubrics ────────────────────────────────────────────────────────────
+// ─── Shared criteria ───────────────────────────────────────────────────────────
 
-router.get('/rubrics', asyncHandler(async (req, res) => {
-  res.json(await findRubricsByInstitution(institutionId(req)))
+router.get('/criteria', asyncHandler(async (req, res) => {
+  res.json(await findCriteriaByInstitution(institutionId(req)))
 }))
 
-router.post('/rubrics', validate(createRubricRules), asyncHandler(async (req, res) => {
+router.post('/criteria', validate(createCriterionRules), asyncHandler(async (req, res) => {
   institutionId(req) // ensure scoped
-  const { name, course_id, criteria } = req.body as { name: string; course_id?: string; criteria: RubricCriterion[] }
+  const { name, description, course_id, subject } = req.body as {
+    name: string; description?: string; course_id?: string; subject?: CriterionSubject
+  }
   // Shared across the institution → visible in every member's grading picker.
-  const rubric = await createRubric(req.teacher.id, { name, course_id, criteria, is_institution_shared: true })
+  const criterion = await createCriterion(req.teacher.id, {
+    name, description, course_id, subject, is_institution_shared: true,
+  })
   recordAudit({ institutionId: req.teacher.institution_id, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
-    action: 'rubric.shared_created', target: name })
-  res.status(201).json(rubric)
+    action: 'criterion.shared_created', target: name })
+  res.status(201).json(criterion)
 }))
 
 export default router
