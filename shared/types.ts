@@ -14,6 +14,8 @@ export interface PlanState {
   presentationsLimit: number | null
   topicsUsed:         number
   topicsLimit:        number | null
+  quizzesUsed:        number
+  quizzesLimit:       number | null
   features: {
     documentUpload:      boolean
     ragFlywheel:         boolean
@@ -252,6 +254,31 @@ export interface Presentation {
   generated_content: string | null
   sources: PresentationSource[] | null
   created_at: string
+}
+
+// ─── Quiz (быстрая проверочная по материалам курса) ───────────────────────────
+
+// Difficulty / cognitive level the teacher asked for. Drives the prompt.
+export type QuizLevel = 'recall' | 'understanding' | 'application'
+
+export interface QuizQuestion {
+  question:      string                // text may contain inline [N] citation markers
+  options:       string[]              // length 4
+  correct_index: number                // 0-based; which option is correct
+  explanation:   string                // 1–2 sentence "why this is correct"
+  citations:     number[]              // source idx values, validated against the source list
+}
+
+export interface Quiz {
+  id:             string
+  teacher_id:     string
+  course_id:      string | null
+  topic:          string
+  level:          QuizLevel | null
+  question_count: number
+  questions:      QuizQuestion[]
+  sources:        PresentationSource[] | null
+  created_at:     string
 }
 
 // ─── API error shape ──────────────────────────────────────────────────────────

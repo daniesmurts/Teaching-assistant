@@ -34,23 +34,24 @@ export function chunkDocument(
   const targetChars  = TARGET_CHUNK_TOKENS * CHARS_PER_TOKEN
   const overlapChars = OVERLAP_TOKENS      * CHARS_PER_TOKEN
 
-  // Walk paragraph-by-paragraph but also track which page each paragraph
-  // starts on, by counting form-feeds in the cumulative source text. Page 1
-  // is implicit (no form-feed before the first byte).
+  // Page is implicit at 1; each subsequent \f increments it. Splitting on \f
+  // first then on paragraph boundaries within each page is simpler and more
+  // correct than tracking a cursor while walking the joined string — and it
+  // handles the edge case of "single paragraph that straddles a form-feed"
+  // by treating the form-feed itself as a paragraph break.
   const paragraphs: Array<{ text: string; page: number }> = []
-  const splits = text.split(/(\n\s*\n)/)   // keep separators so we don't lose page boundaries
-  let cursorPage = 1
-  for (const segment of splits) {
-    if (/^\n\s*\n$/.test(segment)) continue                      // pure separator
-    const formFeeds = (segment.match(/\f/g) ?? []).length
-    if (segment.trim().length > 30) {
-      paragraphs.push({ text: segment.replace(/\f/g, '').trim(), page: cursorPage })
-    }
-    cursorPage += formFeeds
-  }
-  // If there were no form-feeds at all, this is an unpaginated document — keep
-  // page info null on every chunk rather than printing a misleading "стр. 1".
   const paginated = text.includes('\f')
+  const pages     = text.split('\f')
+  for (let i = 0; i < pages.length; i++) {
+    const pageNumber = i + 1
+    const paragraphsOnPage = pages[i]
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 30)
+    for (const p of paragraphsOnPage) {
+      paragraphs.push({ text: p, page: pageNumber })
+    }
+  }
 
   const chunks: DocumentChunk[] = []
   let current     = ''

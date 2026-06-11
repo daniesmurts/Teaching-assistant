@@ -16,6 +16,7 @@ import adminRouter from './routes/admin'
 import institutionRouter from './routes/institution'
 import feedbackRouter from './routes/feedback'
 import topicsRouter from './routes/topics'
+import quizzesRouter from './routes/quizzes'
 import paymentsRouter from './routes/payments'
 import accountRouter from './routes/account'
 import { startRenewalScheduler } from './services/renewals'
@@ -98,6 +99,7 @@ app.use('/api/criteria',      criteriaRouter)
 app.use('/api/grading',       gradingRouter)
 app.use('/api/presentations', presentationsRouter)
 app.use('/api/topics',        topicsRouter)
+app.use('/api/quizzes',       quizzesRouter)
 app.use('/api/documents',     documentsRouter)
 app.use('/api/admin',         adminRouter)
 app.use('/api/institution',   institutionRouter)

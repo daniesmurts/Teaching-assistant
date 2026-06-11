@@ -127,7 +127,7 @@ function toSource(c: RelevantChunk, idx: number): PresentationSource {
 
 // ─── Citation cleanup ─────────────────────────────────────────────────────────
 
-function filterCitations(
+export function filterCitations(
   content: string,
   sources: PresentationSource[]
 ): { cleaned: string; used: PresentationSource[] } {

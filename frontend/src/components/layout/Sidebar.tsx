@@ -19,6 +19,7 @@ const NAV_GROUPS: NavGroup[] = [
   { label: 'Генерация', items: [
     { icon: 'presentation', label: 'Презентации',    to: '/presentations' },
     { icon: 'lightbulb',    label: 'Темы',           to: '/topics' },
+    { icon: 'quiz',         label: 'Тесты',          to: '/quizzes' },
   ]},
   { label: 'Управление', items: [
     { icon: 'book',         label: 'Предметы',       to: '/courses' },

@@ -12,6 +12,7 @@ export type IconName =
   | 'users'           // students
   | 'presentation'
   | 'lightbulb'       // topics
+  | 'quiz'            // quick-check quiz
   | 'book'            // subjects (formerly «курсы»)
   | 'list-checks'     // rubrics / criteria
   | 'diamond'         // pricing / plan
@@ -62,6 +63,14 @@ const PATHS: Record<IconName, JSX.Element> = {
       <path d="M15 14a5 5 0 1 0-6 0" />
       <path d="M9 17h6" />
       <path d="M10 21h4" />
+    </>
+  ),
+
+  quiz: (
+    <>
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M10 9c0-1.5 1-2.5 2-2.5s2 1 2 2c0 1.5-2 1.5-2 3" />
+      <circle cx="12" cy="16" r="0.6" />
     </>
   ),
 

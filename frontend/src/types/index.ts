@@ -26,6 +26,9 @@ export type {
   Presentation,
   PresentationSource,
   PresentationStyle,
+  Quiz,
+  QuizLevel,
+  QuizQuestion,
   ApiError,
 } from '../../../shared/types'
 

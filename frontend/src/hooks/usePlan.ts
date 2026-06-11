@@ -26,9 +26,14 @@ export function usePlan() {
     presentationsLimit: plan?.presentationsLimit ?? 3,
     topicsUsed:         plan?.topicsUsed         ?? 0,
     topicsLimit:        plan?.topicsLimit        ?? 3,
+    quizzesUsed:        plan?.quizzesUsed        ?? 0,
+    quizzesLimit:       plan?.quizzesLimit       ?? 3,
 
     atTopicLimit: plan?.topicsLimit !== null &&
       (plan?.topicsUsed ?? 0) >= (plan?.topicsLimit ?? 3),
+
+    atQuizLimit: plan?.quizzesLimit !== null &&
+      (plan?.quizzesUsed ?? 0) >= (plan?.quizzesLimit ?? 3),
 
     /** Remaining grades (Infinity when on unlimited plan) */
     gradesRemaining: plan?.gradesLimit === null

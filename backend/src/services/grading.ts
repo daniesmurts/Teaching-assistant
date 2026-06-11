@@ -239,7 +239,7 @@ function mergeScoresIntoSnapshot(
  * page), subsequent pages are prefixed. Returns the annotated text plus the
  * total page count so the prompt can constrain the citation field.
  */
-function annotateWithPageMarkers(text: string): { text: string; pageCount: number } {
+export function annotateWithPageMarkers(text: string): { text: string; pageCount: number } {
   if (!text.includes('\f')) return { text, pageCount: 1 }
   const pages = text.split('\f')
   const annotated = pages
@@ -253,7 +253,7 @@ function annotateWithPageMarkers(text: string): { text: string; pageCount: numbe
  * survives only if it actually appears in the source — otherwise the model
  * hallucinated it. Pages are clamped to the document's real range.
  */
-function normaliseCriteriaScores(
+export function normaliseCriteriaScores(
   scores: CriterionScore[],
   submissionText: string,
   pageCount: number

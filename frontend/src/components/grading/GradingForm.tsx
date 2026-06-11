@@ -38,7 +38,7 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 // Distribute 100 across N criteria as evenly as possible, putting the remainder
 // on the first item (e.g. 3 picks → [34, 33, 33]).
-function evenWeights(n: number): number[] {
+export function evenWeights(n: number): number[] {
   if (n <= 0) return []
   const base = Math.floor(100 / n)
   const rem  = 100 - base * n
