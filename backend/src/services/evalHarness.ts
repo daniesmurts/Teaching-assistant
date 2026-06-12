@@ -1,0 +1,248 @@
+// Eval harness — offline replay for the flywheel experiment.
+//
+// For each approved assignment (chronological order), re-grade it through the
+// production prompt path (gradeOnce) under controlled conditions: K = number
+// of RAG examples injected, retrieved ONLY from assignments approved before
+// the target existed (no future leakage). Results land in eval_results next
+// to the teacher's ground-truth score; summariseRun() computes the
+// agreement-vs-K table that is the core artefact of the flywheel study.
+//
+// This module never touches production tables beyond reads. Safe to run
+// against live data; cost is ~N_assignments × N_conditions grading calls.
+
+import { gradeOnce } from './grading'
+import { embed } from './deepseek'
+import {
+  findReplayTargets,
+  findSimilarAssignmentsBefore,
+  type ReplayTarget,
+  type SimilarAssignment,
+} from '../db/queries/assignments'
+import {
+  createEvalRun, getEvalRun, completeEvalRun,
+  findCompletedConditions, insertEvalResult, findEvalResults,
+} from '../db/queries/evalRuns'
+import { quadraticWeightedKappa, meanAbsoluteError, spearman } from '../lib/evalMetrics'
+import { logger } from '../lib/logger'
+import type { CriteriaSnapshotItem } from '../../../shared/types'
+
+const DEFAULT_CONDITIONS = [0, 3, 5]
+const CONCURRENCY = 2          // parallel grading calls — gentle on rate limits
+
+export interface ReplayConfig {
+  teacherId:   string
+  courseId?:   string
+  conditions?: number[]
+  limit?:      number          // cap on assignments (newest dropped), for cheap pilots
+  resumeRunId?: string
+  notes?:      string
+}
+
+export interface ReplayProgress {
+  runId:     string
+  total:     number            // (assignment, K) pairs in scope
+  done:      number
+  skipped:   number            // already present from a previous (resumed) run
+  failed:    number
+}
+
+/**
+ * Strip the merged-in AI scores from a stored criteria snapshot so the replay
+ * grades against clean criteria definitions, exactly like the original call.
+ */
+export function cleanSnapshotForReplay(
+  snapshot: CriteriaSnapshotItem[] | null
+): CriteriaSnapshotItem[] {
+  if (!snapshot) return []
+  return snapshot.map(({ criterion_id, name, weight, description }) => ({
+    criterion_id, name, weight, description,
+  }))
+}
+
+export async function runReplay(
+  cfg: ReplayConfig,
+  onProgress?: (p: ReplayProgress) => void
+): Promise<ReplayProgress> {
+  const conditions = cfg.conditions ?? DEFAULT_CONDITIONS
+
+  // Create or resume the run
+  let runId: string
+  if (cfg.resumeRunId) {
+    const existing = await getEvalRun(cfg.resumeRunId)
+    if (!existing) throw new Error(`Eval run not found: ${cfg.resumeRunId}`)
+    runId = existing.id
+  } else {
+    const run = await createEvalRun({
+      teacherId:  cfg.teacherId,
+      courseId:   cfg.courseId,
+      model:      'deepseek-chat',
+      conditions,
+      notes:      cfg.notes,
+    })
+    runId = run.id
+  }
+
+  const alreadyDone = await findCompletedConditions(runId)
+
+  let targets = await findReplayTargets(cfg.teacherId, cfg.courseId)
+  if (cfg.limit && targets.length > cfg.limit) targets = targets.slice(0, cfg.limit)
+
+  const progress: ReplayProgress = {
+    runId,
+    total:   targets.length * conditions.length,
+    done:    0,
+    skipped: 0,
+    failed:  0,
+  }
+
+  // Work queue of (target, K) pairs, processed with bounded concurrency.
+  const queue: Array<{ target: ReplayTarget; k: number }> = []
+  for (const target of targets) {
+    for (const k of conditions) {
+      if (alreadyDone.has(`${target.id}:${k}`)) {
+        progress.skipped += 1
+        progress.done    += 1
+      } else {
+        queue.push({ target, k })
+      }
+    }
+  }
+
+  // Per-target embedding cache (each target appears once per condition).
+  const embeddingCache = new Map<string, number[]>()
+
+  async function targetEmbedding(t: ReplayTarget): Promise<number[]> {
+    const cached = embeddingCache.get(t.id)
+    if (cached) return cached
+    let vector: number[]
+    if (t.embedding_str) {
+      vector = JSON.parse(t.embedding_str) as number[]   // pgvector text form is valid JSON
+    } else {
+      vector = await embed(t.submission_text, { teacherId: cfg.teacherId, feature: 'embedding' })
+    }
+    embeddingCache.set(t.id, vector)
+    return vector
+  }
+
+  async function processOne(item: { target: ReplayTarget; k: number }): Promise<void> {
+    const { target, k } = item
+    const started = Date.now()
+    try {
+      let examples: SimilarAssignment[] = []
+      if (k > 0) {
+        const vector = await targetEmbedding(target)
+        examples = await findSimilarAssignmentsBefore(
+          target.course_id, vector, target.created_at, target.id, k,
+        )
+      }
+
+      const result = await gradeOnce({
+        submissionText: target.submission_text,
+        criteria:       cleanSnapshotForReplay(target.criteria_snapshot),
+        examples,
+        context:        { teacherId: cfg.teacherId, feature: 'grading' },
+      })
+
+      await insertEvalResult({
+        runId,
+        assignmentId:   target.id,
+        k,
+        examplesUsed:   examples.length,
+        replayScore:    result.score,
+        replayGrade:    result.grade,
+        replayCriteria: result.criteriaScores,
+        teacherScore:   target.approved_score,
+        teacherGrade:   target.approved_grade,
+        durationMs:     Date.now() - started,
+      })
+    } catch (err) {
+      progress.failed += 1
+      await insertEvalResult({
+        runId,
+        assignmentId:   target.id,
+        k,
+        examplesUsed:   0,
+        replayScore:    null,
+        replayGrade:    null,
+        replayCriteria: null,
+        teacherScore:   target.approved_score,
+        teacherGrade:   target.approved_grade,
+        durationMs:     Date.now() - started,
+        error:          (err as Error).message.slice(0, 500),
+      }).catch(() => null)
+      logger.warn({ message: '[eval] condition failed', assignment: target.id, k, error: (err as Error).message })
+    } finally {
+      progress.done += 1
+      onProgress?.(progress)
+    }
+  }
+
+  // Bounded-concurrency worker pool
+  let next = 0
+  async function worker(): Promise<void> {
+    while (next < queue.length) {
+      const i = next++
+      await processOne(queue[i])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker))
+
+  await completeEvalRun(runId, progress.failed === progress.total ? 'failed' : 'done')
+  return progress
+}
+
+// ─── Summary ─────────────────────────────────────────────────────────────────
+
+export interface ConditionSummary {
+  k:             number
+  n:             number          // usable result pairs
+  meanExamples:  number          // actual examples injected (may be < k on thin data)
+  qwk:           number | null   // on 5-point grade
+  mae:           number | null   // on 0–100 score
+  rho:           number | null   // Spearman on 0–100 score
+}
+
+export async function summariseRun(runId: string): Promise<ConditionSummary[]> {
+  const rows = await findEvalResults(runId)
+  const byK = new Map<number, typeof rows>()
+  for (const r of rows) {
+    if (r.error || r.replay_score == null || r.replay_grade == null) continue
+    if (!byK.has(r.k)) byK.set(r.k, [])
+    byK.get(r.k)!.push(r)
+  }
+
+  const out: ConditionSummary[] = []
+  for (const [k, group] of Array.from(byK.entries()).sort((a, b) => a[0] - b[0])) {
+    const replayScores  = group.map((r) => r.replay_score!)
+    const teacherScores = group.map((r) => r.teacher_score)
+    const replayGrades  = group.map((r) => parseInt(r.replay_grade!, 10))
+    const teacherGrades = group.map((r) => parseInt(r.teacher_grade, 10))
+
+    out.push({
+      k,
+      n:            group.length,
+      meanExamples: group.reduce((s, r) => s + r.examples_used, 0) / group.length,
+      qwk:          group.length >= 2 ? round3(quadraticWeightedKappa(teacherGrades, replayGrades)) : null,
+      mae:          round3(meanAbsoluteError(teacherScores, replayScores)),
+      rho:          group.length >= 2 ? round3(spearman(teacherScores, replayScores)) : null,
+    })
+  }
+  return out
+}
+
+/** Raw per-condition rows as CSV — the dataset behind the paper's chart. */
+export async function exportRunCsv(runId: string): Promise<string> {
+  const rows = await findEvalResults(runId)
+  const header = 'assignment_id,k,examples_used,replay_score,replay_grade,teacher_score,teacher_grade,error'
+  const body = rows.map((r) => [
+    r.assignment_id, r.k, r.examples_used,
+    r.replay_score ?? '', r.replay_grade ?? '',
+    r.teacher_score, r.teacher_grade,
+    r.error ? `"${r.error.replace(/"/g, '""')}"` : '',
+  ].join(','))
+  return [header, ...body].join('\n')
+}
+
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000
+}

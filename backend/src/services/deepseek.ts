@@ -92,56 +92,92 @@ export async function chat(
   }
 }
 
-// ─── Embeddings ───────────────────────────────────────────────────────────────
-
-// The embedding model has a token limit; cap very long inputs (e.g. a whole ВКР)
-// to a safe prefix. The leading section is the most semantically representative
-// for RAG retrieval, and this keeps the call from failing on huge documents.
-const EMBED_MAX_CHARS = 24_000
+// ─── Embeddings (Yandex Foundation Models) ────────────────────────────────────
+//
+// DeepSeek's API has no embeddings endpoint — the original integration 404'd
+// silently for the project's whole life (see migration 024). Embeddings now go
+// through Yandex Foundation Models textEmbedding: 256-dim, Russia-accessible,
+// same Api-Key auth scheme as Yandex Vision. The service account behind the
+// key needs the ai.languageModels.user role.
+//
+// Yandex caps embedding input around 2k tokens — cap very long inputs (e.g. a
+// whole ВКР) to a safe prefix; the lead section is the most semantically
+// representative for retrieval anyway.
+const EMBED_MAX_CHARS = 6_000
+const YANDEX_EMBED_URL = 'https://llm.api.cloud.yandex.net/foundationModels/v1/textEmbedding'
 
 export async function embed(text: string, context?: CallContext): Promise<number[]> {
   const start = Date.now()
-  const input = text.length > EMBED_MAX_CHARS ? text.slice(0, EMBED_MAX_CHARS) : text
-  try {
-    const response = await axios.post(
-      `${BASE_URL}/embeddings`,
-      { model: 'deepseek-embedding', input },
-      {
-        headers: {
-          Authorization:  `Bearer ${apiKey()}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 30_000,
-      }
-    )
 
-    if (context) {
-      const usage = response.data.usage as { prompt_tokens: number; total_tokens: number } | undefined
-      createUsageLog({
-        ...context,
-        model:        'deepseek-embedding',
-        inputTokens:  usage?.prompt_tokens ?? 0,
-        outputTokens: 0,
-        costUsd:      0,   // embeddings cost is negligible at MVP scale
-        durationMs:   Date.now() - start,
-        success:      true,
-      }).catch(() => null)
-    }
-
-    return response.data.data[0].embedding as number[]
-  } catch (err) {
-    if (context) {
-      createUsageLog({
-        ...context,
-        model:        'deepseek-embedding',
-        inputTokens:  0, outputTokens: 0, costUsd: 0,
-        durationMs:   Date.now() - start,
-        success:      false,
-        errorCode:    axios.isAxiosError(err) ? `HTTP_${err.response?.status ?? 0}` : 'UNKNOWN',
-      }).catch(() => null)
-    }
-    throw err
+  const yandexKey = process.env.YANDEX_API_KEY || process.env.YANDEX_VISION_API_KEY
+  const folderId  = process.env.YANDEX_FOLDER_ID
+  if (!yandexKey || !folderId) {
+    throw new Error('Yandex embeddings not configured (YANDEX_API_KEY / YANDEX_FOLDER_ID)')
   }
+
+  // The model's hard cap is in tokens, but tokens-per-char varies wildly with
+  // content (formula/digit-heavy STEM texts tokenize ~2× denser than prose).
+  // Rather than guess, retry with a halved prefix when Yandex rejects the
+  // input as too long (HTTP 400).
+  let capChars = EMBED_MAX_CHARS
+  let lastErr: unknown
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const input = text.length > capChars ? text.slice(0, capChars) : text
+    try {
+      const response = await axios.post(
+        YANDEX_EMBED_URL,
+        {
+          modelUri: `emb://${folderId}/text-search-doc/latest`,
+          text:     input,
+        },
+        {
+          headers: {
+            Authorization:  `Api-Key ${yandexKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 30_000,
+        }
+      )
+
+      const vector = (response.data.embedding as number[] | undefined) ?? []
+      if (vector.length === 0) throw new Error('Yandex embedding response missing vector')
+
+      if (context) {
+        createUsageLog({
+          ...context,
+          model:        'yandex-text-search-doc',
+          inputTokens:  Number(response.data.numTokens ?? 0),
+          outputTokens: 0,
+          costUsd:      0,   // embeddings cost is negligible at MVP scale
+          durationMs:   Date.now() - start,
+          success:      true,
+        }).catch(() => null)
+      }
+
+      return vector
+    } catch (err) {
+      lastErr = err
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined
+      if (status === 400 && input.length > 500) {
+        capChars = Math.floor(input.length / 2)   // too many tokens — halve and retry
+        continue
+      }
+      break
+    }
+  }
+
+  if (context) {
+    createUsageLog({
+      ...context,
+      model:        'yandex-text-search-doc',
+      inputTokens:  0, outputTokens: 0, costUsd: 0,
+      durationMs:   Date.now() - start,
+      success:      false,
+      errorCode:    axios.isAxiosError(lastErr) ? `HTTP_${lastErr.response?.status ?? 0}` : 'UNKNOWN',
+    }).catch(() => null)
+  }
+  throw lastErr
 }
 
 // Extract a JSON object from a model response that may wrap it in ```fences```

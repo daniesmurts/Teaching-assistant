@@ -8,7 +8,9 @@
     "start": "node --env-file=../.env dist/backend/src/index.js",
     "migrate": "node --env-file=../.env scripts/migrate.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval": "node --env-file=../.env ../node_modules/.bin/tsx scripts/runEval.ts",
+    "backfill:embeddings": "node --env-file=../.env ../node_modules/.bin/tsx scripts/backfillEmbeddings.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1059.0",

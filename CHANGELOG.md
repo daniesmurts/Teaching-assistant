@@ -14,6 +14,31 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Added
+- **Eval harness** (flywheel research program, ФСИ «Развитие-ИИ» grant prep) —
+  offline replay re-grades approved assignments through the production prompt
+  path (`gradeOnce`) under controlled K-example conditions, time-respecting
+  retrieval (no future leakage), resumable runs, QWK/MAE/Spearman summary +
+  CSV export. Run: `npm run eval -- --teacher <id> [--course <id>] [--k 0,3,5]`.
+  Migration `023_eval_harness.sql` (eval_runs / eval_results).
+- `gradeOnce()` / `buildGradingMessages()` extracted from the grading service —
+  single prompt path shared by production and experiments; prompt assembly is
+  now fully unit-tested (10 tests).
+- Quiz generator («Тесты») — 5–20 MCQ from course materials with RAG source
+  citations, answer reveal, history; free tier 3/mo. Migration `022_quizzes.sql`.
+- Vitest test suites in both workspaces (`npm test`) — 76 backend + 26 frontend.
+
+### Fixed
+- **RAG flywheel never worked**: DeepSeek has no `/embeddings` endpoint — every
+  embedding call since launch failed silently (fire-and-forget swallowed the
+  404), so similar-assignment retrieval always returned empty. Switched to
+  Yandex Foundation Models textEmbedding (256-dim, in-Russia). Migration
+  `024_yandex_embeddings.sql` re-dimensions both vector columns (they were 100%
+  NULL — free change). **Requires the `ai.languageModels.user` role on the
+  Yandex API-key service account**; backfill via `npm run backfill:embeddings`.
+- Criterion names returned by the model with an echoed weight suffix
+  («Структура (вес: 40%)») broke the snapshot score merge — now stripped.
+
 ### Changed
 - **Rubrics → Criteria model** — replaced the named-rubric "bundle" concept with
   individual reusable criteria. Teachers now pick one or more criteria at grading

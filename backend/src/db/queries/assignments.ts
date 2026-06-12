@@ -193,6 +193,68 @@ export async function findSimilarAssignments(
   return rows
 }
 
+/**
+ * Time-respecting variant for the eval harness: only assignments approved
+ * BEFORE the target's creation are eligible as examples, and the target
+ * itself is excluded. This simulates what the RAG flywheel would actually
+ * have retrieved at the moment the target was originally graded.
+ */
+export async function findSimilarAssignmentsBefore(
+  courseId: string,
+  embedding: number[],
+  beforeCreatedAt: Date,
+  excludeId: string,
+  limit = 5
+): Promise<SimilarAssignment[]> {
+  const { rows } = await pool.query<SimilarAssignment>(
+    `SELECT submission_text, approved_score, approved_grade, approved_feedback
+     FROM assignments
+     WHERE course_id = $1
+       AND status = 'approved'
+       AND embedding IS NOT NULL
+       AND created_at < $3
+       AND id <> $4
+     ORDER BY embedding <=> $2
+     LIMIT $5`,
+    [courseId, `[${embedding.join(',')}]`, beforeCreatedAt, excludeId, limit]
+  )
+  return rows
+}
+
+// Replay target: an approved assignment with everything needed to re-grade it.
+export interface ReplayTarget {
+  id:                string
+  course_id:         string
+  submission_text:   string
+  criteria_snapshot: CriteriaSnapshotItem[] | null
+  approved_score:    number
+  approved_grade:    string
+  embedding_str:     string | null   // pgvector text form, parsed by caller
+  created_at:        Date
+}
+
+/** All approved works of a teacher (optionally one course), oldest first. */
+export async function findReplayTargets(
+  teacherId: string,
+  courseId?: string
+): Promise<ReplayTarget[]> {
+  const params: unknown[] = [teacherId]
+  let where = `teacher_id = $1 AND status = 'approved'
+               AND approved_score IS NOT NULL AND approved_grade IS NOT NULL
+               AND course_id IS NOT NULL`
+  if (courseId) { params.push(courseId); where += ` AND course_id = $${params.length}` }
+  const { rows } = await pool.query<ReplayTarget>(
+    `SELECT id, course_id, submission_text, criteria_snapshot,
+            approved_score, approved_grade,
+            embedding::text AS embedding_str, created_at
+       FROM assignments
+      WHERE ${where}
+      ORDER BY created_at ASC`,
+    params
+  )
+  return rows
+}
+
 export async function findAssignmentsByTeacher(
   teacherId: string,
   options: {

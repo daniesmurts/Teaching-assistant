@@ -1,4 +1,4 @@
-import { chatJSON, embed, REASONER_MODEL } from './deepseek'
+import { chatJSON, embed, REASONER_MODEL, type CallContext } from './deepseek'
 import { findCriteriaByIds } from '../db/queries/criteria'
 import {
   createAssignment,
@@ -113,7 +113,116 @@ async function retrieveExamples(
   }
 }
 
-// ─── Grade ────────────────────────────────────────────────────────────────────
+// ─── Pure grading core ────────────────────────────────────────────────────────
+//
+// gradeOnce() is the single prompt path shared by production grading AND the
+// eval harness (offline replay for the flywheel/triage experiments). It has no
+// side effects on the database: no assignment row, no usage counter, no
+// watermark — those are concerns of grade() below. Keeping the experiment and
+// production on one code path is what makes replay results valid.
+
+export interface GradeOnceParams {
+  submissionText: string
+  criteria:       CriteriaSnapshotItem[]   // empty → holistic grading
+  examples:       SimilarAssignment[]      // RAG few-shot examples (may be [])
+  assignmentType?: 'essay' | 'calculation'
+  referenceSolution?: string
+  parent?:        Assignment | null        // revision context, if re-grading a resubmission
+  context:        CallContext              // teacherId + feature, for usage logging
+}
+
+export interface GradeOnceResult {
+  score:          number
+  grade:          GradeLetter
+  gradeLabel:     string
+  feedback:       string
+  criteriaScores: CriterionScore[]         // normalised + citation-validated
+  strengths:      string[]
+  improvements:   string[]
+  revisionCheck:  RevisionCheckItem[] | null
+}
+
+export interface GradingMessages {
+  system:    string
+  user:      string
+  pageCount: number
+}
+
+/**
+ * Deterministic prompt assembly — fully testable without network. Everything
+ * that decides WHAT the model sees lives here; gradeOnce only adds the call
+ * and response normalisation.
+ */
+export function buildGradingMessages(params: {
+  submissionText: string
+  criteria:       CriteriaSnapshotItem[]
+  examples:       SimilarAssignment[]
+  assignmentType?: 'essay' | 'calculation'
+  referenceSolution?: string
+  parent?:        Assignment | null
+}): GradingMessages {
+  const isCalc     = params.assignmentType === 'calculation'
+  const isRevision = params.parent != null
+
+  const system = isCalc
+    ? `Вы опытный преподаватель точных наук (математика, физика, инженерные дисциплины). ` +
+      `Проверяйте расчётные задачи строго: пошагово пересчитывайте решение, проверяйте формулы, ` +
+      `единицы измерения, размерности и числовой ответ. Отличайте ошибку метода от арифметической описки ` +
+      `и справедливо начисляйте частичный балл за верный ход решения. ` +
+      `Давайте обратную связь на русском языке. Всегда отвечайте только валидным JSON-объектом.`
+    : `Вы опытный преподаватель-эксперт. Ваша задача — объективно оценивать студенческие работы ` +
+      `и давать конструктивную обратную связь на русском языке. Всегда отвечайте только валидным JSON.`
+
+  const revisionBlock = isRevision ? buildRevisionContext(params.parent!) : ''
+
+  const reference = params.referenceSolution?.trim()
+    ? `## Эталонное решение / правильный ответ
+Сравнивайте работу студента с этим эталоном. Если ответ студента совпадает по существу — засчитывайте, даже если оформление отличается.
+<reference_solution>
+${sanitiseForPrompt(params.referenceSolution.trim())}
+</reference_solution>
+
+`
+    : ''
+
+  const { text: annotated, pageCount } = annotateWithPageMarkers(params.submissionText)
+
+  const user = revisionBlock + reference + (params.criteria.length > 0
+    ? buildCriteriaPrompt(annotated, params.criteria, params.examples, isCalc, isRevision, pageCount)
+    : buildHolisticPrompt(annotated, params.examples, isCalc, isRevision))
+
+  return { system, user, pageCount }
+}
+
+/** One grading call: prompt → model → normalised result. No DB writes. */
+export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResult> {
+  const { system, user, pageCount } = buildGradingMessages(params)
+  const isCalc = params.assignmentType === 'calculation'
+
+  const result = await chatJSON<AIGradingResult>(
+    [
+      { role: 'system', content: system },
+      { role: 'user',   content: user },
+    ],
+    'результат оценивания',
+    params.context,
+    isCalc ? REASONER_MODEL : undefined,
+  )
+
+  const grade = normaliseGrade(result.grade)
+  return {
+    score:          clampScore(result.score),
+    grade,
+    gradeLabel:     result.grade_label ?? gradeToLabel(grade),
+    feedback:       result.feedback ?? '',
+    criteriaScores: normaliseCriteriaScores(result.criteria_scores ?? [], params.submissionText, pageCount),
+    strengths:      result.strengths ?? [],
+    improvements:   result.improvements ?? [],
+    revisionCheck:  params.parent != null ? normaliseRevisionCheck(result.revision_check) : null,
+  }
+}
+
+// ─── Grade (production path: resolve inputs → gradeOnce → persist) ───────────
 
 export async function grade(params: GradeParams): Promise<GradeResponse> {
   const ragEnabled = canUseFeature(params.planTier, 'ragFlywheel')
@@ -130,56 +239,20 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
       : Promise.resolve(null),
   ])
 
-  const isRevision = parent != null
-  const revisionBlock = isRevision ? buildRevisionContext(parent) : ''
-
-  const isCalc = params.assignmentType === 'calculation'
-
-  const systemPrompt = isCalc
-    ? `Вы опытный преподаватель точных наук (математика, физика, инженерные дисциплины). ` +
-      `Проверяйте расчётные задачи строго: пошагово пересчитывайте решение, проверяйте формулы, ` +
-      `единицы измерения, размерности и числовой ответ. Отличайте ошибку метода от арифметической описки ` +
-      `и справедливо начисляйте частичный балл за верный ход решения. ` +
-      `Давайте обратную связь на русском языке. Всегда отвечайте только валидным JSON-объектом.`
-    : `Вы опытный преподаватель-эксперт. Ваша задача — объективно оценивать студенческие работы ` +
-      `и давать конструктивную обратную связь на русском языке. Всегда отвечайте только валидным JSON.`
-
-  const reference = params.referenceSolution?.trim()
-    ? `## Эталонное решение / правильный ответ
-Сравнивайте работу студента с этим эталоном. Если ответ студента совпадает по существу — засчитывайте, даже если оформление отличается.
-<reference_solution>
-${sanitiseForPrompt(params.referenceSolution.trim())}
-</reference_solution>
-
-`
-    : ''
-
-  const { text: annotated, pageCount } = annotateWithPageMarkers(params.submissionText)
-
-  const userPrompt = revisionBlock + reference + (snapshot.length > 0
-    ? buildCriteriaPrompt(annotated, snapshot, examples, isCalc, isRevision, pageCount)
-    : buildHolisticPrompt(annotated, examples, isCalc, isRevision))
-
-  const result = await chatJSON<AIGradingResult>(
-    [
-      { role: 'system', content: systemPrompt },
-      { role: 'user',   content: userPrompt },
-    ],
-    'результат оценивания',
-    { teacherId: params.teacherId, feature: 'grading' },
-    isCalc ? REASONER_MODEL : undefined,
-  )
-
-  const revisionCheck = isRevision ? normaliseRevisionCheck(result.revision_check) : null
-
-  // Validate citations against the original submission — keep only quotes that
-  // actually appear, drop pages outside the document. Stops hallucinated cites.
-  const cleanedScores = normaliseCriteriaScores(result.criteria_scores ?? [], params.submissionText, pageCount)
+  const result = await gradeOnce({
+    submissionText:    params.submissionText,
+    criteria:          snapshot,
+    examples,
+    assignmentType:    params.assignmentType,
+    referenceSolution: params.referenceSolution,
+    parent,
+    context:           { teacherId: params.teacherId, feature: 'grading' },
+  })
 
   // Merge AI per-criterion scores back into the snapshot so the history view
   // can reconstruct exactly what was graded against what.
   const filledSnapshot: CriteriaSnapshotItem[] | null = snapshot.length > 0
-    ? mergeScoresIntoSnapshot(snapshot, cleanedScores)
+    ? mergeScoresIntoSnapshot(snapshot, result.criteriaScores)
     : null
 
   const assignment = await createAssignment({
@@ -189,16 +262,16 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
     studentEmail: params.studentEmail,
     studentGroup: params.studentGroup,
     submissionText: params.submissionText,
-    aiScore: clampScore(result.score),
-    aiGrade: normaliseGrade(result.grade),
-    aiGradeLabel: result.grade_label ?? gradeToLabel(result.grade),
-    aiFeedback: applyWatermark(result.feedback ?? '', params.planTier),
-    aiCriteriaScores: cleanedScores,
-    aiStrengths: result.strengths ?? [],
-    aiImprovements: result.improvements ?? [],
+    aiScore: result.score,
+    aiGrade: result.grade,
+    aiGradeLabel: result.gradeLabel,
+    aiFeedback: applyWatermark(result.feedback, params.planTier),
+    aiCriteriaScores: result.criteriaScores,
+    aiStrengths: result.strengths,
+    aiImprovements: result.improvements,
     criteriaSnapshot: filledSnapshot,
     parentAssignmentId: parent?.id,
-    aiRevisionCheck: revisionCheck ?? undefined,
+    aiRevisionCheck: result.revisionCheck ?? undefined,
   })
 
   incrementUsage(params.teacherId, 'grade').catch(() => null)
@@ -261,7 +334,9 @@ export function normaliseCriteriaScores(
   const haystack = submissionText.toLowerCase().replace(/\s+/g, ' ').trim()
   return scores.map((s) => {
     const next: CriterionScore = {
-      name:     String(s.name ?? '').trim(),
+      // The model sometimes echoes the weight into the name («Структура (вес: 40%)»)
+      // — strip it so display stays clean and the snapshot merge-by-name works.
+      name:     String(s.name ?? '').replace(/\s*\(вес:?\s*\d+\s*%?\)\s*$/i, '').trim(),
       score:    clampScore(s.score),
       feedback: String(s.feedback ?? '').trim(),
       quote:    null,
