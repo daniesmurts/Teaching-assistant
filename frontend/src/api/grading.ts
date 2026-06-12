@@ -1,6 +1,7 @@
 import client from './client'
 import type {
   Assignment, GradeLetter, LongReview, RevisionCheckItem, CriteriaSnapshotItem, CriterionScore,
+  ConfidenceLevel, AiEnsemble,
 } from '../types'
 
 export interface GradeRequest {
@@ -14,6 +15,7 @@ export interface GradeRequest {
   reference_solution?: string
   assignment_type?: 'essay' | 'calculation'
   parent_assignment_id?: string
+  thorough?: boolean                         // run the confidence ensemble (Pro+)
 }
 
 export interface GradeResponse {
@@ -27,6 +29,8 @@ export interface GradeResponse {
   ai_improvements: string[]
   ai_revision_check: RevisionCheckItem[] | null
   criteria_snapshot: CriteriaSnapshotItem[] | null
+  ai_confidence: ConfidenceLevel | null
+  ai_ensemble: AiEnsemble | null
   used_examples: number
   revision_number: number
   parent_assignment_id: string | null

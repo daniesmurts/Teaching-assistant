@@ -21,6 +21,7 @@ export interface PlanState {
     ragFlywheel:         boolean
     emailGeneration:     boolean
     presentationHistory: boolean
+    confidenceCheck:     boolean
   }
 }
 
@@ -109,6 +110,26 @@ export interface CriterionScore {
   page?:  number | null
 }
 
+// ─── Confidence / ensemble ────────────────────────────────────────────────────
+// "Thorough" grading runs an ensemble of grader variants and derives a
+// calibrated confidence from their disagreement. Low confidence flags a work
+// for closer teacher review (selective-prediction / triage).
+export type ConfidenceLevel = 'high' | 'medium' | 'low'
+
+export interface EnsembleSample {
+  persona:     'strict' | 'neutral' | 'lenient'
+  temperature: number | null
+  score:       number
+  grade:       GradeLetter
+}
+
+export interface AiEnsemble {
+  samples:         EnsembleSample[]
+  score_std:       number
+  score_spread:    number   // max − min
+  grade_agreement: number   // fraction of samples matching the modal grade
+}
+
 export type RevisionStatus = 'addressed' | 'partial' | 'not_addressed'
 
 export interface RevisionCheckItem {
@@ -134,6 +155,8 @@ export interface Assignment {
   ai_improvements: string[] | null
   ai_revision_check: RevisionCheckItem[] | null   // present only on revisions
   criteria_snapshot: CriteriaSnapshotItem[] | null   // the criteria + weights used for this grading
+  ai_confidence:     ConfidenceLevel | null       // present only on "thorough" (ensemble) gradings
+  ai_ensemble:       AiEnsemble | null            // the variant samples behind the confidence
   approved_score: number | null
   approved_grade: GradeLetter | null
   approved_feedback: string | null

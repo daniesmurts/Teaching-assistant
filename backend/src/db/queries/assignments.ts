@@ -1,6 +1,7 @@
 import { pool } from '../connection'
 import type {
   Assignment, GradeLetter, CriterionScore, RevisionCheckItem, CriteriaSnapshotItem,
+  ConfidenceLevel, AiEnsemble,
 } from '../../../../shared/types'
 
 interface AssignmentRow {
@@ -20,6 +21,8 @@ interface AssignmentRow {
   ai_improvements: string[] | null
   ai_revision_check: RevisionCheckItem[] | null
   criteria_snapshot: CriteriaSnapshotItem[] | null
+  ai_confidence: string | null
+  ai_ensemble: AiEnsemble | null
   approved_score: number | null
   approved_grade: string | null
   approved_feedback: string | null
@@ -50,6 +53,8 @@ function toAssignment(row: AssignmentRow): Assignment {
     ai_improvements: row.ai_improvements,
     ai_revision_check: row.ai_revision_check,
     criteria_snapshot: row.criteria_snapshot,
+    ai_confidence: row.ai_confidence as ConfidenceLevel | null,
+    ai_ensemble: row.ai_ensemble,
     approved_score: row.approved_score,
     approved_grade: row.approved_grade as GradeLetter | null,
     approved_feedback: row.approved_feedback,
@@ -80,6 +85,8 @@ export async function createAssignment(data: {
   criteriaSnapshot?: CriteriaSnapshotItem[] | null
   parentAssignmentId?: string
   aiRevisionCheck?: Array<{ point: string; status: string; note: string }>
+  aiConfidence?: ConfidenceLevel | null
+  aiEnsemble?: AiEnsemble | null
 }): Promise<Assignment> {
   const { rows } = await pool.query<AssignmentRow>(
     `WITH parent AS (
@@ -90,11 +97,11 @@ export async function createAssignment(data: {
        teacher_id, course_id, student_name, student_email, student_group,
        submission_text, ai_score, ai_grade, ai_grade_label, ai_feedback,
        ai_criteria_scores, ai_strengths, ai_improvements, criteria_snapshot,
-       parent_assignment_id, ai_revision_check,
+       parent_assignment_id, ai_revision_check, ai_confidence, ai_ensemble,
        revision_number, status
      ) VALUES (
        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-       $15,$16,
+       $15,$16,$17,$18,
        COALESCE((SELECT revision_number + 1 FROM parent), 1),
        'pending'
      )
@@ -116,6 +123,8 @@ export async function createAssignment(data: {
       data.criteriaSnapshot ? JSON.stringify(data.criteriaSnapshot) : null,
       data.parentAssignmentId ?? null,
       data.aiRevisionCheck ? JSON.stringify(data.aiRevisionCheck) : null,
+      data.aiConfidence ?? null,
+      data.aiEnsemble ? JSON.stringify(data.aiEnsemble) : null,
     ]
   )
   return toAssignment(rows[0])

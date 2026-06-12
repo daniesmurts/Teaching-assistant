@@ -15,6 +15,30 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Added
+- **Calibrated confidence thresholds** — the heuristic dispersion cut-offs are
+  now data-driven: `fitThresholds()` picks std bands that best match target
+  error levels on a confidence run's teacher ground truth; persisted in
+  `confidence_config` (migration 027) and read (cached) by `classifyConfidence`.
+- **Admin eval harness UI** (`/admin/evals`) — list past runs (flywheel +
+  confidence) with live status polling; start new runs from a form (background
+  execution); per-run summary tables (flywheel QWK/MAE/Spearman; confidence
+  risk-coverage + per-label + selectivity); CSV download; one-click "apply
+  thresholds" to calibrate confidence from a run. Routes under
+  `/api/admin/evals` (platform-admin only). Replaces CLI-only access.
+- **Confidence / triage** (research pillar #2 + product feature) — "thorough"
+  grading runs an ensemble of grader variants (persona × temperature); their
+  disagreement yields a calibrated confidence label (high/medium/low) that
+  flags uncertain works for closer review (selective prediction). Pro+ gated
+  (`confidenceCheck` plan feature), opt-in per grade (`thorough: true`).
+  Migration `025_grading_confidence.sql` (`ai_confidence`, `ai_ensemble`).
+  Risk-coverage study: `npm run eval:confidence` runs the ensemble over
+  approved works and reports the coverage→error curve + dispersion→error
+  calibration (migration `026_confidence_eval.sql`). First validation run:
+  keeping the most-confident 80% halved mean error (10.8 → 5.2), selectivity
+  gain 20.7 points. UI: "Тщательная проверка" toggle on the grading form
+  (Pro-gated), confidence badge + low-confidence triage banner on the result,
+  badge in the assignment detail modal, and confidence cue on pending history
+  rows. `ConfidenceBadge` component shared across all four.
 - **Eval harness** (flywheel research program, ФСИ «Развитие-ИИ» grant prep) —
   offline replay re-grades approved assignments through the production prompt
   path (`gradeOnce`) under controlled K-example conditions, time-respecting

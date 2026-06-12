@@ -65,6 +65,7 @@ Everything in Free, plus:
 - **Unlimited** grades, presentations, courses, criteria
 - **Document upload** — PDF / DOCX / image with OCR (Yandex Vision), auto-fills submission
 - **RAG flywheel** — grading learns from approved grades (course-scoped few-shot)
+- **Тщательная проверка (confidence)** — opt-in per grade; runs a grader ensemble and flags low-confidence works for closer review (selective-prediction triage)
 - **Long-document review** — ВКР/диплом section-aware map-reduce: chapter-by-chapter analysis, defense questions, suggested grade
 - **Feedback email generation** — draft email to student (teacher sends from own client)
 - **Presentation history**

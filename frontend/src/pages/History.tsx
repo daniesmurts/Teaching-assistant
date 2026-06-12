@@ -3,6 +3,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Badge from '../components/ui/Badge'
+import ConfidenceBadge from '../components/grading/ConfidenceBadge'
 import AssignmentDetailModal from '../components/grading/AssignmentDetailModal'
 import { getGradingHistory } from '../api/grading'
 import { getCourses } from '../api/courses'
@@ -151,6 +152,11 @@ export default function History() {
                       {fmt(a.created_at)} · {a.submission_text.slice(0, 60)}…
                     </div>
                   </div>
+                  {/* Confidence cue — only on pending thorough grades, where it
+                      still matters for the teacher's review decision. */}
+                  {a.ai_confidence && a.status === 'pending' && (
+                    <ConfidenceBadge level={a.ai_confidence} ensemble={a.ai_ensemble} size="sm" />
+                  )}
                   {(a.approved_grade ?? a.ai_grade) && (
                     <div className="font-display text-xl font-bold w-6 text-center flex-shrink-0" style={{ color: gradeColor(a.approved_grade ?? a.ai_grade) }}>
                       {a.approved_grade ?? a.ai_grade}

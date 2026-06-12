@@ -1,4 +1,5 @@
 import { chatJSON, embed, REASONER_MODEL, type CallContext } from './deepseek'
+import { gradeEnsemble } from './confidence'
 import { findCriteriaByIds } from '../db/queries/criteria'
 import {
   createAssignment,
@@ -31,6 +32,7 @@ interface GradeParams {
   referenceSolution?: string
   assignmentType?: 'essay' | 'calculation'
   parentAssignmentId?: string
+  thorough?: boolean   // run the confidence ensemble (premium "тщательная проверка")
 }
 
 interface RevisionCheckItem {
@@ -61,6 +63,8 @@ export interface GradeResponse {
   ai_improvements: string[]
   ai_revision_check: RevisionCheckItem[] | null
   criteria_snapshot: CriteriaSnapshotItem[] | null
+  ai_confidence: import('../../../shared/types').ConfidenceLevel | null
+  ai_ensemble: import('../../../shared/types').AiEnsemble | null
   used_examples: number
   revision_number: number
   parent_assignment_id: string | null
@@ -121,6 +125,18 @@ async function retrieveExamples(
 // watermark — those are concerns of grade() below. Keeping the experiment and
 // production on one code path is what makes replay results valid.
 
+// Grading persona — biases the examiner's leniency. Used by the confidence
+// ensemble to sample genuine disagreement; 'neutral' is the production default.
+export type GradingPersona = 'strict' | 'neutral' | 'lenient'
+
+const PERSONA_MODIFIER: Record<GradingPersona, string> = {
+  neutral: '',
+  strict:  ' Будьте требовательным экзаменатором: придирайтесь к деталям, ' +
+           'не завышайте оценку, любые недочёты должны снижать балл.',
+  lenient: ' Будьте благожелательным проверяющим: засчитывайте частично верное, ' +
+           'не занижайте за мелкие огрехи, оценивайте по существу.',
+}
+
 export interface GradeOnceParams {
   submissionText: string
   criteria:       CriteriaSnapshotItem[]   // empty → holistic grading
@@ -128,6 +144,8 @@ export interface GradeOnceParams {
   assignmentType?: 'essay' | 'calculation'
   referenceSolution?: string
   parent?:        Assignment | null        // revision context, if re-grading a resubmission
+  persona?:       GradingPersona           // default 'neutral'
+  temperature?:   number                   // for ensemble sampling; default undefined (provider default)
   context:        CallContext              // teacherId + feature, for usage logging
 }
 
@@ -160,11 +178,12 @@ export function buildGradingMessages(params: {
   assignmentType?: 'essay' | 'calculation'
   referenceSolution?: string
   parent?:        Assignment | null
+  persona?:       GradingPersona
 }): GradingMessages {
   const isCalc     = params.assignmentType === 'calculation'
   const isRevision = params.parent != null
 
-  const system = isCalc
+  const base = isCalc
     ? `Вы опытный преподаватель точных наук (математика, физика, инженерные дисциплины). ` +
       `Проверяйте расчётные задачи строго: пошагово пересчитывайте решение, проверяйте формулы, ` +
       `единицы измерения, размерности и числовой ответ. Отличайте ошибку метода от арифметической описки ` +
@@ -172,6 +191,8 @@ export function buildGradingMessages(params: {
       `Давайте обратную связь на русском языке. Всегда отвечайте только валидным JSON-объектом.`
     : `Вы опытный преподаватель-эксперт. Ваша задача — объективно оценивать студенческие работы ` +
       `и давать конструктивную обратную связь на русском языке. Всегда отвечайте только валидным JSON.`
+
+  const system = base + PERSONA_MODIFIER[params.persona ?? 'neutral']
 
   const revisionBlock = isRevision ? buildRevisionContext(params.parent!) : ''
 
@@ -207,6 +228,7 @@ export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResul
     'результат оценивания',
     params.context,
     isCalc ? REASONER_MODEL : undefined,
+    params.temperature,
   )
 
   const grade = normaliseGrade(result.grade)
@@ -220,6 +242,66 @@ export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResul
     improvements:   result.improvements ?? [],
     revisionCheck:  params.parent != null ? normaliseRevisionCheck(result.revision_check) : null,
   }
+}
+
+// ─── Score-only sampling (for the confidence ensemble) ───────────────────────
+//
+// The ensemble needs M independent score estimates to measure disagreement,
+// but only the PRIMARY run needs full prose feedback. scoreOnce() asks the
+// model for just {score, grade} under the same submission + criteria + persona,
+// at ~1/5 the output tokens of a full grade. This keeps "thorough mode" at
+// roughly 1× full grade + (M−1)× cheap samples instead of M× full grades.
+
+export interface ScoreOnceParams {
+  submissionText: string
+  criteria:       CriteriaSnapshotItem[]
+  examples:       SimilarAssignment[]
+  assignmentType?: 'essay' | 'calculation'
+  referenceSolution?: string
+  persona?:       GradingPersona
+  temperature?:   number
+  context:        CallContext
+}
+
+export interface ScoreOnceResult {
+  score: number
+  grade: GradeLetter
+}
+
+export async function scoreOnce(params: ScoreOnceParams): Promise<ScoreOnceResult> {
+  const isCalc = params.assignmentType === 'calculation'
+  const base = isCalc
+    ? `Вы строгий преподаватель точных наук. Пошагово проверьте расчёт и выставьте балл.`
+    : `Вы опытный преподаватель-эксперт. Оцените работу студента и выставьте балл.`
+  const system = base + PERSONA_MODIFIER[params.persona ?? 'neutral'] +
+    ` Отвечайте только валидным JSON.`
+
+  const reference = params.referenceSolution?.trim()
+    ? `\n## Эталон\n<reference>\n${sanitiseForPrompt(params.referenceSolution.trim())}\n</reference>\n`
+    : ''
+  const criteriaBlock = params.criteria.length > 0
+    ? `\n## Критерии\n${params.criteria.map((c) => `- ${c.name} (вес ${c.weight}%)`).join('\n')}\n`
+    : ''
+  const examplesBlock = params.examples.length > 0
+    ? `\n## Примеры оценок по предмету (ориентир)\n${params.examples
+        .map((e) => `${e.approved_grade} (${e.approved_score}/100)`).join(', ')}\n`
+    : ''
+
+  const user =
+    `${criteriaBlock}${examplesBlock}${reference}\n## Работа студента\n<submission>\n` +
+    `${sanitiseForPrompt(params.submissionText)}\n</submission>\n\n` +
+    `Верните ТОЛЬКО JSON: {"score": число 0–100, "grade": "5"|"4"|"3"|"2"} ` +
+    `(5: 87–100, 4: 73–86, 3: 60–72, 2: ниже 60). Без пояснений.`
+
+  const result = await chatJSON<{ score: number; grade: string }>(
+    [{ role: 'system', content: system }, { role: 'user', content: user }],
+    'балл',
+    params.context,
+    isCalc ? REASONER_MODEL : undefined,
+    params.temperature,
+  )
+
+  return { score: clampScore(result.score), grade: normaliseGrade(result.grade) }
 }
 
 // ─── Grade (production path: resolve inputs → gradeOnce → persist) ───────────
@@ -239,15 +321,24 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
       : Promise.resolve(null),
   ])
 
-  const result = await gradeOnce({
+  const gradeParams = {
     submissionText:    params.submissionText,
     criteria:          snapshot,
     examples,
     assignmentType:    params.assignmentType,
     referenceSolution: params.referenceSolution,
     parent,
-    context:           { teacherId: params.teacherId, feature: 'grading' },
-  })
+    context:           { teacherId: params.teacherId, feature: 'grading' as const },
+  }
+
+  // "Thorough" mode runs the confidence ensemble: the primary call still
+  // provides the full feedback, plus cheap score-only samples whose
+  // disagreement yields a confidence label. Revisions skip it — the
+  // revision-check flow is its own thing and ensemble adds little there.
+  const ensemble = params.thorough && parent == null
+    ? await gradeEnsemble(gradeParams)
+    : null
+  const result = ensemble ? ensemble.primary : await gradeOnce(gradeParams)
 
   // Merge AI per-criterion scores back into the snapshot so the history view
   // can reconstruct exactly what was graded against what.
@@ -272,6 +363,8 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     criteriaSnapshot: filledSnapshot,
     parentAssignmentId: parent?.id,
     aiRevisionCheck: result.revisionCheck ?? undefined,
+    aiConfidence: ensemble?.confidence ?? null,
+    aiEnsemble: ensemble?.ensemble ?? null,
   })
 
   incrementUsage(params.teacherId, 'grade').catch(() => null)
@@ -287,6 +380,8 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     ai_improvements: assignment.ai_improvements ?? [],
     ai_revision_check: assignment.ai_revision_check,
     criteria_snapshot: assignment.criteria_snapshot,
+    ai_confidence: assignment.ai_confidence,
+    ai_ensemble: assignment.ai_ensemble,
     used_examples: examples.length,
     revision_number: assignment.revision_number,
     parent_assignment_id: assignment.parent_assignment_id,

@@ -274,6 +274,7 @@ async function buildPlanData(
       ragFlywheel:         canUseFeature(tier, 'ragFlywheel'),
       emailGeneration:     canUseFeature(tier, 'emailGeneration'),
       presentationHistory: canUseFeature(tier, 'presentationHistory'),
+      confidenceCheck:     canUseFeature(tier, 'confidenceCheck'),
     },
   }
 }

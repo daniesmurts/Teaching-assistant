@@ -15,21 +15,21 @@ APP_DIR="/var/www/gradeassist"
 FRONTEND_BUCKET="gradeassist-frontend"
 # ─────────────────────────────────────────────────────────────────────────────
 
-echo "▶ [1/5] Building frontend…"
+echo "▶ [1/6] Building frontend…"
 npm run build --workspace=frontend
 
-echo "▶ [2/5] Uploading frontend → s3://${FRONTEND_BUCKET}/ …"
+echo "▶ [2/6] Uploading frontend → s3://${FRONTEND_BUCKET}/ …"
 # Uses S3 static keys (no yc/OAuth). Reads YANDEX_STORAGE_* from the local .env.
 node --env-file=.env scripts/upload-frontend.mjs frontend/dist "${FRONTEND_BUCKET}"
 
-echo "▶ [3/5] Syncing backend source → VM…"
+echo "▶ [3/6] Syncing backend source → VM…"
 rsync -avz --delete \
   --exclude 'node_modules' --exclude '.env' --exclude 'dist' --exclude 'uploads' \
   backend/ "${VM_HOST}:${APP_DIR}/backend/"
 # shared/ types are imported by the backend at build time
 rsync -avz --delete shared/ "${VM_HOST}:${APP_DIR}/shared/"
 
-echo "▶ [4/5] Installing, building, migrating on VM…"
+echo "▶ [4/6] Installing, building, migrating on VM…"
 ssh "$VM_HOST" bash -s <<'REMOTE'
 set -euo pipefail
 cd /var/www/gradeassist/backend
@@ -46,7 +46,7 @@ test -f dist/backend/src/index.js || { echo "❌ Build did not produce dist/back
 node --env-file=../.env scripts/migrate.js
 REMOTE
 
-echo "▶ [5/5] Restarting API…"
+echo "▶ [5/6] Restarting API…"
 ssh "$VM_HOST" bash -s <<'REMOTE'
 set -euo pipefail
 cd /var/www/gradeassist/backend
@@ -56,8 +56,29 @@ pm2 reload gradeassist-api --update-env 2>/dev/null \
 pm2 save
 REMOTE
 
+echo "▶ [6/6] nginx guard…"
+# nginx is NOT restarted on deploy — there's no reason to. If you ever change
+# its config, do it by hand:  sudo nginx -t && sudo systemctl reload nginx
+# (reload keeps the old config serving if the new one is broken; restart does
+# not — a bad restart took the site down for a day on 2026-06-11).
+# This guard only ensures nginx is actually up, and revives it if not.
+ssh "$VM_HOST" bash -s <<'REMOTE'
+set -euo pipefail
+if ! systemctl is-active --quiet nginx; then
+  echo "⚠ nginx is down — config-testing and starting it…"
+  sudo nginx -t
+  sudo systemctl start nginx
+fi
+echo "nginx: $(systemctl is-active nginx)"
+REMOTE
+
 echo "▶ Verifying health…"
 sleep 2
+# Local API health (Node itself is up)…
 ssh "$VM_HOST" 'curl -fsS http://127.0.0.1:3000/api/health' && echo
+# …and the PUBLIC endpoints, exactly as users reach them. The 2026-06-11
+# outage passed the local check while the public site was dead — never again.
+curl -fsS --max-time 15 https://ispum.ru/api/health && echo
+curl -fsS --max-time 15 -o /dev/null -w "frontend: HTTP %{http_code}\n" https://ispum.ru/
 
 echo "✅ Deploy complete."

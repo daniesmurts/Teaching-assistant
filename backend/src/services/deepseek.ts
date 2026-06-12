@@ -30,7 +30,7 @@ interface ChatMessage {
 
 export async function chat(
   messages: ChatMessage[],
-  opts: { jsonMode?: boolean; context?: CallContext; model?: string } = {}
+  opts: { jsonMode?: boolean; context?: CallContext; model?: string; temperature?: number } = {}
 ): Promise<string> {
   const start = Date.now()
   const model = opts.model ?? MODEL
@@ -45,6 +45,9 @@ export async function chat(
         messages,
         // The reasoner (R1) does NOT support response_format — only the chat model gets JSON mode
         ...(opts.jsonMode && !isReasoner ? { response_format: { type: 'json_object' } } : {}),
+        // Temperature drives ensemble sampling (confidence estimation). The
+        // reasoner ignores temperature, so only pass it for the chat model.
+        ...(opts.temperature != null && !isReasoner ? { temperature: opts.temperature } : {}),
       },
       {
         headers: {
@@ -197,8 +200,9 @@ export async function chatJSON<T>(
   retryLabel = 'response',
   context?: CallContext,
   model?: string,
+  temperature?: number,
 ): Promise<T> {
-  const raw = await chat(messages, { jsonMode: true, context, model })
+  const raw = await chat(messages, { jsonMode: true, context, model, temperature })
   try {
     return JSON.parse(extractJSON(raw)) as T
   } catch {
@@ -210,7 +214,7 @@ export async function chatJSON<T>(
         content: `Ваш ${retryLabel} не был валидным JSON. Ответьте ТОЛЬКО валидным JSON-объектом, без markdown и пояснений.`,
       },
     ]
-    const retryRaw = await chat(retryMessages, { jsonMode: true, context, model })
+    const retryRaw = await chat(retryMessages, { jsonMode: true, context, model, temperature })
     return JSON.parse(extractJSON(retryRaw)) as T
   }
 }

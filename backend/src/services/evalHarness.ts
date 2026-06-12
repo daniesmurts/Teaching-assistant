@@ -11,6 +11,7 @@
 // against live data; cost is ~N_assignments × N_conditions grading calls.
 
 import { gradeOnce } from './grading'
+import { gradeEnsemble } from './confidence'
 import { embed } from './deepseek'
 import {
   findReplayTargets,
@@ -21,8 +22,15 @@ import {
 import {
   createEvalRun, getEvalRun, completeEvalRun,
   findCompletedConditions, insertEvalResult, findEvalResults,
+  insertConfidenceResult, findConfidenceResults, findCompletedConfidenceIds,
 } from '../db/queries/evalRuns'
 import { quadraticWeightedKappa, meanAbsoluteError, spearman } from '../lib/evalMetrics'
+import {
+  riskCoverageCurve, binnedCalibration, selectivityGain, fitThresholds,
+  type ConfidencePair, type CoveragePoint, type CalibrationBin, type FittedThresholds,
+} from '../lib/confidenceCalibration'
+import { upsertConfidenceConfig } from '../db/queries/confidenceConfig'
+import { invalidateThresholdsCache } from './confidence'
 import { logger } from '../lib/logger'
 import type { CriteriaSnapshotItem } from '../../../shared/types'
 
@@ -243,6 +251,187 @@ export async function exportRunCsv(runId: string): Promise<string> {
   return [header, ...body].join('\n')
 }
 
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000
+}
+
+// ─── Confidence replay (risk-coverage study) ───────────────────────────────────
+//
+// Runs the grader ensemble over each approved assignment (with the same
+// time-respecting K examples production would use), records dispersion + error
+// vs teacher ground truth, then builds the risk-coverage curve. The headline
+// claim: keeping only the most-confident X% of grades sharply lowers the mean
+// error — i.e. the system knows when to defer to the teacher.
+
+export interface ConfidenceReplayConfig {
+  teacherId:    string
+  courseId?:    string
+  k?:           number   // RAG examples per ensemble (production default 5)
+  samples?:     number   // ensemble size (default 3)
+  limit?:       number
+  resumeRunId?: string
+  notes?:       string
+}
+
+export async function runConfidenceReplay(
+  cfg: ConfidenceReplayConfig,
+  onProgress?: (p: { runId: string; done: number; total: number; failed: number }) => void,
+): Promise<{ runId: string; done: number; total: number; failed: number }> {
+  const k = cfg.k ?? 5
+
+  let runId: string
+  if (cfg.resumeRunId) {
+    const existing = await getEvalRun(cfg.resumeRunId)
+    if (!existing) throw new Error(`Eval run not found: ${cfg.resumeRunId}`)
+    runId = existing.id
+  } else {
+    const run = await createEvalRun({
+      teacherId: cfg.teacherId, courseId: cfg.courseId,
+      model: 'deepseek-chat', conditions: [k], kind: 'confidence', notes: cfg.notes,
+    })
+    runId = run.id
+  }
+
+  const done = await findCompletedConfidenceIds(runId)
+  let targets = await findReplayTargets(cfg.teacherId, cfg.courseId)
+  if (cfg.limit && targets.length > cfg.limit) targets = targets.slice(0, cfg.limit)
+
+  const progress = { runId, total: targets.length, done: 0, failed: 0 }
+
+  for (const target of targets) {
+    if (done.has(target.id)) { progress.done += 1; onProgress?.(progress); continue }
+    const started = Date.now()
+    try {
+      // Time-respecting examples — same retrieval production would have used.
+      let examples: SimilarAssignment[] = []
+      if (k > 0) {
+        const vector = target.embedding_str
+          ? (JSON.parse(target.embedding_str) as number[])
+          : await embed(target.submission_text, { teacherId: cfg.teacherId, feature: 'embedding' })
+        examples = await findSimilarAssignmentsBefore(target.course_id, vector, target.created_at, target.id, k)
+      }
+
+      const outcome = await gradeEnsemble(
+        {
+          submissionText: target.submission_text,
+          criteria:       cleanSnapshotForReplay(target.criteria_snapshot),
+          examples,
+          context:        { teacherId: cfg.teacherId, feature: 'grading' },
+        },
+        { samples: cfg.samples ?? 3 },
+      )
+
+      await insertConfidenceResult({
+        runId,
+        assignmentId:   target.id,
+        consensusScore: outcome.primary.score,
+        consensusGrade: outcome.primary.grade,
+        scoreStd:       outcome.ensemble.score_std,
+        gradeAgreement: outcome.ensemble.grade_agreement,
+        confidence:     outcome.confidence,
+        teacherScore:   target.approved_score,
+        teacherGrade:   target.approved_grade,
+        samples:        outcome.ensemble.samples,
+        durationMs:     Date.now() - started,
+      })
+    } catch (err) {
+      progress.failed += 1
+      await insertConfidenceResult({
+        runId, assignmentId: target.id,
+        consensusScore: null, consensusGrade: null, scoreStd: null,
+        gradeAgreement: null, confidence: null,
+        teacherScore: target.approved_score, teacherGrade: target.approved_grade,
+        samples: null, durationMs: Date.now() - started,
+        error: (err as Error).message.slice(0, 500),
+      }).catch(() => null)
+      logger.warn({ message: '[confidence-eval] failed', assignment: target.id, error: (err as Error).message })
+    } finally {
+      progress.done += 1
+      onProgress?.(progress)
+    }
+  }
+
+  await completeEvalRun(runId, progress.failed === progress.total ? 'failed' : 'done')
+  return progress
+}
+
+export interface ConfidenceSummary {
+  n:            number
+  riskCoverage: CoveragePoint[]
+  calibration:  CalibrationBin[]
+  selectivity:  number   // mean-error gap between least- and most-confident terciles
+  byLabel: Array<{ confidence: string; n: number; meanError: number; gradeAccuracy: number }>
+}
+
+export async function summariseConfidence(runId: string): Promise<ConfidenceSummary> {
+  const rows = await findConfidenceResults(runId)
+  const usable = rows.filter(
+    (r) => !r.error && r.consensus_score != null && r.score_std != null && r.consensus_grade != null,
+  )
+
+  const pairs: ConfidencePair[] = usable.map((r) => ({
+    signal:     Number(r.score_std),
+    scoreError: Math.abs(r.consensus_score! - r.teacher_score),
+    gradeMatch: r.consensus_grade === r.teacher_grade,
+  }))
+
+  // Per-label (high/medium/low) aggregates, for the product UI's framing.
+  const labels = ['high', 'medium', 'low']
+  const byLabel = labels.map((label) => {
+    const group = usable.filter((r) => r.confidence === label)
+    const errs = group.map((r) => Math.abs(r.consensus_score! - r.teacher_score))
+    const matches = group.filter((r) => r.consensus_grade === r.teacher_grade).length
+    return {
+      confidence:    label,
+      n:             group.length,
+      meanError:     group.length ? round2(errs.reduce((a, b) => a + b, 0) / group.length) : 0,
+      gradeAccuracy: group.length ? round3(matches / group.length) : 0,
+    }
+  }).filter((x) => x.n > 0)
+
+  return {
+    n:            pairs.length,
+    riskCoverage: riskCoverageCurve(pairs),
+    calibration:  binnedCalibration(pairs, 3),
+    selectivity:  selectivityGain(pairs),
+    byLabel,
+  }
+}
+
+// ─── Fit + persist thresholds from a confidence run ────────────────────────────
+
+/**
+ * Read a confidence run's results, fit data-driven dispersion thresholds against
+ * teacher ground truth, persist them, and bust the in-memory cache so the next
+ * grade uses the new values. Returns null when there isn't enough usable data.
+ */
+export async function fitThresholdsForRun(
+  runId: string,
+  targets?: { highTargetError: number; lowTargetError: number },
+): Promise<FittedThresholds | null> {
+  const rows = await findConfidenceResults(runId)
+  const pairs: ConfidencePair[] = rows
+    .filter((r) => !r.error && r.consensus_score != null && r.score_std != null && r.consensus_grade != null)
+    .map((r) => ({
+      signal:     Number(r.score_std),
+      scoreError: Math.abs(r.consensus_score! - r.teacher_score),
+      gradeMatch: r.consensus_grade === r.teacher_grade,
+    }))
+
+  const fit = fitThresholds(pairs, targets)
+  if (!fit) return null
+
+  await upsertConfidenceConfig({
+    highStdMax: fit.highStdMax,
+    lowStdMin:  fit.lowStdMin,
+    runId,
+    nHigh:      fit.nHigh,
+    nLow:       fit.nLow,
+  })
+  invalidateThresholdsCache()
+  return fit
 }

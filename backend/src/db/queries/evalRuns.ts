@@ -8,6 +8,7 @@ export interface EvalRun {
   model:        string
   conditions:   number[]
   status:       string
+  kind:         'flywheel' | 'confidence'
   notes:        string | null
   created_at:   Date
   completed_at: Date | null
@@ -19,11 +20,12 @@ export async function createEvalRun(data: {
   model:      string
   conditions: number[]
   notes?:     string
+  kind?:      'flywheel' | 'confidence'
 }): Promise<EvalRun> {
   const { rows } = await pool.query<EvalRun>(
-    `INSERT INTO eval_runs (teacher_id, course_id, model, conditions, notes)
-     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-    [data.teacherId, data.courseId ?? null, data.model, data.conditions, data.notes ?? null]
+    `INSERT INTO eval_runs (teacher_id, course_id, model, conditions, notes, kind)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+    [data.teacherId, data.courseId ?? null, data.model, data.conditions, data.notes ?? null, data.kind ?? 'flywheel']
   )
   return rows[0]
 }
@@ -31,6 +33,35 @@ export async function createEvalRun(data: {
 export async function getEvalRun(id: string): Promise<EvalRun | null> {
   const { rows } = await pool.query<EvalRun>('SELECT * FROM eval_runs WHERE id = $1', [id])
   return rows[0] ?? null
+}
+
+export interface EvalRunListItem extends EvalRun {
+  result_count: number
+  teacher_email: string | null
+  course_name: string | null
+}
+
+/** All eval runs, newest first, with result counts + teacher/course labels for the admin list. */
+export async function listEvalRuns(limit = 50): Promise<EvalRunListItem[]> {
+  const { rows } = await pool.query<EvalRunListItem>(
+    `SELECT r.*,
+            t.email AS teacher_email,
+            c.name  AS course_name,
+            COALESCE(
+              (SELECT COUNT(*) FROM eval_results er WHERE er.run_id = r.id),
+              0
+            ) + COALESCE(
+              (SELECT COUNT(*) FROM confidence_results cr WHERE cr.run_id = r.id),
+              0
+            ) AS result_count
+       FROM eval_runs r
+       LEFT JOIN teachers t ON t.id = r.teacher_id
+       LEFT JOIN courses  c ON c.id = r.course_id
+      ORDER BY r.created_at DESC
+      LIMIT $1`,
+    [limit]
+  )
+  return rows.map((r) => ({ ...r, result_count: Number(r.result_count) }))
 }
 
 export async function completeEvalRun(id: string, status: 'done' | 'failed'): Promise<void> {
@@ -102,4 +133,75 @@ export async function findEvalResults(runId: string): Promise<EvalResultRow[]> {
     [runId]
   )
   return rows
+}
+
+// ─── Confidence-eval results ───────────────────────────────────────────────────
+
+export async function insertConfidenceResult(data: {
+  runId:          string
+  assignmentId:   string
+  consensusScore: number | null
+  consensusGrade: string | null
+  scoreStd:       number | null
+  gradeAgreement: number | null
+  confidence:     string | null
+  teacherScore:   number
+  teacherGrade:   string
+  samples:        unknown | null
+  durationMs:     number
+  error?:         string
+}): Promise<void> {
+  await pool.query(
+    `INSERT INTO confidence_results
+       (run_id, assignment_id, consensus_score, consensus_grade, score_std,
+        grade_agreement, confidence, teacher_score, teacher_grade, samples,
+        duration_ms, error)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+     ON CONFLICT (run_id, assignment_id) DO UPDATE SET
+       consensus_score = EXCLUDED.consensus_score,
+       consensus_grade = EXCLUDED.consensus_grade,
+       score_std       = EXCLUDED.score_std,
+       grade_agreement = EXCLUDED.grade_agreement,
+       confidence      = EXCLUDED.confidence,
+       samples         = EXCLUDED.samples,
+       duration_ms     = EXCLUDED.duration_ms,
+       error           = EXCLUDED.error`,
+    [
+      data.runId, data.assignmentId, data.consensusScore, data.consensusGrade,
+      data.scoreStd, data.gradeAgreement, data.confidence,
+      data.teacherScore, data.teacherGrade,
+      data.samples ? JSON.stringify(data.samples) : null,
+      data.durationMs, data.error ?? null,
+    ]
+  )
+}
+
+export interface ConfidenceResultRow {
+  assignment_id:   string
+  consensus_score: number | null
+  consensus_grade: string | null
+  score_std:       string | null   // NUMERIC comes back as string
+  grade_agreement: string | null
+  confidence:      string | null
+  teacher_score:   number
+  teacher_grade:   string
+  error:           string | null
+}
+
+export async function findConfidenceResults(runId: string): Promise<ConfidenceResultRow[]> {
+  const { rows } = await pool.query<ConfidenceResultRow>(
+    `SELECT assignment_id, consensus_score, consensus_grade, score_std,
+            grade_agreement, confidence, teacher_score, teacher_grade, error
+       FROM confidence_results WHERE run_id = $1`,
+    [runId]
+  )
+  return rows
+}
+
+export async function findCompletedConfidenceIds(runId: string): Promise<Set<string>> {
+  const { rows } = await pool.query<{ assignment_id: string }>(
+    `SELECT assignment_id FROM confidence_results WHERE run_id = $1 AND error IS NULL`,
+    [runId]
+  )
+  return new Set(rows.map((r) => r.assignment_id))
 }

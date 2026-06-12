@@ -77,6 +77,9 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
   )
 
   const isCalc = form.assignment_type === 'calculation'
+  // Thorough mode (confidence ensemble) — opt-in per grade, Pro+ only. Plain
+  // state (not persisted): the safe/cheap default is off on every fresh load.
+  const [thorough, setThorough] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
   const [reviewJob, setReviewJob] = useState<LongReview | null>(null)
@@ -220,6 +223,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
         ...common,
         ...(isCalc ? { assignment_type: 'calculation' as const } : {}),
         ...(form.reference_solution ? { reference_solution: form.reference_solution } : {}),
+        ...(thorough && can('confidenceCheck') ? { thorough: true } : {}),
       }
       const res = await client.post<GradeResponse>('/api/grading/grade', payload)
       onResult(payload, res.data)
@@ -464,6 +468,30 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
               onChange={set('reference_solution')}
             />
           )}
+
+          {/* Thorough mode (confidence ensemble) — Pro+ only */}
+          {can('confidenceCheck') ? (
+            <label className="flex items-start gap-2.5 cursor-pointer select-none pt-1">
+              <input
+                type="checkbox"
+                checked={thorough}
+                onChange={(e) => setThorough(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-border-mid accent-amber cursor-pointer flex-shrink-0"
+              />
+              <span className="text-xs font-sans text-ink-secondary leading-relaxed">
+                <span className="text-ink font-medium">Тщательная проверка</span> — несколько вариантов оценки
+                для расчёта уверенности; помечает спорные работы для внимательной проверки. Занимает чуть больше времени.
+              </span>
+            </label>
+          ) : (
+            <div className="flex items-start gap-2.5 pt-1 opacity-60">
+              <span className="mt-0.5 h-4 w-4 rounded border border-border-mid flex-shrink-0" />
+              <span className="text-xs font-sans text-ink-tertiary leading-relaxed">
+                <span className="font-medium">Тщательная проверка</span> с расчётом уверенности —
+                <span className="text-amber font-medium"> на тарифе Pro</span>
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -560,7 +588,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
 
             <Button type="submit" className="w-full" loading={loading} disabled={atGradeLimit || !weightsValid}>
               {loading
-                ? (isLong ? 'Рецензируем…' : isCalc ? 'Пошаговая проверка…' : 'Проверяем…')
+                ? (isLong ? 'Рецензируем…' : thorough ? 'Тщательная проверка…' : isCalc ? 'Пошаговая проверка…' : 'Проверяем…')
                 : (isLong ? 'Рецензировать работу' : 'Проверить с ИИ')}
               {!loading && gradesLimit !== null && (
                 <span className="ml-2 opacity-60 text-xs">

@@ -9,6 +9,7 @@ const NAV = [
   { to: '/admin/rubrics',  label: 'Шаблоны критериев', end: false },
   { to: '/admin/feedback', label: 'Отзывы',         end: false },
   { to: '/admin/errors',   label: 'Ошибки',         end: false },
+  { to: '/admin/evals',    label: 'Эксперименты',   end: false },
 ]
 
 export default function AdminLayout() {

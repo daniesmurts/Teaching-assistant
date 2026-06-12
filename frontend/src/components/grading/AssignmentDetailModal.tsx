@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import Badge from '../ui/Badge'
 import RevisionCheckList from './RevisionCheckList'
+import ConfidenceBadge from './ConfidenceBadge'
 import { getReviewByAssignment } from '../../api/grading'
 import { gradeColor } from '../../lib/grades'
 import type { Assignment, GradeLetter, AssignmentStatus } from '../../types'
@@ -78,6 +79,9 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
                 >
                   ↻ Переработка №{a.revision_number}
                 </span>
+              )}
+              {a.ai_confidence && (
+                <ConfidenceBadge level={a.ai_confidence} ensemble={a.ai_ensemble} size="sm" />
               )}
             </div>
             <div className="text-xs font-sans text-ink-tertiary">

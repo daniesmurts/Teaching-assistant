@@ -5,6 +5,7 @@ import { aiLimiter } from '../middleware/rateLimits'
 import { gradeRules, approveRules, reviewRules } from '../validation/gradingValidation'
 import { asyncHandler } from '../lib/asyncHandler'
 import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
+import { canUseFeature } from '../config/planLimits'
 import { grade, approve } from '../services/grading'
 import { runLongReview } from '../services/longReview'
 import { createLongReview, getLongReviewById, getLongReviewByAssignmentId } from '../db/queries/longReviews'
@@ -27,7 +28,7 @@ router.post(
     const {
       submission_text, criterion_ids, weights, course_id,
       student_name, student_email, student_group,
-      reference_solution, assignment_type, parent_assignment_id,
+      reference_solution, assignment_type, parent_assignment_id, thorough,
     } = req.body as {
       submission_text: string
       criterion_ids?: string[]
@@ -39,7 +40,13 @@ router.post(
       reference_solution?: string
       assignment_type?: 'essay' | 'calculation'
       parent_assignment_id?: string
+      thorough?: boolean
     }
+    // Thorough (confidence ensemble) is a Pro+ feature — silently downgrade to a
+    // normal grade for free tier rather than erroring (the toggle is hidden in
+    // the UI there anyway; this just guards a hand-crafted request).
+    const thoroughAllowed = Boolean(thorough) && canUseFeature(req.teacher.plan_tier, 'confidenceCheck')
+
     const result = await grade({
       teacherId:          req.teacher.id,
       institutionId:      req.teacher.institution_id ?? null,
@@ -54,6 +61,7 @@ router.post(
       referenceSolution:  reference_solution,
       assignmentType:     assignment_type === 'calculation' ? 'calculation' : 'essay',
       parentAssignmentId: parent_assignment_id,
+      thorough:           thoroughAllowed,
     })
     res.json(result)
   })

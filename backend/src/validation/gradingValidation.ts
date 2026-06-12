@@ -63,6 +63,10 @@ export const gradeRules = [
   body('parent_assignment_id')
     .optional({ nullable: true, checkFalsy: true })
     .isUUID().withMessage('Неверный идентификатор предыдущей версии'),
+
+  body('thorough')
+    .optional()
+    .isBoolean().withMessage('Неверное значение thorough'),
 ]
 
 // Long-document review pipeline — accepts much larger submissions (chunked).

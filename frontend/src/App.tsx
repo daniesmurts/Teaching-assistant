@@ -31,6 +31,7 @@ import AdminRubrics from './pages/admin/AdminRubrics'
 import AdminInstitutions from './pages/admin/AdminInstitutions'
 import AdminFeedback from './pages/admin/AdminFeedback'
 import AdminErrors from './pages/admin/AdminErrors'
+import AdminEvals from './pages/admin/AdminEvals'
 import InstitutionLayout from './pages/institution/InstitutionLayout'
 import InstitutionOverview from './pages/institution/InstitutionOverview'
 import InstitutionUsage from './pages/institution/InstitutionUsage'
@@ -158,6 +159,7 @@ export default function App() {
             <Route path="rubrics"   element={<AdminRubrics />} />
             <Route path="feedback"  element={<AdminFeedback />} />
             <Route path="errors"    element={<AdminErrors />} />
+            <Route path="evals"     element={<AdminEvals />} />
           </Route>
 
           {/* Institution admin — institution_admin or platform_admin */}

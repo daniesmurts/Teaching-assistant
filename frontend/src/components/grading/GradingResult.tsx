@@ -2,6 +2,7 @@ import { useState } from 'react'
 import Button from '../ui/Button'
 import FeedbackEmail from './FeedbackEmail'
 import RevisionCheckList from './RevisionCheckList'
+import ConfidenceBadge from './ConfidenceBadge'
 import { useApprove } from '../../hooks/useGrading'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
@@ -125,6 +126,9 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
                 ✦ RAG ×{result.used_examples}
               </span>
             )}
+            {result.ai_confidence && (
+              <ConfidenceBadge level={result.ai_confidence} ensemble={result.ai_ensemble} size="sm" />
+            )}
           </div>
           <div className="flex items-center gap-2">
             <input
@@ -157,6 +161,21 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
           </span>
         )}
       </div>
+
+      {/* Low-confidence triage banner — the variants disagreed; ask for a look */}
+      {result.ai_confidence === 'low' && !approved && (
+        <div className="mx-5 mt-3 px-3 py-2.5 bg-warning-bg border border-warning/20 rounded-md flex items-start gap-2.5">
+          <span className="text-warning text-sm mt-0.5 flex-shrink-0">⚠</span>
+          <div className="text-[12.5px] font-sans text-ink leading-relaxed">
+            <span className="font-medium">ИИ не уверен в этой оценке.</span>{' '}
+            <span className="text-ink-secondary">
+              Варианты модели дали разные результаты
+              {result.ai_ensemble && ` (${result.ai_ensemble.samples.map((s) => s.grade).join(', ')})`}
+              {' '}— стоит проверить работу внимательнее перед подтверждением.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-border px-5">
