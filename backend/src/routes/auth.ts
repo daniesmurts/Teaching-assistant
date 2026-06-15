@@ -16,6 +16,7 @@ import { getOrCreateCounter } from '../db/queries/usageCounters'
 import { countTopicsThisMonth } from '../db/queries/topics'
 import { countQuizzesThisMonth } from '../db/queries/quizzes'
 import { getLimits, canUseFeature } from '../config/planLimits'
+import { computeEffectiveTier } from '../lib/planTier'
 import {
   generateRawToken, hashToken, createResetToken,
   invalidateExistingTokens, findValidToken, markTokenUsed,
@@ -123,7 +124,10 @@ router.post(
 
     const token = signToken({ id: row.id, email: row.email })
 
-    const plan = await buildPlanData(row.id, row.plan_tier ?? 'free', row.plan_expires_at, row.auto_renew, row.renewal_failed_at)
+    // Effective tier (expiry + institution inheritance) — same helper the
+    // authenticate middleware uses, so login and /me always agree.
+    const effectiveTier = computeEffectiveTier(row)
+    const plan = await buildPlanData(row.id, effectiveTier, row.plan_expires_at, row.auto_renew, row.renewal_failed_at)
 
     res.json({
       token,
@@ -270,11 +274,13 @@ async function buildPlanData(
     quizzesUsed,
     quizzesLimit:       limits.quizzesPerMonth === Infinity ? null : limits.quizzesPerMonth,
     features: {
-      documentUpload:      canUseFeature(tier, 'documentUpload'),
-      ragFlywheel:         canUseFeature(tier, 'ragFlywheel'),
-      emailGeneration:     canUseFeature(tier, 'emailGeneration'),
-      presentationHistory: canUseFeature(tier, 'presentationHistory'),
-      confidenceCheck:     canUseFeature(tier, 'confidenceCheck'),
+      documentUpload:        canUseFeature(tier, 'documentUpload'),
+      ragFlywheel:           canUseFeature(tier, 'ragFlywheel'),
+      emailGeneration:       canUseFeature(tier, 'emailGeneration'),
+      presentationHistory:   canUseFeature(tier, 'presentationHistory'),
+      confidenceCheck:       canUseFeature(tier, 'confidenceCheck'),
+      verificationQuestions: canUseFeature(tier, 'verificationQuestions'),
+      handout:               canUseFeature(tier, 'handout'),
     },
   }
 }

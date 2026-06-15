@@ -14,6 +14,7 @@ import Dashboard from './pages/Dashboard'
 import Courses from './pages/Courses'
 import Grading from './pages/Grading'
 import Criteria from './pages/Criteria'
+import Rubrics from './pages/Rubrics'
 import Students from './pages/Students'
 import History from './pages/History'
 import Presentations from './pages/Presentations'
@@ -28,6 +29,7 @@ import AdminOverview from './pages/admin/AdminOverview'
 import AdminUsage from './pages/admin/AdminUsage'
 import AdminTeachers from './pages/admin/AdminTeachers'
 import AdminRubrics from './pages/admin/AdminRubrics'
+import AdminRubricTemplates from './pages/admin/AdminRubricTemplates'
 import AdminInstitutions from './pages/admin/AdminInstitutions'
 import AdminFeedback from './pages/admin/AdminFeedback'
 import AdminErrors from './pages/admin/AdminErrors'
@@ -37,6 +39,7 @@ import InstitutionOverview from './pages/institution/InstitutionOverview'
 import InstitutionUsage from './pages/institution/InstitutionUsage'
 import InstitutionTeachers from './pages/institution/InstitutionTeachers'
 import InstitutionRubrics from './pages/institution/InstitutionRubrics'
+import InstitutionRubricPresets from './pages/institution/InstitutionRubricPresets'
 import InstitutionAudit from './pages/institution/InstitutionAudit'
 import Landing from './pages/Landing'
 import About from './pages/About'
@@ -73,18 +76,41 @@ function RouteTracker() {
   return null
 }
 
-// On every app load, reconcile the cached teacher + plan with the server.
-// The plan is persisted in localStorage and otherwise only refreshed at login,
-// so an upgrade confirmed elsewhere (e.g. T-Bank webhook) wouldn't show until
-// re-login without this. Silent + non-blocking; a 401 is handled by the client.
+// Reconcile the cached teacher + plan with the server. The plan is persisted
+// in localStorage, so an upgrade confirmed elsewhere (admin panel, T-Bank
+// webhook) wouldn't otherwise reach the browser without a re-login. We refresh:
+//   - on mount / token change (login, reload)
+//   - when the tab regains focus or becomes visible (so a mid-session upgrade —
+//     e.g. the user paid in another tab, or an admin upgraded them — shows up
+//     within a moment, no logout needed)
+// Silent + non-blocking; a 401 is handled by the axios client.
 function PlanSync() {
   const token = useAuthStore((s) => s.token)
   const updateAccount = useAuthStore((s) => s.updateAccount)
+
   useEffect(() => {
     if (!token) return
-    getMe()
-      .then(({ teacher, plan }) => updateAccount(teacher, plan))
-      .catch(() => { /* non-fatal — keep cached values */ })
+
+    let last = 0
+    const refresh = () => {
+      // Throttle: focus + visibilitychange can both fire on a single tab switch.
+      const now = Date.now()
+      if (now - last < 3000) return
+      last = now
+      getMe()
+        .then(({ teacher, plan }) => updateAccount(teacher, plan))
+        .catch(() => { /* non-fatal — keep cached values */ })
+    }
+
+    refresh()   // initial reconcile
+
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh() }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [token, updateAccount])
   return null
 }
@@ -140,6 +166,7 @@ export default function App() {
             <Route path="/courses"       element={<Courses />} />
             <Route path="/grading"       element={<Grading />} />
             <Route path="/criteria"      element={<Criteria />} />
+            <Route path="/rubrics"       element={<Rubrics />} />
             <Route path="/students"      element={<Students />} />
             <Route path="/history"       element={<History />} />
             <Route path="/presentations" element={<Presentations />} />
@@ -157,6 +184,7 @@ export default function App() {
             <Route path="teachers"  element={<AdminTeachers />} />
             <Route path="institutions" element={<AdminInstitutions />} />
             <Route path="rubrics"   element={<AdminRubrics />} />
+            <Route path="rubric-templates" element={<AdminRubricTemplates />} />
             <Route path="feedback"  element={<AdminFeedback />} />
             <Route path="errors"    element={<AdminErrors />} />
             <Route path="evals"     element={<AdminEvals />} />
@@ -168,6 +196,7 @@ export default function App() {
             <Route path="usage"    element={<InstitutionUsage />} />
             <Route path="teachers" element={<InstitutionTeachers />} />
             <Route path="rubrics"  element={<InstitutionRubrics />} />
+            <Route path="rubric-presets" element={<InstitutionRubricPresets />} />
             <Route path="audit"    element={<InstitutionAudit />} />
           </Route>
         </Routes>

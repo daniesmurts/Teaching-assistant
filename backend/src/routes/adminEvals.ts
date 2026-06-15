@@ -11,6 +11,7 @@ import {
   exportRunCsv, fitThresholdsForRun,
 } from '../services/evalHarness'
 import { getConfidenceConfig } from '../db/queries/confidenceConfig'
+import { findReplayTargets } from '../db/queries/assignments'
 import { logger } from '../lib/logger'
 
 // Admin-only control surface for the eval harness (flywheel + confidence).
@@ -37,6 +38,15 @@ router.post('/', asyncHandler(async (req, res) => {
   if (!teacher_id) throw new ValidationError('Укажите преподавателя')
   const conditions = Array.isArray(k) && k.length ? k.map(Number).filter((n) => Number.isInteger(n) && n >= 0) : [0, 3, 5]
 
+  // Pre-check: reject with a clear message before creating a phantom run row.
+  // (The harness has its own fallback in case the check is racy.)
+  const targets = await findReplayTargets(teacher_id, course_id)
+  if (targets.length === 0) {
+    throw new ValidationError(
+      'У этого преподавателя нет утверждённых работ с привязкой к предмету — нечего воспроизводить.'
+    )
+  }
+
   const run = await createEvalRun({
     teacherId: teacher_id, courseId: course_id, model: 'deepseek-chat',
     conditions, notes, kind: 'flywheel',
@@ -55,6 +65,13 @@ router.post('/confidence', asyncHandler(async (req, res) => {
   }
   if (!teacher_id) throw new ValidationError('Укажите преподавателя')
   const kVal = Number.isInteger(k) ? Number(k) : 5
+
+  const targets = await findReplayTargets(teacher_id, course_id)
+  if (targets.length === 0) {
+    throw new ValidationError(
+      'У этого преподавателя нет утверждённых работ с привязкой к предмету — нечего воспроизводить.'
+    )
+  }
 
   const run = await createEvalRun({
     teacherId: teacher_id, courseId: course_id, model: 'deepseek-chat',

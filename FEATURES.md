@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-06-11
+**Last updated:** 2026-06-14
 
 ---
 
@@ -26,7 +26,7 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 
 ## Public / unauthenticated ✅
 
-- Landing page (hero, problem/solution, 3 feature pillars: проверка / лекции / аналитика, pricing, feature matrix)
+- Landing page (hero, problem/solution, 4 feature pillars: проверка / лекции / тесты / аналитика, pricing, feature matrix)
 - Marketing pages: About, Institutions, FAQ, Ethics, Contact, Pricing, Changelog, Use-cases, Offer, Privacy, Terms, Cookies
 - Register (with optional `?invite=` institution invite — prefills + locks email)
 - Login (password reveal, inline errors)
@@ -47,13 +47,14 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 - Revisit any past grade (read-only detail modal, incl. ВКР chapter review + revision check)
 - Moodle-compatible **CSV grade export**
 - Watermark on output (free tier only)
-- Limits: 20 grades/mo, 3 presentations/mo, 3 topic generations/mo, 3 subjects, 15 criteria, 30-day history
+- Limits: 20 grades/mo, 3 presentations/mo, 3 topic generations/mo, 3 quizzes/mo, 3 subjects, 15 criteria, 30-day history
 
 **Topics** — AI topic generator for research/practicals: student level + field + interests + practice site → level-appropriate, valuable topics (with rationale, scope, novelty). Yandex Search grounding. Optional student attachment (name + group, autocomplete from existing students) for later lookup. Free: 3/mo, Pro: unlimited
 **Subjects (formerly «Курсы»)** — CRUD, level, syllabus text/upload. Renamed in UI per Russian-academic vocab («курс» = year of study; «предмет» = subject). URL `/courses` and DB `course_id` unchanged
 **Criteria** — library of reusable criteria (name + description + optional subject), start from global templates. Selected at grading time with per-criterion weights and a live sum-to-100 check
 **Students** — auto-collected roster from graded work, per-student grade-over-time chart, groups
 **Presentations** — slide-by-slide generator (title, bullets, speaker notes), copy-per-slide
+**Quizzes («Тесты»)** — 5–20 multiple-choice questions on a topic, at one of three Bloom-style levels (recall / understanding / application), grounded in the subject's materials via RAG with source citations. Answer reveal, history. Free: 3/mo, Pro: unlimited
 **Onboarding** — welcome modal (first login), getting-started checklist (tracks real progress), per-page "how it works" intros, no-subject hints on grading/presentations
 **Account** — feedback page, in-app help center, settings, password change, account deletion (152-ФЗ cascade)
 

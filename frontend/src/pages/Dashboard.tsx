@@ -6,6 +6,7 @@ import OnboardingChecklist from '../components/onboarding/OnboardingChecklist'
 import WelcomeModal from '../components/onboarding/WelcomeModal'
 import AssignmentDetailModal from '../components/grading/AssignmentDetailModal'
 import { gradeColor } from '../lib/grades'
+import { nameForGreeting } from '../lib/teacherName'
 import { useAuthStore } from '../store/authStore'
 import { getGradingStats, getGradingHistory } from '../api/grading'
 import { getCourses } from '../api/courses'
@@ -72,8 +73,8 @@ export default function Dashboard() {
     queryFn: getCourses,
   })
 
-  const firstName = teacher?.name?.split(' ').find((w) => w.length > 1) ?? teacher?.name?.split(' ')[0]
-  const greeting  = firstName ? `Добрый день, ${firstName}` : 'Добрый день'
+  const greetName = nameForGreeting(teacher?.name)
+  const greeting  = greetName ? `Добрый день, ${greetName}` : 'Добрый день'
 
   const monthDelta = stats ? stats.this_month - stats.last_month : 0
   const [openAssignment, setOpenAssignment] = useState<Assignment | null>(null)

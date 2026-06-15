@@ -7,6 +7,7 @@ const NAV = [
   { to: '/admin/teachers', label: 'Преподаватели',  end: false },
   { to: '/admin/institutions', label: 'Организации', end: false },
   { to: '/admin/rubrics',  label: 'Шаблоны критериев', end: false },
+  { to: '/admin/rubric-templates', label: 'Шаблоны рубрик',   end: false },
   { to: '/admin/feedback', label: 'Отзывы',         end: false },
   { to: '/admin/errors',   label: 'Ошибки',         end: false },
   { to: '/admin/evals',    label: 'Эксперименты',   end: false },

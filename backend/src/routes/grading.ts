@@ -10,10 +10,11 @@ import { grade, approve } from '../services/grading'
 import { runLongReview } from '../services/longReview'
 import { createLongReview, getLongReviewById, getLongReviewByAssignmentId } from '../db/queries/longReviews'
 import { generateEmailDraft } from '../services/email'
+import { composeHandout } from '../services/handout'
 import { findAssignmentsByTeacher, findStudentsByTeacher, findAssignmentsForExport, findAssignmentById } from '../db/queries/assignments'
 import { toCsv, csvFilename } from '../lib/csv'
 import { pool } from '../db/connection'
-import type { GradeLetter } from '../../../shared/types'
+import type { GradeLetter, BulletItem } from '../../../shared/types'
 
 const router = Router()
 router.use(authenticate)
@@ -190,8 +191,8 @@ router.post(
       approved_score: number
       approved_grade: GradeLetter
       approved_feedback: string
-      approved_strengths?: string[]
-      approved_improvements?: string[]
+      approved_strengths?: BulletItem[]
+      approved_improvements?: BulletItem[]
     }
     const assignment = await approve(req.params.id, req.teacher.id, {
       approvedScore:        Number(approved_score),
@@ -212,6 +213,37 @@ router.post(
   asyncHandler(async (req, res) => {
     const tone = (req.body as { tone?: string }).tone as 'encouraging' | 'neutral' | 'direct' | undefined
     const draft = await generateEmailDraft(req.params.id, req.teacher.id, tone)
+    res.json(draft)
+  })
+)
+
+// POST /api/grading/:id/handout — compose a "доработка" packet from teacher-
+// selected improvement bullets + verification questions. Light validation here;
+// real argument validation happens in composeHandout (needs at least one of each).
+router.post(
+  '/:id/handout',
+  aiLimiter,
+  checkFeatureAccess('handout'),
+  asyncHandler(async (req, res) => {
+    const body = req.body as {
+      improvements?: unknown
+      questions?:    unknown
+      tone?:         string
+    }
+    const improvements = Array.isArray(body.improvements)
+      ? body.improvements.filter((x): x is string => typeof x === 'string').slice(0, 20)
+      : []
+    const questions = Array.isArray(body.questions)
+      ? body.questions.filter((x): x is string => typeof x === 'string').slice(0, 20)
+      : []
+    const tone: 'encouraging' | 'neutral' | 'direct' =
+      body.tone === 'encouraging' || body.tone === 'direct' ? body.tone : 'neutral'
+
+    const draft = await composeHandout({
+      assignmentId: req.params.id,
+      teacherId:    req.teacher.id,
+      improvements, questions, tone,
+    })
     res.json(draft)
   })
 )

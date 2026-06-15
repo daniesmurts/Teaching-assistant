@@ -47,7 +47,7 @@ export function checkMonthlyLimit(
 // ─── Boolean feature gates ────────────────────────────────────────────────────
 
 export function checkFeatureAccess(
-  feature: 'documentUpload' | 'ragFlywheel' | 'emailGeneration' | 'presentationHistory'
+  feature: 'documentUpload' | 'ragFlywheel' | 'emailGeneration' | 'presentationHistory' | 'verificationQuestions' | 'handout'
 ) {
   return (req: Request, res: Response, next: NextFunction): void => {
     if (!canUseFeature(req.teacher.plan_tier, feature)) {
@@ -63,11 +63,17 @@ export function checkFeatureAccess(
   }
 }
 
-// ─── Resource count limits (courses, criteria) ────────────────────────────────
+// ─── Resource count limits (courses, criteria, rubrics) ──────────────────────
+
+const RESOURCE_LABEL: Record<'courses' | 'criteria' | 'rubrics', string> = {
+  courses:  'предметов',
+  criteria: 'критериев',
+  rubrics:  'рубрик',
+}
 
 export function checkResourceLimit(
-  resource: 'courses' | 'criteria',
-  limitKey:  'maxCourses' | 'maxCriteria'
+  resource: 'courses' | 'criteria' | 'rubrics',
+  limitKey:  'maxCourses' | 'maxCriteria' | 'maxRubrics'
 ) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
@@ -77,16 +83,17 @@ export function checkResourceLimit(
 
       if (limit === Infinity) { next(); return }
 
-      const table = resource === 'courses' ? 'courses' : 'criteria'
+      // Personal-resource count (institution-shared / global templates don't
+      // count against the teacher's own cap — they're authored by admins).
       const { rows } = await pool.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM ${table} WHERE teacher_id = $1`,
+        `SELECT COUNT(*)::text AS count FROM ${resource} WHERE teacher_id = $1`,
         [req.teacher.id]
       )
       const count = parseInt(rows[0].count, 10)
 
       if (count >= limit) {
         res.status(403).json({
-          error:    `Достигнут лимит ${resource === 'courses' ? 'предметов' : 'критериев'} для вашего тарифа (${limit}).`,
+          error:    `Достигнут лимит ${RESOURCE_LABEL[resource]} для вашего тарифа (${limit}).`,
           code:     'RESOURCE_LIMIT_REACHED',
           resource,
           limit,

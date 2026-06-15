@@ -6,6 +6,7 @@ import { asyncHandler } from '../lib/asyncHandler'
 import { ValidationError, NotFoundError } from '../errors/AppError'
 import { inviteRules, bulkInviteRules } from '../validation/institutionValidation'
 import { createCriterionRules } from '../validation/criteriaValidation'
+import { createRubricRules } from '../validation/rubricsValidation'
 import {
   getInstitutionById, getInstitutionOverview, getInstitutionDailyUsage,
   listInstitutionTeachers, setInstitutionTeacherActive, countInstitutionTeachers,
@@ -14,13 +15,14 @@ import {
   createInvite, listPendingInvites, deleteInvite, findActiveInviteForEmail,
 } from '../db/queries/teacherInvites'
 import { findTeacherByEmail, findTeacherById } from '../db/queries/teachers'
-import { findCriteriaByInstitution, createCriterion } from '../db/queries/criteria'
+import { findCriteriaByInstitution, createCriterion, findCriteriaByIds } from '../db/queries/criteria'
+import { findRubricsByInstitution, createInstitutionRubric } from '../db/queries/rubrics'
 import { recordAudit, listAuditByInstitution } from '../db/queries/audit'
 import { generateRawToken } from '../db/queries/passwordReset'
 import { sendEmail } from '../services/emailTransport'
 import { teacherInviteEmail } from '../lib/emailTemplates'
 import { toCsv, csvFilename } from '../lib/csv'
-import type { CriterionSubject } from '../../../shared/types'
+import type { CriterionSubject, RubricItem } from '../../../shared/types'
 
 const router = Router()
 router.use(authenticate)
@@ -215,6 +217,38 @@ router.post('/criteria', validate(createCriterionRules), asyncHandler(async (req
   recordAudit({ institutionId: req.teacher.institution_id, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
     action: 'criterion.shared_created', target: name })
   res.status(201).json(criterion)
+}))
+
+// ─── Shared rubrics ────────────────────────────────────────────────────────────
+
+router.get('/rubrics', asyncHandler(async (req, res) => {
+  res.json(await findRubricsByInstitution(institutionId(req)))
+}))
+
+router.post('/rubrics', validate(createRubricRules), asyncHandler(async (req, res) => {
+  institutionId(req) // ensure scoped
+  const { name, description, subject, items } = req.body as {
+    name: string; description?: string; subject?: CriterionSubject; items: RubricItem[]
+  }
+  // Weights must sum to 100 and every criterion must be one the admin can use
+  // (own + their institution's shared + global). The author becomes the row's
+  // teacher_id; is_institution_shared = TRUE so all members see it.
+  const total = items.reduce((s, it) => s + it.weight, 0)
+  if (total !== 100) {
+    throw new ValidationError(`Сумма весов критериев должна быть 100% (сейчас ${total}%)`)
+  }
+  const ids = items.map((it) => it.criterion_id)
+  if (new Set(ids).size !== ids.length) {
+    throw new ValidationError('Критерии в рубрике не должны повторяться')
+  }
+  const resolved = await findCriteriaByIds(ids, req.teacher.id, req.teacher.institution_id ?? null)
+  if (resolved.length !== new Set(ids).size) {
+    throw new ValidationError('Один или несколько критериев недоступны')
+  }
+  const rubric = await createInstitutionRubric(req.teacher.id, { name, description, subject, items })
+  recordAudit({ institutionId: req.teacher.institution_id, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
+    action: 'rubric.shared_created', target: name })
+  res.status(201).json(rubric)
 }))
 
 export default router

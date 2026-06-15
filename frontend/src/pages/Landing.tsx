@@ -133,8 +133,53 @@ export default function Landing() {
             </div>
           </div>
 
-          {/* Feature 3 — Analytics */}
+          {/* Feature 3 — Quizzes */}
           <div className="flex flex-col md:flex-row items-center gap-12">
+            <div className="flex-1 space-y-4">
+              <div className="text-xs font-bold text-amber uppercase tracking-wider">Тесты и викторины</div>
+              <h3 className="font-display text-3xl font-bold">Контрольные за минуту, а не за вечер</h3>
+              <p className="text-ink-secondary leading-relaxed">
+                Укажите тему, число вопросов и уровень сложности — ИСПУМ соберёт тест с вариантами ответов и пояснениями, опираясь на материалы вашего предмета. Подходит для проверки запоминания, понимания или применения. Готовый тест можно скопировать в LMS или показать прямо на экране.
+              </p>
+            </div>
+            <div className="flex-1 w-full bg-surface border border-border rounded-xl p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-xs font-semibold text-ink-tertiary uppercase tracking-wider">Микроэкономика · 10 вопросов</div>
+                <div className="text-[10px] font-sans font-medium bg-amber-light text-amber px-1.5 py-0.5 rounded-sm">Понимание</div>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <div className="text-sm font-medium mb-2">3. Что произойдёт со спросом при росте дохода потребителей?</div>
+                  <div className="space-y-1.5">
+                    {[
+                      { label: 'A', text: 'Кривая спроса сместится влево', correct: false },
+                      { label: 'B', text: 'Кривая спроса сместится вправо',  correct: true },
+                      { label: 'C', text: 'Изменится только наклон кривой',  correct: false },
+                    ].map((o) => (
+                      <div
+                        key={o.label}
+                        className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border text-xs ${
+                          o.correct
+                            ? 'bg-success-bg border-success/25 text-success'
+                            : 'bg-bg border-border text-ink-secondary'
+                        }`}
+                      >
+                        <span className="font-display font-bold text-[11px] w-4">{o.label}</span>
+                        <span className="flex-1">{o.text}</span>
+                        {o.correct && <span className="text-success font-bold">✓</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="bg-surface-warm p-2.5 rounded text-[11px] text-ink-secondary border border-border leading-relaxed">
+                  <span className="font-semibold">Пояснение:</span> Рост дохода — это сдвиг кривой спроса, а не движение по ней. См. лекция 2, нормальные блага.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Feature 4 — Analytics */}
+          <div className="flex flex-col md:flex-row-reverse items-center gap-12">
             <div className="flex-1 space-y-4">
               <div className="text-xs font-bold text-success uppercase tracking-wider">Аналитика успеваемости</div>
               <h3 className="font-display text-3xl font-bold">Видно, кто растёт, а кому нужна помощь</h3>
@@ -227,6 +272,7 @@ export default function Landing() {
                 <li className="flex gap-2"><span>•</span> До 20 проверок работ в месяц</li>
                 <li className="flex gap-2"><span>•</span> До 3 презентаций в месяц</li>
                 <li className="flex gap-2"><span>•</span> До 3 генераций тем для исследований</li>
+                <li className="flex gap-2"><span>•</span> До 3 тестов (викторин) в месяц</li>
                 <li className="flex gap-2"><span>•</span> До 3 предметов и 5 рубрик</li>
                 <li className="flex gap-2"><span>•</span> 30 дней истории проверок</li>
                 <li className="flex gap-2"><span>•</span> Водяной знак на результатах</li>
@@ -252,7 +298,7 @@ export default function Landing() {
               </div>
 
               <ul className="space-y-3 mb-8 text-sm text-ink-secondary flex-1">
-                <li className="flex gap-2 text-ink"><span>•</span> <b>Безлимитно:</b> проверки, презентации, темы</li>
+                <li className="flex gap-2 text-ink"><span>•</span> <b>Безлимитно:</b> проверки, презентации, темы, тесты</li>
                 <li className="flex gap-2 text-ink"><span>•</span> Рецензирование больших работ (ВКР, диплом)</li>
                 <li className="flex gap-2 text-ink"><span>•</span> Расчётные задачи: физика, математика, инженерия</li>
                 <li className="flex gap-2 text-ink"><span>•</span> Загрузка документов (PDF, Word, OCR)</li>
@@ -315,6 +361,12 @@ export default function Landing() {
                 </tr>
                 <tr className="border-b border-border hover:bg-surface transition-colors">
                   <td className="py-3 px-4">Генераций тем в месяц</td>
+                  <td className="py-3 px-4">3</td>
+                  <td className="py-3 px-4 text-ink">Безлимитно</td>
+                  <td className="py-3 px-4 text-ink">Безлимитно</td>
+                </tr>
+                <tr className="border-b border-border hover:bg-surface transition-colors">
+                  <td className="py-3 px-4">Тестов (викторин) в месяц</td>
                   <td className="py-3 px-4">3</td>
                   <td className="py-3 px-4 text-ink">Безлимитно</td>
                   <td className="py-3 px-4 text-ink">Безлимитно</td>

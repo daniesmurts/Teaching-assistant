@@ -52,8 +52,8 @@ export async function generateEmailDraft(
     `Имя студента: ${studentName}\n` +
     `Оценка: ${grade} (${score}/100)\n` +
     `Общий отзыв: ${feedback}\n` +
-    `Достоинства работы: ${(assignment.ai_strengths ?? []).join('; ')}\n` +
-    `Что улучшить: ${(assignment.ai_improvements ?? []).join('; ')}\n\n` +
+    `Достоинства работы: ${(assignment.ai_strengths ?? []).map((b) => b.text).join('; ')}\n` +
+    `Что улучшить: ${(assignment.ai_improvements ?? []).map((b) => b.text).join('; ')}\n\n` +
     `Напишите письмо на русском языке. Завершите письмо подписью ` +
     `«С уважением,\\n${signature}» — используйте именно это имя, ` +
     `не заменяйте плейсхолдером и не добавляйте должность или университет.\n` +

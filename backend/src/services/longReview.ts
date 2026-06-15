@@ -12,7 +12,7 @@ import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { logger } from '../lib/logger'
 import type { CallContext } from './deepseek'
-import type { LongReviewResult, ChapterReview, GradeLetter, CriteriaSnapshotItem } from '../../../shared/types'
+import type { LongReviewResult, ChapterReview, DefenseQuestion, GradeLetter, CriteriaSnapshotItem } from '../../../shared/types'
 
 // ─── Tuning ────────────────────────────────────────────────────────────────────
 
@@ -69,6 +69,17 @@ export async function runLongReview(p: RunParams): Promise<void> {
     await setLongReviewStatus(p.reviewId, 'synthesizing')
     const result = await synthesizeReview(sections, analyses, snapshot, ctx)
 
+    // Defence questions go through their own dedicated call — the synthesis
+    // JSON for a long ВКР (24 chapters × prose + arrays) regularly drained the
+    // model's output budget before this field. Failing the call here is
+    // recoverable: the rest of the review still goes through.
+    try {
+      result.defense_questions = await generateDefenseQuestions(sections, analyses, result, ctx)
+    } catch (err) {
+      logger.warn({ message: 'Defence questions failed', reviewId: p.reviewId, error: (err as Error).message })
+      result.defense_questions = []
+    }
+
     // ── Draft assignment so it flows into history / approval / email / RAG ──────
     const assignment = await createAssignment({
       teacherId:     p.teacherId,
@@ -82,8 +93,12 @@ export async function runLongReview(p: RunParams): Promise<void> {
       aiGradeLabel:  result.grade_label ?? gradeToLabel(normaliseGrade(result.suggested_grade)),
       aiFeedback:    result.overall_summary,
       aiCriteriaScores: [],
-      aiStrengths:   result.overall_strengths ?? [],
-      aiImprovements: result.overall_gaps ?? [],
+      // Long-review's overall_strengths/gaps are still string arrays inside the
+      // JSONB result column — but the draft assignment row uses the new
+      // BulletItem shape, so wrap each string. Quotes/pages aren't surfaced for
+      // ВКР-length works yet (citations would need section offsets).
+      aiStrengths:    (result.overall_strengths ?? []).map((s) => ({ text: s, quote: null, page: null })),
+      aiImprovements: (result.overall_gaps      ?? []).map((s) => ({ text: s, quote: null, page: null })),
       criteriaSnapshot: snapshot.length > 0 ? snapshot : null,
     })
 
@@ -316,7 +331,6 @@ ${analysisBlock}
 - "chapter_reviews": массив {"title": string, "assessment": "1–2 абзаца", "strengths": [..], "gaps": [..]} по каждому разделу
 - "overall_strengths": 3–6 ключевых достоинств работы
 - "overall_gaps": 3–6 ключевых недостатков
-- "defense_questions": 4–6 вопросов, которые комиссия может задать на защите
 
 Ответьте ТОЛЬКО JSON-объектом.`
 
@@ -324,6 +338,11 @@ ${analysisBlock}
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'итоговая рецензия',
     ctx,
+    undefined,   // model (default chat)
+    undefined,   // temperature
+    8192,        // max_tokens — lifted from the 4096 default; the synthesis
+                 // JSON (chapter_reviews × up to MAX_SECTIONS + arrays) routinely
+                 // exceeded the default cap and got truncated mid-array.
   )
 
   return {
@@ -334,8 +353,95 @@ ${analysisBlock}
     chapter_reviews:   normaliseChapters(r.chapter_reviews, analyses),
     overall_strengths: (r.overall_strengths ?? []).slice(0, 8),
     overall_gaps:      (r.overall_gaps ?? []).slice(0, 8),
-    defense_questions: (r.defense_questions ?? []).slice(0, 8),
+    defense_questions: [],   // populated by generateDefenseQuestions in the orchestrator
   }
+}
+
+// ─── Defence questions — dedicated call ────────────────────────────────────────
+//
+// Generated outside synthesizeReview because: (a) the synthesis JSON
+// consistently truncated this field on real-ВКР scale even with max_tokens
+// lifted to 8192; (b) we want each question grounded in a specific chapter,
+// which is a tighter ask than "list 4–6 questions".
+
+interface RawDefenseQuestion {
+  question?:      string
+  chapter_index?: number | null
+  quote?:         string | null
+  page?:          number | null
+}
+
+async function generateDefenseQuestions(
+  sections: Section[],
+  analyses: SectionAnalysis[],
+  result:   LongReviewResult,
+  ctx:      CallContext,
+): Promise<DefenseQuestion[]> {
+  // Reuse the chapter list the teacher will see so chapter_index aligns.
+  const chapters = result.chapter_reviews.length > 0
+    ? result.chapter_reviews
+    : analyses.map((a) => ({ title: a.title, assessment: a.summary, strengths: a.strengths, gaps: a.gaps }))
+
+  const chapterBlock = chapters
+    .map((c, i) => `### Раздел ${i}: ${c.title}\n${c.assessment}\nЗамечания: ${c.gaps.join('; ') || '—'}`)
+    .join('\n\n')
+
+  const system =
+    `Вы — научный руководитель, готовящий вопросы к защите ВКР. На основе разбора работы ` +
+    `сформулируйте 5–7 конкретных вопросов, которые комиссия может задать. Каждый вопрос ` +
+    `должен опираться на конкретный раздел и проверять понимание студентом собственной работы — ` +
+    `обоснование выбора метода, источник данных, интерпретация результата. Избегайте общих ` +
+    `формулировок («как вы видите будущее этой темы»). Отвечайте только валидным JSON.`
+
+  const user =
+    `## Краткое заключение по работе
+${sanitiseForPrompt(result.overall_summary).slice(0, 1500)}
+
+## Разделы (с номерами для chapter_index)
+${chapterBlock}
+
+Верните JSON: {"questions": [{"question": "...", "chapter_index": число 0–${chapters.length - 1} или null если вопрос общий, "quote": ДОСЛОВНАЯ цитата из соответствующего раздела (5–12 слов) которая мотивирует вопрос, либо null}]}`
+
+  const r = await chatJSON<{ questions?: RawDefenseQuestion[] }>(
+    [{ role: 'system', content: system }, { role: 'user', content: user }],
+    'вопросы к защите',
+    ctx,
+    undefined,
+    undefined,
+    1024,   // small budget — ~7 questions of 1–2 sentences each is well under
+  )
+
+  const haystackBySection = sections.map((s) => s.text.toLowerCase().replace(/\s+/g, ' ').trim())
+  const fullHaystack = sections.map((s) => s.text).join('\n\n').toLowerCase().replace(/\s+/g, ' ').trim()
+
+  return (r.questions ?? [])
+    .map((q): DefenseQuestion | null => {
+      const question = typeof q.question === 'string' ? q.question.trim() : ''
+      if (!question) return null
+
+      let chapter_index: number | null = null
+      if (typeof q.chapter_index === 'number'
+          && Number.isInteger(q.chapter_index)
+          && q.chapter_index >= 0
+          && q.chapter_index < chapters.length) {
+        chapter_index = q.chapter_index
+      }
+
+      let quote: string | null = null
+      if (typeof q.quote === 'string' && q.quote.trim().length >= 8) {
+        const normalised = q.quote.toLowerCase().replace(/\s+/g, ' ').trim()
+        // Prefer a match inside the cited chapter; fall back to whole document.
+        const localHay = chapter_index != null ? haystackBySection[chapter_index] : null
+        if (localHay && localHay.includes(normalised)) {
+          quote = q.quote.trim().slice(0, 200)
+        } else if (fullHaystack.includes(normalised)) {
+          quote = q.quote.trim().slice(0, 200)
+        }
+      }
+      return { question, chapter_index, quote, page: null }
+    })
+    .filter((q): q is DefenseQuestion => q !== null)
+    .slice(0, 8)
 }
 
 function normaliseChapters(

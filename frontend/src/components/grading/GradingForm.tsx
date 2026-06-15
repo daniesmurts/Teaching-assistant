@@ -5,6 +5,7 @@ import { Textarea } from '../ui/Input'
 import { getCourses } from '../../api/courses'
 import { getStudents, startReview, getReview } from '../../api/grading'
 import { getCriteria } from '../../api/criteria'
+import { getRubrics } from '../../api/rubrics'
 import DocumentUpload from '../ui/DocumentUpload'
 import NoCourseHint from '../onboarding/NoCourseHint'
 import { useUIStore } from '../../store/uiStore'
@@ -126,6 +127,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
 
   const { atGradeLimit, gradesUsed, gradesLimit, can } = usePlan()
   const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
+  const addToast         = useUIStore((s) => s.addToast)
 
   const charCount = form.submission_text.length
   const isLong = charCount > SINGLE_PASS_CHAR_LIMIT
@@ -135,6 +137,10 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
   const { data: criteria = [] } = useQuery({
     queryKey: ['criteria', form.course_id],
     queryFn:  () => getCriteria(form.course_id || undefined),
+  })
+  const { data: rubrics = [] } = useQuery({
+    queryKey: ['rubrics', form.course_id],
+    queryFn:  () => getRubrics(form.course_id || undefined),
   })
 
   const { data: students = [] } = useQuery({
@@ -173,6 +179,28 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
 
   function setWeight(id: string, weight: number) {
     setPicked((prev) => prev.map((p) => p.id === id ? { ...p, weight } : p))
+  }
+
+  /**
+   * Apply a saved rubric: replace the picked criteria with the rubric's items,
+   * dropping any whose criterion the teacher can't currently see (deleted,
+   * shared-then-revoked, etc). Teacher can still edit before submitting.
+   */
+  function loadFromRubric(rubricId: string) {
+    if (!rubricId) return
+    const r = rubrics.find((x) => x.id === rubricId)
+    if (!r) return
+    const next: PickedCriterion[] = []
+    for (const it of r.items) {
+      const c = criteria.find((x) => x.id === it.criterion_id)
+      if (c) next.push({ id: c.id, name: c.name, weight: it.weight })
+    }
+    if (next.length === 0) {
+      addToast('В рубрике не осталось доступных критериев', 'error')
+      return
+    }
+    setPicked(next)
+    addToast(`Рубрика «${r.name}» загружена`, 'success')
   }
 
   const set = (field: keyof Omit<GradeRequest, 'criterion_ids' | 'weights'>) => (
@@ -394,6 +422,25 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
             </select>
             <NoCourseHint />
           </div>
+
+          {/* Load preset rubric — visible only when teacher has at least one saved rubric.
+              Replaces the picked criteria with the rubric's items; weights are still editable. */}
+          {rubrics.length > 0 && (
+            <select
+              className={selectClass}
+              value=""
+              onChange={(e) => loadFromRubric(e.target.value)}
+              title="Загрузить сохранённый набор критериев"
+            >
+              <option value="">↳ Начать с рубрики...</option>
+              {rubrics.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name} · {r.items.length} крит.
+                  {r.is_institution_shared ? ' · кафедра' : ''}
+                </option>
+              ))}
+            </select>
+          )}
 
           {/* Add criterion */}
           <select

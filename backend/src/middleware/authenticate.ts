@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express'
 import { verifyToken } from '../lib/jwt'
 import { findTeacherRowById } from '../db/queries/teachers'
+import { computeEffectiveTier } from '../lib/planTier'
 import { UnauthorizedError } from '../errors/AppError'
 
 // ─── Extended teacher context attached to every authenticated request ─────────
@@ -27,12 +28,6 @@ interface JwtPayload {
   email: string
   iat:   number
   exp:   number
-}
-
-// Rank plan tiers so we can pick the strongest entitlement.
-const TIER_RANK: Record<string, number> = { free: 0, pro: 1, institution: 2 }
-function strongerTier(a: string, b: string): string {
-  return (TIER_RANK[a] ?? 0) >= (TIER_RANK[b] ?? 0) ? a : b
 }
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
@@ -80,18 +75,9 @@ export async function authenticate(
       }
     }
 
-    // Own tier — downgraded to free if an individual subscription has expired
-    // (never rely on a cron job for this).
-    const ownTier =
-      row.plan_expires_at && row.plan_expires_at < new Date()
-        ? 'free'
-        : (row.plan_tier ?? 'free')
-
-    // Active members inherit their institution's tier. Effective tier is the
-    // strongest of the two — so a seat at an 'institution' org grants full
-    // entitlements even if the teacher's personal plan is free.
-    const institutionTier = row.institution_id ? (row.institution_plan_tier ?? 'free') : 'free'
-    const effectiveTier = strongerTier(ownTier, institutionTier)
+    // Effective tier (expiry-aware + institution inheritance) — shared with the
+    // login route via lib/planTier so the two never disagree.
+    const effectiveTier = computeEffectiveTier(row)
 
     req.teacher = {
       id:             row.id,

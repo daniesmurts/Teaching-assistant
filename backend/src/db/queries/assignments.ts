@@ -1,7 +1,8 @@
 import { pool } from '../connection'
 import type {
   Assignment, GradeLetter, CriterionScore, RevisionCheckItem, CriteriaSnapshotItem,
-  ConfidenceLevel, AiEnsemble,
+  ConfidenceLevel, AiEnsemble, BulletItem, VerificationQuestion,
+  Handout, QuestionResponse,
 } from '../../../../shared/types'
 
 interface AssignmentRow {
@@ -17,17 +18,20 @@ interface AssignmentRow {
   ai_grade_label: string | null
   ai_feedback: string | null
   ai_criteria_scores: CriterionScore[] | null
-  ai_strengths: string[] | null
-  ai_improvements: string[] | null
+  ai_strengths: BulletItem[] | null
+  ai_improvements: BulletItem[] | null
+  ai_verification_questions: VerificationQuestion[] | null
   ai_revision_check: RevisionCheckItem[] | null
+  ai_question_responses: QuestionResponse[] | null
+  ai_handout: Handout | null
   criteria_snapshot: CriteriaSnapshotItem[] | null
   ai_confidence: string | null
   ai_ensemble: AiEnsemble | null
   approved_score: number | null
   approved_grade: string | null
   approved_feedback: string | null
-  approved_strengths: string[] | null
-  approved_improvements: string[] | null
+  approved_strengths: BulletItem[] | null
+  approved_improvements: BulletItem[] | null
   approved_at: Date | null
   status: string
   parent_assignment_id: string | null
@@ -51,7 +55,10 @@ function toAssignment(row: AssignmentRow): Assignment {
     ai_criteria_scores: row.ai_criteria_scores,
     ai_strengths: row.ai_strengths,
     ai_improvements: row.ai_improvements,
+    ai_verification_questions: row.ai_verification_questions,
     ai_revision_check: row.ai_revision_check,
+    ai_question_responses: row.ai_question_responses,
+    ai_handout: row.ai_handout,
     criteria_snapshot: row.criteria_snapshot,
     ai_confidence: row.ai_confidence as ConfidenceLevel | null,
     ai_ensemble: row.ai_ensemble,
@@ -80,11 +87,13 @@ export async function createAssignment(data: {
   aiGradeLabel: string
   aiFeedback: string
   aiCriteriaScores: CriterionScore[]
-  aiStrengths: string[]
-  aiImprovements: string[]
+  aiStrengths: BulletItem[]
+  aiImprovements: BulletItem[]
+  aiVerificationQuestions?: VerificationQuestion[]
   criteriaSnapshot?: CriteriaSnapshotItem[] | null
   parentAssignmentId?: string
   aiRevisionCheck?: Array<{ point: string; status: string; note: string }>
+  aiQuestionResponses?: QuestionResponse[]
   aiConfidence?: ConfidenceLevel | null
   aiEnsemble?: AiEnsemble | null
 }): Promise<Assignment> {
@@ -98,10 +107,12 @@ export async function createAssignment(data: {
        submission_text, ai_score, ai_grade, ai_grade_label, ai_feedback,
        ai_criteria_scores, ai_strengths, ai_improvements, criteria_snapshot,
        parent_assignment_id, ai_revision_check, ai_confidence, ai_ensemble,
+       ai_verification_questions, ai_question_responses,
        revision_number, status
      ) VALUES (
        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
        $15,$16,$17,$18,
+       $19,$20,
        COALESCE((SELECT revision_number + 1 FROM parent), 1),
        'pending'
      )
@@ -118,13 +129,15 @@ export async function createAssignment(data: {
       data.aiGradeLabel,
       data.aiFeedback,
       JSON.stringify(data.aiCriteriaScores),
-      data.aiStrengths,
-      data.aiImprovements,
+      JSON.stringify(data.aiStrengths),
+      JSON.stringify(data.aiImprovements),
       data.criteriaSnapshot ? JSON.stringify(data.criteriaSnapshot) : null,
       data.parentAssignmentId ?? null,
       data.aiRevisionCheck ? JSON.stringify(data.aiRevisionCheck) : null,
       data.aiConfidence ?? null,
       data.aiEnsemble ? JSON.stringify(data.aiEnsemble) : null,
+      data.aiVerificationQuestions ? JSON.stringify(data.aiVerificationQuestions) : null,
+      data.aiQuestionResponses ? JSON.stringify(data.aiQuestionResponses) : null,
     ]
   )
   return toAssignment(rows[0])
@@ -145,8 +158,8 @@ export async function approveAssignment(
     approvedScore: number
     approvedGrade: GradeLetter
     approvedFeedback: string
-    approvedStrengths?: string[]      // null/undefined = keep AI's default
-    approvedImprovements?: string[]
+    approvedStrengths?: BulletItem[]      // null/undefined = keep AI's default
+    approvedImprovements?: BulletItem[]
   }
 ): Promise<Assignment | null> {
   const { rows } = await pool.query<AssignmentRow>(
@@ -163,8 +176,8 @@ export async function approveAssignment(
     [
       id, teacherId,
       data.approvedScore, data.approvedGrade, data.approvedFeedback,
-      data.approvedStrengths    ?? null,
-      data.approvedImprovements ?? null,
+      data.approvedStrengths    ? JSON.stringify(data.approvedStrengths)    : null,
+      data.approvedImprovements ? JSON.stringify(data.approvedImprovements) : null,
     ]
   )
   return rows[0] ? toAssignment(rows[0]) : null
@@ -174,6 +187,18 @@ export async function updateEmbedding(id: string, embedding: number[]): Promise<
   await pool.query(
     `UPDATE assignments SET embedding = $2 WHERE id = $1`,
     [id, `[${embedding.join(',')}]`]
+  )
+}
+
+/** Save / overwrite the last handout composed for an assignment. */
+export async function saveHandout(
+  id: string,
+  teacherId: string,
+  handout: Handout,
+): Promise<void> {
+  await pool.query(
+    `UPDATE assignments SET ai_handout = $3::jsonb WHERE id = $1 AND teacher_id = $2`,
+    [id, teacherId, JSON.stringify(handout)]
   )
 }
 

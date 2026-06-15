@@ -165,6 +165,33 @@ export async function deleteCriterionTemplate(id: string): Promise<void> {
   await client.delete(`/api/admin/criteria/templates/${id}`)
 }
 
+// ─── Global rubric templates ──────────────────────────────────────────────────
+
+import type { Rubric, RubricItem } from '../types'
+
+export interface RubricTemplatePayload {
+  name:         string
+  description?: string | null
+  subject?:     string
+  items:        RubricItem[]
+}
+
+export async function getRubricTemplates(): Promise<Rubric[]> {
+  const res = await client.get<Rubric[]>('/api/admin/rubrics/templates')
+  return res.data
+}
+export async function createRubricTemplate(data: RubricTemplatePayload): Promise<Rubric> {
+  const res = await client.post<Rubric>('/api/admin/rubrics/templates', data)
+  return res.data
+}
+export async function updateRubricTemplate(id: string, data: Partial<RubricTemplatePayload>): Promise<Rubric> {
+  const res = await client.put<Rubric>(`/api/admin/rubrics/templates/${id}`, data)
+  return res.data
+}
+export async function deleteRubricTemplate(id: string): Promise<void> {
+  await client.delete(`/api/admin/rubrics/templates/${id}`)
+}
+
 // ─── Subscription management ──────────────────────────────────────────────────
 
 export interface AdminPayment {

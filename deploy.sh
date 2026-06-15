@@ -74,11 +74,28 @@ REMOTE
 
 echo "▶ Verifying health…"
 sleep 2
-# Local API health (Node itself is up)…
-ssh "$VM_HOST" 'curl -fsS http://127.0.0.1:3000/api/health' && echo
-# …and the PUBLIC endpoints, exactly as users reach them. The 2026-06-11
-# outage passed the local check while the public site was dead — never again.
-curl -fsS --max-time 15 https://ispum.ru/api/health && echo
-curl -fsS --max-time 15 -o /dev/null -w "frontend: HTTP %{http_code}\n" https://ispum.ru/
+
+# AUTHORITATIVE check — runs ON the VM, so it can't be fooled by the laptop's
+# network. This is the hard gate: if the public site is truly down, this fails.
+#   - local Node health (the API process is up)
+#   - public TLS from the VM itself (nginx → bucket/API path works)
+ssh "$VM_HOST" 'set -e
+  curl -fsS --max-time 10 http://127.0.0.1:3000/api/health >/dev/null && echo "  ✓ API (local)"
+  curl -fsS --max-time 10 https://ispum.ru/api/health      >/dev/null && echo "  ✓ API (public, from VM)"
+  curl -fsS --max-time 10 -o /dev/null https://ispum.ru/   && echo "  ✓ frontend (from VM)"
+'
+
+# BEST-EFFORT check from this laptop — confirms YOUR path to prod, but a flaky
+# local network (DNS/VPN) must NOT fail an otherwise-good deploy. Retry a few
+# times, then warn-only. The VM-side check above is what actually gates.
+echo "▶ Public check from this machine (best-effort)…"
+ok=""
+for i in 1 2 3; do
+  if curl -fsS --max-time 12 -o /dev/null https://ispum.ru/api/health 2>/dev/null; then
+    ok=1; echo "  ✓ reachable from here"; break
+  fi
+  [ "$i" -lt 3 ] && sleep 4
+done
+[ -z "$ok" ] && echo "  ⚠ couldn't reach prod from THIS machine after 3 tries — likely your local network/DNS, not the server (VM-side checks above passed). Verify in a browser."
 
 echo "✅ Deploy complete."

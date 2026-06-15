@@ -64,7 +64,24 @@ export async function listEvalRuns(limit = 50): Promise<EvalRunListItem[]> {
   return rows.map((r) => ({ ...r, result_count: Number(r.result_count) }))
 }
 
-export async function completeEvalRun(id: string, status: 'done' | 'failed'): Promise<void> {
+export async function completeEvalRun(
+  id: string,
+  status: 'done' | 'failed',
+  reason?: string,
+): Promise<void> {
+  // When the harness exits with no work done (e.g. no replay targets), we
+  // surface the reason in `notes` so the admin UI says *why* instead of just
+  // a vague "ошибка". Never overwrites a user-supplied note — appends.
+  if (reason) {
+    await pool.query(
+      `UPDATE eval_runs
+          SET status = $2, completed_at = NOW(),
+              notes = COALESCE(notes || E'\n', '') || $3
+        WHERE id = $1`,
+      [id, status, reason]
+    )
+    return
+  }
   await pool.query(
     `UPDATE eval_runs SET status = $2, completed_at = NOW() WHERE id = $1`,
     [id, status]

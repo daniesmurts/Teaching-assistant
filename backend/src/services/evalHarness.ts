@@ -95,6 +95,19 @@ export async function runReplay(
   let targets = await findReplayTargets(cfg.teacherId, cfg.courseId)
   if (cfg.limit && targets.length > cfg.limit) targets = targets.slice(0, cfg.limit)
 
+  // Empty replay set is its own outcome — flag it with a useful reason so the
+  // admin sees *why* instead of an opaque "ошибка". `findReplayTargets`
+  // requires status=approved + course_id IS NOT NULL, which is the usual
+  // reason it comes back empty for a fresh teacher.
+  if (targets.length === 0) {
+    await completeEvalRun(
+      runId,
+      'failed',
+      'Нет утверждённых работ с привязкой к предмету — нечего воспроизводить.',
+    )
+    return { runId, total: 0, done: 0, skipped: 0, failed: 0 }
+  }
+
   const progress: ReplayProgress = {
     runId,
     total:   targets.length * conditions.length,
@@ -299,6 +312,15 @@ export async function runConfidenceReplay(
   const done = await findCompletedConfidenceIds(runId)
   let targets = await findReplayTargets(cfg.teacherId, cfg.courseId)
   if (cfg.limit && targets.length > cfg.limit) targets = targets.slice(0, cfg.limit)
+
+  if (targets.length === 0) {
+    await completeEvalRun(
+      runId,
+      'failed',
+      'Нет утверждённых работ с привязкой к предмету — нечего воспроизводить.',
+    )
+    return { runId, total: 0, done: 0, failed: 0 }
+  }
 
   const progress = { runId, total: targets.length, done: 0, failed: 0 }
 

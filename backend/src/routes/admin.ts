@@ -15,6 +15,11 @@ import {
   findPaymentsByTeacher, findPaymentByOrderId, markPaymentRefunded,
 } from '../db/queries/payments'
 import { refundPayment } from '../services/tbank'
+import {
+  findGlobalRubricTemplates, createGlobalRubricTemplate,
+  updateGlobalRubricTemplate, deleteGlobalRubricTemplate,
+} from '../db/queries/rubrics'
+import type { RubricItem, CriterionSubject } from '../../../shared/types'
 
 const router = Router()
 router.use(authenticate)
@@ -116,6 +121,69 @@ router.delete('/criteria/templates/:id', asyncHandler(async (req, res) => {
     [req.params.id]
   )
   if (!rowCount) { res.status(404).json({ error: 'Шаблон не найден' }); return }
+  res.status(204).send()
+}))
+
+// ─── Global rubric templates ──────────────────────────────────────────────────
+//
+// Same idea as criterion templates: admin-curated rubric presets every teacher
+// sees at the bottom of their library. Items reference global criterion
+// templates (so they resolve for any teacher's account).
+
+interface RubricTemplateBody {
+  name:         string
+  description?: string
+  subject?:     CriterionSubject
+  items:        RubricItem[]
+}
+
+function validateTemplateBody(body: RubricTemplateBody, partial = false): void {
+  if (!partial && !body.name?.trim()) throw new ValidationError('Название рубрики обязательно')
+  if (body.items) {
+    if (!Array.isArray(body.items) || body.items.length === 0) {
+      throw new ValidationError('Рубрика должна содержать хотя бы один критерий')
+    }
+    const total = body.items.reduce((s, it) => s + (Number(it.weight) || 0), 0)
+    if (total !== 100) {
+      throw new ValidationError(`Сумма весов критериев должна быть 100% (сейчас ${total}%)`)
+    }
+  } else if (!partial) {
+    throw new ValidationError('Рубрика должна содержать критерии')
+  }
+}
+
+router.get('/rubrics/templates', asyncHandler(async (_req, res) => {
+  res.json(await findGlobalRubricTemplates())
+}))
+
+router.post('/rubrics/templates', asyncHandler(async (req, res) => {
+  const body = req.body as RubricTemplateBody
+  validateTemplateBody(body)
+  const rubric = await createGlobalRubricTemplate({
+    name:        body.name.trim(),
+    description: body.description,
+    subject:     body.subject,
+    items:       body.items,
+  })
+  res.status(201).json(rubric)
+}))
+
+router.put('/rubrics/templates/:id', asyncHandler(async (req, res) => {
+  const body = req.body as Partial<RubricTemplateBody>
+  validateTemplateBody(body as RubricTemplateBody, true)
+  const rubric = await updateGlobalRubricTemplate(req.params.id, {
+    name:        body.name?.trim(),
+    description: body.description,
+    subject:     body.subject,
+    items:       body.items,
+  })
+  if (!rubric) throw new NotFoundError('Шаблон рубрики')
+  res.json(rubric)
+}))
+
+router.delete('/rubrics/templates/:id', asyncHandler(async (req, res) => {
+  const ok = await deleteGlobalRubricTemplate(req.params.id)
+  if (!ok) { res.status(404).json({ error: 'Шаблон не найден' }); return }
   res.status(204).send()
 }))
 

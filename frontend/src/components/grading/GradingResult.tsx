@@ -1,15 +1,17 @@
-import { useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Button from '../ui/Button'
 import FeedbackEmail from './FeedbackEmail'
 import RevisionCheckList from './RevisionCheckList'
+import QuestionResponseList from './QuestionResponseList'
 import ConfidenceBadge from './ConfidenceBadge'
+import HandoutModal from './HandoutModal'
 import { useApprove } from '../../hooks/useGrading'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
 import { usePersistedState, clearPersistedState } from '../../hooks/usePersistedState'
 import { GRADES, gradeColor, gradeLabel, GRADE_BRACKETS, scoreToGrade, snapScoreToGrade } from '../../lib/grades'
 import type { GradeResponse } from '../../api/grading'
-import type { GradeLetter } from '../../types'
+import type { GradeLetter, BulletItem, VerificationQuestion } from '../../types'
 
 interface Props {
   result: GradeResponse
@@ -54,9 +56,22 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
     if (snapped !== current) setEditScore(String(snapped))
   }
   const [editFeedback, setEditFeedback] = usePersistedState<string>(`${editKey}:feedback`,        result.ai_feedback)
-  const [editStrengths, setEditStrengths]       = usePersistedState<string[]>(`${editKey}:strengths`,    result.ai_strengths    ?? [])
-  const [editImprovements, setEditImprovements] = usePersistedState<string[]>(`${editKey}:improvements`, result.ai_improvements ?? [])
+  // Coerce on the initial value too, not just from persisted-state: this also
+  // sanitises bullets that arrived from the backend with "[object Object]" text
+  // (a known prod casualty from a brief normaliseBullets gap).
+  const [editStrengths, setEditStrengths]       = usePersistedState<BulletItem[]>(`${editKey}:strengths`,    coerceBullets(result.ai_strengths    ?? []))
+  const [editImprovements, setEditImprovements] = usePersistedState<BulletItem[]>(`${editKey}:improvements`, coerceBullets(result.ai_improvements ?? []))
+  // Belt-and-braces: drafts persisted before the BulletItem migration were
+  // string[]; one-shot coerce so old reloads don't crash on b.text.
+  useEffect(() => {
+    const sNeedsFix = editStrengths.some((b) => typeof (b as unknown) === 'string' || typeof b?.text !== 'string')
+    if (sNeedsFix) setEditStrengths(coerceBullets(editStrengths))
+    const iNeedsFix = editImprovements.some((b) => typeof (b as unknown) === 'string' || typeof b?.text !== 'string')
+    if (iNeedsFix) setEditImprovements(coerceBullets(editImprovements))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [approved, setApproved]         = useState(false)
+  const [handoutOpen, setHandoutOpen]   = useState(false)
   const approveMut = useApprove()
 
   const gradeClr = gradeColor(editGrade)
@@ -71,8 +86,8 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
           approved_feedback: editFeedback,
           // Only send these if they differ from the AI defaults — keeps the DB
           // honest about what the teacher actually edited.
-          ...(arraysEqual(editStrengths,    result.ai_strengths    ?? []) ? {} : { approved_strengths:    editStrengths.filter((s) => s.trim()) }),
-          ...(arraysEqual(editImprovements, result.ai_improvements ?? []) ? {} : { approved_improvements: editImprovements.filter((s) => s.trim()) }),
+          ...(bulletsEqual(editStrengths,    result.ai_strengths    ?? []) ? {} : { approved_strengths:    editStrengths.filter((b) => b.text.trim()) }),
+          ...(bulletsEqual(editImprovements, result.ai_improvements ?? []) ? {} : { approved_improvements: editImprovements.filter((b) => b.text.trim()) }),
         },
       },
       {
@@ -126,9 +141,6 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
                 ✦ RAG ×{result.used_examples}
               </span>
             )}
-            {result.ai_confidence && (
-              <ConfidenceBadge level={result.ai_confidence} ensemble={result.ai_ensemble} size="sm" />
-            )}
           </div>
           <div className="flex items-center gap-2">
             <input
@@ -161,6 +173,26 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
           </span>
         )}
       </div>
+
+      {/* Confidence row — pulled out of the chip cluster so the teacher actually
+          sees it. Low has its own warning banner below. Container tint matches
+          the badge level so the row reads at a glance. */}
+      {result.ai_confidence && result.ai_confidence !== 'low' && (
+        <div
+          className={`mx-5 mt-3 px-3 py-2 border rounded-md flex items-center gap-2.5 ${
+            result.ai_confidence === 'high'
+              ? 'bg-success-bg border-success/20'
+              : 'bg-amber-light border-amber/25'
+          }`}
+        >
+          <ConfidenceBadge level={result.ai_confidence} ensemble={result.ai_ensemble} size="md" />
+          <span className="text-[12.5px] font-sans text-ink-secondary leading-relaxed">
+            {result.ai_confidence === 'high'
+              ? 'Варианты модели сошлись на одной оценке — ИИ уверен в результате.'
+              : 'Между вариантами модели есть небольшой разброс. Просмотрите ключевые моменты перед подтверждением.'}
+          </span>
+        </div>
+      )}
 
       {/* Low-confidence triage banner — the variants disagreed; ask for a look */}
       {result.ai_confidence === 'low' && !approved && (
@@ -212,17 +244,21 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
               <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">
                 Общий отзыв
               </div>
-              <textarea
+              <AutoGrowTextarea
                 value={editFeedback}
                 onChange={(e) => setEditFeedback(e.target.value)}
-                rows={6}
                 disabled={approved}
-                className="w-full px-3 py-2 text-sm font-sans text-ink bg-surface-warm border border-border rounded-md leading-relaxed resize-none focus:outline-none focus:border-border-strong disabled:opacity-70"
+                minRows={6}
+                className="w-full px-3 py-2 text-sm font-sans text-ink bg-surface-warm border border-border rounded-md leading-relaxed focus:outline-none focus:border-border-strong disabled:opacity-70"
               />
             </div>
 
             {result.ai_revision_check && result.ai_revision_check.length > 0 && (
               <RevisionCheckList items={result.ai_revision_check} />
+            )}
+
+            {result.ai_question_responses && result.ai_question_responses.length > 0 && (
+              <QuestionResponseList items={result.ai_question_responses} />
             )}
 
             {(editStrengths.length > 0 || editImprovements.length > 0 || !approved) && (
@@ -233,6 +269,7 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
                   onChange={setEditStrengths}
                   disabled={approved}
                   tone="success"
+                  onCite={onCite}
                 />
                 <EditableBulletList
                   title="Что улучшить"
@@ -240,10 +277,47 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
                   onChange={setEditImprovements}
                   disabled={approved}
                   tone="warning"
+                  onCite={onCite}
                 />
               </div>
             )}
+
+            {/* Verification questions — Pro tier only. The framing is
+                deliberately "ask the student to verify they understand their
+                own work", not "did they use AI". */}
+            {can('verificationQuestions') && result.ai_verification_questions.length > 0 && (
+              <VerificationQuestionsPanel
+                items={result.ai_verification_questions}
+                onCite={onCite}
+              />
+            )}
+
+            {/* "Доработка" trigger — packages the selected improvements + the
+                AI's questions into a handout the teacher can paste to the
+                student. Pro-tier and only shows when there's something to
+                send (the modal would be empty otherwise). */}
+            {can('handout')
+              && (editImprovements.length > 0 || result.ai_verification_questions.length > 0) && (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setHandoutOpen(true)}
+                  className="text-xs font-sans font-medium text-amber hover:underline"
+                >
+                  ✦ Собрать доработку для студента
+                </button>
+              </div>
+            )}
           </div>
+        )}
+
+        {handoutOpen && (
+          <HandoutModal
+            assignmentId={result.assignment_id}
+            improvements={editImprovements}
+            verificationQuestions={result.ai_verification_questions}
+            onClose={() => setHandoutOpen(false)}
+          />
         )}
 
         {tab === 'criteria' && (
@@ -300,9 +374,35 @@ function scoreColor(score: number): string {
   return 'var(--color-danger)'
 }
 
-function arraysEqual(a: string[], b: string[]): boolean {
+function bulletsEqual(a: BulletItem[], b: BulletItem[]): boolean {
   if (a.length !== b.length) return false
-  return a.every((v, i) => v === b[i])
+  return a.every((v, i) => v.text === b[i].text && (v.quote ?? null) === (b[i].quote ?? null) && (v.page ?? null) === (b[i].page ?? null))
+}
+
+// Migrate legacy string[] persisted drafts to the new BulletItem[] shape, and
+// quietly drop anything malformed — including rows from a brief window where
+// the model returned nested objects and the old normaliser stringified them
+// as "[object Object]". Those rows still exist in the DB; this hides them so
+// the UI doesn't display garbage. The teacher can still re-grade to get
+// well-formed bullets.
+function coerceBullets(raw: BulletItem[]): BulletItem[] {
+  return (raw as unknown as Array<string | BulletItem | unknown>)
+    .map((b): BulletItem | null => {
+      if (typeof b === 'string') {
+        const trimmed = b.trim()
+        return trimmed && trimmed !== '[object Object]'
+          ? { text: trimmed, quote: null, page: null }
+          : null
+      }
+      if (b && typeof b === 'object' && 'text' in (b as Record<string, unknown>)) {
+        const item = b as BulletItem
+        const text = typeof item.text === 'string' ? item.text.trim() : ''
+        if (!text || text === '[object Object]') return null
+        return { ...item, text }
+      }
+      return null
+    })
+    .filter((b): b is BulletItem => b !== null)
 }
 
 // ─── Editable bullet list ─────────────────────────────────────────────────────
@@ -311,48 +411,84 @@ function arraysEqual(a: string[], b: string[]): boolean {
 // point the list locks. The improvements list is what feeds the revision check
 // when the student resubmits — so editing here directly improves the next grade.
 
-const TONES: Record<'success' | 'warning', { bg: string; border: string; text: string; titleText: string }> = {
-  success: { bg: 'bg-success-bg', border: 'border-success/15', text: 'text-success', titleText: 'text-success' },
-  warning: { bg: 'bg-warning-bg', border: 'border-warning/15', text: 'text-warning', titleText: 'text-warning' },
+const TONES: Record<'success' | 'warning', { bg: string; border: string; text: string; titleText: string; citeBorder: string }> = {
+  success: { bg: 'bg-success-bg', border: 'border-success/15', text: 'text-success', titleText: 'text-success', citeBorder: 'border-success/40' },
+  warning: { bg: 'bg-warning-bg', border: 'border-warning/15', text: 'text-warning', titleText: 'text-warning', citeBorder: 'border-warning/40' },
 }
 
-function EditableBulletList({ title, items, onChange, disabled, tone }: {
+function EditableBulletList({ title, items, onChange, disabled, tone, onCite }: {
   title: string
-  items: string[]
-  onChange: (next: string[]) => void
+  items: BulletItem[]
+  onChange: (next: BulletItem[]) => void
   disabled: boolean
   tone: 'success' | 'warning'
+  onCite?: (quote: string) => void
 }) {
   const t = TONES[tone]
-  function setAt(i: number, value: string) { onChange(items.map((v, idx) => idx === i ? value : v)) }
+  function setTextAt(i: number, text: string) {
+    onChange(items.map((b, idx) => idx === i ? { ...b, text } : b))
+  }
   function removeAt(i: number) { onChange(items.filter((_, idx) => idx !== i)) }
-  function add() { onChange([...items, '']) }
+  function add() { onChange([...items, { text: '', quote: null, page: null }]) }
 
   return (
     <div className={`${t.bg} border ${t.border} rounded-lg p-3`}>
       <div className={`text-xs font-semibold ${t.titleText} uppercase tracking-wide mb-2`}>{title}</div>
-      <div className="space-y-1">
-        {items.map((value, i) => (
-          <div key={i} className={`flex gap-1.5 text-xs ${t.text} leading-relaxed items-start group`}>
-            <span className="flex-shrink-0 mt-1">·</span>
-            <textarea
-              value={value}
-              onChange={(e) => setAt(i, e.target.value)}
-              disabled={disabled}
-              rows={1}
-              className={`flex-1 bg-transparent ${t.text} text-xs leading-relaxed resize-none focus:outline-none focus:bg-surface/40 rounded px-1 py-0.5 disabled:opacity-90`}
-              style={{ minHeight: '1.4em' }}
-            />
-            {!disabled && (
+      <div className="space-y-1.5">
+        {items.map((b, i) => (
+          <div key={i}>
+            <div className={`flex gap-1.5 text-xs ${t.text} leading-relaxed items-start group`}>
+              <span className="flex-shrink-0 mt-1">·</span>
+              <AutoGrowTextarea
+                value={b.text}
+                onChange={(e) => setTextAt(i, e.target.value)}
+                disabled={disabled}
+                className={`flex-1 bg-transparent ${t.text} text-xs leading-relaxed focus:outline-none focus:bg-surface/40 rounded px-1 py-0.5 disabled:opacity-90`}
+              />
+              {!disabled && (
+                <button
+                  type="button"
+                  onClick={() => removeAt(i)}
+                  className={`flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${t.text} hover:opacity-100 text-sm leading-none mt-0.5`}
+                  aria-label="Удалить пункт"
+                  title="Удалить пункт"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            {b.quote && (
               <button
                 type="button"
-                onClick={() => removeAt(i)}
-                className={`flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${t.text} hover:opacity-100 text-sm leading-none mt-0.5`}
-                aria-label="Удалить пункт"
-                title="Удалить пункт"
+                onClick={() => onCite?.(b.quote!)}
+                title="Показать в работе"
+                className="ml-3 mt-0.5 inline-flex items-start gap-1 text-left max-w-full group/cite"
               >
-                ×
+                <span className={`text-[10px] mt-0.5 flex-shrink-0 ${t.text} opacity-80`}>↳</span>
+                <span className={`text-[11px] italic ${t.text} opacity-90 leading-relaxed border-l-2 ${t.citeBorder} group-hover/cite:opacity-100 pl-1.5 transition-opacity`}>
+                  «{b.quote}»
+                  {b.page != null && <span className="not-italic font-normal opacity-70"> · стр. {b.page}</span>}
+                </span>
               </button>
+            )}
+            {/* "Спросить об этом" — only on improvement bullets where the AI
+                produced a follow-up question. Pro-tier feature gate is on the
+                parent; here we just render if present. */}
+            {tone === 'warning' && b.question && (
+              <div className="ml-3 mt-1 flex items-start gap-1.5">
+                <span className={`text-[10px] flex-shrink-0 mt-0.5 ${t.text} opacity-70`}>?</span>
+                <span className={`text-[11px] ${t.text} opacity-90 leading-relaxed flex-1`}>
+                  {b.question}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(b.question!)}
+                  className={`text-[10px] ${t.text} opacity-70 hover:opacity-100 transition-opacity flex-shrink-0`}
+                  title="Скопировать вопрос"
+                >
+                  копировать
+                </button>
+              </div>
             )}
           </div>
         ))}
@@ -367,5 +503,94 @@ function EditableBulletList({ title, items, onChange, disabled, tone }: {
         </button>
       )}
     </div>
+  )
+}
+
+// ─── Verification questions panel ────────────────────────────────────────────
+// "Spot-check" prompts the teacher can ask the student. Pro-tier only. Each
+// question may carry a quote citation back into the submission; clicking the
+// quote uses the same onCite plumbing as criterion citations.
+
+function VerificationQuestionsPanel({
+  items, onCite,
+}: { items: VerificationQuestion[]; onCite?: (quote: string) => void }) {
+  return (
+    <div className="bg-info-bg border border-info/15 rounded-lg p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-semibold text-info uppercase tracking-wide">Спросить студента</div>
+        <span
+          className="text-[10px] font-sans text-info/70"
+          title="Не обвинение в использовании ИИ — просто проверка, понимает ли студент свою работу"
+        >
+          для устной проверки
+        </span>
+      </div>
+      <ol className="space-y-2 list-decimal list-inside">
+        {items.map((q, i) => (
+          <li key={i} className="text-[13px] font-sans text-ink leading-relaxed">
+            <span>{q.question}</span>
+            <button
+              type="button"
+              onClick={() => navigator.clipboard?.writeText(q.question)}
+              className="ml-2 text-[10px] text-info/70 hover:text-info transition-colors"
+              title="Скопировать"
+            >
+              копировать
+            </button>
+            {q.quote && (
+              <button
+                type="button"
+                onClick={() => onCite?.(q.quote!)}
+                title="Показать в работе"
+                className="ml-3 mt-0.5 inline-flex items-start gap-1 text-left max-w-full group/cite"
+              >
+                <span className="text-[10px] mt-0.5 flex-shrink-0 text-info/70">↳</span>
+                <span className="text-[11px] italic text-ink-secondary leading-relaxed border-l-2 border-info/30 group-hover/cite:border-info pl-1.5 transition-colors">
+                  «{q.quote}»
+                  {q.page != null && <span className="not-italic font-normal opacity-70"> · стр. {q.page}</span>}
+                </span>
+              </button>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+// ─── Auto-grow textarea ──────────────────────────────────────────────────────
+// Both the per-bullet inputs and the overall summary need to fit the AI's full
+// text without clipping or leaving a half-empty pane. We resize on every value
+// change so paste, programmatic edits, and typing all keep the height in sync.
+
+function AutoGrowTextarea({
+  value,
+  onChange,
+  disabled,
+  className,
+  minRows = 1,
+}: {
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
+  disabled?: boolean
+  className?: string
+  minRows?: number
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [value])
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      rows={minRows}
+      className={`${className ?? ''} resize-none overflow-hidden`}
+    />
   )
 }

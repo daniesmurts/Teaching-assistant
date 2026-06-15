@@ -95,3 +95,17 @@ export async function createInstitutionCriterion(data: {
 }): Promise<Criterion> {
   return (await client.post<Criterion>('/api/institution/criteria', data)).data
 }
+
+// ─── Shared rubrics ────────────────────────────────────────────────────────────
+
+import type { Rubric, RubricItem } from '../types'
+
+export async function getInstitutionRubrics(): Promise<Array<Rubric & { author_name: string | null }>> {
+  return (await client.get<Array<Rubric & { author_name: string | null }>>('/api/institution/rubrics')).data
+}
+
+export async function createInstitutionRubric(data: {
+  name: string; description?: string; subject?: CriterionSubject; items: RubricItem[]
+}): Promise<Rubric> {
+  return (await client.post<Rubric>('/api/institution/rubrics', data)).data
+}

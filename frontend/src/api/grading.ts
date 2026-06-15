@@ -1,7 +1,7 @@
 import client from './client'
 import type {
   Assignment, GradeLetter, LongReview, RevisionCheckItem, CriteriaSnapshotItem, CriterionScore,
-  ConfidenceLevel, AiEnsemble,
+  ConfidenceLevel, AiEnsemble, BulletItem, VerificationQuestion, QuestionResponse,
 } from '../types'
 
 export interface GradeRequest {
@@ -25,9 +25,11 @@ export interface GradeResponse {
   ai_grade_label: string
   ai_feedback: string
   ai_criteria_scores: CriterionScore[]
-  ai_strengths: string[]
-  ai_improvements: string[]
+  ai_strengths: BulletItem[]
+  ai_improvements: BulletItem[]
+  ai_verification_questions: VerificationQuestion[]
   ai_revision_check: RevisionCheckItem[] | null
+  ai_question_responses: QuestionResponse[] | null
   criteria_snapshot: CriteriaSnapshotItem[] | null
   ai_confidence: ConfidenceLevel | null
   ai_ensemble: AiEnsemble | null
@@ -53,8 +55,8 @@ export async function approveGrade(
     approved_score: number
     approved_grade: GradeLetter
     approved_feedback: string
-    approved_strengths?:    string[]
-    approved_improvements?: string[]
+    approved_strengths?:    BulletItem[]
+    approved_improvements?: BulletItem[]
   }
 ): Promise<{ assignment: Assignment }> {
   const res = await client.post<{ assignment: Assignment }>(`/api/grading/${id}/approve`, data)
@@ -66,6 +68,18 @@ export async function generateEmail(
   tone?: 'encouraging' | 'neutral' | 'direct'
 ): Promise<{ subject: string; body: string }> {
   const res = await client.post<{ subject: string; body: string }>(`/api/grading/${id}/email`, { tone })
+  return res.data
+}
+
+export async function composeHandout(
+  id: string,
+  data: {
+    improvements: string[]
+    questions:    string[]
+    tone?:        'encouraging' | 'neutral' | 'direct'
+  }
+): Promise<{ subject: string; body: string }> {
+  const res = await client.post<{ subject: string; body: string }>(`/api/grading/${id}/handout`, data)
   return res.data
 }
 

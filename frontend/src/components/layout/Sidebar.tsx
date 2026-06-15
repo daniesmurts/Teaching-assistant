@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import Icon, { type IconName } from '../ui/Icon'
+import { initialsForAvatar } from '../../lib/teacherName'
 
 interface NavItem { icon: IconName; label: string; to: string }
 interface NavGroup { label?: string; items: NavItem[] }
@@ -24,6 +25,7 @@ const NAV_GROUPS: NavGroup[] = [
   { label: 'Управление', items: [
     { icon: 'book',         label: 'Предметы',       to: '/courses' },
     { icon: 'list-checks',  label: 'Критерии',       to: '/criteria' },
+    { icon: 'list-checks',  label: 'Рубрики',        to: '/rubrics' },
   ]},
   { label: 'Аккаунт', items: [
     { icon: 'diamond',      label: 'Тариф',          to: '/billing' },
@@ -61,9 +63,8 @@ export default function Sidebar({ onClose }: Props) {
   const clearAuth = useAuthStore((s) => s.clearAuth)
   const navigate  = useNavigate()
 
-  const initials = teacher?.name
-    ? teacher.name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
-    : teacher?.email?.[0]?.toUpperCase() ?? '?'
+  const initials =
+    initialsForAvatar(teacher?.name) || teacher?.email?.[0]?.toUpperCase() || '?'
 
   const isInstitutionAdmin = teacher?.role === 'institution_admin' || teacher?.role === 'platform_admin'
 

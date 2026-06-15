@@ -14,7 +14,7 @@ import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { canUseFeature } from '../config/planLimits'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import { logger } from '../lib/logger'
-import type { Assignment, GradeLetter, CriterionScore, CriteriaSnapshotItem } from '../../../shared/types'
+import type { Assignment, GradeLetter, CriterionScore, CriteriaSnapshotItem, BulletItem, VerificationQuestion, QuestionResponse } from '../../../shared/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,15 +41,23 @@ interface RevisionCheckItem {
   note:   string
 }
 
+// What the model is asked to return. strengths/improvements may come back
+// either as plain strings (legacy) or as {text, quote, page, question?} objects —
+// both shapes are normalised in normaliseBullets before persistence. `question`
+// is only meaningful on improvement bullets; it's ignored on strengths.
+type RawBullet = string | { text?: string; quote?: string | null; page?: number | null; question?: string | null }
+
 interface AIGradingResult {
   score: number
   grade: GradeLetter
   grade_label: string
   feedback: string
   criteria_scores: CriterionScore[]
-  strengths: string[]
-  improvements: string[]
+  strengths: RawBullet[]
+  improvements: RawBullet[]
+  verification_questions?: Array<string | { question?: string; quote?: string | null; page?: number | null }>
   revision_check?: RevisionCheckItem[]
+  question_responses?: Array<{ question?: string; status?: string; note?: string }>
 }
 
 export interface GradeResponse {
@@ -59,9 +67,11 @@ export interface GradeResponse {
   ai_grade_label: string
   ai_feedback: string
   ai_criteria_scores: CriterionScore[]
-  ai_strengths: string[]
-  ai_improvements: string[]
+  ai_strengths: BulletItem[]
+  ai_improvements: BulletItem[]
+  ai_verification_questions: VerificationQuestion[]
   ai_revision_check: RevisionCheckItem[] | null
+  ai_question_responses: QuestionResponse[] | null
   criteria_snapshot: CriteriaSnapshotItem[] | null
   ai_confidence: import('../../../shared/types').ConfidenceLevel | null
   ai_ensemble: import('../../../shared/types').AiEnsemble | null
@@ -154,9 +164,11 @@ export interface GradeOnceResult {
   grade:          GradeLetter
   gradeLabel:     string
   feedback:       string
-  criteriaScores: CriterionScore[]         // normalised + citation-validated
-  strengths:      string[]
-  improvements:   string[]
+  criteriaScores:        CriterionScore[]   // normalised + citation-validated
+  strengths:             BulletItem[]       // citation-validated, may have quote+page
+  improvements:          BulletItem[]       // same shape, may have quote+page
+  verificationQuestions: VerificationQuestion[]   // questions for teacher to ask the student
+  questionResponses:     QuestionResponse[] | null   // present only on revision-of-handout
   revisionCheck:  RevisionCheckItem[] | null
 }
 
@@ -182,6 +194,10 @@ export function buildGradingMessages(params: {
 }): GradingMessages {
   const isCalc     = params.assignmentType === 'calculation'
   const isRevision = params.parent != null
+  // Only ask for question_responses when the parent's handout actually had
+  // questions — otherwise the field would always come back empty and waste
+  // tokens.
+  const hasHandoutQuestions = isRevision && (params.parent!.ai_handout?.questions.length ?? 0) > 0
 
   const base = isCalc
     ? `Вы опытный преподаватель точных наук (математика, физика, инженерные дисциплины). ` +
@@ -209,8 +225,8 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
   const { text: annotated, pageCount } = annotateWithPageMarkers(params.submissionText)
 
   const user = revisionBlock + reference + (params.criteria.length > 0
-    ? buildCriteriaPrompt(annotated, params.criteria, params.examples, isCalc, isRevision, pageCount)
-    : buildHolisticPrompt(annotated, params.examples, isCalc, isRevision))
+    ? buildCriteriaPrompt(annotated, params.criteria, params.examples, isCalc, isRevision, pageCount, hasHandoutQuestions)
+    : buildHolisticPrompt(annotated, params.examples, isCalc, isRevision, pageCount, hasHandoutQuestions))
 
   return { system, user, pageCount }
 }
@@ -237,10 +253,14 @@ export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResul
     grade,
     gradeLabel:     result.grade_label ?? gradeToLabel(grade),
     feedback:       result.feedback ?? '',
-    criteriaScores: normaliseCriteriaScores(result.criteria_scores ?? [], params.submissionText, pageCount),
-    strengths:      result.strengths ?? [],
-    improvements:   result.improvements ?? [],
-    revisionCheck:  params.parent != null ? normaliseRevisionCheck(result.revision_check) : null,
+    criteriaScores:        normaliseCriteriaScores(result.criteria_scores ?? [], params.submissionText, pageCount),
+    strengths:             normaliseBullets(result.strengths ?? [], params.submissionText, pageCount),
+    improvements:          normaliseBullets(result.improvements ?? [], params.submissionText, pageCount),
+    verificationQuestions: normaliseVerificationQuestions(result.verification_questions ?? [], params.submissionText, pageCount),
+    revisionCheck:         params.parent != null ? normaliseRevisionCheck(result.revision_check) : null,
+    questionResponses:     (params.parent?.ai_handout?.questions.length ?? 0) > 0
+                            ? normaliseQuestionResponses(result.question_responses)
+                            : null,
   }
 }
 
@@ -360,9 +380,11 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     aiCriteriaScores: result.criteriaScores,
     aiStrengths: result.strengths,
     aiImprovements: result.improvements,
+    aiVerificationQuestions: result.verificationQuestions,
     criteriaSnapshot: filledSnapshot,
     parentAssignmentId: parent?.id,
     aiRevisionCheck: result.revisionCheck ?? undefined,
+    aiQuestionResponses: result.questionResponses ?? undefined,
     aiConfidence: ensemble?.confidence ?? null,
     aiEnsemble: ensemble?.ensemble ?? null,
   })
@@ -378,7 +400,9 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     ai_criteria_scores: assignment.ai_criteria_scores ?? [],
     ai_strengths: assignment.ai_strengths ?? [],
     ai_improvements: assignment.ai_improvements ?? [],
+    ai_verification_questions: assignment.ai_verification_questions ?? [],
     ai_revision_check: assignment.ai_revision_check,
+    ai_question_responses: assignment.ai_question_responses,
     criteria_snapshot: assignment.criteria_snapshot,
     ai_confidence: assignment.ai_confidence,
     ai_ensemble: assignment.ai_ensemble,
@@ -437,20 +461,125 @@ export function normaliseCriteriaScores(
       quote:    null,
       page:     null,
     }
-    const quote = typeof s.quote === 'string' ? s.quote.trim() : ''
-    if (quote) {
-      const normalised = quote.toLowerCase().replace(/\s+/g, ' ').trim()
-      // Accept the quote only if it shows up verbatim (case- and whitespace-insensitive).
-      if (normalised.length >= 8 && haystack.includes(normalised)) {
-        next.quote = quote.slice(0, 200)
-      }
-    }
-    const page = typeof s.page === 'number' ? Math.round(s.page) : null
-    if (page != null && Number.isInteger(page) && page >= 1 && page <= pageCount) {
-      next.page = page
-    }
+    const validated = validateCitation(s.quote, s.page, haystack, pageCount)
+    next.quote = validated.quote
+    next.page  = validated.page
     return next
   })
+}
+
+/**
+ * Normalise a strengths/improvements list. Accepts either plain strings (legacy
+ * shape) or {text, quote?, page?} objects from the new prompt. Citations are
+ * validated against the submission so hallucinated quotes are dropped.
+ */
+export function normaliseBullets(
+  bullets: RawBullet[],
+  submissionText: string,
+  pageCount: number
+): BulletItem[] {
+  const haystack = submissionText.toLowerCase().replace(/\s+/g, ' ').trim()
+  return bullets
+    .map((b): BulletItem | null => {
+      const text = extractBulletText(b)
+      if (!text) return null
+      if (typeof b === 'string') {
+        return { text, quote: null, page: null, question: null }
+      }
+      const { quote, page } = validateCitation(b.quote, b.page, haystack, pageCount)
+      // Pass-through question: a short follow-up the teacher could ask the
+      // student about the same passage. Capped at 240 chars; longer = wasted.
+      let question: string | null = null
+      if (typeof b.question === 'string') {
+        const trimmed = b.question.trim()
+        if (trimmed.length >= 8) question = trimmed.slice(0, 240)
+      }
+      return { text, quote, page, question }
+    })
+    .filter((b): b is BulletItem => b !== null)
+}
+
+/**
+ * Pull a bullet's text out of whatever the model returned. We've seen the
+ * model occasionally wrap the text in nested objects (e.g. {text: {value: "…"}})
+ * or use alternative key names. Naive String() on an object would have stored
+ * "[object Object]" — drop those bullets entirely instead.
+ */
+function extractBulletText(b: unknown): string {
+  if (typeof b === 'string') return b.trim()
+  if (!b || typeof b !== 'object') return ''
+  const obj = b as Record<string, unknown>
+  // Try the canonical key plus a few alternatives the model has been seen
+  // to use when it ignores the schema.
+  for (const key of ['text', 'description', 'point', 'name', 'value', 'content']) {
+    const v = obj[key]
+    if (typeof v === 'string') {
+      const trimmed = v.trim()
+      if (trimmed) return trimmed
+    } else if (v && typeof v === 'object') {
+      // One level of nesting (e.g. {text: {text: "..."}}).
+      const inner = v as Record<string, unknown>
+      for (const innerKey of ['text', 'description', 'value']) {
+        const iv = inner[innerKey]
+        if (typeof iv === 'string') {
+          const trimmed = iv.trim()
+          if (trimmed) return trimmed
+        }
+      }
+    }
+  }
+  return ''
+}
+
+/**
+ * Validate verification questions. Same citation contract as bullets: a quote
+ * is accepted only if it appears verbatim (case- and whitespace-insensitive)
+ * in the submission. Caps at 4 questions — 2-3 is the sweet spot, anything more
+ * dilutes the signal.
+ */
+export function normaliseVerificationQuestions(
+  raw: Array<string | { question?: string; quote?: string | null; page?: number | null }>,
+  submissionText: string,
+  pageCount: number,
+): VerificationQuestion[] {
+  const haystack = submissionText.toLowerCase().replace(/\s+/g, ' ').trim()
+  return raw
+    .map((q): VerificationQuestion | null => {
+      const question = (typeof q === 'string' ? q : String(q.question ?? '')).trim()
+      if (!question || question.length < 4) return null
+      if (typeof q === 'string') {
+        return { question, quote: null, page: null }
+      }
+      const { quote, page } = validateCitation(q.quote, q.page, haystack, pageCount)
+      return { question, quote, page }
+    })
+    .filter((q): q is VerificationQuestion => q !== null)
+    .slice(0, 4)
+}
+
+function validateCitation(
+  rawQuote: unknown,
+  rawPage:  unknown,
+  haystack: string,
+  pageCount: number,
+): { quote: string | null; page: number | null } {
+  let quote: string | null = null
+  if (typeof rawQuote === 'string') {
+    const trimmed = rawQuote.trim()
+    if (trimmed) {
+      const normalised = trimmed.toLowerCase().replace(/\s+/g, ' ').trim()
+      // Accept the quote only if it shows up verbatim (case- and whitespace-insensitive).
+      if (normalised.length >= 8 && haystack.includes(normalised)) {
+        quote = trimmed.slice(0, 200)
+      }
+    }
+  }
+  let page: number | null = null
+  if (typeof rawPage === 'number' && Number.isInteger(Math.round(rawPage))) {
+    const p = Math.round(rawPage)
+    if (p >= 1 && p <= pageCount) page = p
+  }
+  return { quote, page }
 }
 
 // ─── Revision helpers ─────────────────────────────────────────────────────────
@@ -459,14 +588,40 @@ function buildRevisionContext(parent: Assignment): string {
   const prevFeedback = parent.approved_feedback ?? parent.ai_feedback ?? ''
   const prevGrade    = parent.approved_grade   ?? parent.ai_grade   ?? '—'
   const prevScore    = parent.approved_score   ?? parent.ai_score   ?? '—'
-  const prevImprovements = parent.approved_improvements ?? parent.ai_improvements ?? []
 
-  const improvementsList = prevImprovements.length
-    ? prevImprovements.map((p, i) => `${i + 1}. ${sanitiseForPrompt(p)}`).join('\n')
+  // If the teacher composed a доработка handout, that selection is the
+  // contract — check exactly those bullets + questions. Otherwise fall back
+  // to all approved (or AI) improvements like the old flow.
+  const handout = parent.ai_handout
+  const improvementsSource: string[] = handout
+    ? handout.improvements
+    : (parent.approved_improvements ?? parent.ai_improvements ?? []).map((b) => b.text)
+  const questionsSource: string[] = handout?.questions ?? []
+
+  const improvementsList = improvementsSource.length
+    ? improvementsSource.map((p, i) => `${i + 1}. ${sanitiseForPrompt(p)}`).join('\n')
     : '(в предыдущей версии не было сформулированных пунктов улучшения)'
 
+  const questionsBlock = questionsSource.length > 0
+    ? `\n**Вопросы, которые были заданы студенту:**\n${questionsSource.map((q, i) => `${i + 1}. ${sanitiseForPrompt(q)}`).join('\n')}\n`
+    : ''
+
+  const handoutContext = handout
+    ? `\n(Преподаватель отправил студенту «доработку» — список ниже взят из неё, не из общего отзыва. Проверяйте именно эти пункты.)`
+    : ''
+
+  const checkInstructions = [
+    'Учитывайте, что это переработка — её следует сравнивать с прошлой версией, а не оценивать «с нуля».',
+    'По каждому пункту из списка «что улучшить» выше явно укажите в поле "revision_check", был ли он учтён.',
+  ]
+  if (questionsSource.length > 0) {
+    checkInstructions.push(
+      'По каждому вопросу из списка «вопросы» выше укажите в поле "question_responses", был ли он отвечен в текущей версии работы.'
+    )
+  }
+
   return `## Контекст: предыдущая версия работы
-Это переработанная версия (revision). Студент уже сдавал предыдущий вариант, и был дан следующий отзыв:
+Это переработанная версия (revision). Студент уже сдавал предыдущий вариант, и был дан следующий отзыв:${handoutContext}
 
 **Предыдущая оценка:** ${prevGrade} (${prevScore}/100)
 
@@ -475,10 +630,9 @@ ${sanitiseForPrompt(prevFeedback)}
 
 **Что было предложено улучшить в прошлой версии:**
 ${improvementsList}
-
+${questionsBlock}
 При оценке текущей версии:
-1. Учитывайте, что это переработка — её следует сравнивать с прошлой версией, а не оценивать «с нуля».
-2. По каждому пункту из списка «что улучшить» выше явно укажите в поле "revision_check", был ли он учтён.
+${checkInstructions.map((s, i) => `${i + 1}. ${s}`).join('\n')}
 
 `
 }
@@ -500,6 +654,23 @@ function normaliseRevisionCheck(raw: unknown): Array<{ point: string; status: 'a
     .filter((i) => i.point)
 }
 
+function normaliseQuestionResponses(raw: unknown): QuestionResponse[] | null {
+  if (!Array.isArray(raw)) return null
+  const valid = ['answered', 'partial', 'unanswered'] as const
+  type Status = typeof valid[number]
+  return raw
+    .map((item): QuestionResponse => {
+      const i = item as { question?: unknown; status?: unknown; note?: unknown }
+      const status = String(i.status ?? '').trim() as Status
+      return {
+        question: String(i.question ?? '').trim(),
+        status:   valid.includes(status) ? status : 'partial' as Status,
+        note:     String(i.note ?? '').trim(),
+      }
+    })
+    .filter((q) => q.question)
+}
+
 function applyWatermark(feedback: string, planTier: string): string {
   if (!canUseFeature(planTier, 'watermark')) return feedback
   return feedback + '\n\n---\nСгенерировано с ИСПУМ (бесплатный тариф) · ispum.ru'
@@ -514,8 +685,8 @@ export async function approve(
     approvedScore: number
     approvedGrade: GradeLetter
     approvedFeedback: string
-    approvedStrengths?: string[]
-    approvedImprovements?: string[]
+    approvedStrengths?: BulletItem[]
+    approvedImprovements?: BulletItem[]
   }
 ): Promise<Assignment> {
   const assignment = await approveAssignment(id, teacherId, data)
@@ -551,13 +722,35 @@ ${items}
 }
 
 const CALC_GUIDANCE =
-  `\nЭто расчётная задача: пересчитайте решение пошагово, проверьте формулы, единицы измерения и числовой ответ. ` +
-  `За верный метод с арифметической опиской начисляйте частичный балл.\n`
+  `\nЭто расчётная/инженерная задача. Пересчитайте решение пошагово, проверьте формулы, ` +
+  `единицы измерения, размерности и числовой ответ. За верный метод с арифметической опиской ` +
+  `начисляйте частичный балл.\n` +
+  `ОБЯЗАТЕЛЬНО в полях "feedback", "strengths" и "improvements" разберите КОНКРЕТНЫЕ формулы и расчёты: ` +
+  `назовите проверенные формулы по их обозначениям (например, «уравнение теплового баланса Q = G·c·ΔT», ` +
+  `«средняя логарифмическая разность температур», «проверка прочности корпуса по σ = p·D/(2·s)»), ` +
+  `укажите подставленные значения с единицами и итоговые числовые результаты, отметьте, какие из них ` +
+  `сходятся с эталоном, а где расхождения и почему. Общая оценка без таких конкретных ссылок на формулы ` +
+  `и числа считается неполной и должна быть переписана.\n`
 
 const REVISION_FIELD_INSTRUCTION =
   `- "revision_check": массив объектов по каждому пункту из списка «что было предложено улучшить» в прошлой версии. ` +
   `Каждый объект: {"point": исходный пункт прошлой версии, "status": "addressed" | "partial" | "not_addressed", "note": 1-2 предложения с обоснованием — что именно изменилось/не изменилось}. ` +
   `Включите КАЖДЫЙ пункт из прошлой версии, даже если он полностью учтён.`
+
+// Question-responses field instruction — only included when the parent had a
+// handout with questions. Kept separate from REVISION_FIELD_INSTRUCTION so we
+// only ask the model for question_responses when there's something to check.
+const QUESTION_RESPONSES_INSTRUCTION =
+  `- "question_responses": массив объектов по каждому из «вопросов, которые были заданы студенту» выше. ` +
+  `Каждый объект: {"question": исходный вопрос, "status": "answered" | "partial" | "unanswered", "note": 1-2 предложения о том, ответил ли студент в этой версии работы и насколько полно}. ` +
+  `Включите КАЖДЫЙ вопрос, даже если ответ полный.`
+
+// Verification questions field — present in both prompt variants. The intent
+// is "ask the student to verify they understand their own writing", NOT to
+// accuse — phrasing should be a neutral pedagogical probe.
+function verificationFieldInstruction(pageInstruction: string): string {
+  return `- "verification_questions": ОБЯЗАТЕЛЬНОЕ поле. Массив из 2–3 коротких вопросов, которые преподаватель мог бы задать студенту, чтобы убедиться, что студент понимает собственную работу — обоснование выбора метода, источник данных, интерпретация конкретного фрагмента. Никогда не оставляйте массив пустым: даже на отличной работе есть что уточнить устно. Избегайте обвинительных формулировок («признайтесь, что использовали ИИ») — это пробные вопросы для устной проверки понимания, а не обвинения. КАЖДЫЙ объект: {"question": конкретный вопрос на русском (требующий живого, неподготовленного ответа), "quote": ДОСЛОВНАЯ цитата из работы студента (5–12 слов) — фрагмент, к которому относится вопрос, либо null, "page": ${pageInstruction}}`
+}
 
 function buildCriteriaPrompt(
   text: string,
@@ -566,6 +759,7 @@ function buildCriteriaPrompt(
   isCalc = false,
   isRevision = false,
   pageCount = 0,
+  hasHandoutQuestions = false,
 ): string {
   const criteriaBlock = snapshot
     .map((c) => `- ${c.name} (вес: ${c.weight}%)${c.description ? `: ${c.description}` : ''}`)
@@ -574,6 +768,11 @@ function buildCriteriaPrompt(
   const pageInstruction = pageCount > 1
     ? `номер страницы из маркера [стр. N], если фрагмент с этой страницы (целое число 1–${pageCount}); иначе null`
     : `всегда null (работа однострочная, без страниц)`
+  // Only warn against echoing page markers when there *are* page markers —
+  // otherwise the warning is the only place "[стр." shows up in the prompt.
+  const markerWarning = pageCount > 1
+    ? ` Маркеры [стр. N] в цитату НЕ ВКЛЮЧАЙТЕ.`
+    : ''
 
   return `${buildExamplesBlock(examples)}## Критерии оценки
 
@@ -595,16 +794,37 @@ ${sanitiseForPrompt(text)}
      "score": число 0–100,
      "feedback": краткое обоснование оценки (2–4 предложения),
      "quote": ДОСЛОВНАЯ цитата из работы студента (5–12 слов), на которую опирается ваш вывод — используйте её ТОЛЬКО если в работе действительно есть такой фрагмент. Если опереть вывод не на что — null,
-     "page": ${pageInstruction}}
-   Маркеры [стр. N] в цитату НЕ ВКЛЮЧАЙТЕ. Не выдумывайте цитаты — лучше null, чем неточная цитата.
-- "strengths": массив из 3–5 конкретных достоинств работы
-- "improvements": массив из 3–5 конкретных областей для улучшения${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}
+     "page": ${pageInstruction}}${markerWarning} Не выдумывайте цитаты — лучше null, чем неточная цитата.
+${verificationFieldInstruction(pageInstruction)}
+- "strengths": массив из 3–5 конкретных достоинств. КАЖДЫЙ объект:
+    {"text": конкретное достоинство (1 предложение),
+     "quote": ДОСЛОВНАЯ цитата из работы студента (5–12 слов), которая подтверждает этот пункт. Используйте ТОЛЬКО если в работе есть такой фрагмент; иначе null,
+     "page": ${pageInstruction}}${markerWarning} Не выдумывайте цитаты — лучше null.
+- "improvements": массив из 3–5 конкретных областей для улучшения. КАЖДЫЙ объект:
+    {"text": пункт что улучшить (1 предложение),
+     "quote": ДОСЛОВНАЯ цитата из работы — фрагмент, который требует доработки, либо null,
+     "page": ${pageInstruction},
+     "question": ОБЯЗАТЕЛЬНО заполните — ОДИН конкретный вопрос, который преподаватель может задать студенту по этому пункту. Вопрос должен требовать живого ответа, который сложно подготовить заранее, и быть привязан к конкретному фрагменту или утверждению, а не общим. Никогда не оставляйте это поле пустым или null.}${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}${hasHandoutQuestions ? `\n${QUESTION_RESPONSES_INSTRUCTION}` : ''}
 
 Ответьте ТОЛЬКО JSON-объектом, без пояснений.`
 }
 
-function buildHolisticPrompt(text: string, examples: SimilarAssignment[], isCalc = false, isRevision = false): string {
-  return `${buildExamplesBlock(examples)}## Работа студента
+function buildHolisticPrompt(
+  text: string,
+  examples: SimilarAssignment[],
+  isCalc = false,
+  isRevision = false,
+  pageCount = 0,
+  hasHandoutQuestions = false,
+): string {
+  const pageInstruction = pageCount > 1
+    ? `номер страницы из маркера [стр. N], если фрагмент с этой страницы (целое число 1–${pageCount}); иначе null`
+    : `всегда null (работа однострочная, без страниц)`
+  const markerWarning = pageCount > 1
+    ? ` Маркеры [стр. N] в цитату НЕ ВКЛЮЧАЙТЕ.`
+    : ''
+
+  return `${buildExamplesBlock(examples)}## Работа студента${pageCount > 1 ? ` (страницы помечены маркерами [стр. N])` : ''}
 <student_submission>
 ${sanitiseForPrompt(text)}
 </student_submission>
@@ -616,8 +836,16 @@ ${sanitiseForPrompt(text)}
 - "grade_label": одно из "Отлично", "Хорошо", "Удовлетворительно", "Неудовлетворительно"
 - "feedback": общий отзыв на 2–3 абзаца на русском языке
 - "criteria_scores": [] (пустой массив — без критериев)
-- "strengths": массив из 3–5 конкретных достоинств работы
-- "improvements": массив из 3–5 конкретных областей для улучшения${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}
+${verificationFieldInstruction(pageInstruction)}
+- "strengths": массив из 3–5 конкретных достоинств. КАЖДЫЙ объект:
+    {"text": конкретное достоинство (1 предложение),
+     "quote": ДОСЛОВНАЯ цитата из работы студента (5–12 слов), которая подтверждает этот пункт. Используйте ТОЛЬКО если в работе есть такой фрагмент; иначе null,
+     "page": ${pageInstruction}}${markerWarning} Не выдумывайте цитаты — лучше null.
+- "improvements": массив из 3–5 конкретных областей для улучшения. КАЖДЫЙ объект:
+    {"text": пункт что улучшить (1 предложение),
+     "quote": ДОСЛОВНАЯ цитата из работы, либо null,
+     "page": ${pageInstruction},
+     "question": ОБЯЗАТЕЛЬНО заполните — ОДИН конкретный вопрос к студенту по этому пункту, требующий живого ответа, который сложно подготовить заранее. Вопрос привязан к конкретному утверждению, не общий. Никогда не оставляйте поле пустым или null.}${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}${hasHandoutQuestions ? `\n${QUESTION_RESPONSES_INSTRUCTION}` : ''}
 
 Ответьте ТОЛЬКО JSON-объектом, без пояснений.`
 }

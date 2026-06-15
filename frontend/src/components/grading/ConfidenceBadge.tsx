@@ -4,7 +4,7 @@ import type { ConfidenceLevel, AiEnsemble } from '../../types'
 // high → green / reassuring; medium → neutral; low → warning ("check this").
 const LEVEL: Record<ConfidenceLevel, { label: string; cls: string; icon: string }> = {
   high:   { label: 'ИИ уверен',            cls: 'bg-success-bg text-success', icon: '✓' },
-  medium: { label: 'Средняя уверенность',  cls: 'bg-surface-warm text-ink-secondary border border-border', icon: '≈' },
+  medium: { label: 'Средняя уверенность',  cls: 'bg-amber-light text-amber',  icon: '≈' },
   low:    { label: 'Проверьте внимательно', cls: 'bg-warning-bg text-warning', icon: '⚠' },
 }
 

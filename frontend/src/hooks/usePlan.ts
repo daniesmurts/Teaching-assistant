@@ -21,13 +21,17 @@ export function usePlan() {
       plan?.features[feature] ?? false,
 
     gradesUsed:         plan?.gradesUsed        ?? 0,
-    gradesLimit:        plan?.gradesLimit        ?? 20,   // default to free limit
+    // Limits: `null` is MEANINGFUL (unlimited / Pro). Only fall back to the
+    // free default when the plan isn't loaded yet — `plan?.x ?? default` would
+    // wrongly coerce a Pro user's null limit to the free number and show the
+    // usage counter on an unlimited plan.
+    gradesLimit:        plan ? plan.gradesLimit        : 20,
     presentationsUsed:  plan?.presentationsUsed  ?? 0,
-    presentationsLimit: plan?.presentationsLimit ?? 3,
+    presentationsLimit: plan ? plan.presentationsLimit : 3,
     topicsUsed:         plan?.topicsUsed         ?? 0,
-    topicsLimit:        plan?.topicsLimit        ?? 3,
+    topicsLimit:        plan ? plan.topicsLimit       : 3,
     quizzesUsed:        plan?.quizzesUsed        ?? 0,
-    quizzesLimit:       plan?.quizzesLimit       ?? 3,
+    quizzesLimit:       plan ? plan.quizzesLimit      : 3,
 
     atTopicLimit: plan?.topicsLimit !== null &&
       (plan?.topicsUsed ?? 0) >= (plan?.topicsLimit ?? 3),

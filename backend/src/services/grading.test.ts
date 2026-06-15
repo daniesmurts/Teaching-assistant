@@ -144,8 +144,11 @@ function fakeParent(over: Partial<Assignment> = {}): Assignment {
     submission_text: 'старая версия', ai_score: 70, ai_grade: '3',
     ai_grade_label: 'Удовлетворительно', ai_feedback: 'Слабая аргументация.',
     ai_criteria_scores: null, ai_strengths: null,
-    ai_improvements: ['Усилить выводы', 'Добавить источники'],
-    ai_revision_check: null, criteria_snapshot: null,
+    ai_improvements: [
+      { text: 'Усилить выводы',    quote: null, page: null },
+      { text: 'Добавить источники', quote: null, page: null },
+    ],
+    ai_verification_questions: null, ai_revision_check: null, ai_question_responses: null, ai_handout: null, criteria_snapshot: null,
     approved_score: 72, approved_grade: '3', approved_feedback: 'Доработать выводы.',
     approved_strengths: null, approved_improvements: null, approved_at: null,
     status: 'approved', parent_assignment_id: null, revision_number: 1,
@@ -193,7 +196,7 @@ describe('buildGradingMessages', () => {
     const calc  = buildGradingMessages({ submissionText: SUBMISSION, criteria: [], examples: [], assignmentType: 'calculation' })
     expect(essay.system).toContain('преподаватель-эксперт')
     expect(calc.system).toContain('точных наук')
-    expect(calc.user).toContain('расчётная задача')
+    expect(calc.user).toContain('расчётная/инженерная задача')
   })
 
   it('embeds the reference solution in delimiters when provided', () => {

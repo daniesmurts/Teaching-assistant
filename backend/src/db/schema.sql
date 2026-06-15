@@ -49,9 +49,9 @@ CREATE TABLE IF NOT EXISTS assignments (
   ai_grade          TEXT,
   ai_grade_label    TEXT,
   ai_feedback       TEXT,
-  ai_criteria_scores JSONB,        -- [{name, score, feedback}]
-  ai_strengths      TEXT[],
-  ai_improvements   TEXT[],
+  ai_criteria_scores JSONB,        -- [{name, score, feedback, quote?, page?}]
+  ai_strengths      JSONB,         -- [{text, quote?, page?}]
+  ai_improvements   JSONB,         -- [{text, quote?, page?}]
 
   -- Criteria + weights actually used for this grading event
   criteria_snapshot JSONB,         -- [{criterion_id, name, weight, description, score?, feedback?}]

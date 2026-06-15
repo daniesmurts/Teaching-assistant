@@ -22,6 +22,8 @@ export interface PlanState {
     emailGeneration:     boolean
     presentationHistory: boolean
     confidenceCheck:     boolean
+    verificationQuestions: boolean
+    handout:               boolean
   }
 }
 
@@ -92,6 +94,30 @@ export interface CriteriaSnapshotItem {
   feedback?:    string
 }
 
+// ─── Rubric ───────────────────────────────────────────────────────────────────
+// A named preset of (criterion, weight) pairs. Pure convenience: when picked
+// at grade time it fills the criteria list + weights, and the teacher can
+// still edit before submitting. The grading event never stores a rubric_id —
+// only the snapshot of criteria+weights actually used.
+
+export interface RubricItem {
+  criterion_id: string
+  weight:       number          // 0–100, sum across items must be 100
+}
+
+export interface Rubric {
+  id:                    string
+  teacher_id:            string | null   // NULL for global templates
+  course_id:             string | null
+  name:                  string
+  description:           string | null
+  subject:               CriterionSubject | null
+  items:                 RubricItem[]
+  is_global_template:    boolean
+  is_institution_shared: boolean
+  created_at:            string
+}
+
 // ─── Assignment ───────────────────────────────────────────────────────────────
 
 export type AssignmentStatus = 'pending' | 'approved' | 'sent'
@@ -108,6 +134,33 @@ export interface CriterionScore {
   // page is meaningful only when the submission came from a paginated upload.
   quote?: string | null
   page?:  number | null
+}
+
+// A strength or improvement bullet, optionally citing the passage it grounds in.
+// Same citation contract as CriterionScore — quote is verbatim from the
+// submission (validated server-side), page is set only when the submission was
+// extracted from a paginated upload.
+//
+// For improvements bullets the AI may also generate a `question` — a single
+// follow-up the teacher could pose to the student about that exact weakness
+// (e.g. bullet "Выводы не подкреплены данными" → question "Какие данные легли
+// в основу вывода в разделе 3?"). Surfaced inline with a copy button in the
+// grading UI. Strengths bullets ignore the field.
+export interface BulletItem {
+  text:     string
+  quote?:   string | null
+  page?:    number | null
+  question?: string | null
+}
+
+// A question the teacher could ask the student to verify they understand their
+// own writing. Generated on every regular grade as a softer alternative to AI-
+// detection: instead of accusing, the teacher probes. Grounded in a verbatim
+// fragment when possible.
+export interface VerificationQuestion {
+  question: string
+  quote:    string | null
+  page:     number | null
 }
 
 // ─── Confidence / ensemble ────────────────────────────────────────────────────
@@ -138,6 +191,31 @@ export interface RevisionCheckItem {
   note:   string         // 1-sentence justification
 }
 
+// Mirror shape for the handout's questions — did the next version's text
+// actually answer them? Different status vocabulary because "answered" maps
+// more naturally to a question than "addressed".
+export type QuestionResponseStatus = 'answered' | 'partial' | 'unanswered'
+
+export interface QuestionResponse {
+  question: string                  // the original handout question
+  status:   QuestionResponseStatus
+  note:     string                  // 1-sentence justification
+}
+
+// Snapshot of the last "доработка" the teacher composed for an assignment.
+// Stored on the source assignment row; when a revision is linked back to it
+// (via parent_assignment_id), this becomes the contract the AI checks against.
+export type HandoutTone = 'encouraging' | 'neutral' | 'direct'
+
+export interface Handout {
+  improvements: string[]
+  questions:    string[]
+  subject:      string
+  body:         string
+  tone:         HandoutTone
+  created_at:   string             // ISO
+}
+
 export interface Assignment {
   id: string
   teacher_id: string
@@ -151,17 +229,20 @@ export interface Assignment {
   ai_grade_label: string | null
   ai_feedback: string | null
   ai_criteria_scores: CriterionScore[] | null
-  ai_strengths: string[] | null
-  ai_improvements: string[] | null
+  ai_strengths: BulletItem[] | null
+  ai_improvements: BulletItem[] | null
+  ai_verification_questions: VerificationQuestion[] | null  // Pro-tier display gate
   ai_revision_check: RevisionCheckItem[] | null   // present only on revisions
+  ai_question_responses: QuestionResponse[] | null  // present only on revisions where parent had a handout
+  ai_handout: Handout | null                       // present only when teacher composed one
   criteria_snapshot: CriteriaSnapshotItem[] | null   // the criteria + weights used for this grading
   ai_confidence:     ConfidenceLevel | null       // present only on "thorough" (ensemble) gradings
   ai_ensemble:       AiEnsemble | null            // the variant samples behind the confidence
   approved_score: number | null
   approved_grade: GradeLetter | null
   approved_feedback: string | null
-  approved_strengths: string[] | null     // teacher-edited bullet list (null = AI default)
-  approved_improvements: string[] | null  // ditto — feeds the revision check on resubmission
+  approved_strengths: BulletItem[] | null     // teacher-edited bullet list (null = AI default)
+  approved_improvements: BulletItem[] | null  // ditto — feeds the revision check on resubmission
   approved_at: string | null
   status: AssignmentStatus
   parent_assignment_id: string | null              // linked previous version, if any
@@ -190,6 +271,18 @@ export interface ChapterReview {
   gaps: string[]
 }
 
+// A committee question grounded in (optionally) a specific chapter / passage.
+// Generated as a separate, dedicated call so the main synthesis JSON budget
+// doesn't bottleneck it (was happening for long ВКРs — questions silently
+// truncated). Older rows may still carry plain string[] for backwards-compat;
+// the frontend tolerates both shapes when rendering.
+export interface DefenseQuestion {
+  question:      string
+  chapter_index: number | null   // 0-based index into chapter_reviews
+  quote:         string | null   // verbatim fragment from that section
+  page:          number | null
+}
+
 export interface LongReviewResult {
   overall_summary:   string
   suggested_score:   number | null
@@ -198,7 +291,7 @@ export interface LongReviewResult {
   chapter_reviews:   ChapterReview[]
   overall_strengths: string[]
   overall_gaps:      string[]
-  defense_questions: string[]   // questions a committee might ask at the defence
+  defense_questions: DefenseQuestion[]
 }
 
 // Returned by POST /api/grading/review and polled via GET /api/grading/review/:id

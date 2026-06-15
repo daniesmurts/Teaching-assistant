@@ -9,6 +9,7 @@ import { generalLimiter } from './middleware/rateLimits'
 import authRouter from './routes/auth'
 import coursesRouter from './routes/courses'
 import criteriaRouter from './routes/criteria'
+import rubricsRouter from './routes/rubrics'
 import gradingRouter from './routes/grading'
 import presentationsRouter from './routes/presentations'
 import documentsRouter from './routes/documents'
@@ -97,6 +98,7 @@ app.get('/api/health', async (_req, res) => {
 app.use('/api/auth',          authRouter)
 app.use('/api/courses',       coursesRouter)
 app.use('/api/criteria',      criteriaRouter)
+app.use('/api/rubrics',       rubricsRouter)
 app.use('/api/grading',       gradingRouter)
 app.use('/api/presentations', presentationsRouter)
 app.use('/api/topics',        topicsRouter)

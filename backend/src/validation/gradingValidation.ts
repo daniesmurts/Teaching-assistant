@@ -132,13 +132,23 @@ export const approveRules = [
     .notEmpty().withMessage('Отзыв обязателен')
     .isLength({ max: 10_000 }).withMessage('Отзыв слишком длинный'),
 
+  // Bullet lists are arrays of {text, quote?, page?} objects (see BulletItem).
+  // We validate the array shape + size; per-item text length is bounded.
   body('approved_strengths').optional().isArray({ max: 20 })
     .withMessage('Слишком много пунктов сильных сторон'),
-  body('approved_strengths.*').optional().isString()
+  body('approved_strengths.*.text').optional().isString()
     .isLength({ max: 500 }).withMessage('Пункт слишком длинный'),
+  body('approved_strengths.*.quote').optional({ nullable: true }).isString()
+    .isLength({ max: 500 }),
+  body('approved_strengths.*.page').optional({ nullable: true }).isInt({ min: 1, max: 10_000 }),
 
   body('approved_improvements').optional().isArray({ max: 20 })
     .withMessage('Слишком много пунктов «что улучшить»'),
-  body('approved_improvements.*').optional().isString()
+  body('approved_improvements.*.text').optional().isString()
     .isLength({ max: 500 }).withMessage('Пункт слишком длинный'),
+  body('approved_improvements.*.quote').optional({ nullable: true }).isString()
+    .isLength({ max: 500 }),
+  body('approved_improvements.*.page').optional({ nullable: true }).isInt({ min: 1, max: 10_000 }),
+  body('approved_improvements.*.question').optional({ nullable: true }).isString()
+    .isLength({ max: 500 }),
 ]

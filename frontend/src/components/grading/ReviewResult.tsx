@@ -2,7 +2,7 @@ import { useState } from 'react'
 import Button from '../ui/Button'
 import { useApprove } from '../../hooks/useGrading'
 import { GRADES, gradeColor, gradeLabel, GRADE_BRACKETS, scoreToGrade, snapScoreToGrade } from '../../lib/grades'
-import type { LongReview, GradeLetter } from '../../types'
+import type { LongReview, GradeLetter, DefenseQuestion, ChapterReview } from '../../types'
 
 interface Props {
   review: LongReview
@@ -168,16 +168,12 @@ export default function ReviewResult({ review, onApproved }: Props) {
           </section>
         )}
 
-        {/* Defense questions */}
+        {/* Defense questions — grouped by chapter when chapter_index is set */}
         {r.defense_questions.length > 0 && (
-          <section>
-            <SectionLabel>Вопросы к защите</SectionLabel>
-            <ol className="space-y-1.5 list-decimal list-inside">
-              {r.defense_questions.map((q) => (
-                <li key={q} className="text-[13px] font-sans text-ink-secondary leading-relaxed">{q}</li>
-              ))}
-            </ol>
-          </section>
+          <DefenseQuestionsBlock
+            questions={r.defense_questions}
+            chapters={r.chapter_reviews}
+          />
         )}
       </div>
     </div>
@@ -189,5 +185,83 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
     <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">
       {children}
     </div>
+  )
+}
+
+// ─── Defence questions block ─────────────────────────────────────────────────
+// Tolerant of two shapes: the new {question, chapter_index, quote, page} and
+// the legacy plain-string list still present on older rows. Groups by chapter
+// so the teacher can prep questions section-by-section, with copy buttons.
+
+function DefenseQuestionsBlock({
+  questions, chapters,
+}: { questions: Array<DefenseQuestion | string>; chapters: ChapterReview[] }) {
+  const normalised: DefenseQuestion[] = questions.map((q) =>
+    typeof q === 'string'
+      ? { question: q, chapter_index: null, quote: null, page: null }
+      : q
+  )
+  const general = normalised.filter((q) => q.chapter_index == null)
+  const byChapter = new Map<number, DefenseQuestion[]>()
+  for (const q of normalised) {
+    if (q.chapter_index == null) continue
+    if (!byChapter.has(q.chapter_index)) byChapter.set(q.chapter_index, [])
+    byChapter.get(q.chapter_index)!.push(q)
+  }
+  // Stable chapter order (ascending), then general at the end.
+  const chapterEntries = Array.from(byChapter.entries()).sort(([a], [b]) => a - b)
+
+  return (
+    <section>
+      <SectionLabel>Вопросы к защите ({normalised.length})</SectionLabel>
+      <div className="space-y-3">
+        {chapterEntries.map(([idx, qs]) => (
+          <div key={idx} className="bg-surface-warm border border-border rounded-md p-3">
+            <div className="text-[11px] font-sans font-medium text-ink-secondary uppercase tracking-wide mb-2">
+              {chapters[idx]?.title ?? `Раздел ${idx + 1}`}
+            </div>
+            <ol className="space-y-2 list-decimal list-inside">
+              {qs.map((q, i) => (
+                <DefenseQuestionItem key={`${idx}-${i}`} q={q} />
+              ))}
+            </ol>
+          </div>
+        ))}
+        {general.length > 0 && (
+          <div className="bg-surface-warm border border-border rounded-md p-3">
+            <div className="text-[11px] font-sans font-medium text-ink-secondary uppercase tracking-wide mb-2">
+              Общие
+            </div>
+            <ol className="space-y-2 list-decimal list-inside">
+              {general.map((q, i) => <DefenseQuestionItem key={`g-${i}`} q={q} />)}
+            </ol>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function DefenseQuestionItem({ q }: { q: DefenseQuestion }) {
+  return (
+    <li className="text-[13px] font-sans text-ink-secondary leading-relaxed">
+      <span>{q.question}</span>
+      <button
+        type="button"
+        onClick={() => navigator.clipboard?.writeText(q.question)}
+        className="ml-2 text-[10px] text-ink-tertiary hover:text-amber transition-colors"
+        title="Скопировать"
+      >
+        копировать
+      </button>
+      {q.quote && (
+        <div className="ml-4 mt-0.5 inline-flex items-start gap-1">
+          <span className="text-[10px] text-ink-tertiary mt-0.5">↳</span>
+          <span className="text-[11px] italic text-ink-tertiary leading-relaxed border-l-2 border-border pl-1.5">
+            «{q.quote}»
+          </span>
+        </div>
+      )}
+    </li>
   )
 }

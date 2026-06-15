@@ -30,7 +30,7 @@ interface ChatMessage {
 
 export async function chat(
   messages: ChatMessage[],
-  opts: { jsonMode?: boolean; context?: CallContext; model?: string; temperature?: number } = {}
+  opts: { jsonMode?: boolean; context?: CallContext; model?: string; temperature?: number; maxTokens?: number } = {}
 ): Promise<string> {
   const start = Date.now()
   const model = opts.model ?? MODEL
@@ -48,6 +48,11 @@ export async function chat(
         // Temperature drives ensemble sampling (confidence estimation). The
         // reasoner ignores temperature, so only pass it for the chat model.
         ...(opts.temperature != null && !isReasoner ? { temperature: opts.temperature } : {}),
+        // Output cap. Left unset by default so we get DeepSeek's default (4096
+        // for deepseek-chat); callers that produce long structured JSON (e.g.
+        // the long-review synthesis) lift it to 8192 to avoid mid-array
+        // truncation that's expensive to retry.
+        ...(opts.maxTokens != null ? { max_tokens: opts.maxTokens } : {}),
       },
       {
         headers: {
@@ -201,8 +206,9 @@ export async function chatJSON<T>(
   context?: CallContext,
   model?: string,
   temperature?: number,
+  maxTokens?: number,
 ): Promise<T> {
-  const raw = await chat(messages, { jsonMode: true, context, model, temperature })
+  const raw = await chat(messages, { jsonMode: true, context, model, temperature, maxTokens })
   try {
     return JSON.parse(extractJSON(raw)) as T
   } catch {
@@ -214,7 +220,7 @@ export async function chatJSON<T>(
         content: `Ваш ${retryLabel} не был валидным JSON. Ответьте ТОЛЬКО валидным JSON-объектом, без markdown и пояснений.`,
       },
     ]
-    const retryRaw = await chat(retryMessages, { jsonMode: true, context, model, temperature })
+    const retryRaw = await chat(retryMessages, { jsonMode: true, context, model, temperature, maxTokens })
     return JSON.parse(extractJSON(retryRaw)) as T
   }
 }

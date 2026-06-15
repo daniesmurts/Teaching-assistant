@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import { nameForGreeting } from '../../lib/teacherName'
 
 const WELCOMED_KEY = 'ga_welcomed'
 
@@ -19,7 +20,7 @@ export default function WelcomeModal() {
   }
   function start() { close(); navigate('/courses') }
 
-  const firstName = teacher?.name?.split(' ').find((w) => w.length > 1) ?? ''
+  const greetName = nameForGreeting(teacher?.name)
 
   return (
     <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4" onClick={close}>
@@ -27,7 +28,7 @@ export default function WelcomeModal() {
         <div className="px-6 pt-6 pb-5">
           <div className="text-3xl mb-3">👋</div>
           <h2 className="font-display text-2xl font-bold text-ink tracking-tight">
-            Добро пожаловать{firstName ? `, ${firstName}` : ''}!
+            Добро пожаловать{greetName ? `, ${greetName}` : ''}!
           </h2>
           <p className="font-sans text-sm text-ink-secondary leading-relaxed mt-2">
             ИСПУМ помогает преподавателям с двумя задачами:

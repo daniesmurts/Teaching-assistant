@@ -40,8 +40,13 @@ function toTeacher(row: TeacherRow): Teacher {
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
 export async function findTeacherByEmail(email: string): Promise<TeacherRow | null> {
+  // Join the institution so callers (login) can compute the effective tier
+  // — including seat-based inheritance — exactly like findTeacherRowById.
   const { rows } = await pool.query<TeacherRow>(
-    'SELECT * FROM teachers WHERE email = $1 LIMIT 1',
+    `SELECT t.*, i.plan_tier AS institution_plan_tier
+       FROM teachers t
+       LEFT JOIN institutions i ON i.id = t.institution_id
+      WHERE t.email = $1 LIMIT 1`,
     [email.toLowerCase()]
   )
   return rows[0] ?? null
