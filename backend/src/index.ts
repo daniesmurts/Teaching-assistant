@@ -19,6 +19,7 @@ import adminEvalsRouter from './routes/adminEvals'
 import institutionRouter from './routes/institution'
 import feedbackRouter from './routes/feedback'
 import topicsRouter from './routes/topics'
+import curriculumRouter from './routes/curriculum'
 import quizzesRouter from './routes/quizzes'
 import paymentsRouter from './routes/payments'
 import accountRouter from './routes/account'
@@ -107,6 +108,7 @@ app.use('/api/learning-loop', learningLoopRouter)
 app.use('/api/grading',       gradingRouter)
 app.use('/api/presentations', presentationsRouter)
 app.use('/api/topics',        topicsRouter)
+app.use('/api/curriculum',    curriculumRouter)
 app.use('/api/quizzes',       quizzesRouter)
 app.use('/api/documents',     documentsRouter)
 app.use('/api/admin/evals',   adminEvalsRouter)   // before /api/admin so /evals isn't shadowed

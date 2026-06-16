@@ -439,6 +439,56 @@ export interface Quiz {
   created_at:     string
 }
 
+// ─── Curriculum overlap analysis (Анализ дублирования содержания) ───────────────
+// КНИТУ admin feature A3: detect duplicated/overlapping topics across the
+// disciplines a single student takes. Topics are extracted per discipline,
+// embedded, cross-compared by cosine similarity, then the strongest candidate
+// pairs are classified by the model. Computed live — not persisted (MVP).
+
+export type OverlapType = 'duplicate' | 'partial' | 'adjacent'
+
+export interface OverlapPair {
+  course_a_id:    string
+  course_a_name:  string
+  topic_a:        string
+  course_b_id:    string
+  course_b_name:  string
+  topic_b:        string
+  similarity:     number          // cosine, 0..1
+  overlap_type?:  OverlapType     // model-assigned (absent if classification was skipped)
+  note?:          string          // 1-sentence RU explanation of the overlap
+  recommendation?: string         // RU suggestion (e.g. разграничить / убрать дубль)
+}
+
+export interface AnalyzedDiscipline {
+  course_id:   string
+  course_name: string
+  topic_count: number
+}
+
+export interface SkippedDiscipline {
+  course_id:   string
+  course_name: string
+  reason:      string             // RU — why it couldn't be analysed (no content, etc.)
+}
+
+export interface DisciplinePairSummary {
+  course_a_id:    string
+  course_a_name:  string
+  course_b_id:    string
+  course_b_name:  string
+  overlap_count:  number
+  max_similarity: number
+}
+
+export interface CurriculumAnalysis {
+  analyzed:     AnalyzedDiscipline[]
+  skipped:      SkippedDiscipline[]
+  pairs:        OverlapPair[]            // sorted by similarity desc
+  pair_summary: DisciplinePairSummary[]  // per discipline-pair rollup, strongest first
+  generated_at: string
+}
+
 // ─── API error shape ──────────────────────────────────────────────────────────
 
 export interface ApiError {

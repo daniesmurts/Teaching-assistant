@@ -5,6 +5,27 @@ import { nameForGreeting } from '../../lib/teacherName'
 
 const WELCOMED_KEY = 'ga_welcomed'
 
+// Three capability groups — enough to set accurate expectations (the app does
+// more than "grading + slides"), but grouped so a day-one user isn't handed the
+// full 17-item menu up front. One primary action: create a subject.
+const GROUPS = [
+  {
+    glyph: '✦',
+    title: 'Проверка работ',
+    desc: 'Оценка студенческих работ с ИИ — разбор по критериям и обратная связь. Итоговое решение всегда за вами.',
+  },
+  {
+    glyph: '▤',
+    title: 'Учебные материалы',
+    desc: 'Презентации, тесты и темы работ — готовая структура по вашей теме за минуту.',
+  },
+  {
+    glyph: '▦',
+    title: 'Аналитика',
+    desc: 'Прогресс студентов, анализ учебного плана и постепенное обучение ИИ на ваших оценках.',
+  },
+]
+
 export default function WelcomeModal() {
   const navigate = useNavigate()
   const teacher = useAuthStore((s) => s.teacher)
@@ -31,29 +52,24 @@ export default function WelcomeModal() {
             Добро пожаловать{greetName ? `, ${greetName}` : ''}!
           </h2>
           <p className="font-sans text-sm text-ink-secondary leading-relaxed mt-2">
-            ИСПУМ помогает преподавателям с двумя задачами:
+            ИСПУМ — помощник преподавателя. Коротко, что он умеет:
           </p>
 
           <div className="mt-4 space-y-2.5">
-            <div className="flex gap-3">
-              <span className="text-amber text-sm mt-0.5">✦</span>
-              <div>
-                <div className="text-sm font-sans font-medium text-ink">Проверка работ с ИИ</div>
-                <div className="text-xs font-sans text-ink-secondary">Оценка с разбором по критериям и обратной связью — вы подтверждаете результат.</div>
+            {GROUPS.map((g) => (
+              <div key={g.title} className="flex gap-3">
+                <span className="text-amber text-sm mt-0.5">{g.glyph}</span>
+                <div>
+                  <div className="text-sm font-sans font-medium text-ink">{g.title}</div>
+                  <div className="text-xs font-sans text-ink-secondary">{g.desc}</div>
+                </div>
               </div>
-            </div>
-            <div className="flex gap-3">
-              <span className="text-amber text-sm mt-0.5">▤</span>
-              <div>
-                <div className="text-sm font-sans font-medium text-ink">Генератор презентаций</div>
-                <div className="text-xs font-sans text-ink-secondary">Структура лекции по теме — заголовки, тезисы и заметки докладчика.</div>
-              </div>
-            </div>
+            ))}
           </div>
 
           <div className="mt-5 px-3 py-2.5 bg-amber-light/50 border border-amber/20 rounded-lg">
             <p className="text-xs font-sans text-ink-secondary">
-              <span className="font-medium text-ink">С чего начать:</span> создайте предмет — он нужен и для проверки работ, и для презентаций.
+              <span className="font-medium text-ink">С чего начать:</span> создайте предмет — он задаёт контекст почти для всех функций. Дальше вас проведёт чек-лист на главной.
             </p>
           </div>
         </div>

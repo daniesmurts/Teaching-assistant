@@ -43,6 +43,12 @@ export type {
   Quiz,
   QuizLevel,
   QuizQuestion,
+  CurriculumAnalysis,
+  OverlapPair,
+  OverlapType,
+  AnalyzedDiscipline,
+  SkippedDiscipline,
+  DisciplinePairSummary,
   ApiError,
 } from '../../../shared/types'
 

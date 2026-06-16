@@ -15,6 +15,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Added
+- **Curriculum content-overlap analysis** (`/curriculum`, КНИТУ admin feature A3) —
+  «Анализ учебного плана». Teacher selects ≥2 disciplines; the system extracts a
+  topic list per discipline (LLM), embeds each topic, cross-compares topics across
+  disciplines by cosine similarity, and the model classifies the strongest candidate
+  pairs as `duplicate` / `partial` / `adjacent` with a note + recommendation. Reuses
+  the existing embedding + chatJSON surface; cosine computed in-process (no pgvector
+  storage, so embedding dimension is irrelevant). Live, not persisted. Route
+  `POST /api/curriculum/overlap` (`backend/src/services/curriculumAnalysis.ts`).
+  Content source per course: inline `syllabus_text`, else latest ready РПД/material
+  document. Teacher-scoped for now (учебный план is not yet a first-class entity).
+  First step of the КНИТУ curriculum-intelligence roadmap (`docs/KNITU-roadmap.md`,
+  `docs/KNITU-feature-map.md`).
 - **Help articles for session features** — three new `/help` entries under
   «Проверка работ»: «Учебный цикл — как ИИ учится у вас», «Библиотека отзывов»,
   «Спросить студента и доработка». Existing «Как проверять работы» extended to
@@ -69,6 +81,27 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   («Структура (вес: 40%)») broke the snapshot score merge — now stripped.
 
 ### Changed
+- **Onboarding first-run refresh** (`frontend/src/components/onboarding/`) —
+  addresses recurring "не интуитивно, много вкладок" feedback from new users.
+  `WelcomeModal` now sets accurate expectations: instead of "grading + slides" it
+  shows the real feature set grouped into three (Проверка / Учебные материалы /
+  Аналитика), still driving one primary action (create a subject) and pointing at
+  the dashboard checklist. `OnboardingChecklist` now **persists until the first
+  grade is done** — the dismiss (×) only appears once `stats.total > 0`, so a
+  brand-new user can't accidentally clear their only guidance into the full menu.
+  First slice of TODO item J (first-run simplification); progressive sidebar (B)
+  and per-page empty-state CTAs (C) remain.
+- **Legal pages — Privacy & Terms rewritten** (`frontend/src/pages/legal/Privacy.tsx`,
+  `Terms.tsx`) to match what the platform now actually does. Privacy: full data-category
+  list (teacher / student / content / payment / technical), processor-vs-operator roles,
+  RAG reuse-of-approved-work disclosure, named sub-processors (Yandex Cloud, RU email,
+  Т-Банк, Yandex Metrica public-pages-only, DeepSeek), honest **cross-border (DeepSeek,
+  вне РФ)** disclosure + RU-resident-model option, RF data residency (ч.5 ст.18 152-ФЗ),
+  retention/deletion/export, security measures, subject rights. Corrects the now-false
+  "данные не передаются третьим лицам" claim. Terms: registration, tiers/payment (refs
+  Оферта), acceptable use, **student-data lawful-basis + cross-border responsibility**,
+  AI-results-are-advisory, IP, suspension/termination, liability, governing law. Aligned
+  with `docs/legal/152-fz-dpa.md` + `security-overview.md`. Dates bumped to 16 июня 2026.
 - **Rubrics → Criteria model** — replaced the named-rubric "bundle" concept with
   individual reusable criteria. Teachers now pick one or more criteria at grading
   time and set weights inline (sum-to-100), instead of selecting a saved rubric.

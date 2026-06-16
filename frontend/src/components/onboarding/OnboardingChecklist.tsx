@@ -36,6 +36,11 @@ export default function OnboardingChecklist() {
   const doneCount = steps.filter((s) => s.done).length
   const allDone = doneCount === steps.length
 
+  // Keep the checklist present until the user has graded their first work — the
+  // core "aha". Only then can it be dismissed. A brand-new user (no grades yet)
+  // can't accidentally clear their only guidance into the 17-item menu.
+  const canDismiss = stats.total > 0
+
   if (dismissed || allDone) return null
 
   const nextIdx = steps.findIndex((s) => !s.done)
@@ -54,7 +59,9 @@ export default function OnboardingChecklist() {
           <div className="text-xs font-sans text-ink-secondary">Пройдите 3 шага, чтобы освоить ИСПУМ</div>
         </div>
         <div className="text-xs font-sans font-medium text-ink-secondary">{doneCount} из {steps.length}</div>
-        <button onClick={dismiss} title="Скрыть" className="text-ink-tertiary hover:text-ink transition-colors text-lg leading-none ml-1">×</button>
+        {canDismiss && (
+          <button onClick={dismiss} title="Скрыть" className="text-ink-tertiary hover:text-ink transition-colors text-lg leading-none ml-1">×</button>
+        )}
       </div>
 
       {/* progress bar */}

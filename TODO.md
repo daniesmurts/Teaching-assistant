@@ -225,6 +225,66 @@ are under-using the platform? Useful institutional decisions data.
 - **Touches:** [routes/institution.ts](backend/src/routes/institution.ts)
   new aggregation endpoints, new admin pages under `/institution/analytics`.
 
+### I. "Спроси документ" — grounded chat over reference materials · Effort: M
+
+User-requested (early adopter, 2026-06). While grading, a teacher often needs
+to check a fact against a standard or methodology — e.g. a welding ГОСТ. Let
+them upload the reference document and **ask the AI questions answered from that
+document, with a citation to the exact chunk/page** — not from the model's
+general knowledge.
+
+- **Why:** Reuses the stack we already have (document upload → chunking →
+  embeddings → `findRelevantChunks` → `chatJSON`), so it's mostly UI + an
+  endpoint, not new plumbing. The **grounded + cited** framing is the whole
+  point: a generic AI chat would hallucinate ГОСТ numbers and clauses, which is
+  dangerous for normative checks. Citing the source makes answers verifiable and
+  is a genuine differentiator vs. "another GPT wrapper." Pairs naturally with
+  grading ("свериться со стандартом" without leaving the work).
+- **Key design decisions (resolve before building):**
+  - Scope: per-document, or a per-subject "reference library" queried across all
+    of a subject's materials? (Lean: per-subject, reusing the `course_id` chunk
+    scoping that presentations/quizzes already use.)
+  - Multi-turn: keep short conversation context, but re-retrieve chunks per turn.
+  - Refuse-when-ungrounded: if retrieval finds nothing relevant, say so instead
+    of answering from general knowledge — non-negotiable for ГОСТ/normative use.
+- **Touches:** reuse [db/queries/chunks.ts](backend/src/db/queries/chunks.ts)
+  `findRelevantChunks` + [services/embeddings.ts](backend/src/services/embeddings.ts);
+  new `services/docChat.ts` + `routes/docChat.ts` (or extend documents), citation
+  shape like the quiz/presentation `sources`; new chat UI (panel or page), with a
+  hook to open it from the grading screen.
+- **Pricing hook:** Teacher Pro — naturally gated behind `documentUpload`
+  (already Pro-only), so no new entitlement needed.
+- **Open question to the user:** which documents do they check most — ГОСТы,
+  методички, internal normatives? (asked; shapes ingestion priorities.)
+
+### J. First-run simplification — reduce day-one overwhelm · Effort: M
+
+Recurring, multi-user feedback (incl. a day-one user, 2026-06): "не интуитивно,
+много вкладок и меню". A brand-new user lands and doesn't know what to do next;
+the ~17-item sidebar amplifies the freeze (paradox of choice). Root cause is
+first-run guidance, not too many features. **Part A shipped** (welcome modal now
+reflects the real feature set; checklist persists until first grade — see
+CHANGELOG). Remaining:
+
+- **B — Progressive sidebar for new accounts (the "too many tabs" fix).** Until a
+  teacher has a subject + first grade, show only the "start here" path (Главная,
+  Предметы, Проверка) with a «Показать все» toggle; reveal the rest as they
+  progress. This is the piece that actually answers the menu-overload complaint.
+  - **Touches:** [components/layout/Sidebar.tsx](frontend/src/components/layout/Sidebar.tsx)
+    (gate `NAV_GROUPS` on onboarding progress + a reveal toggle), reuse the
+    courses/stats queries the checklist already runs.
+  - **Hold until:** this user answers "where did it tip into too-much" — that
+    tells us which groups to defer vs. surface.
+- **C — Empty-state "next action" on every feature page · Effort: S.** A user who
+  opens /grading, /presentations, /quizzes, /topics, /curriculum with no subject
+  should see one clear CTA, not a blank form. Generalise the existing
+  [NoCourseHint](frontend/src/components/onboarding/NoCourseHint.tsx) pattern to
+  every AI feature page.
+
+- **Why:** First impression drives activation and retention; the strongest signal
+  (day-one users bouncing off complexity) is the cheapest to lose and the hardest
+  to measure after the fact.
+
 ---
 
 ## Intentionally NOT building

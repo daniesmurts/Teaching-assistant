@@ -25,6 +25,7 @@ const NAV_GROUPS: NavGroup[] = [
   ]},
   { label: 'Управление', items: [
     { icon: 'book',         label: 'Предметы',       to: '/courses' },
+    { icon: 'layers',       label: 'Учебный план',   to: '/curriculum' },
     { icon: 'list-checks',  label: 'Критерии',       to: '/criteria' },
     { icon: 'list-checks',  label: 'Рубрики',        to: '/rubrics' },
     { icon: 'sparkle',      label: 'Учебный цикл',   to: '/learning-loop' },

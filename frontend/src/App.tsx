@@ -21,6 +21,7 @@ import Students from './pages/Students'
 import History from './pages/History'
 import Presentations from './pages/Presentations'
 import Topics from './pages/Topics'
+import Curriculum from './pages/Curriculum'
 import Quizzes from './pages/Quizzes'
 import Billing from './pages/Billing'
 import Settings from './pages/Settings'
@@ -177,6 +178,7 @@ export default function App() {
             <Route path="/history"       element={<History />} />
             <Route path="/presentations" element={<Presentations />} />
             <Route path="/topics"        element={<Topics />} />
+            <Route path="/curriculum"    element={<Curriculum />} />
             <Route path="/quizzes"       element={<Quizzes />} />
             <Route path="/billing"       element={<Billing />} />
             <Route path="/settings"      element={<Settings />} />

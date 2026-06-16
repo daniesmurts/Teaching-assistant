@@ -20,6 +20,7 @@ export type IconName =
   | 'help-circle'
   | 'mail'            // feedback
   | 'building'        // institution
+  | 'layers'          // curriculum overlap analysis
   | 'log-out'
 
 const PATHS: Record<IconName, JSX.Element> = {
@@ -130,6 +131,14 @@ const PATHS: Record<IconName, JSX.Element> = {
       <path d="M8 11h2" /><path d="M14 11h2" />
       <path d="M8 15h2" /><path d="M14 15h2" />
       <path d="M10 22v-4h4v4" />
+    </>
+  ),
+
+  layers: (
+    <>
+      <path d="M12 2 2 7l10 5 10-5-10-5z" />
+      <path d="M2 17l10 5 10-5" />
+      <path d="M2 12l10 5 10-5" />
     </>
   ),
 

@@ -74,6 +74,28 @@ export async function setDocumentFailed(id: string, message: string): Promise<vo
   )
 }
 
+/**
+ * Latest ready knowledge-document text for a course (syllabus/material), scoped
+ * to the owning teacher. Used by the curriculum overlap analysis as a content
+ * source when a course has no inline syllabus_text.
+ */
+export async function getLatestKnowledgeText(
+  courseId: string,
+  teacherId: string
+): Promise<string | null> {
+  const { rows } = await pool.query<{ extracted_text: string | null }>(
+    `SELECT extracted_text FROM documents
+      WHERE course_id = $1 AND teacher_id = $2
+        AND document_type IN ('syllabus','material')
+        AND processing_status = 'ready'
+        AND extracted_text IS NOT NULL
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [courseId, teacherId]
+  )
+  return rows[0]?.extracted_text ?? null
+}
+
 export async function updateDocumentExtraction(id: string, data: {
   extractedText:    string
   extractionMethod: string

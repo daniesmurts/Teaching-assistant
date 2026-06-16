@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-06-14
+**Last updated:** 2026-06-16
 
 ---
 
@@ -53,6 +53,7 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 **Subjects (formerly «Курсы»)** — CRUD, level, syllabus text/upload. Renamed in UI per Russian-academic vocab («курс» = year of study; «предмет» = subject). URL `/courses` and DB `course_id` unchanged
 **Criteria** — library of reusable criteria (name + description + optional subject), start from global templates. Selected at grading time with per-criterion weights and a live sum-to-100 check
 **Students** — auto-collected roster from graded work, per-student grade-over-time chart, groups
+**Учебный план — анализ дублирования** 🚧 — select ≥2 disciplines → the system extracts each discipline's topics, compares them semantically across disciplines, and flags duplicated / partially-overlapping / adjacent topics with a recommendation (КНИТУ curriculum-intelligence feature A3; teacher-scoped pending a first-class учебный план entity; see `docs/KNITU-roadmap.md`)
 **Presentations** — slide-by-slide generator (title, bullets, speaker notes), copy-per-slide
 **Quizzes («Тесты»)** — 5–20 multiple-choice questions on a topic, at one of three Bloom-style levels (recall / understanding / application), grounded in the subject's materials via RAG with source citations. Answer reveal, history. Free: 3/mo, Pro: unlimited
 **Onboarding** — welcome modal (first login), getting-started checklist (tracks real progress), per-page "how it works" intros, no-subject hints on grading/presentations
