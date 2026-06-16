@@ -273,7 +273,7 @@ ${sanitiseForPrompt(body)}
     const r = await chatJSON<{ summary: string; strengths?: string[]; gaps?: string[] }>(
       [{ role: 'system', content: system }, { role: 'user', content: user }],
       'анализ раздела',
-      ctx,
+      { context: ctx },
     )
     return {
       title:     section.title,
@@ -337,12 +337,12 @@ ${analysisBlock}
   const r = await chatJSON<Partial<LongReviewResult>>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'итоговая рецензия',
-    ctx,
-    undefined,   // model (default chat)
-    undefined,   // temperature
-    8192,        // max_tokens — lifted from the 4096 default; the synthesis
-                 // JSON (chapter_reviews × up to MAX_SECTIONS + arrays) routinely
-                 // exceeded the default cap and got truncated mid-array.
+    {
+      context:   ctx,
+      maxTokens: 8192,   // lifted from the 4096 default; the synthesis JSON
+                         // (chapter_reviews × up to MAX_SECTIONS + arrays)
+                         // routinely exceeded the default cap and truncated mid-array.
+    },
   )
 
   return {
@@ -405,10 +405,10 @@ ${chapterBlock}
   const r = await chatJSON<{ questions?: RawDefenseQuestion[] }>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'вопросы к защите',
-    ctx,
-    undefined,
-    undefined,
-    1024,   // small budget — ~7 questions of 1–2 sentences each is well under
+    {
+      context:   ctx,
+      maxTokens: 1024,   // ~7 questions of 1–2 sentences each is well under
+    },
   )
 
   const haystackBySection = sections.map((s) => s.text.toLowerCase().replace(/\s+/g, ' ').trim())

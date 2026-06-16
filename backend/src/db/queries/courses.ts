@@ -8,6 +8,7 @@ interface CourseRow {
   code: string | null
   level: string | null
   syllabus_text: string | null
+  share_rag_with_institution: boolean
   created_at: Date
 }
 
@@ -19,6 +20,7 @@ function toCourse(row: CourseRow): Course {
     code: row.code,
     level: row.level as CourseLevel | null,
     syllabus_text: row.syllabus_text,
+    share_rag_with_institution: row.share_rag_with_institution,
     created_at: row.created_at.toISOString(),
   }
 }
@@ -55,17 +57,22 @@ export async function createCourse(
 export async function updateCourse(
   id: string,
   teacherId: string,
-  data: { name?: string; code?: string; level?: string; syllabus_text?: string }
+  data: {
+    name?: string; code?: string; level?: string; syllabus_text?: string
+    share_rag_with_institution?: boolean
+  }
 ): Promise<Course | null> {
   const { rows } = await pool.query<CourseRow>(
     `UPDATE courses
      SET name          = COALESCE($3, name),
          code          = COALESCE($4, code),
          level         = COALESCE($5, level),
-         syllabus_text = COALESCE($6, syllabus_text)
+         syllabus_text = COALESCE($6, syllabus_text),
+         share_rag_with_institution = CASE WHEN $7::boolean IS NOT NULL THEN $7 ELSE share_rag_with_institution END
      WHERE id = $1 AND teacher_id = $2
      RETURNING *`,
-    [id, teacherId, data.name ?? null, data.code ?? null, data.level ?? null, data.syllabus_text ?? null]
+    [id, teacherId, data.name ?? null, data.code ?? null, data.level ?? null, data.syllabus_text ?? null,
+     data.share_rag_with_institution ?? null]
   )
   return rows[0] ? toCourse(rows[0]) : null
 }

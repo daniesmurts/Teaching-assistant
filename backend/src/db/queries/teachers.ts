@@ -22,7 +22,8 @@ export interface TeacherRow {
   auto_renew:          boolean
   subscription_plan:   string | null
   renewal_failed_at:   Date | null
-  institution_plan_tier: string | null   // tier of the teacher's institution (if any)
+  institution_plan_tier:         string | null   // tier of the teacher's institution (if any)
+  institution_shared_rag_enabled: boolean | null // mirror of institutions.shared_rag_enabled
   created_at:          Date
 }
 
@@ -43,7 +44,9 @@ export async function findTeacherByEmail(email: string): Promise<TeacherRow | nu
   // Join the institution so callers (login) can compute the effective tier
   // — including seat-based inheritance — exactly like findTeacherRowById.
   const { rows } = await pool.query<TeacherRow>(
-    `SELECT t.*, i.plan_tier AS institution_plan_tier
+    `SELECT t.*,
+            i.plan_tier         AS institution_plan_tier,
+            i.shared_rag_enabled AS institution_shared_rag_enabled
        FROM teachers t
        LEFT JOIN institutions i ON i.id = t.institution_id
       WHERE t.email = $1 LIMIT 1`,
@@ -63,7 +66,9 @@ export async function findTeacherById(id: string): Promise<Teacher | null> {
 /** Returns the full row (including role, plan_tier etc.) — used by authenticate middleware */
 export async function findTeacherRowById(id: string): Promise<TeacherRow | null> {
   const { rows } = await pool.query<TeacherRow>(
-    `SELECT t.*, i.plan_tier AS institution_plan_tier
+    `SELECT t.*,
+            i.plan_tier         AS institution_plan_tier,
+            i.shared_rag_enabled AS institution_shared_rag_enabled
        FROM teachers t
        LEFT JOIN institutions i ON i.id = t.institution_id
       WHERE t.id = $1 LIMIT 1`,

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { getAdminOverview, getDailyUsage, getUsageByTeacher } from '../../api/admin'
+import { getAdminOverview, getDailyUsage, getUsageByTeacher, getEditDistanceSummary } from '../../api/admin'
 
 function StatCard({
   label, value, sub, danger,
@@ -17,6 +17,7 @@ export default function AdminOverview() {
   const { data: overview } = useQuery({ queryKey: ['admin-overview'],     queryFn: getAdminOverview })
   const { data: daily = [] } = useQuery({ queryKey: ['admin-usage-daily'], queryFn: () => getDailyUsage(30) })
   const { data: byTeacher = [] } = useQuery({ queryKey: ['admin-usage-teachers'], queryFn: getUsageByTeacher })
+  const { data: editDistance } = useQuery({ queryKey: ['admin-edit-distance'], queryFn: getEditDistanceSummary })
 
   const monthCost = daily.reduce((s, d) => s + Number(d.cost_usd), 0)
 
@@ -43,6 +44,48 @@ export default function AdminOverview() {
             danger={overview ? overview.todayCostUsd > 1 : false}
           />
         </div>
+
+        {/* Edit-distance — how far teachers, in practice, edit the AI draft.
+            Platform-wide quality signal complementing per-eval-run metrics. */}
+        {editDistance && editDistance.n_30d > 0 && (
+          <div className="mb-8">
+            <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">
+              Качество ИИ-черновика (за 30 дней)
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard
+                label="Сред. расхождение балла"
+                value={editDistance.mean_score_delta_30d != null ? `${editDistance.mean_score_delta_30d}` : '—'}
+                sub={`${editDistance.n_30d} утверждённых работ`}
+              />
+              <StatCard
+                label="Прозу переписали"
+                value={editDistance.pct_feedback_changed_30d != null ? `${editDistance.pct_feedback_changed_30d}%` : '—'}
+                sub="доля изменённого общего отзыва"
+              />
+              <StatCard
+                label="Сохранили сильные стороны"
+                value={editDistance.mean_strengths_kept_30d != null ? `${editDistance.mean_strengths_kept_30d}%` : '—'}
+                sub="в среднем по работе"
+              />
+              <StatCard
+                label="Сохранили «что улучшить»"
+                value={editDistance.mean_improvements_kept_30d != null ? `${editDistance.mean_improvements_kept_30d}%` : '—'}
+                sub="в среднем по работе"
+              />
+            </div>
+            {editDistance.mean_score_delta_90d != null && editDistance.mean_score_delta_30d != null && (
+              <p className="text-[11px] font-sans text-ink-tertiary mt-2">
+                За 90 дней среднее расхождение: {editDistance.mean_score_delta_90d}.{' '}
+                {editDistance.mean_score_delta_30d < editDistance.mean_score_delta_90d
+                  ? 'Тренд — снижение (ИИ приближается к стилю преподавателей).'
+                  : editDistance.mean_score_delta_30d > editDistance.mean_score_delta_90d
+                    ? 'Тренд — рост (стоит проверить промпты или модель).'
+                    : 'Стабильно.'}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Two columns: usage table + teacher table */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

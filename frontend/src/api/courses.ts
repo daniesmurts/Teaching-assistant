@@ -23,7 +23,13 @@ export async function createCourse(data: {
 
 export async function updateCourse(
   id: string,
-  data: { name?: string; code?: string; level?: string; syllabus_text?: string }
+  data: {
+    name?: string
+    code?: string
+    level?: string
+    syllabus_text?: string
+    share_rag_with_institution?: boolean
+  }
 ): Promise<Course> {
   const res = await client.put<Course>(`/api/courses/${id}`, data)
   return res.data

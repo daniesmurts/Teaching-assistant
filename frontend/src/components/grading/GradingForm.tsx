@@ -8,6 +8,7 @@ import { getCriteria } from '../../api/criteria'
 import { getRubrics } from '../../api/rubrics'
 import DocumentUpload from '../ui/DocumentUpload'
 import NoCourseHint from '../onboarding/NoCourseHint'
+import SimilarPastFeedback from './SimilarPastFeedback'
 import { useUIStore } from '../../store/uiStore'
 import { usePlan } from '../../hooks/usePlan'
 import { usePersistedState } from '../../hooks/usePersistedState'
@@ -652,6 +653,15 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
                 Расчётные задачи проверяются тщательнее — это может занять до минуты.
               </p>
             )}
+
+            {/* While the AI works, surface the teacher's most-similar past
+                approved feedback. Gives them something to read instead of the
+                spinner, and primes their judgment for the AI's incoming draft. */}
+            <SimilarPastFeedback
+              submissionText={form.submission_text}
+              courseId={form.course_id || undefined}
+              active={loading}
+            />
           </>
         )}
       </div>

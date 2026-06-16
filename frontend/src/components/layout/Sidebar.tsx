@@ -16,6 +16,7 @@ const NAV_GROUPS: NavGroup[] = [
     { icon: 'sparkle',      label: 'Проверка работ', to: '/grading' },
     { icon: 'clock',        label: 'Журнал',         to: '/history' },
     { icon: 'users',        label: 'Студенты',       to: '/students' },
+    { icon: 'list-checks',  label: 'Библиотека',     to: '/library' },
   ]},
   { label: 'Генерация', items: [
     { icon: 'presentation', label: 'Презентации',    to: '/presentations' },
@@ -26,6 +27,7 @@ const NAV_GROUPS: NavGroup[] = [
     { icon: 'book',         label: 'Предметы',       to: '/courses' },
     { icon: 'list-checks',  label: 'Критерии',       to: '/criteria' },
     { icon: 'list-checks',  label: 'Рубрики',        to: '/rubrics' },
+    { icon: 'sparkle',      label: 'Учебный цикл',   to: '/learning-loop' },
   ]},
   { label: 'Аккаунт', items: [
     { icon: 'diamond',      label: 'Тариф',          to: '/billing' },

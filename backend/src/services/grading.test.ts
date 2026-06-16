@@ -128,10 +128,13 @@ const CRITERIA: CriteriaSnapshotItem[] = [
 
 const EXAMPLES: SimilarAssignment[] = [
   {
+    id:              'example-1',
     submission_text: 'Пример прошлой работы студента о цифровизации.',
-    approved_score: 85,
-    approved_grade: '4',
+    approved_score:  85,
+    approved_grade:  '4',
     approved_feedback: 'Хорошая работа, есть что улучшить.',
+    similarity:      0.12,
+    source:          'own',
   },
 ]
 
@@ -150,7 +153,9 @@ function fakeParent(over: Partial<Assignment> = {}): Assignment {
     ],
     ai_verification_questions: null, ai_revision_check: null, ai_question_responses: null, ai_handout: null, criteria_snapshot: null,
     approved_score: 72, approved_grade: '3', approved_feedback: 'Доработать выводы.',
-    approved_strengths: null, approved_improvements: null, approved_at: null,
+    approved_strengths: null, approved_improvements: null,
+    approved_criteria_scores: null, approved_edit_reason: null,
+    approved_at: null,
     status: 'approved', parent_assignment_id: null, revision_number: 1,
     created_at: new Date().toISOString(),
     ...over,

@@ -44,6 +44,7 @@ export interface ReplayConfig {
   limit?:      number          // cap on assignments (newest dropped), for cheap pilots
   resumeRunId?: string
   notes?:      string
+  providerOverride?: 'deepseek' | 'yandex' | 'gigachat'
 }
 
 export interface ReplayProgress {
@@ -158,10 +159,11 @@ export async function runReplay(
       }
 
       const result = await gradeOnce({
-        submissionText: target.submission_text,
-        criteria:       cleanSnapshotForReplay(target.criteria_snapshot),
+        submissionText:   target.submission_text,
+        criteria:         cleanSnapshotForReplay(target.criteria_snapshot),
         examples,
-        context:        { teacherId: cfg.teacherId, feature: 'grading' },
+        context:          { teacherId: cfg.teacherId, feature: 'grading' },
+        providerOverride: cfg.providerOverride,
       })
 
       await insertEvalResult({

@@ -89,6 +89,48 @@ router.get('/errors', asyncHandler(async (req, res) => {
   res.json(await getRecentErrors(Math.min(days, 90)))
 }))
 
+// ─── Edit-distance / AI quality signal ────────────────────────────────────────
+// Aggregate of the assignment_edits view: how far teachers, in practice, edit
+// the AI draft. Sliced by 30 / 90 day windows. Low score_delta + high
+// bullets_kept means the AI is in sync with the teacher base.
+
+router.get('/edit-distance', asyncHandler(async (_req, res) => {
+  const { rows } = await pool.query<{
+    n_total:                 string
+    mean_score_delta_30d:    string | null
+    mean_score_delta_90d:    string | null
+    pct_feedback_changed_30d: string | null
+    mean_strengths_kept_30d:  string | null
+    mean_improvements_kept_30d: string | null
+    n_30d:                   string
+    n_90d:                   string
+  }>(
+    `SELECT
+       COUNT(*)                                                       AS n_total,
+       AVG(CASE WHEN approved_at >= NOW() - INTERVAL '30 days' THEN score_delta::float END) AS mean_score_delta_30d,
+       AVG(CASE WHEN approved_at >= NOW() - INTERVAL '90 days' THEN score_delta::float END) AS mean_score_delta_90d,
+       AVG(CASE WHEN approved_at >= NOW() - INTERVAL '30 days' THEN feedback_changed::float END) AS pct_feedback_changed_30d,
+       AVG(CASE WHEN approved_at >= NOW() - INTERVAL '30 days' THEN strengths_kept_pct END) AS mean_strengths_kept_30d,
+       AVG(CASE WHEN approved_at >= NOW() - INTERVAL '30 days' THEN improvements_kept_pct END) AS mean_improvements_kept_30d,
+       COUNT(*) FILTER (WHERE approved_at >= NOW() - INTERVAL '30 days') AS n_30d,
+       COUNT(*) FILTER (WHERE approved_at >= NOW() - INTERVAL '90 days') AS n_90d
+     FROM assignment_edits`
+  )
+  const r = rows[0]
+  const round1 = (s: string | null) => s == null ? null : Math.round(Number(s) * 10) / 10
+  const pct    = (s: string | null) => s == null ? null : Math.round(Number(s) * 1000) / 10
+  res.json({
+    n_total:                    Number(r.n_total),
+    n_30d:                      Number(r.n_30d),
+    n_90d:                      Number(r.n_90d),
+    mean_score_delta_30d:       round1(r.mean_score_delta_30d),
+    mean_score_delta_90d:       round1(r.mean_score_delta_90d),
+    pct_feedback_changed_30d:   pct(r.pct_feedback_changed_30d),
+    mean_strengths_kept_30d:    pct(r.mean_strengths_kept_30d),
+    mean_improvements_kept_30d: pct(r.mean_improvements_kept_30d),
+  })
+}))
+
 // ─── Global criteria templates ────────────────────────────────────────────────
 
 router.get('/criteria/templates', asyncHandler(async (_req, res) => {

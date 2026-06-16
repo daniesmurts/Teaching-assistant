@@ -15,6 +15,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Added
+- **Help articles for session features** — three new `/help` entries under
+  «Проверка работ»: «Учебный цикл — как ИИ учится у вас», «Библиотека отзывов»,
+  «Спросить студента и доработка». Existing «Как проверять работы» extended to
+  cover citation links, per-criterion score editing, edit-reason picker, and
+  approval history visibility.
 - **Calibrated confidence thresholds** — the heuristic dispersion cut-offs are
   now data-driven: `fitThresholds()` picks std bands that best match target
   error levels on a confidence run's teacher ground truth; persisted in

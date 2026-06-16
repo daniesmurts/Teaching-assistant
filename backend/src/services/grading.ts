@@ -1,4 +1,5 @@
-import { chatJSON, embed, REASONER_MODEL, type CallContext } from './deepseek'
+import { chatJSON, embed, type CallContext } from './deepseek'
+import { getActiveProviderName } from './llm/registry'
 import { gradeEnsemble } from './confidence'
 import { findCriteriaByIds } from '../db/queries/criteria'
 import {
@@ -6,8 +7,11 @@ import {
   approveAssignment,
   findAssignmentById,
   findSimilarAssignments,
+  resolveInstitutionPoolContext,
   type SimilarAssignment,
 } from '../db/queries/assignments'
+import { recordRagRetrievals } from '../db/queries/ragRetrievals'
+import { sanitiseForCrossTeacherRetrieval } from '../lib/crossTeacherSanitiser'
 import { generateAndStoreEmbedding } from './embeddings'
 import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
@@ -45,7 +49,13 @@ interface RevisionCheckItem {
 // either as plain strings (legacy) or as {text, quote, page, question?} objects —
 // both shapes are normalised in normaliseBullets before persistence. `question`
 // is only meaningful on improvement bullets; it's ignored on strengths.
-type RawBullet = string | { text?: string; quote?: string | null; page?: number | null; question?: string | null }
+type RawBullet = string | {
+  text?:         string
+  quote?:        string | null
+  page?:         number | null
+  question?:     string | null
+  criterion_id?: string | null
+}
 
 interface AIGradingResult {
   score: number
@@ -120,7 +130,20 @@ async function retrieveExamples(
 ): Promise<SimilarAssignment[]> {
   try {
     const vector = await embed(submissionText, { teacherId, feature: 'embedding' })
-    return await findSimilarAssignments(courseId, vector, 5)
+
+    // Institution pool is opt-in on both sides — null when any of the gates is
+    // off (no institution, master toggle off, or this course not shared).
+    const institutionPool = await resolveInstitutionPoolContext(teacherId, courseId)
+
+    const hits = await findSimilarAssignments(courseId, vector, 5, institutionPool ?? undefined)
+
+    // Sanitise PII on institution-pool hits only — own hits are the teacher's
+    // own work and were never anonymised before either.
+    return hits.map((h) =>
+      h.source === 'institution'
+        ? { ...h, submission_text: sanitiseForCrossTeacherRetrieval(h.submission_text) }
+        : h
+    )
   } catch (err) {
     logger.warn({ message: '[RAG] Could not retrieve similar examples', error: (err as Error).message })
     return []
@@ -157,6 +180,9 @@ export interface GradeOnceParams {
   persona?:       GradingPersona           // default 'neutral'
   temperature?:   number                   // for ensemble sampling; default undefined (provider default)
   context:        CallContext              // teacherId + feature, for usage logging
+  // Eval harness only — force routing to a specific provider, ignoring the
+  // institution preference. Untouched in production.
+  providerOverride?: 'deepseek' | 'yandex' | 'gigachat'
 }
 
 export interface GradeOnceResult {
@@ -242,9 +268,12 @@ export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResul
       { role: 'user',   content: user },
     ],
     'результат оценивания',
-    params.context,
-    isCalc ? REASONER_MODEL : undefined,
-    params.temperature,
+    {
+      context:          params.context,
+      reasoner:         isCalc,
+      temperature:      params.temperature,
+      providerOverride: params.providerOverride,
+    },
   )
 
   const grade = normaliseGrade(result.grade)
@@ -254,8 +283,8 @@ export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResul
     gradeLabel:     result.grade_label ?? gradeToLabel(grade),
     feedback:       result.feedback ?? '',
     criteriaScores:        normaliseCriteriaScores(result.criteria_scores ?? [], params.submissionText, pageCount),
-    strengths:             normaliseBullets(result.strengths ?? [], params.submissionText, pageCount),
-    improvements:          normaliseBullets(result.improvements ?? [], params.submissionText, pageCount),
+    strengths:             normaliseBullets(result.strengths ?? [], params.submissionText, pageCount, params.criteria),
+    improvements:          normaliseBullets(result.improvements ?? [], params.submissionText, pageCount, params.criteria),
     verificationQuestions: normaliseVerificationQuestions(result.verification_questions ?? [], params.submissionText, pageCount),
     revisionCheck:         params.parent != null ? normaliseRevisionCheck(result.revision_check) : null,
     questionResponses:     (params.parent?.ai_handout?.questions.length ?? 0) > 0
@@ -281,6 +310,7 @@ export interface ScoreOnceParams {
   persona?:       GradingPersona
   temperature?:   number
   context:        CallContext
+  providerOverride?: 'deepseek' | 'yandex' | 'gigachat'
 }
 
 export interface ScoreOnceResult {
@@ -316,9 +346,12 @@ export async function scoreOnce(params: ScoreOnceParams): Promise<ScoreOnceResul
   const result = await chatJSON<{ score: number; grade: string }>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'балл',
-    params.context,
-    isCalc ? REASONER_MODEL : undefined,
-    params.temperature,
+    {
+      context:          params.context,
+      reasoner:         isCalc,
+      temperature:      params.temperature,
+      providerOverride: params.providerOverride,
+    },
   )
 
   return { score: clampScore(result.score), grade: normaliseGrade(result.grade) }
@@ -348,7 +381,11 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     assignmentType:    params.assignmentType,
     referenceSolution: params.referenceSolution,
     parent,
-    context:           { teacherId: params.teacherId, feature: 'grading' as const },
+    context:           {
+      teacherId:     params.teacherId,
+      institutionId: params.institutionId ?? undefined,
+      feature:       'grading' as const,
+    },
   }
 
   // "Thorough" mode runs the confidence ensemble: the primary call still
@@ -365,6 +402,14 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
   const filledSnapshot: CriteriaSnapshotItem[] | null = snapshot.length > 0
     ? mergeScoresIntoSnapshot(snapshot, result.criteriaScores)
     : null
+
+  // Provider attribution — record the *intended* provider (silent fallback
+  // doesn't change what the institution asked for). Calc grading carves out
+  // to DeepSeek regardless; getActiveProviderName honours that.
+  const providerName = await getActiveProviderName(
+    gradeParams.context,
+    { reasoner: params.assignmentType === 'calculation' },
+  )
 
   const assignment = await createAssignment({
     teacherId: params.teacherId,
@@ -387,9 +432,24 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     aiQuestionResponses: result.questionResponses ?? undefined,
     aiConfidence: ensemble?.confidence ?? null,
     aiEnsemble: ensemble?.ensemble ?? null,
+    aiProvider: providerName,
   })
 
   incrementUsage(params.teacherId, 'grade').catch(() => null)
+
+  // Audit which past works were retrieved as RAG examples for this grade.
+  // Fire-and-forget — a failure here must never block the grade response.
+  // Powers the «использовано как образец» metric on the Learning Loop page.
+  if (examples.length > 0) {
+    recordRagRetrievals(
+      assignment.id,
+      examples.map((ex) => ({ id: ex.id, similarity: ex.similarity })),
+    ).catch((err) => logger.warn({
+      message: 'Failed to log RAG retrievals',
+      assignmentId: assignment.id,
+      error: (err as Error).message,
+    }))
+  }
 
   return {
     assignment_id: assignment.id,
@@ -476,15 +536,19 @@ export function normaliseCriteriaScores(
 export function normaliseBullets(
   bullets: RawBullet[],
   submissionText: string,
-  pageCount: number
+  pageCount: number,
+  criteriaSnapshot: CriteriaSnapshotItem[] = [],
 ): BulletItem[] {
   const haystack = submissionText.toLowerCase().replace(/\s+/g, ' ').trim()
+  const validCriterionIds = new Set(
+    criteriaSnapshot.map((c) => c.criterion_id).filter((id): id is string => !!id)
+  )
   return bullets
     .map((b): BulletItem | null => {
       const text = extractBulletText(b)
       if (!text) return null
       if (typeof b === 'string') {
-        return { text, quote: null, page: null, question: null }
+        return { text, quote: null, page: null, question: null, criterion_id: null }
       }
       const { quote, page } = validateCitation(b.quote, b.page, haystack, pageCount)
       // Pass-through question: a short follow-up the teacher could ask the
@@ -494,7 +558,12 @@ export function normaliseBullets(
         const trimmed = b.question.trim()
         if (trimmed.length >= 8) question = trimmed.slice(0, 240)
       }
-      return { text, quote, page, question }
+      // Validate criterion_id against the snapshot; drop hallucinated ids.
+      let criterion_id: string | null = null
+      if (typeof b.criterion_id === 'string' && validCriterionIds.has(b.criterion_id)) {
+        criterion_id = b.criterion_id
+      }
+      return { text, quote, page, question, criterion_id }
     })
     .filter((b): b is BulletItem => b !== null)
 }
@@ -687,6 +756,8 @@ export async function approve(
     approvedFeedback: string
     approvedStrengths?: BulletItem[]
     approvedImprovements?: BulletItem[]
+    approvedCriteriaScores?: CriterionScore[]
+    approvedEditReason?: import('../../../shared/types').ApprovedEditReason
   }
 ): Promise<Assignment> {
   const assignment = await approveAssignment(id, teacherId, data)
@@ -762,8 +833,16 @@ function buildCriteriaPrompt(
   hasHandoutQuestions = false,
 ): string {
   const criteriaBlock = snapshot
-    .map((c) => `- ${c.name} (вес: ${c.weight}%)${c.description ? `: ${c.description}` : ''}`)
+    .map((c) => `- [id: ${c.criterion_id ?? 'null'}] ${c.name} (вес: ${c.weight}%)${c.description ? `: ${c.description}` : ''}`)
     .join('\n')
+
+  // The criterion-id linking hint is only meaningful when criteria have ids
+  // (holistic mode hits this code path with no snapshot at all, but criteria
+  // mode might also have legacy items without ids).
+  const haveIds = snapshot.some((c) => !!c.criterion_id)
+  const criterionIdHint = haveIds
+    ? `Каждый объект в "strengths" и "improvements" ОБЯЗАТЕЛЬНО получает поле "criterion_id" — это id критерия из списка выше, к которому пункт ОТНОСИТСЯ. Если пункт связан сразу с несколькими — выберите ОСНОВНОЙ. Если ни с одним — null.`
+    : ''
 
   const pageInstruction = pageCount > 1
     ? `номер страницы из маркера [стр. N], если фрагмент с этой страницы (целое число 1–${pageCount}); иначе null`
@@ -799,12 +878,14 @@ ${verificationFieldInstruction(pageInstruction)}
 - "strengths": массив из 3–5 конкретных достоинств. КАЖДЫЙ объект:
     {"text": конкретное достоинство (1 предложение),
      "quote": ДОСЛОВНАЯ цитата из работы студента (5–12 слов), которая подтверждает этот пункт. Используйте ТОЛЬКО если в работе есть такой фрагмент; иначе null,
-     "page": ${pageInstruction}}${markerWarning} Не выдумывайте цитаты — лучше null.
+     "page": ${pageInstruction},
+     "criterion_id": ${haveIds ? 'id критерия из списка выше, к которому относится пункт; null если ни к какому' : 'всегда null'}}${markerWarning} Не выдумывайте цитаты — лучше null.
 - "improvements": массив из 3–5 конкретных областей для улучшения. КАЖДЫЙ объект:
     {"text": пункт что улучшить (1 предложение),
      "quote": ДОСЛОВНАЯ цитата из работы — фрагмент, который требует доработки, либо null,
      "page": ${pageInstruction},
-     "question": ОБЯЗАТЕЛЬНО заполните — ОДИН конкретный вопрос, который преподаватель может задать студенту по этому пункту. Вопрос должен требовать живого ответа, который сложно подготовить заранее, и быть привязан к конкретному фрагменту или утверждению, а не общим. Никогда не оставляйте это поле пустым или null.}${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}${hasHandoutQuestions ? `\n${QUESTION_RESPONSES_INSTRUCTION}` : ''}
+     "criterion_id": ${haveIds ? 'id критерия из списка выше, к которому относится пункт; null если ни к какому' : 'всегда null'},
+     "question": ОБЯЗАТЕЛЬНО заполните — ОДИН конкретный вопрос, который преподаватель может задать студенту по этому пункту. Вопрос должен требовать живого ответа, который сложно подготовить заранее, и быть привязан к конкретному фрагменту или утверждению, а не общим. Никогда не оставляйте это поле пустым или null.}${criterionIdHint ? `\n${criterionIdHint}` : ''}${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}${hasHandoutQuestions ? `\n${QUESTION_RESPONSES_INSTRUCTION}` : ''}
 
 Ответьте ТОЛЬКО JSON-объектом, без пояснений.`
 }

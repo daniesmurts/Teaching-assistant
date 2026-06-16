@@ -8,6 +8,8 @@ import DocumentUpload from '../components/ui/DocumentUpload'
 import { getCourses, createCourse, updateCourse, deleteCourse } from '../api/courses'
 import { uploadAndWait } from '../api/documents'
 import { useUIStore } from '../store/uiStore'
+import { useAuthStore } from '../store/authStore'
+import ShareRagToggle from '../components/courses/ShareRagToggle'
 import type { Course } from '../types'
 
 const LEVELS = [
@@ -26,6 +28,12 @@ const emptyForm: FormState = { name: '', code: '', level: '', syllabus_text: '' 
 export default function Courses() {
   const qc = useQueryClient()
   const addToast = useUIStore((s) => s.addToast)
+  const teacher = useAuthStore((s) => s.teacher)
+  // The per-course share toggle is meaningful only when the institution master
+  // toggle is also on. Hide the column entirely otherwise — it's confusing
+  // to show a toggle that does nothing.
+  const sharingAllowed = !!teacher?.institution_id && !!teacher?.institution_shared_rag_enabled
+
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing]   = useState<Course | null>(null)
   const [form, setForm]         = useState<FormState>(emptyForm)
@@ -215,6 +223,7 @@ export default function Courses() {
                   )}
                 </div>
                 <div className="flex items-center gap-1.5">
+                  {sharingAllowed && <ShareRagToggle course={course} />}
                   <Button size="sm" variant="secondary" onClick={() => openEdit(course)}>Изменить</Button>
                   <Button
                     size="sm"

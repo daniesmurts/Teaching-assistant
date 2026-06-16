@@ -25,6 +25,10 @@ export const createCourseRules = [
     .optional()
     .trim()
     .isLength({ max: 200_000 }).withMessage('Текст программы слишком длинный'),
+
+  body('share_rag_with_institution')
+    .optional()
+    .isBoolean().withMessage('share_rag_with_institution должен быть true или false'),
 ]
 
 export const updateCourseRules = [
@@ -48,4 +52,8 @@ export const updateCourseRules = [
     .optional()
     .trim()
     .isLength({ max: 200_000 }).withMessage('Текст программы слишком длинный'),
+
+  body('share_rag_with_institution')
+    .optional()
+    .isBoolean().withMessage('share_rag_with_institution должен быть true или false'),
 ]

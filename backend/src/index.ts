@@ -10,6 +10,7 @@ import authRouter from './routes/auth'
 import coursesRouter from './routes/courses'
 import criteriaRouter from './routes/criteria'
 import rubricsRouter from './routes/rubrics'
+import learningLoopRouter from './routes/learningLoop'
 import gradingRouter from './routes/grading'
 import presentationsRouter from './routes/presentations'
 import documentsRouter from './routes/documents'
@@ -22,6 +23,9 @@ import quizzesRouter from './routes/quizzes'
 import paymentsRouter from './routes/payments'
 import accountRouter from './routes/account'
 import { startRenewalScheduler } from './services/renewals'
+// Side-effect import — registers per-institution provider resolution into the
+// LLM registry before any AI call goes through.
+import './services/llm/institutionResolver'
 
 // Validate environment before anything else — crash early on misconfig
 validateConfig()
@@ -99,6 +103,7 @@ app.use('/api/auth',          authRouter)
 app.use('/api/courses',       coursesRouter)
 app.use('/api/criteria',      criteriaRouter)
 app.use('/api/rubrics',       rubricsRouter)
+app.use('/api/learning-loop', learningLoopRouter)
 app.use('/api/grading',       gradingRouter)
 app.use('/api/presentations', presentationsRouter)
 app.use('/api/topics',        topicsRouter)

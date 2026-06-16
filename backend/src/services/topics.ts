@@ -63,7 +63,7 @@ export async function generateTopics(p: GenerateParams): Promise<TopicSet> {
   const result = await chatJSON<{ topics: TopicItem[] }>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'список тем',
-    { teacherId: p.teacherId, feature: 'presentation' },   // reuse a logged feature bucket
+    { context: { teacherId: p.teacherId, feature: 'presentation' } },   // reuse a logged feature bucket
   )
 
   const topics = (result.topics ?? []).slice(0, count).map((t) => ({

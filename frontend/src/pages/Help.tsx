@@ -26,8 +26,8 @@ export default function Help() {
       <div className="flex-1 flex overflow-hidden">
 
         {/* Article nav */}
-        <aside className="w-[260px] border-r border-border bg-surface-warm overflow-y-auto flex-shrink-0 hidden md:flex md:flex-col">
-          <div className="p-3 border-b border-border">
+        <aside className="w-[280px] border-r border-border bg-surface-warm overflow-y-auto flex-shrink-0 hidden md:flex md:flex-col">
+          <div className="p-3 border-b border-border bg-surface-warm sticky top-0 z-10">
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -35,24 +35,38 @@ export default function Help() {
               className="w-full px-3 py-2 text-sm font-sans bg-surface border border-border rounded-md focus:outline-none focus:border-border-strong"
             />
           </div>
-          <nav className="p-2">
-            {HELP_CATEGORIES.map((cat) => {
+          <nav className="p-3">
+            {HELP_CATEGORIES.map((cat, idx) => {
               const items = filtered.filter((a) => a.category === cat)
               if (items.length === 0) return null
               return (
-                <div key={cat} className="mb-3">
-                  <div className="px-2 mb-1 text-[10px] font-sans font-semibold text-ink-tertiary uppercase tracking-wider">{cat}</div>
-                  {items.map((a) => (
-                    <button
-                      key={a.slug}
-                      onClick={() => setActiveSlug(a.slug)}
-                      className={`w-full text-left px-2 py-1.5 rounded-md text-sm font-sans transition-colors ${
-                        active?.slug === a.slug ? 'bg-amber-light text-amber font-medium' : 'text-ink-secondary hover:bg-surface'
-                      }`}
-                    >
-                      {a.title}
-                    </button>
-                  ))}
+                <div key={cat} className={idx === 0 ? 'mb-5' : 'mb-5'}>
+                  <div className="flex items-center gap-2 px-1 mb-2">
+                    <span className="text-[11px] font-sans font-bold text-ink uppercase tracking-[0.08em]">{cat}</span>
+                    <span className="flex-1 h-px bg-border" />
+                    <span className="text-[10px] font-sans text-ink-tertiary tabular-nums">{items.length}</span>
+                  </div>
+                  <div className="space-y-0.5">
+                    {items.map((a) => {
+                      const isActive = active?.slug === a.slug
+                      return (
+                        <button
+                          key={a.slug}
+                          onClick={() => setActiveSlug(a.slug)}
+                          className={`relative w-full text-left pl-3 pr-2 py-1.5 rounded-md text-[13.5px] font-sans leading-snug transition-colors ${
+                            isActive
+                              ? 'bg-amber-light text-amber font-medium'
+                              : 'text-ink-secondary hover:bg-surface hover:text-ink'
+                          }`}
+                        >
+                          {isActive && (
+                            <span className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-full bg-amber" aria-hidden />
+                          )}
+                          {a.title}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
               )
             })}

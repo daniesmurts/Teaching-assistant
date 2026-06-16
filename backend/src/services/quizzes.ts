@@ -59,7 +59,7 @@ export async function generateQuiz(params: GenerateQuizParams): Promise<Generate
       { role: 'user',   content: userPrompt },
     ],
     'тестовые вопросы',
-    { teacherId: params.teacherId, feature: 'presentation' },   // bucket with presentation usage logging
+    { context: { teacherId: params.teacherId, feature: 'presentation' } },   // bucket with presentation usage logging
   )
 
   const { questions, usedSourceIdx } = normaliseQuestions(raw.questions ?? [], sources, count)

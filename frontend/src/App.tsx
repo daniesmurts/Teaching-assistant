@@ -15,6 +15,8 @@ import Courses from './pages/Courses'
 import Grading from './pages/Grading'
 import Criteria from './pages/Criteria'
 import Rubrics from './pages/Rubrics'
+import LearningLoop from './pages/LearningLoop'
+import FeedbackLibrary from './pages/FeedbackLibrary'
 import Students from './pages/Students'
 import History from './pages/History'
 import Presentations from './pages/Presentations'
@@ -40,6 +42,8 @@ import InstitutionUsage from './pages/institution/InstitutionUsage'
 import InstitutionTeachers from './pages/institution/InstitutionTeachers'
 import InstitutionRubrics from './pages/institution/InstitutionRubrics'
 import InstitutionRubricPresets from './pages/institution/InstitutionRubricPresets'
+import InstitutionSharedRag from './pages/institution/InstitutionSharedRag'
+import InstitutionModel from './pages/institution/InstitutionModel'
 import InstitutionAudit from './pages/institution/InstitutionAudit'
 import Landing from './pages/Landing'
 import About from './pages/About'
@@ -167,6 +171,8 @@ export default function App() {
             <Route path="/grading"       element={<Grading />} />
             <Route path="/criteria"      element={<Criteria />} />
             <Route path="/rubrics"       element={<Rubrics />} />
+            <Route path="/learning-loop" element={<LearningLoop />} />
+            <Route path="/library"       element={<FeedbackLibrary />} />
             <Route path="/students"      element={<Students />} />
             <Route path="/history"       element={<History />} />
             <Route path="/presentations" element={<Presentations />} />
@@ -197,6 +203,8 @@ export default function App() {
             <Route path="teachers" element={<InstitutionTeachers />} />
             <Route path="rubrics"  element={<InstitutionRubrics />} />
             <Route path="rubric-presets" element={<InstitutionRubricPresets />} />
+            <Route path="shared-rag"   element={<InstitutionSharedRag />} />
+            <Route path="model"        element={<InstitutionModel />} />
             <Route path="audit"    element={<InstitutionAudit />} />
           </Route>
         </Routes>

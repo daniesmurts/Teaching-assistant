@@ -8,9 +8,35 @@ import { logger } from '../lib/logger'
 import { findTeacherByEmail, deleteTeacher } from '../db/queries/teachers'
 import { getStoragePathsByTeacher } from '../db/queries/documents'
 import { deleteObject } from '../services/objectStorage'
+import { buildAccountExport } from '../services/accountExport'
 
 const router = Router()
 router.use(authenticate)
+
+// ─── GET /api/account/export — download a JSON copy of your data ──────────────
+//
+// Both sensitive payload toggles (submissions, syllabuses) default OFF — the
+// teacher must opt in via query params. Submission texts are the teacher's own
+// data but contain student writing; the explicit opt-in keeps consent in the
+// teacher's hands. Student names are anonymised regardless.
+
+router.get(
+  '/export',
+  asyncHandler(async (req, res) => {
+    const includeSubmissions = req.query.include_submissions === 'true'
+    const includeSyllabuses  = req.query.include_syllabuses  === 'true'
+
+    const data = await buildAccountExport(req.teacher.id, {
+      include_submissions: includeSubmissions,
+      include_syllabuses:  includeSyllabuses,
+    })
+
+    const stamp = new Date().toISOString().slice(0, 10)   // YYYY-MM-DD
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="ispum-export-${stamp}.json"`)
+    res.send(JSON.stringify(data, null, 2))
+  })
+)
 
 // ─── DELETE /api/account ─ permanently erase the account (152-ФЗ) ─────────────
 // Requires the current password to confirm — destructive and irreversible.

@@ -2,6 +2,7 @@ import client from './client'
 import type {
   Assignment, GradeLetter, LongReview, RevisionCheckItem, CriteriaSnapshotItem, CriterionScore,
   ConfidenceLevel, AiEnsemble, BulletItem, VerificationQuestion, QuestionResponse,
+  ApprovedEditReason, ApprovedRevision,
 } from '../types'
 
 export interface GradeRequest {
@@ -44,6 +45,21 @@ export async function getAssignment(id: string): Promise<Assignment> {
   return res.data
 }
 
+/**
+ * How many times this approved grade has been used as a RAG example by
+ * another teacher inside the same institution (institutional flywheel).
+ * Returns zeros when this assignment hasn't fed any colleague's grading.
+ */
+export async function getAssignmentCrossUses(id: string): Promise<{
+  count_lifetime: number
+  count_30d:      number
+}> {
+  const res = await client.get<{ count_lifetime: number; count_30d: number }>(
+    `/api/grading/assignment/${id}/cross-uses`
+  )
+  return res.data
+}
+
 export async function gradeSubmission(data: GradeRequest): Promise<GradeResponse> {
   const res = await client.post<GradeResponse>('/api/grading/grade', data)
   return res.data
@@ -57,10 +73,20 @@ export async function approveGrade(
     approved_feedback: string
     approved_strengths?:    BulletItem[]
     approved_improvements?: BulletItem[]
+    approved_criteria_scores?: CriterionScore[]
+    approved_edit_reason?:     ApprovedEditReason
   }
 ): Promise<{ assignment: Assignment }> {
   const res = await client.post<{ assignment: Assignment }>(`/api/grading/${id}/approve`, data)
   return res.data
+}
+
+/** Audit trail of every approve mutation on an assignment, newest first. */
+export async function getApprovalHistory(id: string): Promise<ApprovedRevision[]> {
+  const res = await client.get<{ history: ApprovedRevision[] }>(
+    `/api/grading/assignment/${id}/approval-history`
+  )
+  return res.data.history
 }
 
 export async function generateEmail(

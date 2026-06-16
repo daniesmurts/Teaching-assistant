@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import TopBar from '../components/layout/TopBar'
 import OnboardingChecklist from '../components/onboarding/OnboardingChecklist'
 import WelcomeModal from '../components/onboarding/WelcomeModal'
+import LearningLoopCard from '../components/dashboard/LearningLoopCard'
 import AssignmentDetailModal from '../components/grading/AssignmentDetailModal'
 import { gradeColor } from '../lib/grades'
 import { nameForGreeting } from '../lib/teacherName'
@@ -132,6 +133,11 @@ export default function Dashboard() {
               value={courses.length}
               sub={courses.length > 0 ? courses[0].name : undefined}
             />
+          </div>
+
+          {/* Learning loop — single hero card, full breakdown at /learning-loop */}
+          <div className="mb-8">
+            <LearningLoopCard />
           </div>
 
           {/* Two-column: recent grades + quick links */}

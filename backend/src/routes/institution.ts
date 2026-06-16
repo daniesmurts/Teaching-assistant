@@ -17,6 +17,9 @@ import {
 import { findTeacherByEmail, findTeacherById } from '../db/queries/teachers'
 import { findCriteriaByInstitution, createCriterion, findCriteriaByIds } from '../db/queries/criteria'
 import { findRubricsByInstitution, createInstitutionRubric } from '../db/queries/rubrics'
+import { getSharedRagSummary, setInstitutionSharedRag } from '../db/queries/sharedRag'
+import { invalidateInstitutionProviderCache } from '../services/llm/institutionResolver'
+import { pool } from '../db/connection'
 import { recordAudit, listAuditByInstitution } from '../db/queries/audit'
 import { generateRawToken } from '../db/queries/passwordReset'
 import { sendEmail } from '../services/emailTransport'
@@ -249,6 +252,85 @@ router.post('/rubrics', validate(createRubricRules), asyncHandler(async (req, re
   recordAudit({ institutionId: req.teacher.institution_id, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
     action: 'rubric.shared_created', target: name })
   res.status(201).json(rubric)
+}))
+
+// ─── Shared RAG flywheel (kafedra-wide loop) ──────────────────────────────────
+
+router.get('/shared-rag', asyncHandler(async (req, res) => {
+  res.json(await getSharedRagSummary(institutionId(req)))
+}))
+
+// ─── Model sovereignty (Phase 4) ──────────────────────────────────────────────
+//
+// GET surfaces the current preferred provider + breakdown of recent grades by
+// provider (so the admin can see the practical impact of any past switch).
+// PATCH validates against the known providers and audits the change.
+
+router.get('/model', asyncHandler(async (req, res) => {
+  const id = institutionId(req)
+  const [prefRows, statRows] = await Promise.all([
+    pool.query<{ preferred_provider: string | null }>(
+      `SELECT preferred_provider FROM institutions WHERE id = $1`,
+      [id]
+    ),
+    pool.query<{ ai_provider: string | null; n: string }>(
+      `SELECT ai_provider, COUNT(*) AS n
+         FROM assignments a
+         JOIN teachers t ON t.id = a.teacher_id
+        WHERE t.institution_id = $1
+          AND a.status = 'approved'
+          AND a.approved_at >= NOW() - INTERVAL '30 days'
+        GROUP BY ai_provider
+        ORDER BY n DESC`,
+      [id]
+    ),
+  ])
+  res.json({
+    preferred_provider:  prefRows.rows[0]?.preferred_provider ?? null,
+    by_provider_30d:     statRows.rows.map((r) => ({
+      provider: r.ai_provider,
+      n:        Number(r.n),
+    })),
+  })
+}))
+
+router.patch('/model', asyncHandler(async (req, res) => {
+  const id = institutionId(req)
+  const { provider } = req.body as { provider?: string | null }
+  const allowed: Array<string | null> = ['deepseek', 'yandex', null]
+  if (!(allowed as Array<string | null>).includes(provider ?? null)) {
+    throw new ValidationError('Допустимы значения: deepseek, yandex, или null (по умолчанию).')
+  }
+  await pool.query(
+    `UPDATE institutions SET preferred_provider = $2 WHERE id = $1`,
+    [id, provider ?? null]
+  )
+  invalidateInstitutionProviderCache(id)
+  recordAudit({
+    institutionId:    id,
+    actorTeacherId:   req.teacher.id,
+    actorEmail:       req.teacher.email,
+    action:           'model.preferred_provider_changed',
+    target:           provider ?? 'default',
+  })
+  res.json({ preferred_provider: provider ?? null })
+}))
+
+router.patch('/shared-rag', asyncHandler(async (req, res) => {
+  const id = institutionId(req)
+  const { enabled } = req.body as { enabled?: boolean }
+  if (typeof enabled !== 'boolean') {
+    throw new ValidationError('enabled должен быть true или false')
+  }
+  await setInstitutionSharedRag(id, enabled)
+  recordAudit({
+    institutionId:    id,
+    actorTeacherId:   req.teacher.id,
+    actorEmail:       req.teacher.email,
+    action:           enabled ? 'shared_rag.enabled' : 'shared_rag.disabled',
+    target:           '',
+  })
+  res.json(await getSharedRagSummary(id))
 }))
 
 export default router

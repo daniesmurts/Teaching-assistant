@@ -2,7 +2,7 @@ import { pool } from '../connection'
 import type {
   Assignment, GradeLetter, CriterionScore, RevisionCheckItem, CriteriaSnapshotItem,
   ConfidenceLevel, AiEnsemble, BulletItem, VerificationQuestion,
-  Handout, QuestionResponse,
+  Handout, QuestionResponse, ApprovedEditReason, ApprovedRevision,
 } from '../../../../shared/types'
 
 interface AssignmentRow {
@@ -27,11 +27,14 @@ interface AssignmentRow {
   criteria_snapshot: CriteriaSnapshotItem[] | null
   ai_confidence: string | null
   ai_ensemble: AiEnsemble | null
+  ai_provider: string | null
   approved_score: number | null
   approved_grade: string | null
   approved_feedback: string | null
   approved_strengths: BulletItem[] | null
   approved_improvements: BulletItem[] | null
+  approved_criteria_scores: CriterionScore[] | null
+  approved_edit_reason: string | null
   approved_at: Date | null
   status: string
   parent_assignment_id: string | null
@@ -62,11 +65,14 @@ function toAssignment(row: AssignmentRow): Assignment {
     criteria_snapshot: row.criteria_snapshot,
     ai_confidence: row.ai_confidence as ConfidenceLevel | null,
     ai_ensemble: row.ai_ensemble,
+    ai_provider: row.ai_provider,
     approved_score: row.approved_score,
     approved_grade: row.approved_grade as GradeLetter | null,
     approved_feedback: row.approved_feedback,
     approved_strengths: row.approved_strengths,
     approved_improvements: row.approved_improvements,
+    approved_criteria_scores: row.approved_criteria_scores,
+    approved_edit_reason: row.approved_edit_reason as ApprovedEditReason | null,
     approved_at: row.approved_at?.toISOString() ?? null,
     status: row.status as Assignment['status'],
     parent_assignment_id: row.parent_assignment_id,
@@ -96,6 +102,7 @@ export async function createAssignment(data: {
   aiQuestionResponses?: QuestionResponse[]
   aiConfidence?: ConfidenceLevel | null
   aiEnsemble?: AiEnsemble | null
+  aiProvider?: string
 }): Promise<Assignment> {
   const { rows } = await pool.query<AssignmentRow>(
     `WITH parent AS (
@@ -107,12 +114,12 @@ export async function createAssignment(data: {
        submission_text, ai_score, ai_grade, ai_grade_label, ai_feedback,
        ai_criteria_scores, ai_strengths, ai_improvements, criteria_snapshot,
        parent_assignment_id, ai_revision_check, ai_confidence, ai_ensemble,
-       ai_verification_questions, ai_question_responses,
+       ai_verification_questions, ai_question_responses, ai_provider,
        revision_number, status
      ) VALUES (
        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
        $15,$16,$17,$18,
-       $19,$20,
+       $19,$20,$21,
        COALESCE((SELECT revision_number + 1 FROM parent), 1),
        'pending'
      )
@@ -138,6 +145,7 @@ export async function createAssignment(data: {
       data.aiEnsemble ? JSON.stringify(data.aiEnsemble) : null,
       data.aiVerificationQuestions ? JSON.stringify(data.aiVerificationQuestions) : null,
       data.aiQuestionResponses ? JSON.stringify(data.aiQuestionResponses) : null,
+      data.aiProvider ?? null,
     ]
   )
   return toAssignment(rows[0])
@@ -160,27 +168,114 @@ export async function approveAssignment(
     approvedFeedback: string
     approvedStrengths?: BulletItem[]      // null/undefined = keep AI's default
     approvedImprovements?: BulletItem[]
+    approvedCriteriaScores?: CriterionScore[]
+    approvedEditReason?: ApprovedEditReason
   }
 ): Promise<Assignment | null> {
-  const { rows } = await pool.query<AssignmentRow>(
-    `UPDATE assignments
-     SET approved_score         = $3,
-         approved_grade         = $4,
-         approved_feedback      = $5,
-         approved_strengths     = $6,
-         approved_improvements  = $7,
-         approved_at            = NOW(),
-         status                 = 'approved'
-     WHERE id = $1 AND teacher_id = $2
-     RETURNING *`,
-    [
-      id, teacherId,
-      data.approvedScore, data.approvedGrade, data.approvedFeedback,
-      data.approvedStrengths    ? JSON.stringify(data.approvedStrengths)    : null,
-      data.approvedImprovements ? JSON.stringify(data.approvedImprovements) : null,
-    ]
+  // Two writes in one transaction: update the canonical assignments row AND
+  // append to approved_revisions so the audit trail of every approve survives.
+  // The conn is the same Pool client — pg auto-commits unless we explicitly
+  // BEGIN, so we use a transaction here to avoid a half-written history.
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+
+    const { rows } = await client.query<AssignmentRow>(
+      `UPDATE assignments
+       SET approved_score           = $3,
+           approved_grade           = $4,
+           approved_feedback        = $5,
+           approved_strengths       = $6,
+           approved_improvements    = $7,
+           approved_criteria_scores = $8,
+           approved_edit_reason     = $9,
+           approved_at              = NOW(),
+           status                   = 'approved'
+       WHERE id = $1 AND teacher_id = $2
+       RETURNING *`,
+      [
+        id, teacherId,
+        data.approvedScore, data.approvedGrade, data.approvedFeedback,
+        data.approvedStrengths        ? JSON.stringify(data.approvedStrengths)        : null,
+        data.approvedImprovements     ? JSON.stringify(data.approvedImprovements)     : null,
+        data.approvedCriteriaScores   ? JSON.stringify(data.approvedCriteriaScores)   : null,
+        data.approvedEditReason       ?? null,
+      ]
+    )
+
+    if (!rows[0]) {
+      await client.query('ROLLBACK')
+      return null
+    }
+
+    await client.query(
+      `INSERT INTO approved_revisions (
+         assignment_id, actor_teacher_id,
+         approved_score, approved_grade, approved_feedback,
+         approved_strengths, approved_improvements,
+         approved_criteria_scores, approved_edit_reason
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        id, teacherId,
+        data.approvedScore, data.approvedGrade, data.approvedFeedback,
+        data.approvedStrengths        ? JSON.stringify(data.approvedStrengths)        : null,
+        data.approvedImprovements     ? JSON.stringify(data.approvedImprovements)     : null,
+        data.approvedCriteriaScores   ? JSON.stringify(data.approvedCriteriaScores)   : null,
+        data.approvedEditReason       ?? null,
+      ]
+    )
+
+    await client.query('COMMIT')
+    return toAssignment(rows[0])
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => null)
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
+// ─── Approval history ────────────────────────────────────────────────────────
+
+export async function findApprovalHistory(
+  assignmentId: string,
+  teacherId:    string,
+): Promise<ApprovedRevision[]> {
+  // Verify the teacher owns the row before returning the history (otherwise
+  // another teacher could pull approval trails by guessing assignment ids).
+  const { rows } = await pool.query<{
+    approved_at:              Date
+    actor_teacher_id:         string | null
+    approved_score:           number | null
+    approved_grade:           string | null
+    approved_feedback:        string | null
+    approved_strengths:       BulletItem[] | null
+    approved_improvements:    BulletItem[] | null
+    approved_criteria_scores: CriterionScore[] | null
+    approved_edit_reason:     string | null
+  }>(
+    `SELECT r.approved_at, r.actor_teacher_id,
+            r.approved_score, r.approved_grade, r.approved_feedback,
+            r.approved_strengths, r.approved_improvements,
+            r.approved_criteria_scores, r.approved_edit_reason
+       FROM approved_revisions r
+       JOIN assignments a ON a.id = r.assignment_id
+      WHERE r.assignment_id = $1
+        AND a.teacher_id = $2
+      ORDER BY r.approved_at DESC`,
+    [assignmentId, teacherId]
   )
-  return rows[0] ? toAssignment(rows[0]) : null
+  return rows.map((r) => ({
+    approved_at:              r.approved_at.toISOString(),
+    actor_teacher_id:         r.actor_teacher_id,
+    approved_score:           r.approved_score,
+    approved_grade:           r.approved_grade as GradeLetter | null,
+    approved_feedback:        r.approved_feedback,
+    approved_strengths:       r.approved_strengths,
+    approved_improvements:    r.approved_improvements,
+    approved_criteria_scores: r.approved_criteria_scores,
+    approved_edit_reason:     r.approved_edit_reason as ApprovedEditReason | null,
+  }))
 }
 
 export async function updateEmbedding(id: string, embedding: number[]): Promise<void> {
@@ -202,29 +297,174 @@ export async function saveHandout(
   )
 }
 
+// SimilarAssignment carries the row id + similarity distance so the caller
+// can audit which past works were retrieved as RAG examples (rag_retrievals
+// table). The id never reaches the prompt; only the prose fields do.
+//
+// `source` distinguishes the two pools the retriever may union:
+//   'own'         — same teacher, same course (original behaviour)
+//   'institution' — different teacher in the same institution whose course
+//                   shares the code/name AND has share_rag_with_institution = TRUE
+//                   AND the institution's master shared_rag_enabled = TRUE.
+// The caller uses `source` to sanitise PII on the institution pool only.
 export interface SimilarAssignment {
-  submission_text: string
-  approved_score: number
-  approved_grade: string
+  id:               string
+  submission_text:  string
+  approved_score:   number
+  approved_grade:   string
   approved_feedback: string
+  similarity:       number
+  source:           'own' | 'institution'
 }
 
+export interface InstitutionPoolContext {
+  institutionId: string
+  teacherId:     string         // exclude this teacher from the institution pool
+  courseCode:    string | null
+  courseName:    string
+}
+
+/**
+ * Decide whether a given (teacher, course) pair qualifies for the institutional
+ * pool. Returns the context object findSimilarAssignments needs, or null when
+ * any of the gating conditions is missing.
+ *
+ * Gates (all must be true):
+ *   - teacher has an institution
+ *   - institution.shared_rag_enabled = TRUE
+ *   - the caller's own course has share_rag_with_institution = TRUE
+ *
+ * The caller's course flag is gated here (not in the SQL UNION) so a teacher
+ * who hasn't opted in can't accidentally pull from the institution pool either.
+ */
+export async function resolveInstitutionPoolContext(
+  teacherId: string,
+  courseId: string,
+): Promise<InstitutionPoolContext | null> {
+  const { rows } = await pool.query<{
+    institution_id:                string | null
+    institution_shared:            boolean
+    course_share_with_institution: boolean
+    course_code:                   string | null
+    course_name:                   string
+  }>(
+    `SELECT t.institution_id,
+            COALESCE(i.shared_rag_enabled, FALSE) AS institution_shared,
+            c.share_rag_with_institution           AS course_share_with_institution,
+            c.code                                 AS course_code,
+            c.name                                 AS course_name
+       FROM teachers t
+       JOIN courses  c ON c.id = $2 AND c.teacher_id = t.id
+       LEFT JOIN institutions i ON i.id = t.institution_id
+      WHERE t.id = $1
+      LIMIT 1`,
+    [teacherId, courseId]
+  )
+
+  const r = rows[0]
+  if (!r) return null
+  if (!r.institution_id) return null
+  if (!r.institution_shared) return null
+  if (!r.course_share_with_institution) return null
+
+  return {
+    institutionId: r.institution_id,
+    teacherId,
+    courseCode:    r.course_code,
+    courseName:    r.course_name,
+  }
+}
+
+/**
+ * Find approved assignments similar to the input embedding. Always pulls from
+ * the teacher's own course (`courseId`). When `institutionPool` is supplied
+ * AND the institution master toggle is on, ALSO unions in approved grades
+ * from other teachers' shared courses with matching code/name — the
+ * institutional flywheel.
+ *
+ * Cross-teacher hits are tagged with source='institution' so the caller can
+ * sanitise PII before they reach the prompt.
+ */
 export async function findSimilarAssignments(
   courseId: string,
   embedding: number[],
-  limit = 5
+  limit = 5,
+  institutionPool?: InstitutionPoolContext,
 ): Promise<SimilarAssignment[]> {
-  const { rows } = await pool.query<SimilarAssignment>(
-    `SELECT submission_text, approved_score, approved_grade, approved_feedback
-     FROM assignments
-     WHERE course_id = $1
-       AND status = 'approved'
-       AND embedding IS NOT NULL
-     ORDER BY embedding <=> $2
-     LIMIT $3`,
-    [courseId, `[${embedding.join(',')}]`, limit]
+  const vec = `[${embedding.join(',')}]`
+
+  // Plain path — no institution pool, no UNION, identical to the original.
+  if (!institutionPool) {
+    const { rows } = await pool.query<Omit<SimilarAssignment, 'source'>>(
+      `SELECT id, submission_text, approved_score, approved_grade, approved_feedback,
+              (embedding <=> $2) AS similarity
+         FROM assignments
+        WHERE course_id = $1
+          AND status = 'approved'
+          AND embedding IS NOT NULL
+        ORDER BY embedding <=> $2
+        LIMIT $3`,
+      [courseId, vec, limit]
+    )
+    return rows.map((r) => ({ ...r, source: 'own' }))
+  }
+
+  // Reserve up to 2 of the `limit` slots for institution-pool hits so a
+  // teacher's own corpus doesn't crowd out the cross-teacher signal entirely.
+  // If the institution pool has fewer than that, we backfill from own.
+  const institutionReserved = Math.min(2, Math.max(1, Math.floor(limit / 3)))
+  const ownTarget = limit - institutionReserved
+
+  // Run both queries in parallel.
+  const ownPromise = pool.query<Omit<SimilarAssignment, 'source'>>(
+    `SELECT id, submission_text, approved_score, approved_grade, approved_feedback,
+            (embedding <=> $2) AS similarity
+       FROM assignments
+      WHERE course_id = $1
+        AND status = 'approved'
+        AND embedding IS NOT NULL
+      ORDER BY embedding <=> $2
+      LIMIT $3`,
+    [courseId, vec, limit]   // overfetch — we may need to backfill
   )
-  return rows
+
+  const institutionPromise = pool.query<Omit<SimilarAssignment, 'source'>>(
+    `SELECT a.id, a.submission_text, a.approved_score, a.approved_grade, a.approved_feedback,
+            (a.embedding <=> $2) AS similarity
+       FROM assignments a
+       JOIN courses  c2 ON c2.id = a.course_id
+       JOIN teachers t2 ON t2.id = a.teacher_id
+      WHERE t2.institution_id = $4::uuid
+        AND t2.id <> $5::uuid
+        AND c2.share_rag_with_institution = TRUE
+        AND a.status = 'approved'
+        AND a.embedding IS NOT NULL
+        AND a.course_id <> $1
+        AND (
+          ($6::text IS NOT NULL AND c2.code IS NOT NULL AND LOWER(c2.code) = LOWER($6))
+          OR LOWER(c2.name) = LOWER($7)
+        )
+      ORDER BY a.embedding <=> $2
+      LIMIT $3`,
+    [courseId, vec, institutionReserved + 2, institutionPool.institutionId,
+     institutionPool.teacherId, institutionPool.courseCode, institutionPool.courseName]
+  )
+
+  const [ownRes, instRes] = await Promise.all([ownPromise, institutionPromise])
+
+  const ownHits = ownRes.rows.map((r) => ({ ...r, source: 'own' as const }))
+  const instHits = instRes.rows.map((r) => ({ ...r, source: 'institution' as const }))
+
+  // Take reserved institution slots first, then fill the rest from own,
+  // then merge and re-sort by similarity so the final order is honest.
+  const reserved = instHits.slice(0, institutionReserved)
+  const remaining = limit - reserved.length
+  const ownTaken = ownHits.slice(0, Math.max(ownTarget, remaining))
+  const combined = [...ownTaken, ...reserved]
+    .sort((a, b) => a.similarity - b.similarity)
+    .slice(0, limit)
+
+  return combined
 }
 
 /**
@@ -240,8 +480,9 @@ export async function findSimilarAssignmentsBefore(
   excludeId: string,
   limit = 5
 ): Promise<SimilarAssignment[]> {
-  const { rows } = await pool.query<SimilarAssignment>(
-    `SELECT submission_text, approved_score, approved_grade, approved_feedback
+  const { rows } = await pool.query<Omit<SimilarAssignment, 'source'>>(
+    `SELECT id, submission_text, approved_score, approved_grade, approved_feedback,
+            (embedding <=> $2) AS similarity
      FROM assignments
      WHERE course_id = $1
        AND status = 'approved'
@@ -252,7 +493,9 @@ export async function findSimilarAssignmentsBefore(
      LIMIT $5`,
     [courseId, `[${embedding.join(',')}]`, beforeCreatedAt, excludeId, limit]
   )
-  return rows
+  // Eval harness only replays a single teacher's history — no institution
+  // pool involvement, so every hit is 'own' by definition.
+  return rows.map((r) => ({ ...r, source: 'own' as const }))
 }
 
 // Replay target: an approved assignment with everything needed to re-grade it.

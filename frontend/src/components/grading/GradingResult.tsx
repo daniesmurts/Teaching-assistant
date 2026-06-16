@@ -11,7 +11,7 @@ import { useUIStore } from '../../store/uiStore'
 import { usePersistedState, clearPersistedState } from '../../hooks/usePersistedState'
 import { GRADES, gradeColor, gradeLabel, GRADE_BRACKETS, scoreToGrade, snapScoreToGrade } from '../../lib/grades'
 import type { GradeResponse } from '../../api/grading'
-import type { GradeLetter, BulletItem, VerificationQuestion } from '../../types'
+import type { GradeLetter, BulletItem, VerificationQuestion, CriterionScore, ApprovedEditReason } from '../../types'
 
 interface Props {
   result: GradeResponse
@@ -74,9 +74,25 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
   const [handoutOpen, setHandoutOpen]   = useState(false)
   const approveMut = useApprove()
 
+  // Per-criterion approved scores. Start with the AI's scores; teacher can edit
+  // individual entries from the Критерии tab. Persisted under the same draft
+  // key family so a tab refresh doesn't lose edits.
+  const [editCriteriaScores, setEditCriteriaScores] = usePersistedState<CriterionScore[]>(
+    `${editKey}:criteria_scores`,
+    result.ai_criteria_scores ?? [],
+  )
+  const [editReason, setEditReason] = usePersistedState<ApprovedEditReason | ''>(
+    `${editKey}:edit_reason`,
+    '',
+  )
+
   const gradeClr = gradeColor(editGrade)
 
   function handleApprove() {
+    // Only send fields the teacher actually edited — keeps the DB honest about
+    // what was an AI default vs an explicit teacher decision.
+    const criteriaScoresEdited = !criteriaScoresEqual(editCriteriaScores, result.ai_criteria_scores ?? [])
+
     approveMut.mutate(
       {
         id: result.assignment_id,
@@ -84,10 +100,10 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
           approved_score: Number(editScore),
           approved_grade: editGrade,
           approved_feedback: editFeedback,
-          // Only send these if they differ from the AI defaults — keeps the DB
-          // honest about what the teacher actually edited.
           ...(bulletsEqual(editStrengths,    result.ai_strengths    ?? []) ? {} : { approved_strengths:    editStrengths.filter((b) => b.text.trim()) }),
           ...(bulletsEqual(editImprovements, result.ai_improvements ?? []) ? {} : { approved_improvements: editImprovements.filter((b) => b.text.trim()) }),
+          ...(criteriaScoresEdited ? { approved_criteria_scores: editCriteriaScores } : {}),
+          ...(editReason ? { approved_edit_reason: editReason as ApprovedEditReason } : {}),
         },
       },
       {
@@ -99,6 +115,8 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
           clearPersistedState(`${editKey}:feedback`)
           clearPersistedState(`${editKey}:strengths`)
           clearPersistedState(`${editKey}:improvements`)
+          clearPersistedState(`${editKey}:criteria_scores`)
+          clearPersistedState(`${editKey}:edit_reason`)
           onApproved()
         },
       }
@@ -164,9 +182,12 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
           </div>
         </div>
         {!approved ? (
-          <Button onClick={handleApprove} loading={approveMut.isPending}>
-            Подтвердить оценку
-          </Button>
+          <div className="flex items-center gap-2">
+            <EditReasonPicker value={editReason} onChange={setEditReason} disabled={approveMut.isPending} />
+            <Button onClick={handleApprove} loading={approveMut.isPending}>
+              Подтвердить оценку
+            </Button>
+          </div>
         ) : (
           <span className="text-xs font-sans font-medium bg-success-bg text-success px-3 py-1.5 rounded-md">
             ✓ Подтверждено
@@ -270,6 +291,7 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
                   disabled={approved}
                   tone="success"
                   onCite={onCite}
+                  criteria={result.criteria_snapshot ?? []}
                 />
                 <EditableBulletList
                   title="Что улучшить"
@@ -278,6 +300,7 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
                   disabled={approved}
                   tone="warning"
                   onCite={onCite}
+                  criteria={result.criteria_snapshot ?? []}
                 />
               </div>
             )}
@@ -322,40 +345,62 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
 
         {tab === 'criteria' && (
           <div className="space-y-4">
-            {result.ai_criteria_scores.length === 0 ? (
+            {editCriteriaScores.length === 0 ? (
               <p className="text-sm font-sans text-ink-secondary">Критерии не использовались — общая оценка.</p>
             ) : (
-              result.ai_criteria_scores.map((cs) => (
-                <div key={cs.name}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-sans font-medium text-ink">{cs.name}</span>
-                    <span className="text-sm font-sans text-ink-secondary">{cs.score}/100</span>
-                  </div>
-                  <div className="h-1 bg-border rounded-full overflow-hidden mb-2">
-                    <div
-                      className="h-full rounded-full transition-all duration-700 ease-out"
-                      style={{ width: `${cs.score}%`, backgroundColor: scoreColor(cs.score) }}
-                    />
-                  </div>
-                  <p className="text-xs font-sans text-ink-secondary leading-relaxed">{cs.feedback}</p>
-                  {cs.quote && (
-                    <button
-                      type="button"
-                      onClick={() => onCite?.(cs.quote!)}
-                      title="Показать в работе"
-                      className="mt-1.5 group inline-flex items-start gap-1.5 text-left max-w-full"
-                    >
-                      <span className="text-[10px] font-sans font-medium text-amber mt-0.5 flex-shrink-0">↳</span>
-                      <span className="text-xs font-sans italic text-ink-secondary leading-relaxed border-l-2 border-amber/40 group-hover:border-amber pl-2 transition-colors">
-                        «{cs.quote}»
-                        {cs.page != null && (
-                          <span className="not-italic text-ink-tertiary font-normal"> · стр. {cs.page}</span>
+              editCriteriaScores.map((cs, idx) => {
+                const aiCs = result.ai_criteria_scores[idx]
+                const edited = aiCs && aiCs.score !== cs.score
+                return (
+                  <div key={`${cs.name}-${idx}`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-sans font-medium text-ink">{cs.name}</span>
+                      <div className="flex items-center gap-2">
+                        {edited && aiCs && (
+                          <span className="text-[10px] font-sans text-ink-tertiary">
+                            ИИ: {aiCs.score}
+                          </span>
                         )}
-                      </span>
-                    </button>
-                  )}
-                </div>
-              ))
+                        <input
+                          type="number" min={0} max={100} value={cs.score}
+                          disabled={approved}
+                          onChange={(e) => {
+                            const next = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0))
+                            setEditCriteriaScores((prev) =>
+                              prev.map((p, i) => i === idx ? { ...p, score: next } : p)
+                            )
+                          }}
+                          className="w-14 px-1.5 py-0.5 text-sm font-sans text-ink bg-surface border border-border rounded-md text-center disabled:opacity-70"
+                        />
+                        <span className="text-xs font-sans text-ink-tertiary">/ 100</span>
+                      </div>
+                    </div>
+                    <div className="h-1 bg-border rounded-full overflow-hidden mb-2">
+                      <div
+                        className="h-full rounded-full transition-all duration-700 ease-out"
+                        style={{ width: `${cs.score}%`, backgroundColor: scoreColor(cs.score) }}
+                      />
+                    </div>
+                    <p className="text-xs font-sans text-ink-secondary leading-relaxed">{cs.feedback}</p>
+                    {cs.quote && (
+                      <button
+                        type="button"
+                        onClick={() => onCite?.(cs.quote!)}
+                        title="Показать в работе"
+                        className="mt-1.5 group inline-flex items-start gap-1.5 text-left max-w-full"
+                      >
+                        <span className="text-[10px] font-sans font-medium text-amber mt-0.5 flex-shrink-0">↳</span>
+                        <span className="text-xs font-sans italic text-ink-secondary leading-relaxed border-l-2 border-amber/40 group-hover:border-amber pl-2 transition-colors">
+                          «{cs.quote}»
+                          {cs.page != null && (
+                            <span className="not-italic text-ink-tertiary font-normal"> · стр. {cs.page}</span>
+                          )}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                )
+              })
             )}
           </div>
         )}
@@ -368,6 +413,36 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
   )
 }
 
+// Dropdown that captures WHY the teacher's about to override the AI draft.
+// Optional — null/empty means "no reason given". Surfaces six categories so
+// the corpus has a queryable taxonomy of judgment-calls (item #2 of the
+// asset-hardening pass).
+function EditReasonPicker({
+  value, onChange, disabled,
+}: {
+  value:    ApprovedEditReason | ''
+  onChange: (v: ApprovedEditReason | '') => void
+  disabled: boolean
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as ApprovedEditReason | '')}
+      disabled={disabled}
+      title="Опционально: почему вы правите оценку ИИ?"
+      className="px-2 py-1 text-xs font-sans text-ink bg-surface border border-border rounded-md hover:border-border-strong"
+    >
+      <option value="">Причина правки…</option>
+      <option value="fact_check">фактическая ошибка</option>
+      <option value="tone">тон / формулировка</option>
+      <option value="criterion_weight">веса критериев</option>
+      <option value="scale">шкала оценивания</option>
+      <option value="scope">ИИ отклонился от задания</option>
+      <option value="other">другое</option>
+    </select>
+  )
+}
+
 function scoreColor(score: number): string {
   if (score >= 75) return 'var(--color-success)'
   if (score >= 55) return 'var(--color-amber)'
@@ -376,7 +451,21 @@ function scoreColor(score: number): string {
 
 function bulletsEqual(a: BulletItem[], b: BulletItem[]): boolean {
   if (a.length !== b.length) return false
-  return a.every((v, i) => v.text === b[i].text && (v.quote ?? null) === (b[i].quote ?? null) && (v.page ?? null) === (b[i].page ?? null))
+  return a.every((v, i) =>
+    v.text === b[i].text
+    && (v.quote ?? null)         === (b[i].quote ?? null)
+    && (v.page ?? null)          === (b[i].page  ?? null)
+    && (v.criterion_id ?? null)  === (b[i].criterion_id ?? null)
+  )
+}
+
+function criteriaScoresEqual(a: CriterionScore[], b: CriterionScore[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((v, i) =>
+    v.name === b[i].name
+    && v.score === b[i].score
+    && (v.feedback ?? '') === (b[i].feedback ?? '')
+  )
 }
 
 // Migrate legacy string[] persisted drafts to the new BulletItem[] shape, and
@@ -416,17 +505,25 @@ const TONES: Record<'success' | 'warning', { bg: string; border: string; text: s
   warning: { bg: 'bg-warning-bg', border: 'border-warning/15', text: 'text-warning', titleText: 'text-warning', citeBorder: 'border-warning/40' },
 }
 
-function EditableBulletList({ title, items, onChange, disabled, tone, onCite }: {
+function EditableBulletList({ title, items, onChange, disabled, tone, onCite, criteria = [] }: {
   title: string
   items: BulletItem[]
   onChange: (next: BulletItem[]) => void
   disabled: boolean
   tone: 'success' | 'warning'
   onCite?: (quote: string) => void
+  /** When present, each bullet gets a "к критерию: …" dropdown. */
+  criteria?: Array<{ criterion_id: string | null; name: string }>
 }) {
   const t = TONES[tone]
+  const criteriaWithId = criteria.filter((c) => !!c.criterion_id)
+  const nameById = new Map(criteriaWithId.map((c) => [c.criterion_id!, c.name]))
+
   function setTextAt(i: number, text: string) {
     onChange(items.map((b, idx) => idx === i ? { ...b, text } : b))
+  }
+  function setCriterionAt(i: number, id: string | null) {
+    onChange(items.map((b, idx) => idx === i ? { ...b, criterion_id: id } : b))
   }
   function removeAt(i: number) { onChange(items.filter((_, idx) => idx !== i)) }
   function add() { onChange([...items, { text: '', quote: null, page: null }]) }
@@ -470,6 +567,30 @@ function EditableBulletList({ title, items, onChange, disabled, tone, onCite }: 
                   {b.page != null && <span className="not-italic font-normal opacity-70"> · стр. {b.page}</span>}
                 </span>
               </button>
+            )}
+            {/* Criterion link — small dropdown so the teacher can attach
+                each bullet to the criterion it relates to. Only shown when
+                this grade actually has criteria. */}
+            {criteriaWithId.length > 0 && (
+              <div className="ml-3 mt-0.5 flex items-center gap-1">
+                <span className={`text-[10px] ${t.text} opacity-60`}>к критерию:</span>
+                {disabled ? (
+                  <span className={`text-[10px] ${t.text} opacity-80`}>
+                    {b.criterion_id ? nameById.get(b.criterion_id) ?? '—' : '—'}
+                  </span>
+                ) : (
+                  <select
+                    value={b.criterion_id ?? ''}
+                    onChange={(e) => setCriterionAt(i, e.target.value || null)}
+                    className={`text-[10px] bg-transparent ${t.text} border-0 border-b border-dotted ${t.citeBorder} focus:outline-none cursor-pointer`}
+                  >
+                    <option value="">—</option>
+                    {criteriaWithId.map((c) => (
+                      <option key={c.criterion_id!} value={c.criterion_id!}>{c.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
             )}
             {/* "Спросить об этом" — only on improvement bullets where the AI
                 produced a follow-up question. Pro-tier feature gate is on the

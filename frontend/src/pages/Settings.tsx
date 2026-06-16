@@ -5,7 +5,7 @@ import { Input } from '../components/ui/Input'
 import Button from '../components/ui/Button'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
-import { deleteAccount } from '../api/account'
+import { deleteAccount, downloadAccountExport } from '../api/account'
 
 const CONFIRM_WORD = 'УДАЛИТЬ'
 
@@ -20,6 +20,26 @@ export default function Settings() {
   const [confirm, setConfirm]   = useState('')
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
+
+  // Export — both toggles default OFF per the privacy decision.
+  const [includeSubmissions, setIncludeSubmissions] = useState(false)
+  const [includeSyllabuses,  setIncludeSyllabuses]  = useState(false)
+  const [exporting, setExporting] = useState(false)
+
+  async function handleExport() {
+    setExporting(true)
+    try {
+      await downloadAccountExport({
+        include_submissions: includeSubmissions,
+        include_syllabuses:  includeSyllabuses,
+      })
+      addToast('Файл экспорта скачан', 'success')
+    } catch {
+      // Axios interceptor handles the toast.
+    } finally {
+      setExporting(false)
+    }
+  }
 
   async function handleDelete() {
     setError('')
@@ -58,6 +78,47 @@ export default function Settings() {
                 <div className="flex justify-between"><dt className="text-ink-secondary">Организация</dt><dd className="text-ink">{teacher.university}</dd></div>
               )}
             </dl>
+          </div>
+
+          {/* Export */}
+          <div className="bg-surface border border-border rounded-lg p-5 mb-6">
+            <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">
+              Экспорт данных
+            </div>
+            <p className="text-xs font-sans text-ink-secondary leading-relaxed mb-4">
+              Скачайте копию своих предметов, критериев, рубрик и утверждённых проверок в формате JSON.
+              Имена студентов автоматически обезличиваются.{' '}
+              <a href="/help?slug=account-export" className="text-amber hover:underline">Что входит в экспорт?</a>
+            </p>
+
+            <div className="space-y-2 mb-4">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeSubmissions}
+                  onChange={(e) => setIncludeSubmissions(e.target.checked)}
+                  className="mt-0.5 h-3.5 w-3.5 rounded border-border-mid accent-amber cursor-pointer flex-shrink-0"
+                />
+                <span className="text-xs font-sans text-ink leading-relaxed">
+                  Включить тексты работ студентов <span className="text-ink-tertiary">(имена остаются обезличенными)</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeSyllabuses}
+                  onChange={(e) => setIncludeSyllabuses(e.target.checked)}
+                  className="mt-0.5 h-3.5 w-3.5 rounded border-border-mid accent-amber cursor-pointer flex-shrink-0"
+                />
+                <span className="text-xs font-sans text-ink leading-relaxed">
+                  Включить программы предметов
+                </span>
+              </label>
+            </div>
+
+            <Button size="sm" loading={exporting} onClick={handleExport}>
+              Скачать экспорт
+            </Button>
           </div>
 
           {/* Danger zone */}

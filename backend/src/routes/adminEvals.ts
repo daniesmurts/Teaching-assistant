@@ -32,11 +32,13 @@ router.get('/config', asyncHandler(async (_req, res) => {
 
 // POST /api/admin/evals — start a flywheel replay (background)
 router.post('/', asyncHandler(async (req, res) => {
-  const { teacher_id, course_id, k, limit, notes } = req.body as {
+  const { teacher_id, course_id, k, limit, notes, provider } = req.body as {
     teacher_id?: string; course_id?: string; k?: number[]; limit?: number; notes?: string
+    provider?: 'deepseek' | 'yandex' | 'gigachat'
   }
   if (!teacher_id) throw new ValidationError('Укажите преподавателя')
   const conditions = Array.isArray(k) && k.length ? k.map(Number).filter((n) => Number.isInteger(n) && n >= 0) : [0, 3, 5]
+  const providerOverride = provider && ['deepseek', 'yandex', 'gigachat'].includes(provider) ? provider : undefined
 
   // Pre-check: reject with a clear message before creating a phantom run row.
   // (The harness has its own fallback in case the check is racy.)
@@ -47,12 +49,19 @@ router.post('/', asyncHandler(async (req, res) => {
     )
   }
 
+  // Provider tag goes into notes so the eval-runs list visually distinguishes
+  // comparison runs without needing a schema migration.
+  const taggedNotes = providerOverride
+    ? `[provider:${providerOverride}]${notes ? ` ${notes}` : ''}`
+    : notes
+
   const run = await createEvalRun({
-    teacherId: teacher_id, courseId: course_id, model: 'deepseek-chat',
-    conditions, notes, kind: 'flywheel',
+    teacherId: teacher_id, courseId: course_id,
+    model:    providerOverride ? `${providerOverride}-chat` : 'deepseek-chat',
+    conditions, notes: taggedNotes, kind: 'flywheel',
   })
   // Fire-and-forget — resume into the row we just created.
-  runReplay({ teacherId: teacher_id, courseId: course_id, conditions, limit, resumeRunId: run.id })
+  runReplay({ teacherId: teacher_id, courseId: course_id, conditions, limit, resumeRunId: run.id, providerOverride })
     .catch((err) => logger.error({ message: '[admin-eval] flywheel run failed', runId: run.id, error: err.message }))
 
   res.status(201).json(run)

@@ -38,7 +38,10 @@ router.get('/:id', asyncHandler(async (req, res) => {
 router.put('/:id', validate(updateCourseRules), asyncHandler(async (req, res) => {
   const course = await updateCourse(
     req.params.id, req.teacher.id,
-    req.body as { name?: string; code?: string; level?: string; syllabus_text?: string }
+    req.body as {
+      name?: string; code?: string; level?: string; syllabus_text?: string
+      share_rag_with_institution?: boolean
+    }
   )
   if (!course) throw new NotFoundError('Предмет')
   res.json(course)

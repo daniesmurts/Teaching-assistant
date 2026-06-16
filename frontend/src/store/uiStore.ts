@@ -20,11 +20,15 @@ interface UIState {
 
 export const useUIStore = create<UIState>((set) => ({
   toasts: [],
+  // Coerce to string at the store boundary as belt-and-braces — ToastContainer
+  // renders `toast.message` directly, so a non-string slip-through here would
+  // crash React. Better to render a less-helpful "[object Object]" than to
+  // unmount the toast tree (and with it any other toast on screen).
   addToast: (message, type = 'info') =>
     set((s) => ({
       toasts: [
         ...s.toasts,
-        { id: `${Date.now()}-${Math.random()}`, message, type },
+        { id: `${Date.now()}-${Math.random()}`, message: typeof message === 'string' ? message : String(message), type },
       ],
     })),
   removeToast: (id) =>

@@ -96,6 +96,49 @@ export async function createInstitutionCriterion(data: {
   return (await client.post<Criterion>('/api/institution/criteria', data)).data
 }
 
+// ─── Model sovereignty (Phase 4) ──────────────────────────────────────────────
+
+export type LLMProviderName = 'deepseek' | 'yandex' | null
+
+export interface InstitutionModelSummary {
+  preferred_provider: LLMProviderName
+  by_provider_30d:    Array<{ provider: string | null; n: number }>
+}
+
+export async function getInstitutionModel(): Promise<InstitutionModelSummary> {
+  return (await client.get<InstitutionModelSummary>('/api/institution/model')).data
+}
+
+export async function setInstitutionModel(provider: LLMProviderName): Promise<InstitutionModelSummary> {
+  return (await client.patch<InstitutionModelSummary>('/api/institution/model', { provider })).data
+}
+
+// ─── Shared RAG (institutional flywheel) ──────────────────────────────────────
+
+export interface SharedRagSummary {
+  enabled:                  boolean
+  shared_courses_n:         number
+  participating_teachers_n: number
+  cross_uses_30d:           number
+  courses: Array<{
+    course_id:        string
+    course_name:      string
+    course_code:      string | null
+    teacher_id:       string
+    teacher_name:     string | null
+    approved_n:       number
+    cross_uses_30d:   number
+  }>
+}
+
+export async function getSharedRag(): Promise<SharedRagSummary> {
+  return (await client.get<SharedRagSummary>('/api/institution/shared-rag')).data
+}
+
+export async function setSharedRagEnabled(enabled: boolean): Promise<SharedRagSummary> {
+  return (await client.patch<SharedRagSummary>('/api/institution/shared-rag', { enabled })).data
+}
+
 // ─── Shared rubrics ────────────────────────────────────────────────────────────
 
 import type { Rubric, RubricItem } from '../types'

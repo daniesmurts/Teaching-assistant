@@ -11,7 +11,9 @@ import { runLongReview } from '../services/longReview'
 import { createLongReview, getLongReviewById, getLongReviewByAssignmentId } from '../db/queries/longReviews'
 import { generateEmailDraft } from '../services/email'
 import { composeHandout } from '../services/handout'
-import { findAssignmentsByTeacher, findStudentsByTeacher, findAssignmentsForExport, findAssignmentById } from '../db/queries/assignments'
+import { searchFeedbackLibrary } from '../services/feedbackLibrary'
+import { getCrossInstitutionUseCount } from '../db/queries/ragRetrievals'
+import { findAssignmentsByTeacher, findStudentsByTeacher, findAssignmentsForExport, findAssignmentById, findApprovalHistory } from '../db/queries/assignments'
 import { toCsv, csvFilename } from '../lib/csv'
 import { pool } from '../db/connection'
 import type { GradeLetter, BulletItem } from '../../../shared/types'
@@ -156,6 +158,29 @@ router.get(
   })
 )
 
+// Approval history — the audit trail of every approve mutation on this row.
+// Latest first. Returns [] when the row has never been approved, single
+// element when it's been approved once (the common case).
+router.get(
+  '/assignment/:id/approval-history',
+  asyncHandler(async (req, res) => {
+    const history = await findApprovalHistory(req.params.id, req.teacher.id)
+    res.json({ history })
+  })
+)
+
+// Cross-teacher use count — how many times this teacher's grade has been
+// pulled into a colleague's RAG retrieval within the institution. Returns
+// {0, 0} for everything outside the institutional flywheel.
+router.get(
+  '/assignment/:id/cross-uses',
+  asyncHandler(async (req, res) => {
+    const assignment = await findAssignmentById(req.params.id, req.teacher.id)
+    if (!assignment) return res.status(404).json({ error: 'Работа не найдена', code: 'NOT_FOUND' })
+    res.json(await getCrossInstitutionUseCount(req.params.id))
+  })
+)
+
 // GET /api/grading/assignment/:id/review  — the long review (if any) behind an assignment.
 // Returns { review: null } rather than 404 so the client can quietly skip the chapter view.
 router.get(
@@ -187,19 +212,24 @@ router.post(
     const {
       approved_score, approved_grade, approved_feedback,
       approved_strengths, approved_improvements,
+      approved_criteria_scores, approved_edit_reason,
     } = req.body as {
-      approved_score: number
-      approved_grade: GradeLetter
-      approved_feedback: string
-      approved_strengths?: BulletItem[]
-      approved_improvements?: BulletItem[]
+      approved_score:           number
+      approved_grade:           GradeLetter
+      approved_feedback:        string
+      approved_strengths?:      BulletItem[]
+      approved_improvements?:   BulletItem[]
+      approved_criteria_scores?: import('../../../shared/types').CriterionScore[]
+      approved_edit_reason?:    import('../../../shared/types').ApprovedEditReason
     }
     const assignment = await approve(req.params.id, req.teacher.id, {
-      approvedScore:        Number(approved_score),
-      approvedGrade:        approved_grade,
-      approvedFeedback:     approved_feedback,
-      approvedStrengths:    approved_strengths,
-      approvedImprovements: approved_improvements,
+      approvedScore:           Number(approved_score),
+      approvedGrade:           approved_grade,
+      approvedFeedback:        approved_feedback,
+      approvedStrengths:       approved_strengths,
+      approvedImprovements:    approved_improvements,
+      approvedCriteriaScores:  approved_criteria_scores,
+      approvedEditReason:      approved_edit_reason,
     })
     res.json({ assignment })
   })
@@ -263,6 +293,26 @@ router.get(
       limit:        limit ? parseInt(limit, 10) : undefined,
     })
     res.json(result)
+  })
+)
+
+// GET /api/grading/library/search — search the teacher's own approved
+// feedback library. Powers both the /library page and the inline hint that
+// appears in the grading form while the AI is running.
+router.get(
+  '/library/search',
+  asyncHandler(async (req, res) => {
+    const q         = (req.query.q as string | undefined) ?? ''
+    const courseId  = (req.query.course_id as string | undefined) || undefined
+    const limitRaw  = parseInt((req.query.limit as string | undefined) ?? '', 10)
+    const limit     = Number.isFinite(limitRaw) ? limitRaw : 10
+
+    const hits = await searchFeedbackLibrary(req.teacher.id, {
+      query:    q,
+      courseId,
+      limit,
+    })
+    res.json({ hits })
   })
 )
 

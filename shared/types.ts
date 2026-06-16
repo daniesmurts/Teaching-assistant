@@ -35,6 +35,10 @@ export interface Teacher {
   phone:       string | null
   role?:       TeacherRole
   institution_id?: string | null
+  // Mirror of the teacher's institution's shared_rag_enabled flag — surfaced
+  // here so the Courses page can decide whether to show / enable the "поделиться
+  // с кафедрой" toggle without an extra round-trip.
+  institution_shared_rag_enabled?: boolean
   created_at:  string
 }
 
@@ -59,6 +63,7 @@ export interface Course {
   code: string | null
   level: CourseLevel | null
   syllabus_text: string | null
+  share_rag_with_institution: boolean    // opt-in for the kafedra-wide RAG flywheel
   created_at: string
 }
 
@@ -146,11 +151,45 @@ export interface CriterionScore {
 // (e.g. bullet "Выводы не подкреплены данными" → question "Какие данные легли
 // в основу вывода в разделе 3?"). Surfaced inline with a copy button in the
 // grading UI. Strengths bullets ignore the field.
+//
+// `criterion_id` links the bullet to the criterion it relates to (when criteria
+// were selected for the grading event). Validated against the snapshot so
+// hallucinated ids are dropped. Lets the corpus answer questions like
+// "all my improvement bullets about Аргументация" via direct JOIN instead of
+// text search.
 export interface BulletItem {
-  text:     string
-  quote?:   string | null
-  page?:    number | null
-  question?: string | null
+  text:          string
+  quote?:        string | null
+  page?:         number | null
+  question?:     string | null
+  criterion_id?: string | null
+}
+
+// Why the teacher edited the AI draft. Optional; surfaced as a dropdown next
+// to the Approve button only when an edit is detected. Becomes a training
+// signal and a queryable corpus dimension when populated.
+export type ApprovedEditReason =
+  | 'fact_check'        // ИИ ошибся фактически
+  | 'tone'              // вопрос интонации / формулировки
+  | 'criterion_weight'  // веса критериев распределены иначе
+  | 'scale'             // вопрос шкалы оценивания
+  | 'scope'             // ИИ отклонился от задания
+  | 'other'
+
+// One row in approved_revisions — the audit trail of every approve mutation.
+// First approve creates the row in approved_revisions AND fills the columns
+// on assignments; subsequent re-approves overwrite the assignments row but
+// append a new approved_revisions row, so history is never lost.
+export interface ApprovedRevision {
+  approved_at:              string
+  actor_teacher_id:         string | null
+  approved_score:           number | null
+  approved_grade:           GradeLetter | null
+  approved_feedback:        string | null
+  approved_strengths:       BulletItem[] | null
+  approved_improvements:    BulletItem[] | null
+  approved_criteria_scores: CriterionScore[] | null
+  approved_edit_reason:     ApprovedEditReason | null
 }
 
 // A question the teacher could ask the student to verify they understand their
@@ -238,11 +277,14 @@ export interface Assignment {
   criteria_snapshot: CriteriaSnapshotItem[] | null   // the criteria + weights used for this grading
   ai_confidence:     ConfidenceLevel | null       // present only on "thorough" (ensemble) gradings
   ai_ensemble:       AiEnsemble | null            // the variant samples behind the confidence
+  ai_provider:       string | null                 // which LLM provider graded this row (Phase 4)
   approved_score: number | null
   approved_grade: GradeLetter | null
   approved_feedback: string | null
   approved_strengths: BulletItem[] | null     // teacher-edited bullet list (null = AI default)
   approved_improvements: BulletItem[] | null  // ditto — feeds the revision check on resubmission
+  approved_criteria_scores: CriterionScore[] | null   // teacher-edited per-criterion scores (Phase asset-hardening)
+  approved_edit_reason:     ApprovedEditReason | null  // optional taxonomy of WHY the teacher edited
   approved_at: string | null
   status: AssignmentStatus
   parent_assignment_id: string | null              // linked previous version, if any

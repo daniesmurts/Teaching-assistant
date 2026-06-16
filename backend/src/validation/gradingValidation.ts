@@ -151,4 +151,19 @@ export const approveRules = [
   body('approved_improvements.*.page').optional({ nullable: true }).isInt({ min: 1, max: 10_000 }),
   body('approved_improvements.*.question').optional({ nullable: true }).isString()
     .isLength({ max: 500 }),
+  body('approved_strengths.*.criterion_id').optional({ nullable: true }).isUUID(),
+  body('approved_improvements.*.criterion_id').optional({ nullable: true }).isUUID(),
+
+  // Per-criterion approved scores. Same shape as ai_criteria_scores; the
+  // citation fields are echo-through for consistency with the AI output.
+  body('approved_criteria_scores').optional().isArray({ max: 20 }),
+  body('approved_criteria_scores.*.name').optional().isString().isLength({ max: 200 }),
+  body('approved_criteria_scores.*.score').optional().isInt({ min: 0, max: 100 }),
+  body('approved_criteria_scores.*.feedback').optional().isString().isLength({ max: 2000 }),
+  body('approved_criteria_scores.*.quote').optional({ nullable: true }).isString().isLength({ max: 500 }),
+  body('approved_criteria_scores.*.page').optional({ nullable: true }).isInt({ min: 1, max: 10_000 }),
+
+  body('approved_edit_reason').optional({ nullable: true })
+    .isIn(['fact_check', 'tone', 'criterion_weight', 'scale', 'scope', 'other'])
+    .withMessage('Неверная причина редактирования'),
 ]

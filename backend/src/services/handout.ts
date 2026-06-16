@@ -77,10 +77,10 @@ ${improvementsBlock}${questionsBlock}
   const r = await chatJSON<{ subject?: string; body?: string }>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'доработка',
-    { teacherId: params.teacherId, feature: 'feedback_email' },   // reuse the email-bucket usage tag
-    undefined,
-    undefined,
-    2048,
+    {
+      context:   { teacherId: params.teacherId, feature: 'feedback_email' },   // reuse the email-bucket usage tag
+      maxTokens: 2048,
+    },
   )
 
   const subject = (r.subject ?? 'Доработка работы').trim().slice(0, 200)

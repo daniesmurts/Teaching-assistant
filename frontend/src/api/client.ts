@@ -22,14 +22,35 @@ client.interceptors.request.use((config) => {
   return config
 })
 
+// Pull a *string* error message out of whatever the server (or an upstream
+// proxy) sent back. Reasons the field might not be a string:
+//   - express-validator failures sometimes attach an array/object payload
+//   - a non-ours-Express layer (502 from nginx, an interloper static server
+//     on the API port, etc.) returns raw HTML or a nested `{code, message}`
+//   - a future backend rewrite changes the contract
+// In any of those cases we'd rather fall through to the friendly Russian
+// fallback than crash <ToastContainer> with "Objects are not valid as a
+// React child".
+function extractErrorMessage(err: unknown): string | undefined {
+  const data = (err as { response?: { data?: unknown } })?.response?.data as Record<string, unknown> | undefined
+  const raw  = data?.error
+  return typeof raw === 'string' ? raw : undefined
+}
+
+function extractErrorCode(err: unknown): string | undefined {
+  const data = (err as { response?: { data?: unknown } })?.response?.data as Record<string, unknown> | undefined
+  const raw  = data?.code
+  return typeof raw === 'string' ? raw : undefined
+}
+
 // Central error handling
 client.interceptors.response.use(
   (res) => res,
   (err) => {
     const status  = err.response?.status
-    const code    = err.response?.data?.code    as string | undefined
-    const message = err.response?.data?.error   as string | undefined
-    const upgrade = err.response?.data?.upgrade as boolean | undefined
+    const code    = extractErrorCode(err)
+    const message = extractErrorMessage(err)
+    const upgrade = err.response?.data?.upgrade === true
 
     // Session expired → clear auth and redirect to login
     if (status === 401) {

@@ -165,6 +165,24 @@ export async function deleteCriterionTemplate(id: string): Promise<void> {
   await client.delete(`/api/admin/criteria/templates/${id}`)
 }
 
+// ─── Edit-distance / AI quality ───────────────────────────────────────────────
+
+export interface EditDistanceSummary {
+  n_total:                     number
+  n_30d:                       number
+  n_90d:                       number
+  mean_score_delta_30d:        number | null    // 0–100, lower = AI agrees with teachers
+  mean_score_delta_90d:        number | null
+  pct_feedback_changed_30d:    number | null    // 0–100
+  mean_strengths_kept_30d:     number | null    // 0–100
+  mean_improvements_kept_30d:  number | null    // 0–100
+}
+
+export async function getEditDistanceSummary(): Promise<EditDistanceSummary> {
+  const res = await client.get<EditDistanceSummary>('/api/admin/edit-distance')
+  return res.data
+}
+
 // ─── Global rubric templates ──────────────────────────────────────────────────
 
 import type { Rubric, RubricItem } from '../types'

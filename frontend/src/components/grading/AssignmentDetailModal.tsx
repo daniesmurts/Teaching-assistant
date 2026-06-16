@@ -5,9 +5,9 @@ import Badge from '../ui/Badge'
 import RevisionCheckList from './RevisionCheckList'
 import QuestionResponseList from './QuestionResponseList'
 import ConfidenceBadge from './ConfidenceBadge'
-import { getReviewByAssignment } from '../../api/grading'
+import { getReviewByAssignment, getAssignmentCrossUses, getApprovalHistory } from '../../api/grading'
 import { gradeColor } from '../../lib/grades'
-import type { Assignment, GradeLetter, AssignmentStatus, BulletItem, DefenseQuestion, ChapterReview, VerificationQuestion, Handout } from '../../types'
+import type { Assignment, GradeLetter, AssignmentStatus, BulletItem, DefenseQuestion, ChapterReview, VerificationQuestion, Handout, ApprovedRevision } from '../../types'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
 
@@ -47,6 +47,25 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
     queryFn: () => getReviewByAssignment(a.id),
   })
   const r = review?.result ?? null
+
+  // Has this grade been used as a RAG example by colleagues? Only matters
+  // when the institutional flywheel is on; the endpoint cheaply returns
+  // {0, 0} otherwise, so we always fetch.
+  const { data: crossUses } = useQuery({
+    queryKey: ['assignment-cross-uses', a.id],
+    queryFn: () => getAssignmentCrossUses(a.id),
+    staleTime: 5 * 60_000,
+  })
+
+  // Approval history — empty array for never-approved or pre-asset-hardening
+  // rows; one entry for the common case of a single approve; more when the
+  // teacher re-approved with changes.
+  const { data: approvalHistory = [] } = useQuery({
+    queryKey: ['assignment-approval-history', a.id],
+    queryFn: () => getApprovalHistory(a.id),
+    staleTime: 5 * 60_000,
+    enabled:  a.status === 'approved' || a.status === 'sent',
+  })
 
   const grade    = (a.approved_grade ?? a.ai_grade) as GradeLetter | null
   const score    = a.approved_score ?? a.ai_score
@@ -90,6 +109,14 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
                   title={`Текст доработки сформирован ${new Date(a.ai_handout.created_at).toLocaleDateString('ru-RU')} · ${a.ai_handout.improvements.length} пункт(ов), ${a.ai_handout.questions.length} вопрос(ов)`}
                 >
                   ✦ Доработка
+                </span>
+              )}
+              {crossUses && crossUses.count_lifetime > 0 && (
+                <span
+                  className="text-[10px] font-sans font-medium bg-success-bg text-success px-1.5 py-0.5 rounded-sm"
+                  title={`Эта работа была использована ИИ как образец при оценке работ коллег ${crossUses.count_lifetime} раз${crossUses.count_30d > 0 ? ` (${crossUses.count_30d} за 30 дней)` : ''}.`}
+                >
+                  ✦ Использовано кафедрой ×{crossUses.count_lifetime}
                 </span>
               )}
               {a.ai_confidence && (
@@ -153,6 +180,13 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
               subject + body and a copy button. */}
           {a.ai_handout && (
             <HandoutSnapshot handout={a.ai_handout} />
+          )}
+
+          {/* Approval history — collapsed by default; visible only when
+              there's more than one revision (the common case of "approved
+              once" stays out of the way). */}
+          {approvalHistory.length > 1 && (
+            <ApprovalHistorySection history={approvalHistory} />
           )}
 
           {/* Strengths / improvements — prefer teacher-edited values when present */}
@@ -281,6 +315,75 @@ function Label({ children }: { children: React.ReactNode }) {
 // Collapsed handout snapshot — shows what the teacher actually composed for
 // this assignment (the contract the AI checked the revision against). Useful
 // when looking back at a past grade and wanting to remember what was sent.
+// Audit trail of every approve mutation. First row = current state; older
+// rows let the teacher see what was changed. Renders nothing for the common
+// "one approval" case; the parent gates on history.length > 1.
+function ApprovalHistorySection({ history }: { history: ApprovedRevision[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider hover:text-ink-secondary transition-colors flex items-center gap-2"
+      >
+        <span>{open ? '−' : '+'} История утверждений</span>
+        <span className="text-ink-tertiary normal-case font-normal tracking-normal">
+          · {history.length} {pluralRevisions(history.length)}
+        </span>
+      </button>
+
+      {open && (
+        <ol className="mt-3 space-y-2">
+          {history.map((rev, i) => (
+            <li key={i} className="bg-surface-warm border border-border rounded-md p-3">
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-xs font-sans font-medium text-ink">
+                  {i === 0 ? 'Текущая редакция' : `Редакция #${history.length - i}`}
+                </div>
+                <div className="text-[10px] font-sans text-ink-tertiary">
+                  {new Date(rev.approved_at).toLocaleString('ru-RU')}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 mb-1 text-xs font-sans text-ink-secondary">
+                {rev.approved_grade && (
+                  <span><strong className="text-ink">{rev.approved_grade}</strong> · {rev.approved_score}/100</span>
+                )}
+                {rev.approved_edit_reason && (
+                  <span className="text-[10px] bg-info-bg text-info px-1.5 py-0.5 rounded-sm">
+                    {EDIT_REASON_LABEL[rev.approved_edit_reason] ?? rev.approved_edit_reason}
+                  </span>
+                )}
+              </div>
+              {rev.approved_feedback && (
+                <p className="text-[11.5px] font-sans text-ink-secondary leading-relaxed whitespace-pre-line">
+                  {rev.approved_feedback}
+                </p>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  )
+}
+
+const EDIT_REASON_LABEL: Record<string, string> = {
+  fact_check:       'фактическая ошибка',
+  tone:             'тон / формулировка',
+  criterion_weight: 'веса критериев',
+  scale:            'шкала оценивания',
+  scope:            'отклонение от задания',
+  other:            'другое',
+}
+
+function pluralRevisions(n: number): string {
+  const mod10 = n % 10, mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return 'редакция'
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'редакции'
+  return 'редакций'
+}
+
 function HandoutSnapshot({ handout }: { handout: Handout }) {
   const [open, setOpen] = useState(false)
   const addToast = useUIStore((s) => s.addToast)

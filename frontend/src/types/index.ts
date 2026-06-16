@@ -23,6 +23,8 @@ export type {
   QuestionResponseStatus,
   Handout,
   HandoutTone,
+  ApprovedEditReason,
+  ApprovedRevision,
   ConfidenceLevel,
   EnsembleSample,
   AiEnsemble,
