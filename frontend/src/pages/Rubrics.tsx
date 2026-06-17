@@ -5,7 +5,7 @@ import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { getCourses } from '../api/courses'
-import { getCriteria } from '../api/criteria'
+import { getCriteria, getCriteriaTemplates } from '../api/criteria'
 import {
   getRubrics, getRubricTemplates, createRubric, updateRubric, deleteRubric,
   type RubricPayload,
@@ -41,10 +41,19 @@ export default function Rubrics() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<FormState>(emptyForm)
 
-  const { data: rubrics = [] }    = useQuery({ queryKey: ['rubrics-all'],   queryFn: () => getRubrics() })
-  const { data: templates = [] }  = useQuery({ queryKey: ['rubrics-templates'], queryFn: getRubricTemplates })
-  const { data: courses = [] }    = useQuery({ queryKey: ['courses'],       queryFn: getCourses })
-  const { data: criteria = [] }   = useQuery({ queryKey: ['criteria-all'],  queryFn: () => getCriteria() })
+  const { data: rubrics = [] }            = useQuery({ queryKey: ['rubrics-all'],         queryFn: () => getRubrics() })
+  const { data: templates = [] }          = useQuery({ queryKey: ['rubrics-templates'],   queryFn: getRubricTemplates })
+  const { data: courses = [] }            = useQuery({ queryKey: ['courses'],             queryFn: getCourses })
+  const { data: personalCriteria = [] }   = useQuery({ queryKey: ['criteria-all'],        queryFn: () => getCriteria() })
+  const { data: templateCriteria = [] }   = useQuery({ queryKey: ['criteria-templates'],  queryFn: getCriteriaTemplates })
+
+  // Merge personal + globals so a new teacher's picker is not empty and so
+  // global-rubric "use as template" can resolve criterion ids in pickedFromRubric.
+  const criteria = useMemo(() => {
+    const byId = new Map<string, Criterion>()
+    for (const c of [...personalCriteria, ...templateCriteria]) if (!byId.has(c.id)) byId.set(c.id, c)
+    return Array.from(byId.values())
+  }, [personalCriteria, templateCriteria])
 
   const courseName = (id: string | null) => courses.find((c) => c.id === id)?.name
   const criterionById = useMemo(() => new Map(criteria.map((c) => [c.id, c])), [criteria])
@@ -225,7 +234,9 @@ export default function Rubrics() {
                   </option>
                   {available.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name}{c.subject ? ` · ${SUBJECT_LABEL[c.subject] ?? c.subject}` : ''}
+                      {c.name}
+                      {c.subject ? ` · ${SUBJECT_LABEL[c.subject] ?? c.subject}` : ''}
+                      {c.is_global_template ? ' · шаблон' : ''}
                     </option>
                   ))}
                 </select>

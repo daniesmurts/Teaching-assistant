@@ -2,6 +2,8 @@ import { useState } from 'react'
 import Button from '../ui/Button'
 import { useApprove } from '../../hooks/useGrading'
 import { GRADES, gradeColor, gradeLabel, GRADE_BRACKETS, scoreToGrade, snapScoreToGrade } from '../../lib/grades'
+import LongReviewBullet from './LongReviewBullet'
+import InconsistenciesBlock from './InconsistenciesBlock'
 import type { LongReview, GradeLetter, DefenseQuestion, ChapterReview } from '../../types'
 
 interface Props {
@@ -103,20 +105,34 @@ export default function ReviewResult({ review, onApproved }: Props) {
           <div className="grid grid-cols-2 gap-2.5">
             <div className="bg-success-bg border border-success/15 rounded-lg p-3">
               <div className="text-xs font-semibold text-success uppercase tracking-wide mb-2">Сильные стороны</div>
-              {r.overall_strengths.map((s) => (
-                <div key={s} className="flex gap-1.5 text-xs text-success mb-1 leading-relaxed">
-                  <span className="flex-shrink-0">·</span><span>{s}</span>
-                </div>
+              {r.overall_strengths.map((s, i) => (
+                <LongReviewBullet key={i} bullet={s} variant="positive" />
               ))}
             </div>
             <div className="bg-warning-bg border border-warning/15 rounded-lg p-3">
               <div className="text-xs font-semibold text-warning uppercase tracking-wide mb-2">Недостатки</div>
-              {r.overall_gaps.map((g) => (
-                <div key={g} className="flex gap-1.5 text-xs text-warning mb-1 leading-relaxed">
-                  <span className="flex-shrink-0">·</span><span>{g}</span>
-                </div>
+              {r.overall_gaps.map((g, i) => (
+                <LongReviewBullet key={i} bullet={g} variant="negative" />
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Cross-section contradictions — Tier-2 addition. Hidden when empty
+            (which is most reviews and all legacy rows). High-signal so it
+            sits above the coverage note. */}
+        <InconsistenciesBlock items={r.inconsistencies ?? []} chapters={r.chapter_reviews} />
+
+        {/* Coverage note — what was actually verified vs. where the model
+            couldn't get enough material. Tier-1 addition; null on legacy rows. */}
+        {r.coverage_note && (
+          <div className="bg-surface-warm border border-border rounded-md p-3">
+            <div className="text-[10px] font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-1.5">
+              Что проверено
+            </div>
+            <p className="text-xs font-sans text-ink-secondary leading-relaxed whitespace-pre-line">
+              {r.coverage_note}
+            </p>
           </div>
         )}
 
@@ -142,20 +158,16 @@ export default function ReviewResult({ review, onApproved }: Props) {
                         {c.strengths.length > 0 && (
                           <div>
                             <div className="text-[10px] font-semibold text-success uppercase tracking-wide mb-1">Плюсы</div>
-                            {c.strengths.map((s) => (
-                              <div key={s} className="flex gap-1.5 text-xs text-ink-secondary mb-0.5 leading-relaxed">
-                                <span className="text-success flex-shrink-0">+</span><span>{s}</span>
-                              </div>
+                            {c.strengths.map((s, j) => (
+                              <LongReviewBullet key={j} bullet={s} variant="positive" />
                             ))}
                           </div>
                         )}
                         {c.gaps.length > 0 && (
                           <div>
                             <div className="text-[10px] font-semibold text-warning uppercase tracking-wide mb-1">Замечания</div>
-                            {c.gaps.map((g) => (
-                              <div key={g} className="flex gap-1.5 text-xs text-ink-secondary mb-0.5 leading-relaxed">
-                                <span className="text-warning flex-shrink-0">−</span><span>{g}</span>
-                              </div>
+                            {c.gaps.map((g, j) => (
+                              <LongReviewBullet key={j} bullet={g} variant="negative" />
                             ))}
                           </div>
                         )}

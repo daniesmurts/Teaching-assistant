@@ -15,6 +15,43 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Added
+- **ВКР review — Tier-2 cross-section consistency** — catches the class of
+  error that was structurally invisible before: a number stated one way in
+  chapter 2 and another way in chapter 5. (1) The section pass now extracts
+  a `key_quantities` array per chapter — name + value + verbatim quote —
+  alongside strengths/gaps. Quote validated against the section text;
+  `chapter_index` stamped by the orchestrator. (2) A new
+  `findInconsistencies` post-synthesis pass runs in two stages: deterministic
+  clustering by lowercased quantity name → only candidates with ≥2 different
+  numeric values, then an LLM confirmation call that filters out
+  same-name-different-concept false positives ("температура реакции" vs
+  "температура окружающей среды") and emits a 1-line summary per real
+  contradiction. (3) A new `inconsistencies: Inconsistency[]` field on
+  `LongReviewResult` + an `InconsistenciesBlock` UI surfaced above the
+  coverage note in both the ВКР result page and the assignment detail modal.
+  Hidden when empty so legacy rows render unchanged. 7 unit tests pin the
+  deterministic clustering (case-insensitive grouping, decimal-separator
+  normalisation, single-numeric-value rejection, multi-cluster output).
+- **ВКР review — Tier-1 prompt overhaul** — three changes that move the long-form
+  review from rubber-stamp prose to evidence-grounded analysis. (1) **Recall-bias
+  framing** in both the section pass and the synthesis pass: "это
+  предварительный разбор для преподавателя — лучше задать вопрос, чем
+  промолчать". Gives the model permission to flag instead of hedge. (2)
+  **Two-pass section analysis**: extract claims/numbers/formulas with verbatim
+  quotes FIRST, then judge only over the extracted set — kills the
+  confident-but-ungrounded prose. (3) **Evidence requirement** on every chapter
+  strength/gap and every overall strength/gap: must include a verbatim quote
+  validated against the section (analyzeSection) and the full submission
+  (synthesizeReview). Bullets without resolvable quotes are dropped at the
+  normaliseBullets boundary, same contract as regular grading bullets. Also
+  added a `coverage_note` field on the synthesis: 1–3 sentences on what was
+  actually verified vs. where evidence was thin — rendered as a small "Что
+  проверено" block at the top of the review and in the assignment detail modal.
+  `ChapterReview.strengths/gaps` and `LongReviewResult.overall_strengths/gaps`
+  changed from `string[]` to `Array<BulletItem | string>` (legacy rows still
+  hold strings; new ones hold BulletItem with quote). No DB migration — JSONB
+  column. Frontend renderers go through a new shared `LongReviewBullet`
+  component that tolerates both shapes.
 - **Curriculum content-overlap analysis** (`/curriculum`, КНИТУ admin feature A3) —
   «Анализ учебного плана». Teacher selects ≥2 disciplines; the system extracts a
   topic list per discipline (LLM), embeds each topic, cross-compares topics across

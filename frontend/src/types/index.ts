@@ -33,6 +33,8 @@ export type {
   LongReviewStatus,
   ChapterReview,
   DefenseQuestion,
+  KeyQuantity,
+  Inconsistency,
   TopicSet,
   TopicItem,
   StudentLevel,

@@ -1,5 +1,6 @@
 import { chatJSON } from './deepseek'
-import { resolveCriteriaSnapshot } from './grading'
+import { resolveCriteriaSnapshot, normaliseBullets } from './grading'
+import type { BulletItem } from '../../../shared/types'
 import { createAssignment } from '../db/queries/assignments'
 import {
   setLongReviewStatus,
@@ -12,7 +13,7 @@ import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { logger } from '../lib/logger'
 import type { CallContext } from './deepseek'
-import type { LongReviewResult, ChapterReview, DefenseQuestion, GradeLetter, CriteriaSnapshotItem } from '../../../shared/types'
+import type { LongReviewResult, ChapterReview, DefenseQuestion, GradeLetter, CriteriaSnapshotItem, KeyQuantity, Inconsistency } from '../../../shared/types'
 
 // ─── Tuning ────────────────────────────────────────────────────────────────────
 
@@ -58,8 +59,11 @@ export async function runLongReview(p: RunParams): Promise<void> {
 
     // ── Map: analyse each section, with bounded concurrency + progress ──────────
     let done = 0
-    const analyses = await mapWithConcurrency(sections, MAP_CONCURRENCY, async (sec) => {
+    const analyses = await mapWithConcurrency(sections, MAP_CONCURRENCY, async (sec, idx) => {
       const a = await analyzeSection(sec, snapshot, ctx)
+      // Tier-2: stamp each key quantity with the index of THIS section so the
+      // cross-section pass — and the frontend — can show where it came from.
+      a.key_quantities = a.key_quantities.map((q) => ({ ...q, chapter_index: idx }))
       done += 1
       await setLongReviewProgress(p.reviewId, done, sections.length).catch(() => null)
       return a
@@ -67,7 +71,7 @@ export async function runLongReview(p: RunParams): Promise<void> {
 
     // ── Reduce: synthesise the overall review ───────────────────────────────────
     await setLongReviewStatus(p.reviewId, 'synthesizing')
-    const result = await synthesizeReview(sections, analyses, snapshot, ctx)
+    const result = await synthesizeReview(sections, analyses, snapshot, p.submissionText, ctx)
 
     // Defence questions go through their own dedicated call — the synthesis
     // JSON for a long ВКР (24 chapters × prose + arrays) regularly drained the
@@ -78,6 +82,18 @@ export async function runLongReview(p: RunParams): Promise<void> {
     } catch (err) {
       logger.warn({ message: 'Defence questions failed', reviewId: p.reviewId, error: (err as Error).message })
       result.defense_questions = []
+    }
+
+    // Tier-2 cross-section consistency. Cluster extracted quantities by name;
+    // if any cluster has conflicting numeric values, ask the model to confirm
+    // it's a real contradiction (vs. two different concepts that happen to
+    // share a name). Failing the call leaves inconsistencies=[] — review still
+    // ships.
+    try {
+      result.inconsistencies = await findInconsistencies(analyses, result.chapter_reviews, ctx)
+    } catch (err) {
+      logger.warn({ message: 'Consistency pass failed', reviewId: p.reviewId, error: (err as Error).message })
+      result.inconsistencies = []
     }
 
     // ── Draft assignment so it flows into history / approval / email / RAG ──────
@@ -93,12 +109,11 @@ export async function runLongReview(p: RunParams): Promise<void> {
       aiGradeLabel:  result.grade_label ?? gradeToLabel(normaliseGrade(result.suggested_grade)),
       aiFeedback:    result.overall_summary,
       aiCriteriaScores: [],
-      // Long-review's overall_strengths/gaps are still string arrays inside the
-      // JSONB result column — but the draft assignment row uses the new
-      // BulletItem shape, so wrap each string. Quotes/pages aren't surfaced for
-      // ВКР-length works yet (citations would need section offsets).
-      aiStrengths:    (result.overall_strengths ?? []).map((s) => ({ text: s, quote: null, page: null })),
-      aiImprovements: (result.overall_gaps      ?? []).map((s) => ({ text: s, quote: null, page: null })),
+      // Tier-1: overall_strengths/gaps are now BulletItem[] (with verbatim
+      // quotes validated against the submission). Older review rows may still
+      // hold plain strings — wrap any straggler defensively.
+      aiStrengths:    (result.overall_strengths ?? []).map(toBulletItem),
+      aiImprovements: (result.overall_gaps      ?? []).map(toBulletItem),
       criteriaSnapshot: snapshot.length > 0 ? snapshot : null,
     })
 
@@ -242,8 +257,15 @@ function sizeSplit(text: string, baseTitle: string): { title: string; text: stri
 interface SectionAnalysis {
   title:     string
   summary:   string
-  strengths: string[]
-  gaps:      string[]
+  // Each bullet carries a verbatim quote from this section so the synthesis
+  // pass — and the teacher — can trace the claim back to its evidence.
+  strengths: BulletItem[]
+  gaps:      BulletItem[]
+  // Tier-2: quantitative claims pulled from this section, used by the
+  // post-synthesis consistency pass to detect cross-section contradictions.
+  // chapter_index is stamped by the orchestrator (analyzeSection doesn't
+  // know its own index).
+  key_quantities: KeyQuantity[]
 }
 
 async function analyzeSection(
@@ -257,34 +279,108 @@ async function analyzeSection(
   // Cap the text sent per section (huge reference lists / appendices)
   const body = capMiddle(section.text, SECTION_MAX_CHARS)
 
+  // Tier-1 system prompt — recall-bias framing + neutral tone. The model
+  // tends to hedge into generic prose without the explicit permission to flag
+  // uncertainties as questions; this rewards over-flagging where it matters.
   const system =
-    `Вы — научный рецензент выпускных квалификационных работ. Кратко и предметно проанализируйте ` +
-    `один раздел работы. Отвечайте только валидным JSON на русском языке.`
+    `Вы — научный рецензент выпускных квалификационных работ. Это ПРЕДВАРИТЕЛЬНЫЙ разбор для ` +
+    `преподавателя, а не окончательная оценка. Лучше задать уточняющий вопрос, чем промолчать о ` +
+    `подозрительном моменте. Не выносите финальный вердикт по работе — это делает преподаватель. ` +
+    `Описывайте дефект и его последствие, а не личность студента. Если по предоставленному фрагменту ` +
+    `раздел оценить нельзя — так и напишите. Отвечайте только валидным JSON на русском языке.`
+
+  // Two-pass instruction: extract evidence first, then judge. Constrains the
+  // model to commit to verbatim quotes before opinionating, which kills the
+  // confident-but-ungrounded prose we were getting.
   const user =
     `${criteriaHint}Раздел: «${section.title}»
 <section>
 ${sanitiseForPrompt(body)}
 </section>
 
-Верните JSON: {"summary": "2–4 предложения о содержании и качестве раздела", ` +
-    `"strengths": ["до 3 сильных сторон"], "gaps": ["до 3 недостатков или вопросов"]}`
+Работайте в два прохода:
+ШАГ 1 (извлечение): соберите все ключевые количественные утверждения раздела — ` +
+    `численные величины (плотности, давления, температуры, объёмы выборки, сроки, ` +
+    `проценты), коэффициенты в формулах, марки материалов, объёмы выборки, размеры ` +
+    `групп, ссылки на конкретные нормы. К каждому — точная цитата из раздела.
+ШАГ 2 (суждение): рассуждайте ТОЛЬКО на основе извлечённого материала. Никаких ` +
+    `догадок, никаких терминов и коэффициентов, которых нет в тексте.
+
+Верните JSON со следующими полями (все обязательны):
+- "summary": 2–4 предложения о содержании раздела
+- "key_quantities": массив объектов вида ` +
+    `{"name": "название величины (стандартизованное, без вашего раздела)", "value": "значение с единицами как в тексте (например, «850 кг/м³», «n=42», «32 ч»)", "quote": "точная цитата из раздела, содержащая значение"}. ` +
+    `Используйте короткое стандартное название («плотность нефти», а не «плотность нефти в первом столбце»), ` +
+    `чтобы другое употребление этой же величины в другом разделе получило такое же имя. ` +
+    `Если в разделе нет количественных утверждений — верните пустой массив.
+- "strengths": до 3 объектов вида ` +
+    `{"text": "что именно сделано хорошо (1–2 предложения)", "quote": "точная цитата из раздела"}. ` +
+    `Помечайте сильной стороной ТОЛЬКО то, что вы проверили по цитате. Если проверить нельзя — не добавляйте.
+- "gaps": до 3 объектов вида ` +
+    `{"text": "недостаток или вопрос для проверки (1–2 предложения)", "quote": "точная цитата из раздела, к которой относится замечание"}. ` +
+    `Если не можете точно процитировать то, что критикуете, переформулируйте пункт как ВОПРОС (что уточнить у автора).
+
+Ответьте ТОЛЬКО JSON-объектом.`
 
   try {
-    const r = await chatJSON<{ summary: string; strengths?: string[]; gaps?: string[] }>(
+    const r = await chatJSON<{
+      summary:         string
+      strengths?:      unknown[]
+      gaps?:           unknown[]
+      key_quantities?: unknown[]
+    }>(
       [{ role: 'system', content: system }, { role: 'user', content: user }],
       'анализ раздела',
       { context: ctx },
     )
+    // Validate quotes against THIS section's text — quotes that don't appear
+    // verbatim get dropped (page is irrelevant at section grain; pass a
+    // permissive pageCount so the citation validator doesn't strip it).
+    type RawBullets = Parameters<typeof normaliseBullets>[0]
+    const strengths = normaliseBullets((r.strengths ?? []) as RawBullets, body, 9999).slice(0, 3)
+    const gaps      = normaliseBullets((r.gaps      ?? []) as RawBullets, body, 9999).slice(0, 3)
+    const key_quantities = normaliseKeyQuantities(r.key_quantities, body).slice(0, 8)
     return {
       title:     section.title,
       summary:   r.summary ?? '',
-      strengths: (r.strengths ?? []).slice(0, 3),
-      gaps:      (r.gaps ?? []).slice(0, 3),
+      strengths,
+      gaps,
+      key_quantities,
     }
   } catch (err) {
     logger.warn({ message: 'Section analysis failed', title: section.title, error: (err as Error).message })
-    return { title: section.title, summary: '(не удалось проанализировать раздел)', strengths: [], gaps: [] }
+    return { title: section.title, summary: '(не удалось проанализировать раздел)', strengths: [], gaps: [], key_quantities: [] }
   }
+}
+
+/**
+ * Validate the model's key_quantities output. Same contract as bullet quotes:
+ * a quantity is kept only if its quote appears verbatim in the section text
+ * (case- and whitespace-insensitive). chapter_index is stamped to 0 here and
+ * rewritten by the orchestrator once it knows the section's actual position.
+ */
+function normaliseKeyQuantities(raw: unknown, sectionText: string): KeyQuantity[] {
+  if (!Array.isArray(raw)) return []
+  const haystack = sectionText.toLowerCase().replace(/\s+/g, ' ').trim()
+  const out: KeyQuantity[] = []
+  for (const q of raw) {
+    if (!q || typeof q !== 'object') continue
+    const obj = q as Record<string, unknown>
+    const name  = typeof obj.name  === 'string' ? obj.name.trim()  : ''
+    const value = typeof obj.value === 'string' ? obj.value.trim() : ''
+    const rawQuote = typeof obj.quote === 'string' ? obj.quote.trim() : ''
+    if (!name || !value || !rawQuote) continue
+    if (name.length > 120 || value.length > 80) continue
+    const norm = rawQuote.toLowerCase().replace(/\s+/g, ' ').trim()
+    if (norm.length < 8 || !haystack.includes(norm)) continue
+    out.push({
+      name,
+      value,
+      quote:         rawQuote.slice(0, 220),
+      chapter_index: 0,    // stamped by the orchestrator
+    })
+  }
+  return out
 }
 
 // ─── Reduce: synthesise the overall review ─────────────────────────────────────
@@ -293,6 +389,7 @@ async function synthesizeReview(
   sections: Section[],
   analyses: SectionAnalysis[],
   criteria: CriteriaSnapshotItem[],
+  submissionText: string,
   ctx: CallContext
 ): Promise<LongReviewResult> {
   const intro = sections.find((s) => s.kind === 'intro')
@@ -306,35 +403,71 @@ async function synthesizeReview(
     (intro ? `## Введение (полностью)\n<intro>\n${sanitiseForPrompt(capMiddle(intro.text, VERBATIM_CHARS))}\n</intro>\n\n` : '') +
     (concl ? `## Заключение (полностью)\n<conclusion>\n${sanitiseForPrompt(capMiddle(concl.text, VERBATIM_CHARS))}\n</conclusion>\n\n` : '')
 
+  // Tier-1: preserve evidence per bullet so the synthesis can carry quotes
+  // through to the overall view instead of joining bullets into prose.
+  const renderBullets = (bs: BulletItem[]) =>
+    bs.length === 0 ? '—' :
+    bs.map((b) => `· ${b.text}${b.quote ? ` — «${b.quote}»` : ''}`).join('\n  ')
+
   const analysisBlock = analyses
     .map((a, i) => `### Раздел ${i + 1}: ${a.title}
 ${a.summary}
-Сильные стороны: ${a.strengths.join('; ') || '—'}
-Недостатки/вопросы: ${a.gaps.join('; ') || '—'}`)
+Сильные стороны:
+  ${renderBullets(a.strengths)}
+Недостатки/вопросы:
+  ${renderBullets(a.gaps)}`)
     .join('\n\n')
 
+  // Tier-1 system prompt — recall-bias + role separation. The "это не
+  // окончательная оценка" reminder is intentional: it makes the model braver
+  // about flagging things, not blander, because it knows the teacher reviews.
   const system =
-    `Вы — научный руководитель и член аттестационной комиссии. На основе поразделного анализа ` +
-    `составьте развёрнутую рецензию на выпускную квалификационную работу. Будьте конкретны и ` +
-    `академичны. Оценка является РЕКОМЕНДАТЕЛЬНОЙ — окончательное решение принимает преподаватель. ` +
+    `Вы — научный руководитель и член аттестационной комиссии. Это ПРЕДВАРИТЕЛЬНЫЙ разбор работы ` +
+    `для преподавателя — окончательное решение по оценке принимает он. Лучше поднять сомнение, чем ` +
+    `промолчать. Не утверждайте то, что не можете подкрепить цитатой. Если по предоставленному ` +
+    `материалу критерий проверить нельзя — отметьте это в "coverage_note", а не выдумывайте оценку. ` +
+    `Тон — академический и нейтральный: описывайте дефект и его последствие, не личность студента. ` +
     `Отвечайте только валидным JSON на русском языке.`
 
   const user =
-    `${criteriaBlock}${verbatim}## Поразделный анализ работы
+    `${criteriaBlock}${verbatim}## Поразделный анализ работы (с цитатами)
 ${analysisBlock}
 
-Составьте итоговую рецензию. Верните JSON со следующими полями:
+Составьте итоговую рецензию. Используйте ТОЛЬКО материал из поразделного анализа выше — не ` +
+    `придумывайте новых фактов и цитат. Цитаты, которые вы переносите в итоговые пункты, должны ` +
+    `точно совпадать с цитатами из анализа разделов.
+
+Верните JSON со следующими полями (все обязательны):
 - "overall_summary": общее заключение по работе (2–3 абзаца)
 - "suggested_score": рекомендуемый балл 0–100
 - "suggested_grade": одна из "5","4","3","2" (5: 87–100, 4: 73–86, 3: 60–72, 2: ниже 60)
 - "grade_label": "Отлично"|"Хорошо"|"Удовлетворительно"|"Неудовлетворительно"
-- "chapter_reviews": массив {"title": string, "assessment": "1–2 абзаца", "strengths": [..], "gaps": [..]} по каждому разделу
-- "overall_strengths": 3–6 ключевых достоинств работы
-- "overall_gaps": 3–6 ключевых недостатков
+- "chapter_reviews": массив по разделам ` +
+    `{"title": string, "assessment": "1–2 абзаца", "strengths": [{"text": "...", "quote": "точная цитата"}], "gaps": [{"text": "...", "quote": "точная цитата"}]}
+- "overall_strengths": 3–6 главных достоинств работы в виде ` +
+    `[{"text": "...", "quote": "цитата из работы, подтверждающая пункт"}]. Сильной стороной может быть только то, что вы проверили по цитате.
+- "overall_gaps": 3–6 главных недостатков в виде ` +
+    `[{"text": "...", "quote": "цитата из работы, к которой относится замечание"}]. Если цитировать нечего, переформулируйте как вопрос для уточнения у автора.
+- "coverage_note": 1–3 предложения о том, какие критерии вы фактически проверили и где материала не хватило ` +
+    `для уверенного суждения (например, "методология описана подробно, но проверить расчёты в главе 3 по предоставленному тексту нельзя").
 
 Ответьте ТОЛЬКО JSON-объектом.`
 
-  const r = await chatJSON<Partial<LongReviewResult>>(
+  const r = await chatJSON<{
+    overall_summary?:   string
+    suggested_score?:   number
+    suggested_grade?:   unknown
+    grade_label?:       string
+    chapter_reviews?:   Array<{
+      title?:      string
+      assessment?: string
+      strengths?:  unknown[]
+      gaps?:       unknown[]
+    }>
+    overall_strengths?: unknown[]
+    overall_gaps?:      unknown[]
+    coverage_note?:     string
+  }>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'итоговая рецензия',
     {
@@ -345,15 +478,24 @@ ${analysisBlock}
     },
   )
 
+  // Validate quotes against the FULL submission — section-grain validation
+  // already ran at analyzeSection time, but the model may rewrite quotes when
+  // summarising, so we re-check.
+  type RawBullets = Parameters<typeof normaliseBullets>[0]
+  const overallStrengths = normaliseBullets((r.overall_strengths ?? []) as RawBullets, submissionText, 9999).slice(0, 8)
+  const overallGaps      = normaliseBullets((r.overall_gaps      ?? []) as RawBullets, submissionText, 9999).slice(0, 8)
+
   return {
     overall_summary:   r.overall_summary ?? '',
     suggested_score:   typeof r.suggested_score === 'number' ? clampScore(r.suggested_score) : null,
     suggested_grade:   r.suggested_grade ? normaliseGrade(r.suggested_grade) : null,
     grade_label:       r.grade_label ?? null,
-    chapter_reviews:   normaliseChapters(r.chapter_reviews, analyses),
-    overall_strengths: (r.overall_strengths ?? []).slice(0, 8),
-    overall_gaps:      (r.overall_gaps ?? []).slice(0, 8),
+    chapter_reviews:   normaliseChapters(r.chapter_reviews, analyses, submissionText),
+    overall_strengths: overallStrengths,
+    overall_gaps:      overallGaps,
     defense_questions: [],   // populated by generateDefenseQuestions in the orchestrator
+    coverage_note:     (r.coverage_note ?? '').trim() || null,
+    inconsistencies:   [],   // populated by findInconsistencies in the orchestrator
   }
 }
 
@@ -383,7 +525,13 @@ async function generateDefenseQuestions(
     : analyses.map((a) => ({ title: a.title, assessment: a.summary, strengths: a.strengths, gaps: a.gaps }))
 
   const chapterBlock = chapters
-    .map((c, i) => `### Раздел ${i}: ${c.title}\n${c.assessment}\nЗамечания: ${c.gaps.join('; ') || '—'}`)
+    .map((c, i) => {
+      // c.gaps is now BulletItem[] (Tier-1) but legacy review rows held strings.
+      // Render either shape as plain text — the defence-questions model only
+      // needs the gist of what was flagged in each chapter.
+      const gapText = c.gaps.map((g) => typeof g === 'string' ? g : g.text).filter(Boolean).join('; ') || '—'
+      return `### Раздел ${i}: ${c.title}\n${c.assessment}\nЗамечания: ${gapText}`
+    })
     .join('\n\n')
 
   const system =
@@ -444,23 +592,182 @@ ${chapterBlock}
     .slice(0, 8)
 }
 
+// ─── Tier 2: cross-section consistency ─────────────────────────────────────────
+//
+// Two-stage to keep cost and false-positive rate low:
+//   1. Deterministic clustering — group key_quantities by lowercased name;
+//      keep clusters where >=2 occurrences have different numeric values.
+//      Cheap, predictable, and catches the "плотность 850 vs 920" case.
+//   2. LLM confirmation pass — over the *candidates only*, ask the model
+//      whether each cluster is a real contradiction or just two unrelated
+//      concepts that share a name ("температура реакции" vs "температура
+//      окружающей среды"). Returns a 1-line summary per real contradiction.
+//
+// Failing the LLM call leaves inconsistencies=[] — the rest of the review
+// still ships. Stage 1 alone is not used as a fallback because the false-
+// positive rate is too high without semantic check (e.g. "выборка" appears
+// with different sizes in different sub-studies).
+
+interface QuantityCluster {
+  name:         string                 // canonical (lowercased) name used to group
+  display_name: string                 // model's most common spelling, for the UI
+  occurrences:  KeyQuantity[]
+}
+
+export function clusterByName(quantities: KeyQuantity[]): QuantityCluster[] {
+  const groups = new Map<string, KeyQuantity[]>()
+  for (const q of quantities) {
+    const key = q.name.toLowerCase().replace(/\s+/g, ' ').trim()
+    if (!key) continue
+    const arr = groups.get(key) ?? []
+    arr.push(q)
+    groups.set(key, arr)
+  }
+
+  const candidates: QuantityCluster[] = []
+  for (const [key, arr] of groups) {
+    if (arr.length < 2) continue
+    // Need at least two different numeric values to be a candidate
+    // contradiction. Pure text-only mismatches ("сталь 09Г2С" vs "сталь
+    // 09Г2С-У") are rejected here — they're rarely real contradictions and
+    // raising them inflates noise.
+    const numerics = new Set(
+      arr
+        .map((q) => extractFirstNumber(q.value))
+        .filter((n): n is string => n !== null)
+    )
+    if (numerics.size < 2) continue
+    candidates.push({
+      name:         key,
+      display_name: arr[0].name,
+      occurrences:  arr,
+    })
+  }
+  return candidates
+}
+
+function extractFirstNumber(s: string): string | null {
+  // Pulls the first number, normalising the decimal separator. Used only
+  // for deterministic clustering — the model sees the original value text.
+  const m = s.match(/-?\d+(?:[.,]\d+)?/)
+  return m ? m[0].replace(',', '.') : null
+}
+
+async function findInconsistencies(
+  analyses:       SectionAnalysis[],
+  chapterReviews: ChapterReview[],
+  ctx:            CallContext,
+): Promise<Inconsistency[]> {
+  const allQuantities = analyses.flatMap((a) => a.key_quantities)
+  const clusters = clusterByName(allQuantities)
+  if (clusters.length === 0) return []
+
+  // Build a compact, numbered list the model can refer back to by index.
+  const titleOf = (idx: number) =>
+    chapterReviews[idx]?.title ?? analyses[idx]?.title ?? `Раздел ${idx + 1}`
+
+  const clusterBlock = clusters
+    .map((c, i) => {
+      const lines = c.occurrences
+        .map((o) => `    – «${titleOf(o.chapter_index)}»: ${o.value}  — «${o.quote}»`)
+        .join('\n')
+      return `${i + 1}. ${c.display_name}\n${lines}`
+    })
+    .join('\n\n')
+
+  const system =
+    `Вы — рецензент, проверяющий внутреннюю согласованность работы. На вход дан список ` +
+    `количественных величин, извлечённых из разных разделов. Часть из них может оказаться ` +
+    `РАЗНЫМИ понятиями с похожим названием — это НЕ противоречие. Реальное противоречие — ` +
+    `когда одна и та же величина в одной и той же работе имеет несовместимые значения. ` +
+    `Отвечайте только валидным JSON на русском языке.`
+
+  const user =
+    `## Кандидаты на противоречие (каждый — группа упоминаний с расходящимися значениями)
+${clusterBlock}
+
+По каждой группе определите: это РЕАЛЬНОЕ противоречие в работе или просто разные ` +
+    `понятия со схожими именами? Верните JSON:
+{
+  "items": [
+    {
+      "cluster_index": число (номер группы выше, начиная с 1),
+      "is_contradiction": true|false,
+      "summary": "если is_contradiction=true: 1 предложение, в чём именно несовместимость. Иначе — пустая строка."
+    }
+  ]
+}
+Включите ответ по КАЖДОЙ группе из списка. Не добавляйте групп, которых не было в списке.`
+
+  const r = await chatJSON<{
+    items?: Array<{
+      cluster_index?:    number
+      is_contradiction?: boolean
+      summary?:          string
+    }>
+  }>(
+    [{ role: 'system', content: system }, { role: 'user', content: user }],
+    'проверка согласованности',
+    { context: ctx, maxTokens: 1024 },
+  )
+
+  const out: Inconsistency[] = []
+  for (const item of r.items ?? []) {
+    if (item.is_contradiction !== true) continue
+    const idx = typeof item.cluster_index === 'number' ? item.cluster_index - 1 : -1
+    const cluster = clusters[idx]
+    if (!cluster) continue
+    const summary = typeof item.summary === 'string' ? item.summary.trim() : ''
+    if (!summary) continue
+    out.push({
+      name:        cluster.display_name,
+      occurrences: cluster.occurrences,
+      summary:     summary.slice(0, 280),
+    })
+  }
+  return out.slice(0, 6)   // cap UI noise — anything beyond ~5 is fatigue
+}
+
 function normaliseChapters(
-  chapters: ChapterReview[] | undefined,
-  analyses: SectionAnalysis[]
+  chapters: Array<{
+    title?:      string
+    assessment?: string
+    strengths?:  unknown[]
+    gaps?:       unknown[]
+  }> | undefined,
+  analyses: SectionAnalysis[],
+  submissionText: string,
 ): ChapterReview[] {
+  type RawBullets = Parameters<typeof normaliseBullets>[0]
   if (chapters && chapters.length) {
     return chapters.map((c) => ({
-      title:     c.title ?? '',
+      title:      c.title ?? '',
       assessment: c.assessment ?? '',
-      strengths: c.strengths ?? [],
-      gaps:      c.gaps ?? [],
+      // Validate quotes against the full submission — synthesis may rewrite
+      // them when consolidating. Bullets without verbatim quotes survive as
+      // plain text (normaliseBullets keeps .text, drops only the quote).
+      strengths:  normaliseBullets((c.strengths ?? []) as RawBullets, submissionText, 9999),
+      gaps:       normaliseBullets((c.gaps      ?? []) as RawBullets, submissionText, 9999),
     }))
   }
   // Fallback to the raw section analyses if the reduce omitted chapter_reviews
-  return analyses.map((a) => ({ title: a.title, assessment: a.summary, strengths: a.strengths, gaps: a.gaps }))
+  return analyses.map((a) => ({
+    title:      a.title,
+    assessment: a.summary,
+    strengths:  a.strengths,
+    gaps:       a.gaps,
+  }))
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
+
+// Coerce a possibly-legacy (string) or new (BulletItem) entry into BulletItem.
+// Used at the boundary into the assignments table, which expects BulletItem[].
+function toBulletItem(b: BulletItem | string): BulletItem {
+  return typeof b === 'string'
+    ? { text: b, quote: null, page: null }
+    : b
+}
 
 // Keep head + tail of an over-long block, dropping the middle with a marker.
 function capMiddle(text: string, maxChars: number): string {
@@ -473,14 +780,14 @@ function capMiddle(text: string, maxChars: number): string {
 async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
-  fn: (item: T) => Promise<R>
+  fn: (item: T, index: number) => Promise<R>
 ): Promise<R[]> {
   const results: R[] = new Array(items.length)
   let next = 0
   async function worker(): Promise<void> {
     while (next < items.length) {
       const i = next++
-      results[i] = await fn(items[i])
+      results[i] = await fn(items[i], i)
     }
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))

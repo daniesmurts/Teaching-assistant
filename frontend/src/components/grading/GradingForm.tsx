@@ -4,8 +4,8 @@ import Button from '../ui/Button'
 import { Textarea } from '../ui/Input'
 import { getCourses } from '../../api/courses'
 import { getStudents, startReview, getReview } from '../../api/grading'
-import { getCriteria } from '../../api/criteria'
-import { getRubrics } from '../../api/rubrics'
+import { getCriteria, getCriteriaTemplates } from '../../api/criteria'
+import { getRubrics, getRubricTemplates } from '../../api/rubrics'
 import DocumentUpload from '../ui/DocumentUpload'
 import NoCourseHint from '../onboarding/NoCourseHint'
 import SimilarPastFeedback from './SimilarPastFeedback'
@@ -135,14 +135,38 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
   const approxPages = Math.round(charCount / 3000)
 
   const { data: courses = [] } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
-  const { data: criteria = [] } = useQuery({
+
+  // Personal + institution-shared. Globals come from /templates and are merged
+  // below so a brand-new teacher with an empty library still sees the curated
+  // starter set in the criterion and rubric pickers.
+  const { data: personalCriteria = [] } = useQuery({
     queryKey: ['criteria', form.course_id],
     queryFn:  () => getCriteria(form.course_id || undefined),
   })
-  const { data: rubrics = [] } = useQuery({
+  const { data: templateCriteria = [] } = useQuery({
+    queryKey: ['criteria-templates'],
+    queryFn:  getCriteriaTemplates,
+  })
+  const { data: personalRubrics = [] } = useQuery({
     queryKey: ['rubrics', form.course_id],
     queryFn:  () => getRubrics(form.course_id || undefined),
   })
+  const { data: templateRubrics = [] } = useQuery({
+    queryKey: ['rubrics-templates'],
+    queryFn:  getRubricTemplates,
+  })
+
+  // Personal first so dedup keeps the personal copy if a teacher cloned a template.
+  const criteria = useMemo(() => {
+    const byId = new Map<string, typeof personalCriteria[number]>()
+    for (const c of [...personalCriteria, ...templateCriteria]) if (!byId.has(c.id)) byId.set(c.id, c)
+    return Array.from(byId.values())
+  }, [personalCriteria, templateCriteria])
+  const rubrics = useMemo(() => {
+    const byId = new Map<string, typeof personalRubrics[number]>()
+    for (const r of [...personalRubrics, ...templateRubrics]) if (!byId.has(r.id)) byId.set(r.id, r)
+    return Array.from(byId.values())
+  }, [personalRubrics, templateRubrics])
 
   const { data: students = [] } = useQuery({
     queryKey: ['students', form.course_id],
@@ -437,7 +461,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
               {rubrics.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name} · {r.items.length} крит.
-                  {r.is_institution_shared ? ' · кафедра' : ''}
+                  {r.is_global_template ? ' · шаблон' : r.is_institution_shared ? ' · кафедра' : ''}
                 </option>
               ))}
             </select>
@@ -458,6 +482,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
               <option key={c.id} value={c.id}>
                 {c.name}
                 {c.subject ? ` · ${c.subject}` : ''}
+                {c.is_global_template ? ' · шаблон' : ''}
               </option>
             ))}
           </select>

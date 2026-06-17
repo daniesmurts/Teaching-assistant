@@ -306,11 +306,15 @@ export const MAX_REVIEW_CHARS = 1_000_000
 
 export type LongReviewStatus = 'pending' | 'analyzing' | 'synthesizing' | 'ready' | 'failed'
 
+// Strengths/gaps shape evolved from plain string[] (Tier-0) to BulletItem[]
+// (Tier-1, with verbatim quotes from the section). Older rows still carry
+// strings inside the JSONB result column — the frontend renderer tolerates
+// both, the backend writes only BulletItem now.
 export interface ChapterReview {
   title: string
-  assessment: string      // 1–2 paragraphs on this section
-  strengths: string[]
-  gaps: string[]
+  assessment: string                       // 1–2 paragraphs on this section
+  strengths: Array<BulletItem | string>
+  gaps:      Array<BulletItem | string>
 }
 
 // A committee question grounded in (optionally) a specific chapter / passage.
@@ -325,15 +329,45 @@ export interface DefenseQuestion {
   page:          number | null
 }
 
+// A single quantitative claim pulled from one section during analyzeSection.
+// `value` is preserved verbatim (units and all — "850 кг/м³", "n=42",
+// "до 1 октября 2025") so the cross-section pass can compare meaningfully and
+// the teacher sees exactly what the work said. `quote` is a verbatim sentence
+// containing the value; `chapter_index` is stamped by the orchestrator after
+// section analysis (analyzeSection doesn't know its own index).
+export interface KeyQuantity {
+  name:          string
+  value:         string
+  quote:         string
+  chapter_index: number
+}
+
+// A contradiction detected across sections by the post-synthesis consistency
+// pass. `occurrences` carries every conflicting mention (≥2) so the teacher
+// can verify directly. `summary` is the model's one-line diagnosis.
+export interface Inconsistency {
+  name:        string
+  occurrences: KeyQuantity[]
+  summary:     string
+}
+
 export interface LongReviewResult {
   overall_summary:   string
   suggested_score:   number | null
   suggested_grade:   GradeLetter | null
   grade_label:       string | null
   chapter_reviews:   ChapterReview[]
-  overall_strengths: string[]
-  overall_gaps:      string[]
+  overall_strengths: Array<BulletItem | string>
+  overall_gaps:      Array<BulletItem | string>
   defense_questions: DefenseQuestion[]
+  // Coverage note — what was actually verified vs. where evidence was thin.
+  // Tier-1 addition. Null on legacy rows. Surfaced as a discreet block under
+  // the overall summary so the teacher knows what to spot-check.
+  coverage_note:     string | null
+  // Tier-2: cross-section quantitative contradictions surfaced by the
+  // post-synthesis consistency pass. Empty when nothing was found OR on
+  // legacy rows. Frontend hides the whole block when empty.
+  inconsistencies:   Inconsistency[]
 }
 
 // Returned by POST /api/grading/review and polled via GET /api/grading/review/:id

@@ -5,6 +5,8 @@ import Badge from '../ui/Badge'
 import RevisionCheckList from './RevisionCheckList'
 import QuestionResponseList from './QuestionResponseList'
 import ConfidenceBadge from './ConfidenceBadge'
+import LongReviewBullet from './LongReviewBullet'
+import InconsistenciesBlock from './InconsistenciesBlock'
 import { getReviewByAssignment, getAssignmentCrossUses, getApprovalHistory } from '../../api/grading'
 import { gradeColor } from '../../lib/grades'
 import type { Assignment, GradeLetter, AssignmentStatus, BulletItem, DefenseQuestion, ChapterReview, VerificationQuestion, Handout, ApprovedRevision } from '../../types'
@@ -223,6 +225,24 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
             </section>
           )}
 
+          {/* Cross-section contradictions (ВКР review) — Tier-2 addition.
+              Hidden when empty. */}
+          {r && (
+            <InconsistenciesBlock items={r.inconsistencies ?? []} chapters={r.chapter_reviews} />
+          )}
+
+          {/* Coverage note (ВКР review) — Tier-1 addition; null on legacy rows. */}
+          {r && r.coverage_note && (
+            <section className="bg-surface-warm border border-border rounded-md p-3">
+              <div className="text-[10px] font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-1.5">
+                Что проверено
+              </div>
+              <p className="text-xs font-sans text-ink-secondary leading-relaxed whitespace-pre-line">
+                {r.coverage_note}
+              </p>
+            </section>
+          )}
+
           {/* Chapter-by-chapter (ВКР review) */}
           {r && r.chapter_reviews.length > 0 && (
             <section>
@@ -245,20 +265,16 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
                           {c.strengths.length > 0 && (
                             <div>
                               <div className="text-[10px] font-semibold text-success uppercase tracking-wide mb-1">Плюсы</div>
-                              {c.strengths.map((s) => (
-                                <div key={s} className="flex gap-1.5 text-xs text-ink-secondary mb-0.5 leading-relaxed">
-                                  <span className="text-success flex-shrink-0">+</span><span>{s}</span>
-                                </div>
+                              {c.strengths.map((s, j) => (
+                                <LongReviewBullet key={j} bullet={s} variant="positive" />
                               ))}
                             </div>
                           )}
                           {c.gaps.length > 0 && (
                             <div>
                               <div className="text-[10px] font-semibold text-warning uppercase tracking-wide mb-1">Замечания</div>
-                              {c.gaps.map((g) => (
-                                <div key={g} className="flex gap-1.5 text-xs text-ink-secondary mb-0.5 leading-relaxed">
-                                  <span className="text-warning flex-shrink-0">−</span><span>{g}</span>
-                                </div>
+                              {c.gaps.map((g, j) => (
+                                <LongReviewBullet key={j} bullet={g} variant="negative" />
                               ))}
                             </div>
                           )}
