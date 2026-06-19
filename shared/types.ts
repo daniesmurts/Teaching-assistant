@@ -163,7 +163,17 @@ export interface BulletItem {
   page?:         number | null
   question?:     string | null
   criterion_id?: string | null
+  // Tier-3 (ВКР-only for now). Optional everywhere; regular grading bullets
+  // leave these null. severity sorts gaps in the UI; action distinguishes
+  // "уверен, что это ошибка → к проверке" from "стоит спросить автора";
+  // correction is a 1-sentence "что сделать" hint surfaced below the bullet.
+  severity?:   BulletSeverity | null
+  action?:     BulletAction   | null
+  correction?: string         | null
 }
+
+export type BulletSeverity = 'critical' | 'substantial' | 'minor'
+export type BulletAction   = 'flag'     | 'verify'
 
 // Why the teacher edited the AI draft. Optional; surfaced as a dropdown next
 // to the Approve button only when an edit is detected. Becomes a training
@@ -351,6 +361,26 @@ export interface Inconsistency {
   summary:     string
 }
 
+// Tier-4: a headline numerical result that the recomputation pass independently
+// re-derived from the inputs visible in the work, and compared to the author's
+// stated value. Only surfaced when there's a real discrepancy. Severity follows
+// the BulletItem taxonomy so the UI styles it consistently with gaps.
+//
+// `inputs` and `formula` are best-effort context for the teacher to verify the
+// re-derivation themselves; both may be null when the work didn't make them
+// explicit and the reasoner inferred them.
+export interface RecomputationFinding {
+  claim:            string             // human-readable label of what was checked
+  claimed_value:    string             // author's value, verbatim with units
+  recomputed_value: string             // model's independent re-derivation
+  discrepancy:      string             // 1 sentence: nature/magnitude of the gap
+  inputs:           string | null      // e.g. "ρ=850 кг/м³, v=2 м/с, d=0.1 м"
+  formula:          string | null      // e.g. "Re = ρvd/μ"
+  quote:            string             // verbatim sentence from the work
+  chapter_index:    number
+  severity:         BulletSeverity
+}
+
 export interface LongReviewResult {
   overall_summary:   string
   suggested_score:   number | null
@@ -368,6 +398,10 @@ export interface LongReviewResult {
   // post-synthesis consistency pass. Empty when nothing was found OR on
   // legacy rows. Frontend hides the whole block when empty.
   inconsistencies:   Inconsistency[]
+  // Tier-4: independent recomputation of headline numerical results, run via
+  // the DeepSeek reasoner. Empty when nothing was checked (no numeric
+  // claims) OR everything matched OR on legacy rows.
+  recomputation_findings: RecomputationFinding[]
 }
 
 // Returned by POST /api/grading/review and polled via GET /api/grading/review/:id
@@ -520,6 +554,79 @@ export interface CurriculumAnalysis {
   skipped:      SkippedDiscipline[]
   pairs:        OverlapPair[]            // sorted by similarity desc
   pair_summary: DisciplinePairSummary[]  // per discipline-pair rollup, strongest first
+  generated_at: string
+}
+
+// ─── Syllabus conformance review (РПД ↔ компетенции/цели) ───────────────────────
+// КНИТУ admin feature A2: score how well a syllabus (РПД) covers the ОПК/ПК/УК
+// competencies and goals/outcomes it is meant to fulfil. Structurally this is the
+// grading engine — each competency/goal is a "criterion", the syllabus is the
+// "submission". Competencies/goals are either declared inside the РПД (auto-
+// extracted) or supplied by the admin. Computed live — not persisted (MVP).
+
+export type CoverageStatus = 'covered' | 'partial' | 'missing'
+
+export interface SyllabusCoverageItem {
+  kind:           'competency' | 'goal'
+  code:           string | null     // 'ОПК-1' / 'ПК-3' / 'УК-2'; null for goals
+  title:          string            // competency text or goal/outcome statement
+  status:         CoverageStatus
+  score:          number            // 0–100 coverage estimate
+  evidence:       string | null     // verbatim fragment from the syllabus, or null
+  gap:            string            // what's missing or weak (1–2 sentences)
+  recommendation: string            // concrete fix for the РПД
+}
+
+export interface SyllabusReview {
+  competencies_source: 'declared' | 'provided'   // extracted from the РПД vs. supplied
+  goals_source:        'declared' | 'provided'
+  items:        SyllabusCoverageItem[]            // competencies first, then goals
+  summary:      string                            // 2–3 sentence overall verdict
+  covered:      number
+  partial:      number
+  missing:      number
+  generated_at: string
+}
+
+// ─── Материалы — AI practical-material generator (КНИТУ T1) ─────────────────────
+// One generator, three kinds: задания (assignment), кейсы (case), проекты (project).
+// Shared item shape; the prompt + UI labels differ by kind. Entity is task_sets (the
+// `assignments` table holds graded student work). Mirrors TopicSet.
+
+export type MaterialKind = 'assignment' | 'case' | 'project'
+export type TaskDifficulty = 'basic' | 'intermediate' | 'advanced'
+
+export interface TaskItem {
+  title:     string    // короткое название
+  statement: string    // основное содержание: условие / описание ситуации + вопросы / цель и результат
+  skills:    string    // какие умения/компетенции развивает (1 строка)
+  guidance?: string    // подсказка / разбор / критерии для преподавателя
+}
+
+export interface TaskSet {
+  id:         string
+  teacher_id: string
+  course_id:  string | null
+  kind:       MaterialKind
+  topic:      string
+  difficulty: TaskDifficulty
+  tasks:      TaskItem[]
+  created_at: string
+}
+
+// ─── РПД-студия — AI-assisted syllabus authoring (КНИТУ T5) ─────────────────────
+// AI drafts/updates syllabus content aimed at target ОПК/ПК/УК + goals. Pairs with
+// the SyllabusReview check (above) into a write → check → fix loop. AI drafts, the
+// teacher (разработчик РПД) is the author of record. Computed live, not persisted.
+
+export interface SyllabusSection {
+  heading: string     // e.g. «Цели освоения дисциплины», «Содержание (темы)»
+  content: string     // editable text — paragraphs or newline-separated lines
+}
+
+export interface SyllabusDraft {
+  mode:         'draft' | 'improve'   // fresh draft vs. revision of existing content
+  sections:     SyllabusSection[]
   generated_at: string
 }
 

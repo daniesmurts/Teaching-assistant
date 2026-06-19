@@ -7,6 +7,7 @@ import { pool } from './db/connection'
 import { errorHandler } from './middleware/errorHandler'
 import { generalLimiter } from './middleware/rateLimits'
 import authRouter from './routes/auth'
+import ssoRouter from './routes/sso'
 import coursesRouter from './routes/courses'
 import criteriaRouter from './routes/criteria'
 import rubricsRouter from './routes/rubrics'
@@ -19,6 +20,7 @@ import adminEvalsRouter from './routes/adminEvals'
 import institutionRouter from './routes/institution'
 import feedbackRouter from './routes/feedback'
 import topicsRouter from './routes/topics'
+import tasksRouter from './routes/tasks'
 import curriculumRouter from './routes/curriculum'
 import quizzesRouter from './routes/quizzes'
 import paymentsRouter from './routes/payments'
@@ -82,7 +84,10 @@ app.use(cors({
 // ─── Body parsing + global rate limit ─────────────────────────────────────────
 
 app.use(express.json({ limit: '1mb' }))
-app.use(express.urlencoded({ extended: false }))
+// urlencoded body — needed for SAML ACS where the IdP POSTs SAMLResponse as
+// application/x-www-form-urlencoded. Bumped from default 100kb because the
+// base64-encoded assertion can be ~50kb on its own.
+app.use(express.urlencoded({ extended: false, limit: '1mb' }))
 app.use(generalLimiter)
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
@@ -101,6 +106,7 @@ app.get('/api/health', async (_req, res) => {
 })
 
 app.use('/api/auth',          authRouter)
+app.use('/api/sso',           ssoRouter)
 app.use('/api/courses',       coursesRouter)
 app.use('/api/criteria',      criteriaRouter)
 app.use('/api/rubrics',       rubricsRouter)
@@ -108,6 +114,7 @@ app.use('/api/learning-loop', learningLoopRouter)
 app.use('/api/grading',       gradingRouter)
 app.use('/api/presentations', presentationsRouter)
 app.use('/api/topics',        topicsRouter)
+app.use('/api/tasks',         tasksRouter)
 app.use('/api/curriculum',    curriculumRouter)
 app.use('/api/quizzes',       quizzesRouter)
 app.use('/api/documents',     documentsRouter)

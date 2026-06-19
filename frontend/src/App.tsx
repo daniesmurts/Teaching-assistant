@@ -9,6 +9,7 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
+import SsoCallback from './pages/SsoCallback'
 import PaymentResult from './pages/PaymentResult'
 import Dashboard from './pages/Dashboard'
 import Courses from './pages/Courses'
@@ -23,6 +24,8 @@ import Presentations from './pages/Presentations'
 import Topics from './pages/Topics'
 import Curriculum from './pages/Curriculum'
 import Quizzes from './pages/Quizzes'
+import MaterialGenerator from './pages/MaterialGenerator'
+import Materials from './pages/Materials'
 import Billing from './pages/Billing'
 import Settings from './pages/Settings'
 import Help from './pages/Help'
@@ -165,6 +168,7 @@ export default function App() {
           <Route path="/register"         element={<Register />} />
           <Route path="/forgot-password"  element={<ForgotPassword />} />
           <Route path="/reset-password"   element={<ResetPassword />} />
+          <Route path="/sso/callback"     element={<SsoCallback />} />
           <Route path="/payment/result"   element={<PaymentResult />} />
           <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
             <Route path="/dashboard"     element={<Dashboard />} />
@@ -176,10 +180,12 @@ export default function App() {
             <Route path="/library"       element={<FeedbackLibrary />} />
             <Route path="/students"      element={<Students />} />
             <Route path="/history"       element={<History />} />
+            <Route path="/materials"     element={<Materials />} />
             <Route path="/presentations" element={<Presentations />} />
             <Route path="/topics"        element={<Topics />} />
             <Route path="/curriculum"    element={<Curriculum />} />
             <Route path="/quizzes"       element={<Quizzes />} />
+            <Route path="/materials/:kind" element={<MaterialGenerator />} />
             <Route path="/billing"       element={<Billing />} />
             <Route path="/settings"      element={<Settings />} />
             <Route path="/help"          element={<Help />} />

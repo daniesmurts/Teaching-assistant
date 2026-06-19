@@ -22,6 +22,9 @@ declare global {
 const PRIVATE_PREFIXES = [
   '/dashboard', '/courses', '/grading', '/criteria', '/students',
   '/presentations', '/billing', '/settings', '/help', '/admin',
+  // SSO callback URL carries a live JWT in the query string — never let
+  // Webvisor/session-replay capture it.
+  '/sso',
 ]
 
 export function isPublicPath(pathname: string): boolean {

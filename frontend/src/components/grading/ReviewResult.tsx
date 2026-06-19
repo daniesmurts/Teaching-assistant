@@ -2,8 +2,9 @@ import { useState } from 'react'
 import Button from '../ui/Button'
 import { useApprove } from '../../hooks/useGrading'
 import { GRADES, gradeColor, gradeLabel, GRADE_BRACKETS, scoreToGrade, snapScoreToGrade } from '../../lib/grades'
-import LongReviewBullet from './LongReviewBullet'
+import LongReviewBullet, { sortGapsBySeverity } from './LongReviewBullet'
 import InconsistenciesBlock from './InconsistenciesBlock'
+import RecomputationBlock from './RecomputationBlock'
 import type { LongReview, GradeLetter, DefenseQuestion, ChapterReview } from '../../types'
 
 interface Props {
@@ -111,7 +112,7 @@ export default function ReviewResult({ review, onApproved }: Props) {
             </div>
             <div className="bg-warning-bg border border-warning/15 rounded-lg p-3">
               <div className="text-xs font-semibold text-warning uppercase tracking-wide mb-2">Недостатки</div>
-              {r.overall_gaps.map((g, i) => (
+              {sortGapsBySeverity(r.overall_gaps).map((g, i) => (
                 <LongReviewBullet key={i} bullet={g} variant="negative" />
               ))}
             </div>
@@ -122,6 +123,12 @@ export default function ReviewResult({ review, onApproved }: Props) {
             (which is most reviews and all legacy rows). High-signal so it
             sits above the coverage note. */}
         <InconsistenciesBlock items={r.inconsistencies ?? []} chapters={r.chapter_reviews} />
+
+        {/* Recomputation findings — Tier-4: reasoner-checked headline
+            numerical results. Highest-effort signal in the review; placed
+            right under inconsistencies because both ask "is this number
+            actually right?". Hidden when empty. */}
+        <RecomputationBlock items={r.recomputation_findings ?? []} chapters={r.chapter_reviews} />
 
         {/* Coverage note — what was actually verified vs. where the model
             couldn't get enough material. Tier-1 addition; null on legacy rows. */}
@@ -166,7 +173,7 @@ export default function ReviewResult({ review, onApproved }: Props) {
                         {c.gaps.length > 0 && (
                           <div>
                             <div className="text-[10px] font-semibold text-warning uppercase tracking-wide mb-1">Замечания</div>
-                            {c.gaps.map((g, j) => (
+                            {sortGapsBySeverity(c.gaps).map((g, j) => (
                               <LongReviewBullet key={j} bullet={g} variant="negative" />
                             ))}
                           </div>

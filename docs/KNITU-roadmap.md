@@ -65,6 +65,37 @@ to maximise early-adoption value and frictionless demos. Admin/curriculum featur
 framed as Institution-tier in `CLAUDE.md`; revisit gating to Institution-tier once
 учебный план becomes a first-class institution entity and the admin role model lands.
 
+### Promotion plan — when the curriculum suite moves to the university admin
+
+The «university admin» role already exists — it's **`institution_admin`** (`requireInstitutionAdmin`
+middleware, `institution_id` scoping, `/institution/*` routes). So this is a **relocation + gate**,
+not a new role. Today A3/A2/L are teacher-scoped and open to all tiers — deliberately, to drive the
+pilot. They move to the institution admin when **all three** conditions hold:
+
+1. **A signed/committed institutional deal** — gating is a packaging act; do it when there's a buyer
+   to gate *for*. Flipping earlier just locks out the people evaluating it.
+2. **The учебный план is a first-class institution entity** (roadmap step 4 — competency model +
+   curriculum/РПД entities). This is the real gate: until it exists, "the admin runs it across the
+   whole curriculum" has nothing institution-wide to run on — only one teacher's courses.
+3. **The client is provisioned as an institution** — institution record created, УМУ coordinator /
+   pro-rector assigned `institution_admin`, teachers seated.
+
+When triggered, the move is:
+
+- **Re-scope (the real work):** queries shift from per-teacher (`req.teacher.id` over their courses)
+  to per-institution (`req.teacher.institution_id` over the institution's учебный план/РПД). Only
+  meaningful *after* the curriculum entity exists.
+- **Relocate:** routes under `/api/institution/*` (or add `requireInstitutionAdmin` to the
+  curriculum routes); surface in the institution-admin nav, off the teacher sidebar.
+- **Gate (trivial — one line):** `requireInstitutionAdmin` and/or a `checkFeatureAccess('curriculumSuite')`
+  flag in `planLimits.ts` (institution tier only).
+- **Role split — they don't all land in the same place:** A3 (duplication) and A2 (conformance) are
+  УМУ/admin work → `institution_admin`. **L (РПД-студия) is the teacher's job** (разработчик РПД) →
+  stays teacher-accessible, just gated to the institution tier.
+
+Sequence: **pilot open (now) → sign deal → build the curriculum entity (step 4) → re-scope + relocate
++ gate.** The gate is the *last* step, not the first; the data model is the bottleneck, not the gate.
+
 ---
 
 ## Административный уровень (Administrative)
@@ -72,7 +103,7 @@ framed as Institution-tier in `CLAUDE.md`; revisit gating to Institution-tier on
 | # | Their wording (RU) | English reading | Maps to / reuses | Net-new |
 |---|---|---|---|---|
 | A1 | Анализ соотношения целей и задач содержанию и форматам в РПД | Consistency: do the РПД's goals/objectives match its content & teaching formats? | documents + chunks, chatJSON | РПД section parsing, analysis prompt |
-| A2 | Анализ соотношения заявленных компетенций и содержанию/форматам в РПД | Consistency: do the declared competencies match the content & formats? | documents + chunks | competency model |
+| A2 | Анализ соответствия РПД заявленным компетенциям (ОПК/ПК/УК) и целям/результатам | Score how well a syllabus covers the ОПК/ПК/УК + goals/outcomes it should fulfil | **= the grading engine** — competencies/goals = criteria, syllabus = "submission" → per-competency coverage + gaps + citations; reuses `CriterionScore` / strengths-improvements shape | MVP: competencies entered/selected (often already declared in the РПД); v2: + competency library |
 | A3 | Выявление задвоения содержания (одинаковых тем) в разных дисциплинах одного учебного плана | Detect duplicated topics across disciplines a single student takes | **embeddings + cosine `<=>` (already used for RAG)** | topic-level extraction |
 | A4 | Последовательность расположения дисциплин (какая дисциплина — основа для следующей) | Prerequisite ordering: which discipline founds the next | chatJSON for semantic prereq detection | curriculum ordering + dependency graph |
 | A5 | Анализ сквозного освоения компетенций (компетенция формируется несколькими дисциплинами); за какой блок отвечает каждая дисциплина | Cross-cutting competency mastery — read/visualise the matrix; each discipline's block of a shared competency | — | the competency matrix itself |
@@ -83,17 +114,30 @@ instead of student submissions.
 **A5 (the matrix) is the strategic anchor** — once competencies are modelled, A1/A2/A4/A5
 and the whole student tier light up.
 
+**A2 is the next build, and it's the lever.** Structurally it *is* the student-work grading
+engine pointed at a РПД: the ОПК/ПК/УК + goals become the criteria, the syllabus is the
+"submission", and the output is per-competency coverage + gaps + citations (same
+`CriterionScore` shape, even the thorough-mode confidence). It needs only a way to supply
+the target competencies — so it ships *before* the full competency model, and building it is
+exactly what **justifies** that model (→ A5, student tier). Together with A3 it forms a
+**«РПД analysis suite»**: A3 looks *across* disciplines, A1/A2 *within* one. Requested at the
+admin level by КНИТУ on 2026-06.
+
 ## Уровень преподавателя (Teacher)
 
 | # | Their wording (RU) | English reading | Maps to / reuses | Net-new |
 |---|---|---|---|---|
 | T1 | Инструменты для разработки учебных материалов (тесты, проекты, задания, кейсы, презентации) | Build learning materials: tests, projects, assignments, cases, presentations | **Already have presentations, quizzes, topics** — extend with projects/cases/assignments | new generators (cases, projects, assignments) |
+| T5 | (новое, запрос 2026-06) «РПД-студия» — ИИ помогает писать/обновлять содержание РПД под заданные ОПК/ПК/УК и цели | AI drafts/updates syllabus content aimed at target competencies + goals | generation engine (как презентации/тесты/темы) **+ the A2 check** | competency input; write→check→fix loop; AI drafts, teacher (разработчик РПД) is author of record |
 | T2 | Анализ модели обратной связи и запросов преподавателя для траектории проф. развития | Analyse the teacher's feedback patterns + requests → professional-development trajectory | We already store every approved grade + ai_feedback (RAG flywheel) | analytics layer over existing data |
 | T3 | Рекомендации: на что обратить внимание, что усилить | Recommendations: what to focus on / strengthen | builds on T2 | recommendation prompt |
 | T4 | Цифровой аватар/портрет (портфолио) преподавателя | Digital portrait / portfolio of the teacher | aggregation/view over T2/T3 | mostly a view |
 
 Closest tier to what we already do. **T1 (extend the generator family)** is a fast win.
-T2–T4 need enough grading volume to be meaningful.
+T2–T4 need enough grading volume to be meaningful. **T5 («РПД-студия»)** pairs with the A2
+check into a write→check→fix loop — the same generation pattern as our existing generators,
+spec'd by the competency framework instead of a lecture topic. AI assists; the teacher stays
+the author of record (same "AI never final" principle as grading).
 
 ## Уровень студента (Student)
 
@@ -113,11 +157,15 @@ single choice drives auth, privacy scope, and effort.
 
 ## Suggested build order (dependency order, not their list order)
 
-1. **Foundation** — competency model + curriculum/РПД entities (unlocks most admin + all student features)
-2. **Quick admin wins** — A3 (duplication, shipping now), then A1/A2 (РПД consistency)
-3. **Teacher T1** — extend generator family (cases, projects, assignments) — fast, reuses existing engine
-4. **Admin A4/A5** — sequencing + competency-matrix visualisation
-5. **Student tier** — last; depends on 1 and raises privacy scope
+1. **A3** — duplication analysis (shipped); the cheapest, most visible demo
+2. **A2 / A1 (РПД ↔ competencies/goals)** — the grading engine + a competency input. Ships
+   before the full model and **justifies building it**. The pivotal next step.
+3. **T5 «РПД-студия» + Teacher T1** — AI-assisted syllabus authoring (pairs with A2 into a
+   write→check→fix loop) and the extended generator family
+4. **Competency model + curriculum/РПД entities** — promoted from "input" to first-class data
+   once A2/T5 prove demand (unlocks A4/A5 + the student tier)
+5. **Admin A4/A5** — sequencing + competency-matrix visualisation
+6. **Student tier** — last; depends on the competency model and raises privacy scope
 
 ## Open questions to bring to the meeting
 

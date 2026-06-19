@@ -42,6 +42,11 @@ export const config = {
     user: optional('SMTP_USER'),
     pass: optional('SMTP_PASS'),
   },
+  saml: {
+    spEntityId:  optional('SAML_SP_ENTITY_ID'),
+    spPrivateKey: optional('SAML_SP_PRIVATE_KEY'),
+    spCert:      optional('SAML_SP_CERTIFICATE'),
+  },
 } as const
 
 /** Call once at boot. Validates essentials and warns about degraded features. */
@@ -52,6 +57,9 @@ export function validateConfig(): void {
   if (!config.yandex.storageAccessKey) warnings.push('object storage (files saved to local ./uploads)')
   if (!config.yandex.visionApiKey)     warnings.push('Yandex Vision OCR (scanned PDFs/images will return empty text)')
   if (!config.email.host)              warnings.push('SMTP email (emails logged to console)')
+  if (!config.saml.spPrivateKey || !config.saml.spCert || !config.saml.spEntityId) {
+    warnings.push('SAML SSO (institutional SSO logins will be rejected — run scripts/generateSamlSpKeypair.ts)')
+  }
 
   if (warnings.length > 0 && config.nodeEnv === 'production') {
     logger.warn({ message: 'Running in production with degraded features', degraded: warnings })

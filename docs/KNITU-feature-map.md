@@ -20,16 +20,21 @@ DeepSeek. We're adding structured curriculum data and analysis prompts, not new 
 ### Администрация
 | Ask | Fit | Built on |
 |---|---|---|
-| 🟢 **A3** Дублирование тем между дисциплинами | **shipping now** | embeddings + cosine similarity (our RAG engine) |
-| 🟡 A1 Цели/задачи ↔ содержание/форматы в РПД | reuses doc pipeline | + РПД parsing |
-| 🟡 A2 Компетенции ↔ содержание/форматы | reuses doc pipeline | + competency model |
+| 🟢 **A3** Дублирование тем между дисциплинами | **shipped** | embeddings + cosine similarity (our RAG engine) |
+| 🟢 **A2** Соответствие РПД компетенциям (ОПК/ПК/УК) и целям/результатам | **= наш движок проверки** (компетенции/цели = критерии, РПД = «работа» → покрытие + пробелы + цитаты) | MVP: компетенции вводятся/выбираются вручную (часто уже есть в самом РПД); v2: + competency model |
+| 🟡 A1 Цели/задачи ↔ содержание/форматы в РПД | часть той же проверки A2 | + РПД parsing |
 | 🟡 A4 Последовательность дисциплин (пререквизиты) | new graph | + curriculum ordering |
 | 🟡 A5 Сквозное освоение компетенций (матрица) | **strategic anchor** | + competency matrix |
+
+> **«РПД analysis suite»:** A3 смотрит *между* дисциплинами, A1/A2 — *внутри* одной;
+> T5 (ниже) замыкает в петлю «проверка → авторство». A2 — это уже существующий движок
+> проверки работ, наведённый на РПД вместо студенческой работы.
 
 ### Преподаватель
 | Ask | Fit | Built on |
 |---|---|---|
 | 🟢 T1 Генерация материалов (тесты/кейсы/проекты/задания) | extends existing | presentations + quizzes + topics engine |
+| 🟡 **T5** «РПД-студия» — ИИ пишет/обновляет содержание РПД под ОПК/ПК/УК + цели | generation engine + проверка A2 (петля «черновик → проверка → правка») | + competency input; ИИ-черновик, утверждает преподаватель |
 | 🟡 T2 Анализ обратной связи → траектория развития | reuses stored grades | analytics layer |
 | 🟡 T3 Рекомендации что усилить | builds on T2 | recommendation prompt |
 | 🟡 T4 Цифровой портрет (портфолио) | view over T2/T3 | aggregation view |
@@ -45,8 +50,10 @@ DeepSeek. We're adding structured curriculum data and analysis prompts, not new 
 ---
 
 ### Build order
-**1.** Foundation: competencies + curriculum/РПД → **2.** Admin quick wins: A3 (now), A1/A2 →
-**3.** Teacher T1 → **4.** Admin A4/A5 → **5.** Student tier (last; privacy scope).
+**1.** A3 (done) → **2.** **A2/A1** — grading engine + competency input (next; also the
+feature that *justifies building the competency model* → unlocks A5 + student tier) →
+**3.** **T5 «РПД-студия»** (pairs with A2) + Teacher T1 → **4.** Admin A4/A5 →
+**5.** Student tier (last; privacy scope).
 
 ### Ask them tomorrow
 Real учебный план + 2–3 РПД samples · competencies structured or in PDFs? ·

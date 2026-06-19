@@ -245,3 +245,60 @@ export async function createTeacher(
   )
   return toTeacher(rows[0])
 }
+
+// ─── SAML SSO — JIT provisioning ──────────────────────────────────────────────
+
+/**
+ * Find a teacher by email or create one from a SAML assertion. Called from
+ * the ACS handler after the IdP signature is verified.
+ *
+ * - Match is on lowercased email (the same key used elsewhere).
+ * - For an existing teacher we attach the SAML subject + institution if not
+ *   already set, but never overwrite a name the teacher edited themselves.
+ * - For a new teacher we generate an unguessable random password hash that
+ *   no one ever uses — password auth still works for non-SSO teachers, but
+ *   this row is effectively SSO-only.
+ *
+ * Returns the full TeacherRow so the caller can mint a JWT immediately.
+ */
+export async function findOrCreateSamlTeacher(params: {
+  email:         string
+  name:          string | null
+  institutionId: string
+  samlSubject:   string
+}): Promise<TeacherRow> {
+  const email = params.email.toLowerCase()
+
+  const existing = await findTeacherByEmail(email)
+  if (existing) {
+    // Backfill SSO fields the first time this teacher logs in via SAML —
+    // but never re-attach to a different institution if they already have one.
+    await pool.query(
+      `UPDATE teachers SET
+         saml_subject        = COALESCE(saml_subject, $2),
+         saml_provisioned_at = COALESCE(saml_provisioned_at, NOW()),
+         institution_id      = COALESCE(institution_id, $3)
+       WHERE id = $1`,
+      [existing.id, params.samlSubject, params.institutionId]
+    )
+    return (await findTeacherRowById(existing.id))!
+  }
+
+  // Random 256-bit hex password — long enough that bcrypt with cost 12 won't
+  // be brute-forced even if the hash leaks. The SAML teacher never sees it.
+  const { randomBytes } = await import('node:crypto')
+  const bcrypt = await import('bcryptjs')
+  const randomPassword = randomBytes(32).toString('hex')
+  const passwordHash   = await bcrypt.hash(randomPassword, 12)
+
+  const { rows } = await pool.query<TeacherRow>(
+    `INSERT INTO teachers (email, password_hash, name, institution_id,
+                            saml_subject, saml_provisioned_at)
+     VALUES ($1, $2, $3, $4, $5, NOW())
+     RETURNING *`,
+    [email, passwordHash, params.name, params.institutionId, params.samlSubject]
+  )
+  // findOrCreate must return the full institution-joined row so the JWT can
+  // be minted with the right effective tier — re-fetch through the joined query.
+  return (await findTeacherRowById(rows[0].id))!
+}

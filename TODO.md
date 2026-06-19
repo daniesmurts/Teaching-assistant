@@ -262,28 +262,90 @@ general knowledge.
 Recurring, multi-user feedback (incl. a day-one user, 2026-06): "не интуитивно,
 много вкладок и меню". A brand-new user lands and doesn't know what to do next;
 the ~17-item sidebar amplifies the freeze (paradox of choice). Root cause is
-first-run guidance, not too many features. **Part A shipped** (welcome modal now
-reflects the real feature set; checklist persists until first grade — see
-CHANGELOG). Remaining:
+first-run guidance, not too many features. **✅ All three parts shipped (Unreleased)** —
+move J out of the backlog when this deploys:
 
-- **B — Progressive sidebar for new accounts (the "too many tabs" fix).** Until a
-  teacher has a subject + first grade, show only the "start here" path (Главная,
-  Предметы, Проверка) with a «Показать все» toggle; reveal the rest as they
-  progress. This is the piece that actually answers the menu-overload complaint.
-  - **Touches:** [components/layout/Sidebar.tsx](frontend/src/components/layout/Sidebar.tsx)
-    (gate `NAV_GROUPS` on onboarding progress + a reveal toggle), reuse the
-    courses/stats queries the checklist already runs.
-  - **Hold until:** this user answers "where did it tip into too-much" — that
-    tells us which groups to defer vs. surface.
-- **C — Empty-state "next action" on every feature page · Effort: S.** A user who
-  opens /grading, /presentations, /quizzes, /topics, /curriculum with no subject
-  should see one clear CTA, not a blank form. Generalise the existing
-  [NoCourseHint](frontend/src/components/onboarding/NoCourseHint.tsx) pattern to
-  every AI feature page.
+- **A ✅** — welcome modal reflects the real feature set; checklist persists until first grade.
+- **B ✅ — progressive sidebar.** A brand-new account (no subject + no first grade) sees only
+  essential start-here items (Главная / Проверка работ / Материалы / Предметы) + account group
+  + a «Показать всё» toggle; full nav appears automatically on activation (first grade),
+  persisted via `ga_nav_expanded`, full-nav default while loading to avoid a flash for
+  returning users. [Sidebar.tsx](frontend/src/components/layout/Sidebar.tsx).
+- **C ✅** — `NoCourseHint` on grading/presentations/quizzes/topics; curriculum tabs have inline
+  empty states. Every AI feature page points a new user at the first action.
 
-- **Why:** First impression drives activation and retention; the strongest signal
-  (day-one users bouncing off complexity) is the cheapest to lose and the hardest
-  to measure after the fact.
+- **Why (kept for context):** First impression drives activation and retention; the strongest
+  signal (day-one users bouncing off complexity) is the cheapest to lose and hardest to measure
+  after the fact.
+- **Follow-up:** when the day-one customer answers *where* it tipped into "too much", use it to
+  refine which items count as essential (the slimmed set is a sensible default, not final).
+
+> **КНИТУ curriculum-intelligence suite** (items K, L, M below; A3 already shipped). These
+> are the *near-term, actionable* slices. The full feature map, dependencies, and items not
+> yet promoted here (A4/A5, the competency model, the student tier) live in
+> [docs/KNITU-roadmap.md](docs/KNITU-roadmap.md) — promote to this backlog on readiness.
+
+### K. РПД ↔ competency/goals conformance check (Admin A2) · Effort: M
+
+КНИТУ admin request (2026-06). Upload a syllabus/РПД → score how well it covers
+the ОПК/ПК/УК competencies and the goals/outcomes it's meant to fulfil:
+per-competency coverage, concrete gaps, and citations to the syllabus sections.
+
+- **Why:** It's the **existing student-work grading engine pointed at a РПД** —
+  competencies/goals become the criteria, the syllabus is the "submission". Proven
+  code, high admin value (РПД quality assurance for the УМУ), and it's the feature
+  that **justifies building the competency model** the rest of the roadmap (A5,
+  student tier) depends on. Sibling to the shipped A3 overlap analysis — together a
+  «РПД analysis suite».
+- **MVP (ships without the competency model):** target competencies + goals are
+  supplied as input — pasted / selected, or extracted from the РПД's own declared
+  section — then scored against the syllabus body. **v2:** a per-направление/ФГОС
+  competency library makes it one click (and that library *is* the matrix powering A5).
+- **Touches:** reuse the grading path —
+  [services/grading.ts](backend/src/services/grading.ts) and the
+  `CriterionScore` / `ai_strengths` / `ai_improvements` shapes in
+  [shared/types.ts](shared/types.ts) (each competency/goal = a criterion); document
+  upload + chunking (РПД is a knowledge doc); new `services/syllabusReview.ts` (or
+  generalise grading), new route + page; per-criterion citations like grading.
+  Optionally reuse thorough-mode confidence to flag "is this competency *really*
+  covered?".
+- **Pricing hook:** Institution-tier (admin/УМУ feature) — where the curriculum suite is heading.
+
+### L. «РПД-студия» — AI-assisted syllabus authoring (Teacher T5) · Effort: M (pairs with K)
+
+КНИТУ request (2026-06). Help a teacher (разработчик РПД) draft and update syllabus
+content aimed at given ОПК/ПК/УК + goals. Pairs with K into a **write → check → fix** loop.
+
+- **Why:** Same generation pattern as presentations/quizzes/topics, just spec'd by
+  the competency framework instead of a lecture topic. The author (L) + check (K)
+  loop is a flywheel and a strong demo for the УМУ.
+- **Touches:** generation engine (`chatJSON`) like
+  [services/presentations.ts](backend/src/services/presentations.ts) /
+  [services/quizzes.ts](backend/src/services/quizzes.ts); takes competencies + goals
+  as the spec; emits editable syllabus sections (content, topics, assessment
+  formats); feeds straight into K to score coverage, then suggests fixes for gaps.
+  New service + route + UI; reuse the editable-output + `FeatureIntro` patterns.
+- **Principle:** AI drafts, the teacher is the author of record — never
+  auto-published (same "AI never final" rule as grading).
+- **Depends on:** K (the check closes the loop) — build K first.
+
+### M. Material generators — cases / projects / assignments (Teacher T1) · Effort: M
+
+КНИТУ T1, and broadly requested. Extend the existing generator family
+(presentations, quizzes, topics) with three more material types teachers prepare:
+practical cases (кейсы), projects (проекты), assignments/tasks (задания).
+
+- **Why:** pure reuse of the proven generation pattern; broad teacher value; rounds
+  out the "materials" pillar. Lower strategic priority than K/L for the admin
+  audience, but cheap per generator.
+- **Touches:** new services mirroring
+  [services/quizzes.ts](backend/src/services/quizzes.ts) /
+  [services/topics.ts](backend/src/services/topics.ts) (`chatJSON` + course context
+  + RAG citations); routes; UI; plan gating like quizzes/topics.
+- **✅ Done (Unreleased):** the **«Материалы» hub** plus a single kind-parameterized
+  generator (`/materials/:kind`) covering **задания / кейсы / проекты** — `task_sets` + a
+  `kind` discriminator, shared item shape, per-kind prompt + labels, three hub cards. КНИТУ's
+  T1 set is complete. (Move M out of the backlog when this ships.)
 
 ---
 

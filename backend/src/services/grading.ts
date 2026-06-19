@@ -18,7 +18,7 @@ import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { canUseFeature } from '../config/planLimits'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import { logger } from '../lib/logger'
-import type { Assignment, GradeLetter, CriterionScore, CriteriaSnapshotItem, BulletItem, VerificationQuestion, QuestionResponse } from '../../../shared/types'
+import type { Assignment, GradeLetter, CriterionScore, CriteriaSnapshotItem, BulletItem, BulletSeverity, BulletAction, VerificationQuestion, QuestionResponse } from '../../../shared/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,6 +55,10 @@ type RawBullet = string | {
   page?:         number | null
   question?:     string | null
   criterion_id?: string | null
+  // Tier-3 ВКР extension — unused by regular grading callers
+  severity?:     unknown
+  action?:       unknown
+  correction?:   unknown
 }
 
 interface AIGradingResult {
@@ -563,9 +567,29 @@ export function normaliseBullets(
       if (typeof b.criterion_id === 'string' && validCriterionIds.has(b.criterion_id)) {
         criterion_id = b.criterion_id
       }
-      return { text, quote, page, question, criterion_id }
+      // Tier-3: severity/action/correction. All optional and validated against
+      // a fixed enum so a hallucinated value just falls back to null instead
+      // of breaking the renderer's switch.
+      const severity = normaliseSeverity(b.severity)
+      const action   = normaliseAction(b.action)
+      let correction: string | null = null
+      if (typeof b.correction === 'string') {
+        const trimmed = b.correction.trim()
+        if (trimmed.length >= 4) correction = trimmed.slice(0, 240)
+      }
+      return { text, quote, page, question, criterion_id, severity, action, correction }
     })
     .filter((b): b is BulletItem => b !== null)
+}
+
+function normaliseSeverity(raw: unknown): BulletSeverity | null {
+  if (raw === 'critical' || raw === 'substantial' || raw === 'minor') return raw
+  return null
+}
+
+function normaliseAction(raw: unknown): BulletAction | null {
+  if (raw === 'flag' || raw === 'verify') return raw
+  return null
 }
 
 /**

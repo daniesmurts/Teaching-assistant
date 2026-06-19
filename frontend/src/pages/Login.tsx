@@ -1,21 +1,56 @@
 import { useState, FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useLogin } from '../hooks/useAuth'
-import { authErrorMessage } from '../api/auth'
+import { authErrorMessage, discoverSso } from '../api/auth'
 import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+
+// Two-step login: enter email → we ask the backend whether this domain uses
+// SSO. SAML domains are redirected to their IdP; everyone else sees the
+// password field. Mirrors the Google / Microsoft / Slack login pattern.
+type Step = 'email' | 'password'
+
 export default function Login() {
+  const [step, setStep]         = useState<Step>('email')
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
+  const [discovering, setDiscovering] = useState(false)
+  const [discoverError, setDiscoverError] = useState('')
   const login = useLogin()
 
-  function handleSubmit(e: FormEvent) {
+  async function handleContinue(e: FormEvent) {
+    e.preventDefault()
+    setDiscoverError('')
+    setDiscovering(true)
+    try {
+      const result = await discoverSso(email)
+      if (result.method === 'saml') {
+        // Full-page redirect to the backend, which 302s to the university IdP.
+        window.location.assign(`${API_BASE}${result.loginUrl}`)
+        return // keep the spinner up while the browser navigates away
+      }
+      setStep('password')
+    } catch (err) {
+      setDiscoverError(authErrorMessage(err))
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
+  function handleLogin(e: FormEvent) {
     e.preventDefault()
     login.mutate({ email, password })
   }
 
-  const errorMsg = login.isError ? authErrorMessage(login.error) : ''
+  function backToEmail() {
+    setStep('email')
+    setPassword('')
+    login.reset()
+  }
+
+  const loginError = login.isError ? authErrorMessage(login.error) : ''
 
   return (
     <div className="min-h-screen bg-bg flex items-center justify-center p-4">
@@ -35,46 +70,72 @@ export default function Login() {
         </div>
 
         <div className="bg-surface border border-border rounded-lg p-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              label="Эл. почта"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@university.ru"
-              required
-              autoFocus
-            />
-            <div>
+          {step === 'email' ? (
+            <form onSubmit={handleContinue} className="space-y-4">
               <Input
-                label="Пароль"
-                type="password"
-                reveal
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
+                label="Эл. почта"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@university.ru"
                 required
+                autoFocus
               />
-              <div className="text-right mt-1">
-                <Link
-                  to="/forgot-password"
-                  className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors"
-                >
-                  Забыли пароль?
-                </Link>
-              </div>
-            </div>
 
-            {errorMsg && (
-              <div className="px-3 py-2 bg-danger-bg text-danger text-xs font-sans rounded-md">
-                {errorMsg}
-              </div>
-            )}
+              {discoverError && (
+                <div className="px-3 py-2 bg-danger-bg text-danger text-xs font-sans rounded-md">
+                  {discoverError}
+                </div>
+              )}
 
-            <Button type="submit" className="w-full" loading={login.isPending}>
-              Войти
-            </Button>
-          </form>
+              <Button type="submit" className="w-full" loading={discovering}>
+                Продолжить
+              </Button>
+            </form>
+          ) : (
+            <form onSubmit={handleLogin} className="space-y-4">
+              {/* Show which email we're signing in, with a way back */}
+              <button
+                type="button"
+                onClick={backToEmail}
+                className="flex items-center gap-1.5 text-xs font-sans text-ink-secondary hover:text-amber transition-colors"
+              >
+                <span aria-hidden>←</span>
+                <span className="truncate max-w-[16rem]">{email}</span>
+              </button>
+
+              <div>
+                <Input
+                  label="Пароль"
+                  type="password"
+                  reveal
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  autoFocus
+                />
+                <div className="text-right mt-1">
+                  <Link
+                    to="/forgot-password"
+                    className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors"
+                  >
+                    Забыли пароль?
+                  </Link>
+                </div>
+              </div>
+
+              {loginError && (
+                <div className="px-3 py-2 bg-danger-bg text-danger text-xs font-sans rounded-md">
+                  {loginError}
+                </div>
+              )}
+
+              <Button type="submit" className="w-full" loading={login.isPending}>
+                Войти
+              </Button>
+            </form>
+          )}
         </div>
 
         <p className="text-center text-sm font-sans text-ink-secondary mt-4">

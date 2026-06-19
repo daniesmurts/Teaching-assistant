@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-06-16
+**Last updated:** 2026-06-19
 
 ---
 
@@ -47,16 +47,21 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 - Revisit any past grade (read-only detail modal, incl. ВКР chapter review + revision check)
 - Moodle-compatible **CSV grade export**
 - Watermark on output (free tier only)
-- Limits: 20 grades/mo, 3 presentations/mo, 3 topic generations/mo, 3 quizzes/mo, 3 subjects, 15 criteria, 30-day history
+- Limits: 20 grades/mo, 3 presentations/mo, 3 topic generations/mo, 3 quizzes/mo, 3 task sets/mo, 3 subjects, 15 criteria, 30-day history
 
 **Topics** — AI topic generator for research/practicals: student level + field + interests + practice site → level-appropriate, valuable topics (with rationale, scope, novelty). Yandex Search grounding. Optional student attachment (name + group, autocomplete from existing students) for later lookup. Free: 3/mo, Pro: unlimited
 **Subjects (formerly «Курсы»)** — CRUD, level, syllabus text/upload. Renamed in UI per Russian-academic vocab («курс» = year of study; «предмет» = subject). URL `/courses` and DB `course_id` unchanged
 **Criteria** — library of reusable criteria (name + description + optional subject), start from global templates. Selected at grading time with per-criterion weights and a live sum-to-100 check
 **Students** — auto-collected roster from graded work, per-student grade-over-time chart, groups
-**Учебный план — анализ дублирования** 🚧 — select ≥2 disciplines → the system extracts each discipline's topics, compares them semantically across disciplines, and flags duplicated / partially-overlapping / adjacent topics with a recommendation (КНИТУ curriculum-intelligence feature A3; teacher-scoped pending a first-class учебный план entity; see `docs/KNITU-roadmap.md`)
+**Учебный план и РПД — суите** 🚧 — one page (`/curriculum`), three tabs (КНИТУ curriculum-intelligence; teacher-scoped pending a first-class учебный план entity; see `docs/KNITU-roadmap.md`):
+- **Дублирование тем** (A3) — select ≥2 disciplines → extracts each discipline's topics, compares them semantically across disciplines, flags duplicated / partially-overlapping / adjacent topics with a recommendation
+- **Соответствие РПД компетенциям** (A2) — select a discipline → auto-extracts the ОПК/ПК/УК competencies + goals declared in its РПД → scores how well the content covers each (обеспечена / частично / не обеспечена) with evidence quote, gap, and a concrete fix
+- **РПД-студия** (T5) — select a discipline → AI drafts РПД content (цели, результаты по компетенциям, темы, формы контроля) aimed at its ОПК/ПК/УК + goals, then self-checks coverage. Sections editable; «Перепроверить покрытие» re-scores the edited text (write→check→fix loop). AI assists; teacher is author of record
+**Материалы (хаб генерации)** — single sidebar entry (`/materials`) that launches all generators below (Презентации / Тесты / Темы работ / Задания / Кейсы / Проекты), replacing separate menu items; clear "what can I create?" overview for new users
+**Задания / Кейсы / Проекты** — one practical-material generator (`/materials/:kind`): topic + difficulty (базовый/средний/продвинутый) + optional subject → задания (условие), кейсы (ситуация + вопросы для разбора), or проекты (цель, результат, этапы), each with developed skills and a teacher hint. Copy-all + per-kind history. Free: 3/mo, Pro: unlimited
 **Presentations** — slide-by-slide generator (title, bullets, speaker notes), copy-per-slide
 **Quizzes («Тесты»)** — 5–20 multiple-choice questions on a topic, at one of three Bloom-style levels (recall / understanding / application), grounded in the subject's materials via RAG with source citations. Answer reveal, history. Free: 3/mo, Pro: unlimited
-**Onboarding** — welcome modal (first login), getting-started checklist (tracks real progress), per-page "how it works" intros, no-subject hints on grading/presentations
+**Onboarding** — welcome modal (first login), getting-started checklist (persists until first grade), per-page "how it works" intros, no-subject hints on every generator page, and a **progressive sidebar** (new users see only essential start-here items + a «Показать всё» toggle; full nav unlocks automatically after the first grade)
 **Account** — feedback page, in-app help center, settings, password change, account deletion (152-ФЗ cascade)
 
 ---
@@ -102,7 +107,7 @@ Panel at `/admin` (direct URL only, `platform_admin`):
 - **Overview** — platform stats + today's cost
 - **Usage** — by day / feature / teacher (cost visible here only)
 - **Teachers** — search, change role / plan / institution assignment, activate/deactivate
-- **Institutions** — create/edit (tier, seat cap, **email auto-join domain**), teacher counts
+- **Institutions** — create/edit (tier, seat cap, **email auto-join domain**), teacher counts; **SAML SSO config** per institution (IdP entity id / SSO URL / cert, attribute mapping, copy-ready SP metadata + ACS URLs)
 - **Criterion templates** — global templates teachers start from (incl. STEM)
 - **Feedback** — browse in-app user feedback (category filter, reply link)
 - **Errors** — recent AI/service errors
@@ -113,7 +118,7 @@ Panel at `/admin` (direct URL only, `platform_admin`):
 ## Cross-cutting / platform ✅
 
 - **Email** — Unisender Go transactional (cluster go2): registration, password reset/changed, institution invite, renewal dunning; **owner notifications** (new signup, purchase, feedback) to `ADMIN_NOTIFY_EMAIL`
-- **Auth** — JWT (7-day), bcrypt-12, password-change token invalidation, role middleware
+- **Auth** — JWT (7-day), bcrypt-12, password-change token invalidation, role middleware; **SAML 2.0 SSO** — email-first login routes to the institution's IdP when configured, JIT-provisions the teacher on first login (password auth still works alongside); SLO deferred
 - **Security** — helmet, CORS allowlist, rate limiting, express-validator, parameterized SQL, prompt-injection sanitisation, magic-byte file validation
 - **PWA** — installable, offline, Workbox service worker
 - **Infra** — Yandex Cloud VM (RU), nginx, **PM2 cluster (2 workers)**, PostgreSQL + pgvector with tuned config, numbered SQL migrations 001–019, `/api/health`
@@ -130,4 +135,4 @@ Panel at `/admin` (direct URL only, `platform_admin`):
 - **Domain ownership verification** — DNS TXT before honoring auto-join (currently admin-set only)
 - **Department analytics** — cohort comparison, at-risk students across an institution
 - **Uptime monitoring + public status page** (external monitor on `/api/health`)
-- LMS deeper integration, SSO/SAML, white-label
+- LMS deeper integration (LTI 1.3, Moodle roster/grade sync, SCIM provisioning), white-label

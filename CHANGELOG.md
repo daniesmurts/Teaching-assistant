@@ -15,6 +15,99 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Added
+- **SAML 2.0 SSO (institutional, per-institution IdP)** — teachers and admins
+  at an institution can sign in through their university's identity provider
+  (ADFS, Keycloak, Azure AD, ALD Pro). Email-first login: the teacher types
+  their email → `POST /api/sso/discover` checks whether the domain's
+  institution has SSO configured → SAML domains redirect to the IdP, everyone
+  else falls through to the password field. First SAML login JIT-provisions a
+  teacher row (matched by email, attached to the institution, random
+  unusable password) and stamps `saml_subject` / `saml_provisioned_at`.
+  Password auth keeps working alongside SSO. Backend: migration 041 adds
+  `saml_*` columns to `institutions` + `teachers`; `services/saml.ts` wraps
+  `@node-saml/node-saml` (per-institution AuthnRequest signing, assertion
+  validation, SP metadata XML, attribute extraction with IdP-friendly
+  fallbacks); `routes/sso.ts` exposes `/discover`, `/:id/metadata`,
+  `/:id/login`, `/:id/acs`; one global SP keypair lives in env
+  (`SAML_SP_*`, generated via `scripts/generateSamlSpKeypair.ts`). Platform
+  admin configures each institution's IdP under **Admin → Организации → SSO**
+  (enable toggle, IdP entity id / SSO URL / cert, attribute mapping, plus
+  copy-ready SP Entity ID / ACS / metadata URLs to hand the IdP admin).
+  Frontend: two-step Login, `/sso/callback` token-exchange page (excluded
+  from Metrica/Webvisor so the JWT in the URL is never replay-recorded).
+  SLO deferred. Local testing via `docker-compose.keycloak.yml` +
+  `docs/saml-testing.md`.
+- **ВКР review — Tier-4 independent recomputation + method-applicability** —
+  the highest-effort tier in the long-review pipeline. (1) A new
+  `findRecomputations` orchestrator step runs after the consistency pass.
+  Gating: fires only if ≥1 section emitted a numeric `key_quantity` (purely
+  qualitative humanities ВКР skip the call). Routes to the DeepSeek
+  **reasoner** model (`opts.reasoner: true`) — slow + costly but reliable at
+  arithmetic, where DeepSeek V3 isn't. The prompt asks for *real* divergence
+  only (`>5%` or principled error), with verbatim quote, formula, and inputs
+  carried through. Output validated against the section haystack and a
+  numeric-chapter allow-list so the reasoner can't invent contexts. Soft-fail
+  (logged, leaves `recomputation_findings=[]`). (2) Section prompt extended
+  with explicit method-applicability instructions: empirical correlations
+  (Dittus-Boelter Re > 10⁴; Stokes Ar < ~36; criteria from ГОСТ/СП/ОСТ;
+  statistical tests with their assumptions) must be checked against their
+  validity ranges and flagged as gaps with `severity` and `action` set
+  appropriately. New shared type `RecomputationFinding` with claimed vs.
+  recomputed values side-by-side; new field
+  `LongReviewResult.recomputation_findings`. Empty default on legacy rows.
+  Frontend: new `RecomputationBlock` rendered between Inconsistencies and
+  CoverageNote in both the result page and the assignment detail modal —
+  shows claim, severity dot, "В работе" vs "Перерасчёт ИИ" cards
+  side-by-side, the model's discrepancy explanation, formula + inputs when
+  provided, and a ↳ quote line. Sorted by severity DESC inside the block.
+- **ВКР review — Tier-3 severity / action / correction on gaps** — gaps now
+  surface as triaged findings rather than uniform bullets. Each ВКР gap can
+  carry `severity` (critical / substantial / minor), `action` (flag = we're
+  sure it's wrong → к проверке; verify = we couldn't pin it down → спросить
+  автора), and `correction` (one short sentence: what to do). All three are
+  optional fields on `BulletItem`, so regular grading bullets remain
+  unchanged. Validated by `normaliseBullets`: hallucinated enum values fall
+  back to null, correction capped at 240 chars. Both ВКР prompts updated to
+  request the new fields and explain how to choose between them.
+  `LongReviewBullet` renders a colour-coded severity dot before the marker
+  (danger/warning/ink-tertiary), an action chip («к проверке» /
+  «спросить автора»), and a "→ что сделать" subline for the correction. Gaps
+  are sorted by severity DESC inside chapter and overall lists so critical
+  findings rise to the top. 5 unit tests pin the validation logic
+  (happy path, hallucinated enums, short corrections rejected, length cap,
+  legacy string bullets stay clean). Per-finding confidence skipped on
+  purpose — the existing ensemble-based assignment-level confidence is the
+  calibrated one and we don't want two competing signals in the UI.
+- **Practical-material generator — задания / кейсы / проекты** (КНИТУ teacher feature T1) —
+  one kind-parameterized generator (`/materials/:kind`) producing **assignment / case /
+  project** sets: topic + difficulty (базовый/средний/продвинутый) + optional subject → items
+  with content (условие / ситуация + вопросы / цель + этапы), the skills developed, and a
+  teacher hint. Copy-all + per-kind history. Single `task_sets` table with a `kind`
+  discriminator (migrations 039 + 040; named to avoid the graded `assignments` table); shared
+  item shape, per-kind prompt + UI labels. `POST /api/tasks/generate` (+ list `?kind=`,
+  delete), `services/tasks.ts`. Surfaced as three cards in the «Материалы» hub. Count-based
+  monthly limit `tasksPerMonth` (free 3/mo across kinds). Completes КНИТУ's T1 set.
+- **РПД-студия — AI-assisted syllabus authoring** (`/curriculum` → tab «РПД-студия»,
+  КНИТУ teacher feature T5) — pick a discipline → AI drafts РПД content (цели,
+  планируемые результаты по компетенциям, тематический план, формы контроля) aimed at the
+  ОПК/ПК/УК + goals declared in its РПД, then **self-checks coverage** against those
+  targets (reuses A2). Sections are editable; «Перепроверить покрытие» re-scores the edited
+  text — the **write → check → fix loop**. AI drafts, the teacher is author of record;
+  computed live, not persisted. `POST /api/curriculum/syllabus-draft` +
+  `/syllabus-review` generalised to accept raw text + targets
+  (`backend/src/services/syllabusAuthor.ts`). Third tab on the `/curriculum` page — still
+  no new sidebar entry. See `docs/KNITU-roadmap.md` (item T5 / TODO L).
+- **Syllabus conformance review** (`/curriculum` → tab «Соответствие РПД компетенциям»,
+  КНИТУ admin feature A2) — score how well a discipline's РПД covers the ОПК/ПК/УК
+  competencies and goals it declares. Structurally the **grading engine pointed at a
+  syllabus**: each competency/goal is a criterion, the РПД is the "submission", output is
+  per-item coverage (`covered`/`partial`/`missing`) + score + verbatim evidence quote +
+  gap + recommendation. Competencies/goals are auto-extracted from the РПД (or supplied).
+  Reuses `chatJSON` + the grading verbatim-quote convention; computed live, not persisted.
+  `POST /api/curriculum/syllabus-review` (`backend/src/services/syllabusReview.ts`). The
+  `/curriculum` page is now **tabbed** (Дублирование тем + Соответствие РПД) — the «РПД
+  analysis suite» under one menu item, no new sidebar entry. See `docs/KNITU-roadmap.md`
+  (item A2 / TODO K).
 - **ВКР review — Tier-2 cross-section consistency** — catches the class of
   error that was structurally invisible before: a number stated one way in
   chapter 2 and another way in chapter 5. (1) The section pass now extracts
@@ -118,6 +211,33 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   («Структура (вес: 40%)») broke the snapshot score merge — now stripped.
 
 ### Changed
+- **Template picker — searchable + grouped when the list grows** — the "Начать с готового
+  шаблона" picker on the Criteria and Rubrics pages was a flat wrap of chips that got hard to
+  scan as templates multiplied. New shared `TemplatePicker` component: a simple flat row when
+  there are ≤6 templates, but once larger it gains a **search box + subject-filter pills**
+  (Все / Бизнес / Инженерия / …) and **groups results by subject**. Used by both
+  `Criteria.tsx` and `Rubrics.tsx`.
+- **Progressive sidebar for new users** (item J/B — the core "too many tabs" fix) — a
+  brand-new account (no subject + no first grade) now sees only the essential start-here
+  items (Главная / Проверка работ / Материалы / Предметы) plus the account group and a
+  «Показать всё» toggle, instead of the full ~14-item menu. Once the teacher grades their
+  first work (activation), the full nav appears automatically and permanently; the toggle
+  choice is persisted (`ga_nav_expanded`). Defaults to the full nav while data loads so
+  returning users never see a flash of the slimmed menu. Completes the first-run arc
+  (A: welcome/checklist · C: empty-states · B: this).
+- **«Материалы» generator hub** (`/materials`) — the three generation pages
+  (Презентации / Тесты / Темы работ) are now reached through one **«Материалы»** hub
+  instead of three separate sidebar items, cutting the «Генерация» group from 3 entries to
+  1 (item J — nav simplification) and giving new users a clear "what can I create?"
+  overview. Existing routes unchanged; «Материалы» stays highlighted while inside any child
+  page (location-aware nav active state). Future КНИТУ T1 types (кейсы/проекты/задания) slot
+  in as more hub cards (TODO M).
+- **Empty-state CTAs on the generator pages + curriculum-prompt hardening** — extended the
+  `NoCourseHint` "create your first subject" nudge to the **Quizzes** and **Topics**
+  generators (was only on grading/presentations), so every AI feature page points a
+  brand-new user at the first action (item J/C). Hardening: user-supplied competency/goal
+  text is now run through `sanitiseForPrompt` before entering the syllabus review/author
+  ИИ prompts, matching the prompt-injection posture used for submission text.
 - **Onboarding first-run refresh** (`frontend/src/components/onboarding/`) —
   addresses recurring "не интуитивно, много вкладок" feedback from new users.
   `WelcomeModal` now sets accurate expectations: instead of "grading + slides" it

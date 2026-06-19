@@ -4,6 +4,7 @@ import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
+import TemplatePicker from '../components/ui/TemplatePicker'
 import { getCourses } from '../api/courses'
 import {
   getCriteria, getCriteriaTemplates, createCriterion, updateCriterion, deleteCriterion,
@@ -169,23 +170,12 @@ export default function Criteria() {
             </div>
           ) : (
             <>
-              {/* Templates */}
-              {templates.length > 0 && (
-                <div className="mb-6">
-                  <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">
-                    Начать с готового шаблона
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {templates.map((t) => (
-                      <button key={t.id} onClick={() => fromTemplate(t)}
-                        className="px-3 py-1.5 text-xs font-sans bg-surface border border-border rounded-md hover:border-amber/40 hover:bg-amber-light transition-colors">
-                        {t.name}
-                        {t.subject && <span className="text-ink-tertiary ml-1.5">· {SUBJECT_LABEL[t.subject] ?? t.subject}</span>}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Templates — search + subject filter when the list grows */}
+              <TemplatePicker
+                items={templates}
+                subjectLabel={SUBJECT_LABEL}
+                onPick={(t) => fromTemplate(t as Criterion)}
+              />
 
               {/* Existing criteria */}
               {criteria.length === 0 ? (

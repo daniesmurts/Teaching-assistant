@@ -1,0 +1,19 @@
+# Local Keycloak for SAML SSO testing — NOT for production.
+#
+#   docker compose -f docker-compose.keycloak.yml up -d
+#
+# Admin console: http://localhost:8080  (admin / admin)
+# Acts as a stand-in for a university IdP (ADFS / Keycloak / ALD Pro) so we can
+# exercise the full SAML flow locally. See docs/saml-testing.md for setup steps.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: start-dev
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: 8080
+    ports:
+      - "8080:8080"
+    # Data is ephemeral by default (start-dev uses an in-memory H2 DB). That's
+    # fine for testing — re-import the realm if you recreate the container.

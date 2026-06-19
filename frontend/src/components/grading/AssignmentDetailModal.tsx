@@ -5,8 +5,9 @@ import Badge from '../ui/Badge'
 import RevisionCheckList from './RevisionCheckList'
 import QuestionResponseList from './QuestionResponseList'
 import ConfidenceBadge from './ConfidenceBadge'
-import LongReviewBullet from './LongReviewBullet'
+import LongReviewBullet, { sortGapsBySeverity } from './LongReviewBullet'
 import InconsistenciesBlock from './InconsistenciesBlock'
+import RecomputationBlock from './RecomputationBlock'
 import { getReviewByAssignment, getAssignmentCrossUses, getApprovalHistory } from '../../api/grading'
 import { gradeColor } from '../../lib/grades'
 import type { Assignment, GradeLetter, AssignmentStatus, BulletItem, DefenseQuestion, ChapterReview, VerificationQuestion, Handout, ApprovedRevision } from '../../types'
@@ -231,6 +232,11 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
             <InconsistenciesBlock items={r.inconsistencies ?? []} chapters={r.chapter_reviews} />
           )}
 
+          {/* Recomputation findings (ВКР review) — Tier-4 addition. Hidden when empty. */}
+          {r && (
+            <RecomputationBlock items={r.recomputation_findings ?? []} chapters={r.chapter_reviews} />
+          )}
+
           {/* Coverage note (ВКР review) — Tier-1 addition; null on legacy rows. */}
           {r && r.coverage_note && (
             <section className="bg-surface-warm border border-border rounded-md p-3">
@@ -273,7 +279,7 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
                           {c.gaps.length > 0 && (
                             <div>
                               <div className="text-[10px] font-semibold text-warning uppercase tracking-wide mb-1">Замечания</div>
-                              {c.gaps.map((g, j) => (
+                              {sortGapsBySeverity(c.gaps).map((g, j) => (
                                 <LongReviewBullet key={j} bullet={g} variant="negative" />
                               ))}
                             </div>

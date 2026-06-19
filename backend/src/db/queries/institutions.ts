@@ -9,6 +9,30 @@ export interface InstitutionRow {
   created_at:   string
 }
 
+// SAML config — separate from InstitutionRow so callers can hold it
+// independently and so the public list/overview endpoints never accidentally
+// serialise the IdP cert.
+export interface SamlConfigRow {
+  saml_enabled:         boolean
+  saml_idp_entity_id:   string | null
+  saml_idp_sso_url:     string | null
+  saml_idp_x509_cert:   string | null
+  saml_attribute_email: string
+  saml_attribute_name:  string
+  saml_force_sso:       boolean
+}
+
+// A SAML config is "complete" only when all three IdP fields are populated.
+// Used by /api/sso/discover before redirecting.
+export function isSamlConfigComplete(c: SamlConfigRow): boolean {
+  return Boolean(
+    c.saml_enabled &&
+    c.saml_idp_entity_id &&
+    c.saml_idp_sso_url &&
+    c.saml_idp_x509_cert
+  )
+}
+
 export async function getInstitutionById(id: string): Promise<InstitutionRow | null> {
   const { rows } = await pool.query<InstitutionRow>(`SELECT * FROM institutions WHERE id = $1`, [id])
   return rows[0] ?? null
@@ -18,6 +42,71 @@ export async function getInstitutionById(id: string): Promise<InstitutionRow | n
 export async function findInstitutionByEmailDomain(domain: string): Promise<InstitutionRow | null> {
   const { rows } = await pool.query<InstitutionRow>(
     `SELECT * FROM institutions WHERE lower(email_domain) = lower($1) LIMIT 1`,
+    [domain]
+  )
+  return rows[0] ?? null
+}
+
+// ─── SAML config ──────────────────────────────────────────────────────────────
+
+export async function getSamlConfig(institutionId: string): Promise<SamlConfigRow | null> {
+  const { rows } = await pool.query<SamlConfigRow>(
+    `SELECT saml_enabled, saml_idp_entity_id, saml_idp_sso_url, saml_idp_x509_cert,
+            saml_attribute_email, saml_attribute_name, saml_force_sso
+       FROM institutions WHERE id = $1`,
+    [institutionId]
+  )
+  return rows[0] ?? null
+}
+
+export async function setSamlConfig(
+  institutionId: string,
+  patch: Partial<SamlConfigRow>
+): Promise<SamlConfigRow | null> {
+  const { rows } = await pool.query<SamlConfigRow>(
+    `UPDATE institutions SET
+       saml_enabled          = COALESCE($2, saml_enabled),
+       saml_idp_entity_id    = CASE WHEN $3  THEN $4  ELSE saml_idp_entity_id   END,
+       saml_idp_sso_url      = CASE WHEN $5  THEN $6  ELSE saml_idp_sso_url     END,
+       saml_idp_x509_cert    = CASE WHEN $7  THEN $8  ELSE saml_idp_x509_cert   END,
+       saml_attribute_email  = COALESCE($9,  saml_attribute_email),
+       saml_attribute_name   = COALESCE($10, saml_attribute_name),
+       saml_force_sso        = COALESCE($11, saml_force_sso)
+     WHERE id = $1
+     RETURNING saml_enabled, saml_idp_entity_id, saml_idp_sso_url, saml_idp_x509_cert,
+               saml_attribute_email, saml_attribute_name, saml_force_sso`,
+    [
+      institutionId,
+      patch.saml_enabled         ?? null,
+      patch.saml_idp_entity_id   !== undefined, patch.saml_idp_entity_id   ?? null,
+      patch.saml_idp_sso_url     !== undefined, patch.saml_idp_sso_url     ?? null,
+      patch.saml_idp_x509_cert   !== undefined, patch.saml_idp_x509_cert   ?? null,
+      patch.saml_attribute_email ?? null,
+      patch.saml_attribute_name  ?? null,
+      patch.saml_force_sso       ?? null,
+    ]
+  )
+  return rows[0] ?? null
+}
+
+// Discovery: "what login method does this email use?" — case-insensitive on
+// the domain, returns the institution + its SAML config in one round trip.
+// Used by POST /api/sso/discover from the login page.
+export interface SamlDiscoveryRow extends SamlConfigRow {
+  institution_id:   string
+  institution_name: string
+}
+
+export async function findSamlConfigForEmailDomain(
+  domain: string
+): Promise<SamlDiscoveryRow | null> {
+  const { rows } = await pool.query<SamlDiscoveryRow>(
+    `SELECT id AS institution_id, name AS institution_name,
+            saml_enabled, saml_idp_entity_id, saml_idp_sso_url, saml_idp_x509_cert,
+            saml_attribute_email, saml_attribute_name, saml_force_sso
+       FROM institutions
+      WHERE lower(email_domain) = lower($1)
+      LIMIT 1`,
     [domain]
   )
   return rows[0] ?? null

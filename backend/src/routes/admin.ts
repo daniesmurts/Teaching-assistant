@@ -9,7 +9,11 @@ import {
   getUsageByFeature, getRecentErrors,
 } from '../db/queries/usageLog'
 import { upgradeTeacherToPro, cancelTeacherSubscription } from '../db/queries/teachers'
-import { listInstitutionsWithCounts, createInstitution, updateInstitution } from '../db/queries/institutions'
+import {
+  listInstitutionsWithCounts, createInstitution, updateInstitution,
+  getSamlConfig, setSamlConfig,
+} from '../db/queries/institutions'
+import { metadataUrlForInstitution, acsUrlForInstitution } from '../services/saml'
 import { listFeedback } from '../db/queries/feedback'
 import {
   findPaymentsByTeacher, findPaymentByOrderId, markPaymentRefunded,
@@ -396,6 +400,47 @@ router.patch('/institutions/:id', asyncHandler(async (req, res) => {
   }
 
   const updated = await updateInstitution(req.params.id, patch)
+  if (!updated) throw new NotFoundError('Организация')
+  res.json(updated)
+}))
+
+// ─── SAML config (platform admin only) ────────────────────────────────────────
+// Institution admin will get a scoped version of these later; for v1 only
+// platform admin can configure SAML so we can hand-hold the first pilots.
+
+router.get('/institutions/:id/saml', asyncHandler(async (req, res) => {
+  const cfg = await getSamlConfig(req.params.id)
+  if (!cfg) throw new NotFoundError('Организация')
+  res.json({
+    ...cfg,
+    // URLs the IdP admin needs to configure their side
+    spEntityId:  process.env.SAML_SP_ENTITY_ID ?? null,
+    metadataUrl: metadataUrlForInstitution(req.params.id),
+    acsUrl:      acsUrlForInstitution(req.params.id),
+  })
+}))
+
+router.put('/institutions/:id/saml', asyncHandler(async (req, res) => {
+  const b = req.body as Partial<{
+    saml_enabled:         boolean
+    saml_idp_entity_id:   string | null
+    saml_idp_sso_url:     string | null
+    saml_idp_x509_cert:   string | null
+    saml_attribute_email: string
+    saml_attribute_name:  string
+    saml_force_sso:       boolean
+  }>
+
+  // Light validation — full validation lives in the discovery/login endpoints
+  // which fail closed if config is incomplete. Here we just sanity-check types.
+  if (b.saml_idp_sso_url && !/^https?:\/\//i.test(b.saml_idp_sso_url)) {
+    throw new ValidationError('SSO URL должен начинаться с http(s)://')
+  }
+  if (b.saml_idp_x509_cert && !b.saml_idp_x509_cert.includes('-----BEGIN CERTIFICATE-----')) {
+    throw new ValidationError('Сертификат должен быть в формате PEM')
+  }
+
+  const updated = await setSamlConfig(req.params.id, b)
   if (!updated) throw new NotFoundError('Организация')
   res.json(updated)
 }))

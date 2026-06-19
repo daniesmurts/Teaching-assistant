@@ -13,7 +13,7 @@ import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { logger } from '../lib/logger'
 import type { CallContext } from './deepseek'
-import type { LongReviewResult, ChapterReview, DefenseQuestion, GradeLetter, CriteriaSnapshotItem, KeyQuantity, Inconsistency } from '../../../shared/types'
+import type { LongReviewResult, ChapterReview, DefenseQuestion, GradeLetter, CriteriaSnapshotItem, KeyQuantity, Inconsistency, RecomputationFinding, BulletSeverity } from '../../../shared/types'
 
 // ─── Tuning ────────────────────────────────────────────────────────────────────
 
@@ -94,6 +94,16 @@ export async function runLongReview(p: RunParams): Promise<void> {
     } catch (err) {
       logger.warn({ message: 'Consistency pass failed', reviewId: p.reviewId, error: (err as Error).message })
       result.inconsistencies = []
+    }
+
+    // Tier-4 independent recomputation of headline numerical results. Runs on
+    // the reasoner (slow + costly — only fire if there's actually math). Same
+    // soft-fail contract as defence/consistency.
+    try {
+      result.recomputation_findings = await findRecomputations(sections, analyses, result.chapter_reviews, ctx)
+    } catch (err) {
+      logger.warn({ message: 'Recomputation pass failed', reviewId: p.reviewId, error: (err as Error).message })
+      result.recomputation_findings = []
     }
 
     // ── Draft assignment so it flows into history / approval / email / RAG ──────
@@ -304,7 +314,14 @@ ${sanitiseForPrompt(body)}
     `проценты), коэффициенты в формулах, марки материалов, объёмы выборки, размеры ` +
     `групп, ссылки на конкретные нормы. К каждому — точная цитата из раздела.
 ШАГ 2 (суждение): рассуждайте ТОЛЬКО на основе извлечённого материала. Никаких ` +
-    `догадок, никаких терминов и коэффициентов, которых нет в тексте.
+    `догадок, никаких терминов и коэффициентов, которых нет в тексте. ` +
+    `ДОПОЛНИТЕЛЬНО: если в разделе применяется эмпирическая корреляция или стандартная ` +
+    `формула (например, Дитуса-Болтера для теплообмена при Re > 10⁴; формула Стокса при ` +
+    `Ar < ~36; критерий Рейнольдса; формулы из ГОСТ/СП/ОСТ; статистические тесты при ` +
+    `соответствующих условиях применимости) — проверьте, попадают ли входные параметры в ` +
+    `область её применимости. Если данных для проверки в разделе недостаточно — оформите ` +
+    `как gap с action="verify". Если параметры явно за пределами области — gap с ` +
+    `severity="critical" или "substantial" и action="flag".
 
 Верните JSON со следующими полями (все обязательны):
 - "summary": 2–4 предложения о содержании раздела
@@ -317,8 +334,9 @@ ${sanitiseForPrompt(body)}
     `{"text": "что именно сделано хорошо (1–2 предложения)", "quote": "точная цитата из раздела"}. ` +
     `Помечайте сильной стороной ТОЛЬКО то, что вы проверили по цитате. Если проверить нельзя — не добавляйте.
 - "gaps": до 3 объектов вида ` +
-    `{"text": "недостаток или вопрос для проверки (1–2 предложения)", "quote": "точная цитата из раздела, к которой относится замечание"}. ` +
-    `Если не можете точно процитировать то, что критикуете, переформулируйте пункт как ВОПРОС (что уточнить у автора).
+    `{"text": "недостаток или вопрос для проверки (1–2 предложения)", "quote": "точная цитата из раздела, к которой относится замечание", "severity": "critical"|"substantial"|"minor", "action": "flag"|"verify", "correction": "одно предложение — что именно сделать, чтобы исправить (например, «пересчитать с учётом плотности 850, а не 920»)"}. ` +
+    `Если не можете точно процитировать то, что критикуете, переформулируйте пункт как ВОПРОС (что уточнить у автора) и поставьте action="verify"; в противном случае action="flag". ` +
+    `severity: "critical" — ошибка, которая ставит под сомнение результат работы; "substantial" — заметный недостаток, требующий исправления; "minor" — мелочь, на которую стоит обратить внимание.
 
 Ответьте ТОЛЬКО JSON-объектом.`
 
@@ -443,11 +461,12 @@ ${analysisBlock}
 - "suggested_grade": одна из "5","4","3","2" (5: 87–100, 4: 73–86, 3: 60–72, 2: ниже 60)
 - "grade_label": "Отлично"|"Хорошо"|"Удовлетворительно"|"Неудовлетворительно"
 - "chapter_reviews": массив по разделам ` +
-    `{"title": string, "assessment": "1–2 абзаца", "strengths": [{"text": "...", "quote": "точная цитата"}], "gaps": [{"text": "...", "quote": "точная цитата"}]}
+    `{"title": string, "assessment": "1–2 абзаца", "strengths": [{"text": "...", "quote": "точная цитата"}], "gaps": [{"text": "...", "quote": "точная цитата", "severity": "critical"|"substantial"|"minor", "action": "flag"|"verify", "correction": "что сделать (1 предложение)"}]}
 - "overall_strengths": 3–6 главных достоинств работы в виде ` +
     `[{"text": "...", "quote": "цитата из работы, подтверждающая пункт"}]. Сильной стороной может быть только то, что вы проверили по цитате.
 - "overall_gaps": 3–6 главных недостатков в виде ` +
-    `[{"text": "...", "quote": "цитата из работы, к которой относится замечание"}]. Если цитировать нечего, переформулируйте как вопрос для уточнения у автора.
+    `[{"text": "...", "quote": "цитата из работы, к которой относится замечание", "severity": "critical"|"substantial"|"minor", "action": "flag"|"verify", "correction": "что сделать (1 предложение)"}]. ` +
+    `Сортируйте от самого критичного к самому мелкому. Если цитировать нечего, переформулируйте как вопрос для уточнения у автора и поставьте action="verify".
 - "coverage_note": 1–3 предложения о том, какие критерии вы фактически проверили и где материала не хватило ` +
     `для уверенного суждения (например, "методология описана подробно, но проверить расчёты в главе 3 по предоставленному тексту нельзя").
 
@@ -493,9 +512,10 @@ ${analysisBlock}
     chapter_reviews:   normaliseChapters(r.chapter_reviews, analyses, submissionText),
     overall_strengths: overallStrengths,
     overall_gaps:      overallGaps,
-    defense_questions: [],   // populated by generateDefenseQuestions in the orchestrator
+    defense_questions: [],        // populated by generateDefenseQuestions in the orchestrator
     coverage_note:     (r.coverage_note ?? '').trim() || null,
-    inconsistencies:   [],   // populated by findInconsistencies in the orchestrator
+    inconsistencies:   [],        // populated by findInconsistencies in the orchestrator
+    recomputation_findings: [],   // populated by findRecomputations in the orchestrator
   }
 }
 
@@ -726,6 +746,179 @@ ${clusterBlock}
     })
   }
   return out.slice(0, 6)   // cap UI noise — anything beyond ~5 is fatigue
+}
+
+// ─── Tier 4: independent recomputation via the reasoner ────────────────────────
+//
+// Why this exists: DeepSeek V3 is unreliable at arithmetic. The reasoning
+// model (DeepSeek-Reasoner) is much better. For ВКР — where bad arithmetic
+// matters and is a recurring failure mode — we accept the cost (slow,
+// expensive) of one extra reasoner call per review to independently re-derive
+// the headline numerical results and surface any divergence from what the
+// author claimed.
+//
+// Gating: only fires if ANY section emitted a key_quantity with a number. A
+// purely qualitative work (humanities ВКР) skips the call entirely.
+//
+// Soft-fail: failures are logged and leave recomputation_findings=[] — the
+// rest of the review still ships. We never gate the whole pipeline on the
+// reasoner being available.
+
+const RECOMP_SECTION_CHAR_CAP   = 7_500   // per-section content cap
+const RECOMP_TOTAL_CHAR_BUDGET  = 60_000  // total chars across all sections sent
+
+async function findRecomputations(
+  sections:       Section[],
+  analyses:       SectionAnalysis[],
+  chapterReviews: ChapterReview[],
+  ctx:            CallContext,
+): Promise<RecomputationFinding[]> {
+  // Gate 1: any numeric key_quantity at all?
+  const allQuantities = analyses.flatMap((a) => a.key_quantities)
+  const numericQs = allQuantities.filter((q) => extractFirstNumber(q.value) !== null)
+  if (numericQs.length === 0) return []
+
+  // Build a per-section block — title + (capped) text + the quantities the
+  // first pass already pulled out. Only sections that contributed at least
+  // one numeric quantity are included; everything else is noise here.
+  const numericByChapter = new Map<number, KeyQuantity[]>()
+  for (const q of numericQs) {
+    const arr = numericByChapter.get(q.chapter_index) ?? []
+    arr.push(q)
+    numericByChapter.set(q.chapter_index, arr)
+  }
+
+  let budget = RECOMP_TOTAL_CHAR_BUDGET
+  const blocks: string[] = []
+  for (const [chapterIdx, qs] of numericByChapter) {
+    const section = sections[chapterIdx]
+    if (!section) continue
+    const title = chapterReviews[chapterIdx]?.title ?? section.title
+    // Take head + tail of the section so a long section still has its
+    // conclusion visible to the reasoner (where the headline results usually
+    // sit).
+    const sectionText = capMiddle(section.text, RECOMP_SECTION_CHAR_CAP)
+    if (sectionText.length > budget) break    // out of budget — stop adding
+    budget -= sectionText.length
+
+    const qsBlock = qs.map((q) => `  · ${q.name} = ${q.value}   («${q.quote}»)`).join('\n')
+    blocks.push(
+      `### Раздел ${chapterIdx}: ${title}
+Извлечённые количественные величины:
+${qsBlock}
+<section_text>
+${sanitiseForPrompt(sectionText)}
+</section_text>`)
+  }
+
+  if (blocks.length === 0) return []
+
+  const system =
+    `Вы — независимый рецензент-расчётчик. Ваша задача — проверить АРИФМЕТИКУ и ПРИМЕНИМОСТЬ ` +
+    `формул в работе. Не доверяйте вычислениям автора: перепроверяйте каждое головное ` +
+    `численное значение по тем входным данным и формулам, которые приведены в самом разделе. ` +
+    `Если входов недостаточно для перепроверки — НЕ выдумывайте; пропустите этот пункт. ` +
+    `Если формула цитируется по стандарту (ГОСТ, СП, ОСТ) — проверяйте именно ФОРМУ формулы ` +
+    `(коэффициенты, члены), а не только перемножение. Сообщайте только РЕАЛЬНЫЕ расхождения ` +
+    `(> 5% или принципиальная ошибка). Совпадения не упоминайте. Думайте пошагово, отвечайте ` +
+    `только валидным JSON на русском языке.`
+
+  const user =
+    `## Разделы работы с численными результатами
+
+${blocks.join('\n\n')}
+
+Перепроверьте каждое головное численное значение из извлечённых величин. ` +
+    `Верните JSON:
+{
+  "items": [
+    {
+      "chapter_index": число (0-based),
+      "claim": "что именно проверяется (например, «Число Рейнольдса в трубе»)",
+      "claimed_value": "значение из работы, как в тексте (например, «50 000»)",
+      "recomputed_value": "ваше независимое значение (например, «170 000»)",
+      "discrepancy": "1 предложение: характер расхождения (например, «расчёт автора не учитывает плотность нефти 850, а использует 920»)",
+      "inputs": "входные данные, которые вы использовали (например, «ρ=850 кг/м³, v=2 м/с, d=0.1 м, μ=0.001 Па·с»), либо null если автор не указал",
+      "formula": "формула, по которой вы пересчитали (например, «Re = ρvd/μ»), либо null если автор не привёл",
+      "quote": "точная цитата из раздела, содержащая claimed_value",
+      "severity": "critical" (результат сильно неверен и ломает выводы) | "substantial" (заметная ошибка, требует исправления) | "minor" (округление/единицы)
+    }
+  ]
+}
+Если расхождений нет — верните {"items": []}. Не дублируйте уже отмеченные противоречия между разделами.`
+
+  const r = await chatJSON<{
+    items?: Array<{
+      chapter_index?:    number
+      claim?:            string
+      claimed_value?:    string
+      recomputed_value?: string
+      discrepancy?:      string
+      inputs?:           string | null
+      formula?:          string | null
+      quote?:            string
+      severity?:         unknown
+    }>
+  }>(
+    [{ role: 'system', content: system }, { role: 'user', content: user }],
+    'независимый перерасчёт',
+    {
+      context:   ctx,
+      reasoner:  true,    // routes to DeepSeek-Reasoner; no fallback
+      maxTokens: 4096,
+    },
+  )
+
+  return normaliseRecomputations(r.items, sections, numericByChapter)
+}
+
+function normaliseRecomputations(
+  items:            unknown,
+  sections:         Section[],
+  numericByChapter: Map<number, KeyQuantity[]>,
+): RecomputationFinding[] {
+  if (!Array.isArray(items)) return []
+  const out: RecomputationFinding[] = []
+  for (const it of items) {
+    if (!it || typeof it !== 'object') continue
+    const obj = it as Record<string, unknown>
+    const chapter_index = typeof obj.chapter_index === 'number' ? obj.chapter_index : -1
+    const section = sections[chapter_index]
+    if (!section) continue
+    const claim            = typeof obj.claim            === 'string' ? obj.claim.trim()            : ''
+    const claimed_value    = typeof obj.claimed_value    === 'string' ? obj.claimed_value.trim()    : ''
+    const recomputed_value = typeof obj.recomputed_value === 'string' ? obj.recomputed_value.trim() : ''
+    const discrepancy      = typeof obj.discrepancy      === 'string' ? obj.discrepancy.trim()      : ''
+    const rawQuote         = typeof obj.quote            === 'string' ? obj.quote.trim()            : ''
+    if (!claim || !claimed_value || !recomputed_value || !discrepancy || !rawQuote) continue
+    // Quote must appear verbatim somewhere in the section we sent — same
+    // citation contract as bullets. Stops the reasoner inventing context.
+    const haystack = section.text.toLowerCase().replace(/\s+/g, ' ').trim()
+    const norm = rawQuote.toLowerCase().replace(/\s+/g, ' ').trim()
+    if (norm.length < 8 || !haystack.includes(norm)) continue
+    // Defensive: only accept claims for sections that *did* contribute numeric
+    // quantities. If the reasoner invents a chapter_index that didn't have
+    // numbers, drop it.
+    if (!numericByChapter.has(chapter_index)) continue
+    const inputs  = typeof obj.inputs  === 'string' && obj.inputs.trim()  ? obj.inputs.trim().slice(0, 280)  : null
+    const formula = typeof obj.formula === 'string' && obj.formula.trim() ? obj.formula.trim().slice(0, 160) : null
+    const severity: BulletSeverity =
+      obj.severity === 'critical' || obj.severity === 'substantial' || obj.severity === 'minor'
+        ? obj.severity
+        : 'substantial'
+    out.push({
+      claim:            claim.slice(0, 160),
+      claimed_value:    claimed_value.slice(0, 80),
+      recomputed_value: recomputed_value.slice(0, 80),
+      discrepancy:      discrepancy.slice(0, 320),
+      inputs,
+      formula,
+      quote:            rawQuote.slice(0, 220),
+      chapter_index,
+      severity,
+    })
+  }
+  return out.slice(0, 8)   // cap UI noise
 }
 
 function normaliseChapters(

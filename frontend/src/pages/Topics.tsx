@@ -4,6 +4,7 @@ import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
 import { getCourses } from '../api/courses'
+import NoCourseHint from '../components/onboarding/NoCourseHint'
 import { getStudents } from '../api/grading'
 import { generateTopics, getTopicSets, type GenerateTopicsRequest } from '../api/topics'
 import { useUIStore } from '../store/uiStore'
@@ -161,6 +162,7 @@ export default function Topics() {
                     <option value="">Без предмета</option>
                     {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
+                  <NoCourseHint />
                 </Field>
                 <Field label="Количество тем">
                   <select className={selectClass} value={form.count} onChange={(e) => setForm((f) => ({ ...f, count: Number(e.target.value) }))}>

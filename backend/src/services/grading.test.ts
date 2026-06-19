@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { annotateWithPageMarkers, normaliseCriteriaScores, buildGradingMessages } from './grading'
+import { annotateWithPageMarkers, normaliseCriteriaScores, buildGradingMessages, normaliseBullets } from './grading'
 import type { Assignment, CriterionScore, CriteriaSnapshotItem } from '../../../shared/types'
 import type { SimilarAssignment } from '../db/queries/assignments'
 
@@ -252,5 +252,68 @@ describe('normaliseCriteriaScores — name cleanup', () => {
   it('leaves names without a weight suffix untouched', () => {
     const out = normaliseCriteriaScores([score({ name: 'Структура (логика изложения)' })], submission, 1)
     expect(out[0].name).toBe('Структура (логика изложения)')
+  })
+})
+
+describe('normaliseBullets — Tier 3 fields', () => {
+  // Quote validation runs case- and whitespace-insensitive over the submission
+  // (already covered by the citation tests). These tests focus on the new
+  // severity/action/correction fields added in Tier 3 — they must accept the
+  // happy path, reject hallucinated enum values, and survive a missing payload.
+  const submission = 'Введение содержит ясное обоснование темы исследования и постановку задач.'
+
+  it('passes through valid severity/action/correction', () => {
+    const out = normaliseBullets(
+      [{
+        text:       'Нет ссылок на источники',
+        quote:      'Введение содержит ясное обоснование',
+        severity:   'critical',
+        action:     'flag',
+        correction: 'Добавить ссылки на 3–5 источников по теме',
+      }],
+      submission, 1
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0].severity).toBe('critical')
+    expect(out[0].action).toBe('flag')
+    expect(out[0].correction).toBe('Добавить ссылки на 3–5 источников по теме')
+  })
+
+  it('drops hallucinated severity values', () => {
+    const out = normaliseBullets(
+      [{
+        text:     'a',
+        severity: 'catastrophic' as never,
+        action:   'escalate'      as never,
+      }],
+      submission, 1
+    )
+    expect(out[0].severity).toBeNull()
+    expect(out[0].action).toBeNull()
+  })
+
+  it('drops empty/too-short corrections', () => {
+    const out = normaliseBullets(
+      [{ text: 'a', correction: 'ok' }],
+      submission, 1
+    )
+    expect(out[0].correction).toBeNull()
+  })
+
+  it('caps correction text at 240 chars', () => {
+    const long = 'и'.repeat(500)
+    const out = normaliseBullets(
+      [{ text: 'a', correction: long }],
+      submission, 1
+    )
+    expect(out[0].correction).not.toBeNull()
+    expect(out[0].correction!.length).toBe(240)
+  })
+
+  it('leaves new fields null for legacy string bullets', () => {
+    const out = normaliseBullets(['just text'], submission, 1)
+    expect(out[0].severity).toBeUndefined()      // string branch returns no field
+    expect(out[0].action).toBeUndefined()
+    expect(out[0].correction).toBeUndefined()
   })
 })

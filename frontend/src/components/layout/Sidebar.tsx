@@ -1,36 +1,43 @@
-import { NavLink, useNavigate } from 'react-router-dom'
+import { useState } from 'react'
+import { NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../store/authStore'
+import { getCourses } from '../../api/courses'
+import { getGradingStats } from '../../api/grading'
 import Icon, { type IconName } from '../ui/Icon'
 import { initialsForAvatar } from '../../lib/teacherName'
 
-interface NavItem { icon: IconName; label: string; to: string }
-interface NavGroup { label?: string; items: NavItem[] }
+// `essential` items show in the slimmed nav a brand-new user sees; `alwaysShow`
+// groups (account) always render even before activation.
+interface NavItem { icon: IconName; label: string; to: string; match?: string[]; essential?: boolean }
+interface NavGroup { label?: string; items: NavItem[]; alwaysShow?: boolean }
+
+const NAV_EXPANDED_KEY = 'ga_nav_expanded'
 
 // Grouped by what the teacher is trying to do — top to bottom: overview →
 // grading → AI generation → setup → account.
 const NAV_GROUPS: NavGroup[] = [
   { items: [
-    { icon: 'home',         label: 'Главная',        to: '/dashboard' },
+    { icon: 'home',         label: 'Главная',        to: '/dashboard', essential: true },
   ]},
   { label: 'Проверка', items: [
-    { icon: 'sparkle',      label: 'Проверка работ', to: '/grading' },
+    { icon: 'sparkle',      label: 'Проверка работ', to: '/grading', essential: true },
     { icon: 'clock',        label: 'Журнал',         to: '/history' },
     { icon: 'users',        label: 'Студенты',       to: '/students' },
     { icon: 'list-checks',  label: 'Библиотека',     to: '/library' },
   ]},
   { label: 'Генерация', items: [
-    { icon: 'presentation', label: 'Презентации',    to: '/presentations' },
-    { icon: 'lightbulb',    label: 'Темы',           to: '/topics' },
-    { icon: 'quiz',         label: 'Тесты',          to: '/quizzes' },
+    { icon: 'grid',         label: 'Материалы',      to: '/materials', essential: true,
+      match: ['/materials', '/presentations', '/topics', '/quizzes'] },
   ]},
   { label: 'Управление', items: [
-    { icon: 'book',         label: 'Предметы',       to: '/courses' },
+    { icon: 'book',         label: 'Предметы',       to: '/courses', essential: true },
     { icon: 'layers',       label: 'Учебный план',   to: '/curriculum' },
     { icon: 'list-checks',  label: 'Критерии',       to: '/criteria' },
     { icon: 'list-checks',  label: 'Рубрики',        to: '/rubrics' },
     { icon: 'sparkle',      label: 'Учебный цикл',   to: '/learning-loop' },
   ]},
-  { label: 'Аккаунт', items: [
+  { label: 'Аккаунт', alwaysShow: true, items: [
     { icon: 'diamond',      label: 'Тариф',          to: '/billing' },
     { icon: 'settings',     label: 'Настройки',      to: '/settings' },
     { icon: 'help-circle',  label: 'Помощь',         to: '/help' },
@@ -38,21 +45,28 @@ const NAV_GROUPS: NavGroup[] = [
 ]
 
 function NavRow({ item }: { item: NavItem }) {
+  const { pathname } = useLocation()
+  // Keep a parent item (e.g. «Материалы») highlighted while the user is on one of
+  // its child pages (/presentations, /topics, /quizzes), for orientation.
+  const matched = item.match?.some((p) => pathname === p || pathname.startsWith(p + '/'))
   return (
     <NavLink to={item.to}>
-      {({ isActive }) => (
-        <div className={`flex items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer transition-colors ${
-          isActive ? 'bg-sidebar-active' : 'hover:bg-sidebar-hover'
-        }`}>
-          <Icon
-            name={item.icon}
-            className={`flex-shrink-0 ${isActive ? 'text-amber-mid' : 'text-ink-inv-muted'}`}
-          />
-          <span className={`text-sm font-sans ${isActive ? 'font-medium text-ink-inverse' : 'font-normal text-ink-inv-muted'}`}>
-            {item.label}
-          </span>
-        </div>
-      )}
+      {({ isActive }) => {
+        const active = isActive || matched
+        return (
+          <div className={`flex items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer transition-colors ${
+            active ? 'bg-sidebar-active' : 'hover:bg-sidebar-hover'
+          }`}>
+            <Icon
+              name={item.icon}
+              className={`flex-shrink-0 ${active ? 'text-amber-mid' : 'text-ink-inv-muted'}`}
+            />
+            <span className={`text-sm font-sans ${active ? 'font-medium text-ink-inverse' : 'font-normal text-ink-inv-muted'}`}>
+              {item.label}
+            </span>
+          </div>
+        )
+      }}
     </NavLink>
   )
 }
@@ -65,6 +79,34 @@ export default function Sidebar({ onClose }: Props) {
   const teacher   = useAuthStore((s) => s.teacher)
   const clearAuth = useAuthStore((s) => s.clearAuth)
   const navigate  = useNavigate()
+
+  const [expanded, setExpanded] = useState<boolean>(() => {
+    try { return localStorage.getItem(NAV_EXPANDED_KEY) === '1' } catch { return false }
+  })
+
+  // Progressive nav: a brand-new user (no subject + no first grade) sees only the
+  // essential start-here items, with a «Показать всё» toggle. Once activated, the
+  // full nav appears automatically. While data loads we default to the full nav so
+  // returning users never see a flash of the slimmed menu.
+  const { data: courses } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
+  const { data: stats }   = useQuery({ queryKey: ['grading-stats'], queryFn: getGradingStats })
+  const ready     = courses !== undefined && stats !== undefined
+  const activated = ready && courses.length > 0 && (stats?.total ?? 0) > 0
+  const minimal   = ready && !activated && !expanded
+
+  // Slimmed view: all essential items as one tight unlabeled list, then the
+  // always-show (account) groups. Full view: the normal grouped nav.
+  const groups: NavGroup[] = minimal
+    ? [
+        { items: NAV_GROUPS.flatMap((g) => (g.alwaysShow ? [] : g.items.filter((i) => i.essential))) },
+        ...NAV_GROUPS.filter((g) => g.alwaysShow),
+      ]
+    : NAV_GROUPS
+
+  function showAll() {
+    try { localStorage.setItem(NAV_EXPANDED_KEY, '1') } catch { /* ignore */ }
+    setExpanded(true)
+  }
 
   const initials =
     initialsForAvatar(teacher?.name) || teacher?.email?.[0]?.toUpperCase() || '?'
@@ -91,10 +133,10 @@ export default function Sidebar({ onClose }: Props) {
         )}
       </div>
 
-      {/* Nav — grouped into labeled sections */}
+      {/* Nav — grouped into labeled sections (slimmed for brand-new users) */}
       <nav className="flex-1 overflow-y-auto px-2 py-3">
-        {NAV_GROUPS.map((group, gi) => (
-          <div key={gi} className={gi > 0 ? 'mt-3' : ''}>
+        {groups.map((group, gi) => (
+          <div key={group.label ?? gi} className={gi > 0 ? 'mt-3' : ''}>
             {group.label && (
               <div className="px-3 pb-1 text-[10px] font-sans font-semibold uppercase tracking-wider text-amber-mid">
                 {group.label}
@@ -105,6 +147,17 @@ export default function Sidebar({ onClose }: Props) {
             </div>
           </div>
         ))}
+
+        {/* Show-all toggle — only while the slimmed nav is active */}
+        {minimal && (
+          <button
+            onClick={showAll}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md mt-2 text-ink-inv-muted hover:bg-sidebar-hover hover:text-ink-inverse transition-colors"
+          >
+            <span className="flex-shrink-0 w-4 text-center text-xs">▾</span>
+            <span className="text-sm font-sans">Показать всё</span>
+          </button>
+        )}
 
         {/* Feedback — visually distinct (amber) so early users notice it */}
         <NavLink to="/feedback">

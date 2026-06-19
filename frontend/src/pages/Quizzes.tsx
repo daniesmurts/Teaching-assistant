@@ -5,6 +5,7 @@ import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { getCourses } from '../api/courses'
+import NoCourseHint from '../components/onboarding/NoCourseHint'
 import { generateQuiz, getQuizzes, deleteQuiz } from '../api/quizzes'
 import { usePlan } from '../hooks/usePlan'
 import { useUIStore } from '../store/uiStore'
@@ -102,6 +103,7 @@ export default function Quizzes() {
                       <option value="">Без привязки</option>
                       {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
+                    <NoCourseHint />
                   </div>
                   <div>
                     <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">Количество вопросов</label>

@@ -129,6 +129,33 @@ export async function updateInstitution(
   return (await client.patch<AdminInstitution>(`/api/admin/institutions/${id}`, data)).data
 }
 
+// ─── SAML / SSO config ────────────────────────────────────────────────────────
+
+export interface SamlConfig {
+  saml_enabled:         boolean
+  saml_idp_entity_id:   string | null
+  saml_idp_sso_url:     string | null
+  saml_idp_x509_cert:   string | null
+  saml_attribute_email: string
+  saml_attribute_name:  string
+  saml_force_sso:       boolean
+  // Read-only — the SP values the IdP admin needs on their side
+  spEntityId:  string | null
+  metadataUrl: string
+  acsUrl:      string
+}
+
+export async function getSamlConfig(institutionId: string): Promise<SamlConfig> {
+  return (await client.get<SamlConfig>(`/api/admin/institutions/${institutionId}/saml`)).data
+}
+
+export async function updateSamlConfig(
+  institutionId: string,
+  patch: Partial<Omit<SamlConfig, 'spEntityId' | 'metadataUrl' | 'acsUrl'>>
+): Promise<SamlConfig> {
+  return (await client.put<SamlConfig>(`/api/admin/institutions/${institutionId}/saml`, patch)).data
+}
+
 export interface AdminError {
   feature:    string
   error_code: string | null

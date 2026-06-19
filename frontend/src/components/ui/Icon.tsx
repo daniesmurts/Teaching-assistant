@@ -21,6 +21,7 @@ export type IconName =
   | 'mail'            // feedback
   | 'building'        // institution
   | 'layers'          // curriculum overlap analysis
+  | 'grid'            // materials hub
   | 'log-out'
 
 const PATHS: Record<IconName, JSX.Element> = {
@@ -139,6 +140,15 @@ const PATHS: Record<IconName, JSX.Element> = {
       <path d="M12 2 2 7l10 5 10-5-10-5z" />
       <path d="M2 17l10 5 10-5" />
       <path d="M2 12l10 5 10-5" />
+    </>
+  ),
+
+  grid: (
+    <>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
     </>
   ),
 
