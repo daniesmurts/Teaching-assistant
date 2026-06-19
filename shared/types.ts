@@ -566,21 +566,55 @@ export interface CurriculumAnalysis {
 
 export type CoverageStatus = 'covered' | 'partial' | 'missing'
 
+// Each requirement extracted from the РПД is one of these kinds. They mirror the
+// ФГОС structure: цель → компетенция → индикатор → Знать / Уметь / Владеть.
+export type RequirementKind =
+  | 'goal'         // Цель освоения (раздел 1)
+  | 'competency'   // ОПК / ПК / УК (раздел 3, верхний уровень)
+  | 'indicator'    // индикатор достижения компетенции (3.1, 3.2, …)
+  | 'knowledge'    // Знать
+  | 'skill'        // Уметь
+  | 'mastery'      // Владеть
+
+// Content sections of the РПД — *where* evidence of coverage must live. Findings
+// cite these, not the requirement section itself.
+export type ContentSection = 'lectures' | 'practicals' | 'labs' | 'independent' | 'control'
+
+export interface CoverageSource {
+  section:  ContentSection
+  excerpt:  string                  // verbatim quote from that content section
+}
+
 export interface SyllabusCoverageItem {
-  kind:           'competency' | 'goal'
-  code:           string | null     // 'ОПК-1' / 'ПК-3' / 'УК-2'; null for goals
-  title:          string            // competency text or goal/outcome statement
+  kind:           RequirementKind
+  code:           string | null      // 'ОПК-1' / 'ОПК-1.1' / null for free-form goals
+  title:          string             // requirement statement
+  parent_code?:   string | null      // for indicators — parent competency code
   status:         CoverageStatus
-  score:          number            // 0–100 coverage estimate
-  evidence:       string | null     // verbatim fragment from the syllabus, or null
-  gap:            string            // what's missing or weak (1–2 sentences)
-  recommendation: string            // concrete fix for the РПД
+  score:          number             // 0–100 coverage estimate
+  sources:        CoverageSource[]   // content sections that actually deliver this (may be empty)
+  evidence:       string | null      // legacy single quote — first source.excerpt for back-compat
+  gap:            string             // what's missing or weak (1–2 sentences)
+  recommendation: string             // concrete fix for the РПД
+}
+
+// "Что мы нашли в РПД" — surfaced before the findings so the reviewer can verify
+// the structural understanding (есть ли §5, нашли ли Знать/Уметь/Владеть, …).
+export interface ParsedSyllabusReport {
+  goals_count:        number
+  competencies_count: number
+  indicators_count:   number
+  knowledge_count:    number
+  skills_count:       number
+  mastery_count:      number
+  content_sections:   ContentSection[]   // which content sections were located
 }
 
 export interface SyllabusReview {
   competencies_source: 'declared' | 'provided'   // extracted from the РПД vs. supplied
   goals_source:        'declared' | 'provided'
-  items:        SyllabusCoverageItem[]            // competencies first, then goals
+  parsed?:      ParsedSyllabusReport             // structural parse summary
+  items:        SyllabusCoverageItem[]
   summary:      string                            // 2–3 sentence overall verdict
   covered:      number
   partial:      number

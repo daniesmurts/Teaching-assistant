@@ -1,3 +1,5 @@
+import bcrypt from 'bcryptjs'
+import { randomBytes } from 'node:crypto'
 import { pool } from '../connection'
 import type { Teacher } from '../../../../shared/types'
 
@@ -286,8 +288,6 @@ export async function findOrCreateSamlTeacher(params: {
 
   // Random 256-bit hex password — long enough that bcrypt with cost 12 won't
   // be brute-forced even if the hash leaks. The SAML teacher never sees it.
-  const { randomBytes } = await import('node:crypto')
-  const bcrypt = await import('bcryptjs')
   const randomPassword = randomBytes(32).toString('hex')
   const passwordHash   = await bcrypt.hash(randomPassword, 12)
 

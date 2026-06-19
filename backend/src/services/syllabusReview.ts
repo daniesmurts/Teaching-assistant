@@ -2,69 +2,82 @@ import { chatJSON } from './deepseek'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { ValidationError } from '../errors/AppError'
 import type {
-  SyllabusReview, SyllabusCoverageItem, CoverageStatus,
+  SyllabusReview, SyllabusCoverageItem, CoverageStatus, CoverageSource,
+  ContentSection, RequirementKind, ParsedSyllabusReport,
 } from '../../../shared/types'
 
-// КНИТУ admin feature A2 — «Анализ соответствия РПД заявленным компетенциям
-// (ОПК/ПК/УК) и целям/результатам». Structurally the grading engine pointed at a
-// syllabus: each competency/goal is a "criterion", the РПД is the "submission".
-// Competencies/goals are either declared inside the РПД (auto-extracted) or
-// supplied by the admin. Reuses the same chatJSON + verbatim-quote conventions as
-// grading; computed live, not persisted (MVP).
+// КНИТУ admin feature A2 — «Анализ соответствия РПД». Structure-aware version:
+// PARSE the РПД into requirements (цели / компетенции + индикаторы / Знать /
+// Уметь / Владеть) and CONTENT sections (§5 лекции / §6 практ. / §7 лаб. /
+// §8 СРС / §8.1 контроль); SCORE each requirement against the *content*
+// sections (not the requirements section itself), citing which sections
+// deliver it. Reuses chatJSON + verbatim-quote conventions from grading.
+// Computed live, not persisted (MVP).
 
-const MAX_SYLLABUS_CHARS = 9000
-const MAX_ITEMS          = 30      // competencies + goals sent to the reviewer
+const MAX_SYLLABUS_CHARS  = 14000   // parser pass — sees the whole РПД
+const MAX_CONTENT_CHARS   = 9000    // scorer pass — only the content sections
+const MAX_REQUIREMENTS    = 40      // safety cap for prompt size
 const VALID_STATUS: CoverageStatus[] = ['covered', 'partial', 'missing']
+const VALID_SECTION: ContentSection[] = ['lectures', 'practicals', 'labs', 'independent', 'control']
 
-export interface CompetencyInput {
-  code:   string          // 'ОПК-1' / 'ПК-3' / 'УК-2'
-  title:  string          // competency statement
+const SECTION_LABEL: Record<ContentSection, string> = {
+  lectures:    'LECTURES — лекционные занятия (§5)',
+  practicals:  'PRACTICALS — практические/семинарские занятия (§6)',
+  labs:        'LABS — лабораторные занятия (§7)',
+  independent: 'INDEPENDENT — самостоятельная работа (§8)',
+  control:     'CONTROL — контроль / промежуточная аттестация (§8.1)',
 }
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+export interface CompetencyInput { code: string; title: string }
 
 export interface ReviewParams {
   teacherId:     string
   syllabusText:  string
-  competencies?: CompetencyInput[]   // if omitted, extracted from the syllabus
-  goals?:        string[]            // if omitted, extracted from the syllabus
+  competencies?: CompetencyInput[]   // if omitted, parsed from the syllabus
+  goals?:        string[]            // if omitted, parsed from the syllabus
 }
 
 export async function reviewSyllabus(params: ReviewParams): Promise<SyllabusReview> {
-  const syllabus = (params.syllabusText ?? '').trim().slice(0, MAX_SYLLABUS_CHARS)
-  if (syllabus.length < 80) {
+  const text = (params.syllabusText ?? '').trim().slice(0, MAX_SYLLABUS_CHARS)
+  if (text.length < 80) {
     throw new ValidationError('Недостаточно содержания РПД для анализа.')
   }
 
-  // Resolve targets: use what's supplied, otherwise extract what the РПД declares.
-  let competencies = (params.competencies ?? []).filter((c) => c.title?.trim())
-  let goals        = (params.goals ?? []).filter((g) => g?.trim())
-  const competenciesProvided = competencies.length > 0
-  const goalsProvided        = goals.length > 0
+  const competenciesProvided = (params.competencies?.length ?? 0) > 0
+  const goalsProvided        = (params.goals?.length ?? 0) > 0
 
-  if (!competenciesProvided || !goalsProvided) {
-    const declared = await extractDeclared(params.teacherId, syllabus)
-    if (!competenciesProvided) competencies = declared.competencies
-    if (!goalsProvided)        goals        = declared.goals
+  // 1) Parse РПД into structured sections (requirements + content blocks).
+  const parsed = await parseSyllabusStructure(params.teacherId, text)
+
+  // 2) Overlay caller-provided competencies/goals (РПД-студия uses this path).
+  if (competenciesProvided) {
+    parsed.competencies = params.competencies!.map((c) => ({
+      code: (c.code ?? '').trim(), title: c.title.trim(), indicators: [],
+    }))
+  }
+  if (goalsProvided) {
+    parsed.goals = params.goals!.map((g) => g.trim()).filter(Boolean)
   }
 
-  if (competencies.length === 0 && goals.length === 0) {
+  // 3) Build the flat requirements list (with refs that survive the round-trip).
+  const requirements = buildRequirements(parsed)
+  if (requirements.length === 0) {
     throw new ValidationError(
-      'Не удалось определить компетенции и цели. Укажите их вручную или загрузите РПД, где они заявлены.'
+      'Не удалось определить требования (цели/компетенции/результаты). Проверьте структуру РПД или укажите их вручную.'
     )
   }
 
-  // Cap the workload — competencies take priority over goals if we're over.
-  competencies = competencies.slice(0, MAX_ITEMS)
-  goals        = goals.slice(0, Math.max(0, MAX_ITEMS - competencies.length))
-
-  const items = await scoreCoverage(params.teacherId, syllabus, competencies, goals)
-
-  const summary = await summarise(items)
+  // 4) Score each requirement against the CONTENT sections only.
+  const items = await scoreCoverage(params.teacherId, parsed.content, requirements)
 
   return {
     competencies_source: competenciesProvided ? 'provided' : 'declared',
     goals_source:        goalsProvided ? 'provided' : 'declared',
+    parsed: parsedReport(parsed),
     items,
-    summary,
+    summary: summarise(items),
     covered: items.filter((i) => i.status === 'covered').length,
     partial: items.filter((i) => i.status === 'partial').length,
     missing: items.filter((i) => i.status === 'missing').length,
@@ -72,108 +85,243 @@ export async function reviewSyllabus(params: ReviewParams): Promise<SyllabusRevi
   }
 }
 
-// ── Extract the competencies + goals the РПД itself declares ───────────────────
-// Exported so the РПД-студия (syllabusAuthor) can seed authoring targets from a
-// discipline's existing РПД.
+// Backward-compat for РПД-студия (`syllabusAuthor`) which seeds its authoring
+// targets from a discipline's existing РПД. Returns just the flat shapes it
+// needs; internally uses the structured parser so we keep one source of truth.
 export async function extractDeclared(
   teacherId: string, syllabus: string
 ): Promise<{ competencies: CompetencyInput[]; goals: string[] }> {
+  const parsed = await parseSyllabusStructure(teacherId, syllabus)
+  return {
+    competencies: parsed.competencies.map((c) => ({ code: c.code, title: c.title })),
+    goals:        [...parsed.goals],
+  }
+}
+
+// ── Internal types ────────────────────────────────────────────────────────────
+
+interface ParsedCompetency {
+  code:       string
+  title:      string
+  indicators: { code: string; title: string }[]
+}
+interface ParsedSyllabus {
+  goals:        string[]
+  competencies: ParsedCompetency[]
+  outcomes:     { knowledge: string[]; skills: string[]; mastery: string[] }
+  content:      Record<ContentSection, string | null>
+}
+
+interface Requirement {
+  ref:         string                 // stable id for the round-trip (G0 / C0 / I0_1 / K0 / S0 / M0)
+  kind:        RequirementKind
+  code:        string | null
+  title:       string
+  parent_code: string | null
+}
+
+// ── Parser pass — RPD → structured sections ───────────────────────────────────
+
+async function parseSyllabusStructure(teacherId: string, text: string): Promise<ParsedSyllabus> {
   const system =
     'Вы — методист российского вуза. Вы извлекаете из текста рабочей программы дисциплины (РПД) ' +
-    'заявленные компетенции (ОПК/ПК/УК) и цели/планируемые результаты обучения. ' +
-    'Отвечайте только валидным JSON на русском языке.'
+    'её структурные элементы: цели, компетенции с индикаторами, планируемые результаты ' +
+    '(Знать/Уметь/Владеть) и разделы содержания (лекции, практические, лабораторные, СРС, контроль). ' +
+    'Берите формулировки из текста, не выдумывайте. Отвечайте только валидным JSON на русском языке.'
 
   const user =
-    `## Текст РПД\n${sanitiseForPrompt(syllabus)}\n\n` +
-    `## Задача\nИзвлеките:\n` +
-    `- "competencies": компетенции, которые дисциплина должна формировать. Каждый элемент: ` +
-    `{"code": код вида "ОПК-1"/"ПК-3"/"УК-2" (или "" если кода нет), "title": формулировка компетенции}.\n` +
-    `- "goals": цели освоения и планируемые результаты обучения (массив строк).\n` +
-    `Берите формулировки из текста, не выдумывайте. Если чего-то нет — верните пустой массив.\n\n` +
-    `## Формат ответа\nВерните JSON: {"competencies":[...],"goals":[...]}. Только JSON.`
+    `## Текст РПД\n${sanitiseForPrompt(text)}\n\n` +
+    `## Задача\nИзвлеките структуру РПД.\n\n` +
+    `1) "goals" — массив строк: цели освоения дисциплины (раздел «Цели освоения»).\n\n` +
+    `2) "competencies" — массив компетенций (раздел «Компетенции»). Для каждой:\n` +
+    `   - "code": код вида "ОПК-1" / "ПК-3" / "УК-2" (или "" если кода нет),\n` +
+    `   - "title": формулировка компетенции,\n` +
+    `   - "indicators": массив индикаторов достижения (например 3.1, 3.2). Для каждого:\n` +
+    `     {"code": "ОПК-1.1" или "3.1", "title": "..."}\n\n` +
+    `3) "outcomes" — планируемые результаты обучения («В результате освоения … должен»). Объект:\n` +
+    `   - "knowledge": массив пунктов из «Знать:» (каждый пункт — отдельная строка),\n` +
+    `   - "skills": массив пунктов из «Уметь:»,\n` +
+    `   - "mastery": массив пунктов из «Владеть:».\n\n` +
+    `4) "content" — РАЗДЕЛЫ СОДЕРЖАНИЯ (что реально преподаётся/делается). Объект с пятью полями:\n` +
+    `   - "lectures": текст раздела о лекционных занятиях (полностью), либо null,\n` +
+    `   - "practicals": текст раздела о практических/семинарских, либо null,\n` +
+    `   - "labs": текст раздела о лабораторных занятиях, либо null,\n` +
+    `   - "independent": текст раздела о самостоятельной работе студентов (СРС), либо null,\n` +
+    `   - "control": текст раздела о контроле/промежуточной аттестации, либо null.\n` +
+    `Если соответствующего раздела в РПД нет — null или пустой массив. Не выдумывайте контент.\n\n` +
+    `## Формат\nВерните JSON: {"goals":[...],"competencies":[...],"outcomes":{...},"content":{...}}. Только JSON.`
 
-  const result = await chatJSON<{
-    competencies?: { code?: string; title?: string }[]; goals?: string[]
-  }>(
+  const result = await chatJSON<RawParse>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
-    'компетенции и цели РПД',
+    'структура РПД',
     { context: { teacherId, feature: 'grading' } },
   )
 
-  const competencies = (result.competencies ?? [])
-    .map((c) => ({ code: String(c.code ?? '').trim(), title: String(c.title ?? '').trim() }))
-    .filter((c) => c.title)
-  const goals = (result.goals ?? []).map((g) => String(g ?? '').trim()).filter(Boolean)
-  return { competencies, goals }
+  return normaliseParse(result)
 }
 
-// ── Score how well the syllabus covers each competency/goal ────────────────────
+interface RawParse {
+  goals?:        unknown
+  competencies?: { code?: string; title?: string; indicators?: { code?: string; title?: string }[] }[]
+  outcomes?:     { knowledge?: unknown; skills?: unknown; mastery?: unknown }
+  content?:      Partial<Record<ContentSection, string | null>>
+}
+
+function normaliseParse(r: RawParse): ParsedSyllabus {
+  const strArr = (x: unknown): string[] =>
+    Array.isArray(x) ? x.map((v) => String(v ?? '').trim()).filter(Boolean) : []
+
+  const competencies: ParsedCompetency[] = (r.competencies ?? []).map((c) => ({
+    code:  String(c.code ?? '').trim(),
+    title: String(c.title ?? '').trim(),
+    indicators: (c.indicators ?? [])
+      .map((i) => ({ code: String(i.code ?? '').trim(), title: String(i.title ?? '').trim() }))
+      .filter((i) => i.title),
+  })).filter((c) => c.title)
+
+  const content = Object.fromEntries(
+    VALID_SECTION.map((s) => [s, normContent(r.content?.[s])])
+  ) as Record<ContentSection, string | null>
+
+  return {
+    goals:        strArr(r.goals),
+    competencies,
+    outcomes: {
+      knowledge: strArr(r.outcomes?.knowledge),
+      skills:    strArr(r.outcomes?.skills),
+      mastery:   strArr(r.outcomes?.mastery),
+    },
+    content,
+  }
+}
+
+function normContent(v: string | null | undefined): string | null {
+  const t = (v ?? '').trim()
+  return t.length >= 30 ? t : null   // tiny snippets aren't real sections
+}
+
+// ── Build the flat requirement list with stable refs ──────────────────────────
+
+function buildRequirements(p: ParsedSyllabus): Requirement[] {
+  const out: Requirement[] = []
+  p.goals.forEach((g, i)        => out.push({ ref: `G${i}`,  kind: 'goal',       code: null,                  title: g, parent_code: null }))
+  p.competencies.forEach((c, i) => {
+    out.push({ ref: `C${i}`, kind: 'competency', code: c.code || null, title: c.title, parent_code: null })
+    c.indicators.forEach((ind, k) => {
+      out.push({ ref: `I${i}_${k}`, kind: 'indicator', code: ind.code || null, title: ind.title, parent_code: c.code || null })
+    })
+  })
+  p.outcomes.knowledge.forEach((t, i) => out.push({ ref: `K${i}`, kind: 'knowledge', code: null, title: t, parent_code: null }))
+  p.outcomes.skills.forEach((t, i)    => out.push({ ref: `S${i}`, kind: 'skill',     code: null, title: t, parent_code: null }))
+  p.outcomes.mastery.forEach((t, i)   => out.push({ ref: `M${i}`, kind: 'mastery',   code: null, title: t, parent_code: null }))
+  return out.slice(0, MAX_REQUIREMENTS)
+}
+
+// ── Scorer pass — score each requirement against the CONTENT sections only ────
+
+interface RawScored {
+  ref?:            string
+  status?:         string
+  score?:          number
+  sources?:        { section?: string; excerpt?: string }[]
+  gap?:            string
+  recommendation?: string
+}
+
 async function scoreCoverage(
   teacherId: string,
-  syllabus: string,
-  competencies: CompetencyInput[],
-  goals: string[],
+  content: Record<ContentSection, string | null>,
+  requirements: Requirement[],
 ): Promise<SyllabusCoverageItem[]> {
-  const compBlock = competencies.length
-    ? competencies.map((c, i) => `K${i}. [${sanitiseForPrompt(c.code || 'без кода')}] ${sanitiseForPrompt(c.title)}`).join('\n')
-    : '— нет —'
-  const goalBlock = goals.length
-    ? goals.map((g, i) => `G${i}. ${sanitiseForPrompt(g)}`).join('\n')
-    : '— нет —'
+  const contentBlock = buildContentBlock(content)
+  const reqBlock     = buildRequirementsBlock(requirements)
 
   const system =
-    'Вы — эксперт по качеству учебных программ российского вуза. Вы оцениваете, насколько ' +
-    'содержание, темы и формы работы рабочей программы дисциплины (РПД) действительно ' +
-    'обеспечивают заявленные компетенции и цели. Отвечайте только валидным JSON на русском языке.'
+    'Вы — эксперт по качеству учебных программ российского вуза. Вы оцениваете, действительно ли ' +
+    'содержание лекций, практических, лабораторных, СРС и контроля обеспечивает заявленные ' +
+    'требования (цели, компетенции, индикаторы, Знать/Уметь/Владеть). Отвечайте только валидным JSON на русском.'
 
   const user =
-    `## Текст РПД\n<syllabus>\n${sanitiseForPrompt(syllabus)}\n</syllabus>\n\n` +
-    `## Компетенции (ОПК/ПК/УК)\n${compBlock}\n\n## Цели и результаты\n${goalBlock}\n\n` +
-    `## Задача\nДля КАЖДОЙ компетенции (K0, K1, …) и КАЖДОЙ цели (G0, G1, …) оцените, ` +
-    `насколько содержание РПД её действительно обеспечивает.\n\n` +
+    `## Содержание РПД (что реально преподаётся и оценивается)\n${contentBlock}\n\n` +
+    `## Требования к обеспечению\n${reqBlock}\n\n` +
+    `## Задача\nДля КАЖДОГО требования (с ref) определите, обеспечивает ли его СОДЕРЖАНИЕ выше.\n` +
+    `ВАЖНО: ищите подтверждение в РАЗДЕЛАХ СОДЕРЖАНИЯ (LECTURES/PRACTICALS/LABS/INDEPENDENT/CONTROL), ` +
+    `а не в формулировке самого требования. Если в содержании опереться не на что — это «missing».\n\n` +
     `## Формат ответа\nВерните JSON: {"items":[ ... ]}, где каждый элемент:\n` +
-    `- "ref": идентификатор из списков выше ("K0", "G1", …)\n` +
-    `- "status": "covered" (полностью обеспечена), "partial" (частично), "missing" (не обеспечена)\n` +
-    `- "score": число 0–100 — степень покрытия\n` +
-    `- "evidence": ДОСЛОВНАЯ цитата из РПД (5–15 слов), подтверждающая покрытие, либо null если опереться не на что. Не выдумывайте цитаты.\n` +
-    `- "gap": чего не хватает или что слабо (1–2 предложения; для полностью покрытых — пусто)\n` +
-    `- "recommendation": конкретная рекомендация, что добавить/изменить в РПД (1 предложение)\n` +
-    `Ответьте ТОЛЬКО JSON-объектом.`
+    `- "ref": идентификатор требования из списка выше,\n` +
+    `- "status": "covered" / "partial" / "missing",\n` +
+    `- "score": число 0–100 (степень покрытия),\n` +
+    `- "sources": массив до 3 источников: [{"section": "lectures|practicals|labs|independent|control", ` +
+    `"excerpt": "ДОСЛОВНАЯ цитата 5–20 слов из этого раздела"}]. Пустой массив, если опереться не на что.\n` +
+    `- "gap": что слабо/отсутствует (1–2 предложения; пусто, если covered),\n` +
+    `- "recommendation": конкретная рекомендация — в какой раздел и что добавить (1 предложение).\n` +
+    `Не выдумывайте цитаты. Ответьте ТОЛЬКО JSON-объектом.`
 
-  const result = await chatJSON<{
-    items: { ref?: string; status?: string; score?: number; evidence?: string | null; gap?: string; recommendation?: string }[]
-  }>(
+  const result = await chatJSON<{ items: RawScored[] }>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'оценка покрытия РПД',
     { context: { teacherId, feature: 'grading' } },
   )
 
-  // Map model refs (K0/G1) back to the source items, preserving order
-  // (competencies first, then goals) and filling any the model skipped.
-  const byRef = new Map<string, { status?: string; score?: number; evidence?: string | null; gap?: string; recommendation?: string }>()
+  const byRef = new Map<string, RawScored>()
   for (const it of result.items ?? []) {
     if (it.ref) byRef.set(String(it.ref).trim().toUpperCase(), it)
   }
 
-  const items: SyllabusCoverageItem[] = []
-  competencies.forEach((c, i) => items.push(toItem('competency', c.code || null, c.title, byRef.get(`K${i}`))))
-  goals.forEach((g, i)        => items.push(toItem('goal', null, g, byRef.get(`G${i}`))))
-  return items
+  return requirements.map((req) => toItem(req, byRef.get(req.ref.toUpperCase())))
 }
 
-function toItem(
-  kind: 'competency' | 'goal',
-  code: string | null,
-  title: string,
-  raw?: { status?: string; score?: number; evidence?: string | null; gap?: string; recommendation?: string },
-): SyllabusCoverageItem {
-  const status = VALID_STATUS.includes(raw?.status as CoverageStatus)
+function buildContentBlock(content: Record<ContentSection, string | null>): string {
+  const present = VALID_SECTION.filter((s) => content[s])
+  if (present.length === 0) return '— разделы содержания не найдены в РПД —'
+
+  // Cap proportionally so the prompt stays in budget.
+  const budget = Math.floor(MAX_CONTENT_CHARS / present.length)
+  return present.map((s) =>
+    `### ${SECTION_LABEL[s]}\n${sanitiseForPrompt((content[s] ?? '').slice(0, budget))}`
+  ).join('\n\n')
+}
+
+function buildRequirementsBlock(reqs: Requirement[]): string {
+  const groups: Record<RequirementKind, Requirement[]> = {
+    goal: [], competency: [], indicator: [], knowledge: [], skill: [], mastery: [],
+  }
+  for (const r of reqs) groups[r.kind].push(r)
+
+  const header: Record<RequirementKind, string> = {
+    goal: '### Цели', competency: '### Компетенции', indicator: '### Индикаторы достижения',
+    knowledge: '### Знать', skill: '### Уметь', mastery: '### Владеть',
+  }
+  return (['goal','competency','indicator','knowledge','skill','mastery'] as RequirementKind[])
+    .filter((k) => groups[k].length > 0)
+    .map((k) => `${header[k]}\n` + groups[k].map((r) =>
+      `${r.ref}.${r.code ? ` [${sanitiseForPrompt(r.code)}]` : ''} ${sanitiseForPrompt(r.title)}`
+    ).join('\n'))
+    .join('\n\n')
+}
+
+function toItem(req: Requirement, raw: RawScored | undefined): SyllabusCoverageItem {
+  const status: CoverageStatus = VALID_STATUS.includes(raw?.status as CoverageStatus)
     ? (raw!.status as CoverageStatus)
     : 'missing'
-  const score = clampScore(raw?.score, status)
+
+  const sources: CoverageSource[] = (raw?.sources ?? [])
+    .map((s) => ({
+      section: (VALID_SECTION as readonly string[]).includes(String(s.section)) ? (s.section as ContentSection) : null,
+      excerpt: String(s.excerpt ?? '').trim(),
+    }))
+    .filter((s): s is CoverageSource => s.section !== null && s.excerpt.length > 0)
+    .slice(0, 3)
+
   return {
-    kind, code, title, status, score,
-    evidence:       raw?.evidence ? String(raw.evidence).trim() : null,
+    kind:           req.kind,
+    code:           req.code,
+    title:          req.title,
+    parent_code:    req.parent_code,
+    status,
+    score:          clampScore(raw?.score, status),
+    sources,
+    evidence:       sources[0]?.excerpt ?? null,    // back-compat with existing UI
     gap:            (raw?.gap ?? '').trim(),
     recommendation: (raw?.recommendation ?? '').trim(),
   }
@@ -183,21 +331,33 @@ function clampScore(score: number | undefined, status: CoverageStatus): number {
   if (typeof score === 'number' && isFinite(score)) {
     return Math.max(0, Math.min(100, Math.round(score)))
   }
-  // Fall back to a sensible default from the status if the model omitted a number.
   return status === 'covered' ? 90 : status === 'partial' ? 55 : 15
 }
 
-// ── One-line overall verdict ───────────────────────────────────────────────────
-async function summarise(items: SyllabusCoverageItem[]): Promise<string> {
-  const missing = items.filter((i) => i.status === 'missing')
-  const partial = items.filter((i) => i.status === 'partial')
-  const total = items.length
+// ── Reports + verdict ─────────────────────────────────────────────────────────
+
+function parsedReport(p: ParsedSyllabus): ParsedSyllabusReport {
+  return {
+    goals_count:        p.goals.length,
+    competencies_count: p.competencies.length,
+    indicators_count:   p.competencies.reduce((n, c) => n + c.indicators.length, 0),
+    knowledge_count:    p.outcomes.knowledge.length,
+    skills_count:       p.outcomes.skills.length,
+    mastery_count:      p.outcomes.mastery.length,
+    content_sections:   VALID_SECTION.filter((s) => p.content[s]),
+  }
+}
+
+function summarise(items: SyllabusCoverageItem[]): string {
+  const total   = items.length
   if (total === 0) return 'Нет элементов для оценки.'
-  if (missing.length === 0 && partial.length === 0) {
-    return 'РПД полностью покрывает заявленные компетенции и цели.'
+  const missing = items.filter((i) => i.status === 'missing').length
+  const partial = items.filter((i) => i.status === 'partial').length
+  if (missing === 0 && partial === 0) {
+    return 'Содержание РПД полностью обеспечивает заявленные требования.'
   }
   const parts: string[] = []
-  if (missing.length) parts.push(`${missing.length} не обеспечено`)
-  if (partial.length) parts.push(`${partial.length} частично`)
-  return `Из ${total} элементов: ${parts.join(', ')}. Требуется доработка содержания РПД.`
+  if (missing) parts.push(`${missing} не обеспечено`)
+  if (partial) parts.push(`${partial} частично`)
+  return `Из ${total} требований: ${parts.join(', ')}. Требуется доработка содержания РПД.`
 }

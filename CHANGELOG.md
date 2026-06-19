@@ -15,6 +15,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Added
+- **Syllabus conformance — structure-aware redesign** (КНИТУ A2 v2). The check now
+  **parses the РПД into ФГОС-shaped sections** before scoring: each requirement (цель /
+  компетенция / индикатор достижения / Знать / Уметь / Владеть) is identified separately
+  and scored against the **content sections** (§5 лекции / §6 практ. / §7 лаб. / §8 СРС /
+  §8.1 контроль) — *not against the requirements section itself*. Every finding cites one
+  or more content sections with a verbatim excerpt (e.g. *ПК-3.1 → §7 «Лаб. №5. Определение
+  неисправности при пуске центробежного насоса»*). Fixes the previous "evidence equals
+  title" bug (the model was echoing the goal back as proof) and surfaces real gaps the old
+  whole-document check missed (e.g. «Владеть составлением технической документации» → ✗
+  with a precise fix for СРС). New shared types: `RequirementKind`, `ContentSection`,
+  `CoverageSource`, `ParsedSyllabusReport`. Two LLM calls per review (parse + score) — same
+  cost as before, materially better output. Backward-compatible with РПД-студия's
+  self-check (its `competencies`/`goals` inputs still override). UI: a «Что нашли в РПД»
+  summary strip, findings **grouped by kind** (Цели / Компетенции / Индикаторы / Знать /
+  Уметь / Владеть) with indicators nested under their parent, and per-finding section
+  chips with the cited excerpt. `backend/src/services/syllabusReview.ts` rewritten;
+  `frontend/src/pages/CurriculumConformance.tsx` rewritten.
 - **SAML 2.0 SSO (institutional, per-institution IdP)** — teachers and admins
   at an institution can sign in through their university's identity provider
   (ADFS, Keycloak, Azure AD, ALD Pro). Email-first login: the teacher types

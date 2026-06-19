@@ -11,6 +11,15 @@
  */
 import { readFileSync } from 'node:fs'
 
+let pass = 0, fail = 0
+function check(name: string, cond: boolean, detail = '') {
+  if (cond) { console.log(`  ✓ ${name}`); pass++ }
+  else { console.log(`  ✗ ${name} ${detail}`); fail++ }
+}
+
+const INST = '11111111-1111-1111-1111-111111111111'
+
+async function main() {
 // ── Load generated SP keys into env BEFORE importing the service ──
 const keysFile = readFileSync('/tmp/saml_keys.txt', 'utf8')
 const pk = keysFile.match(/SAML_SP_PRIVATE_KEY="([^"]*)"/)?.[1]
@@ -26,14 +35,6 @@ const {
   extractAttribute, EMAIL_FALLBACK_ATTRS, NAME_FALLBACK_ATTRS,
   acsUrlForInstitution,
 } = await import('../src/services/saml')
-
-let pass = 0, fail = 0
-function check(name: string, cond: boolean, detail = '') {
-  if (cond) { console.log(`  ✓ ${name}`); pass++ }
-  else { console.log(`  ✗ ${name} ${detail}`); fail++ }
-}
-
-const INST = '11111111-1111-1111-1111-111111111111'
 
 console.log('\n1. SP metadata generation')
 const meta = generateSpMetadata(INST)
@@ -81,3 +82,6 @@ check('undefined attributes → null', extractAttribute(undefined, 'email', EMAI
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass} passed, ${fail} failed\n`)
 process.exit(fail === 0 ? 0 : 1)
+}
+
+main().catch((e) => { console.error(e); process.exit(1) })
