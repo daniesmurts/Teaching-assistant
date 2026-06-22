@@ -347,6 +347,41 @@ practical cases (кейсы), projects (проекты), assignments/tasks (за
   `kind` discriminator, shared item shape, per-kind prompt + labels, three hub cards. КНИТУ's
   T1 set is complete. (Move M out of the backlog when this ships.)
 
+### N. Drawings into the ВКР review — text-vs-drawing findings · Effort: M
+
+Teachers submit чертежи as **separate files** alongside the ПЗ. Today the long
+review only sees the extracted ПЗ text, so a whole class of high-value findings
+is structurally unreachable — the ones the reference Opus review caught by
+*reading the drawings*: габаритная высота 15 м в тексте vs 54 000 мм на чертеже,
+сепаратор горизонтальный в расчёте vs вертикальный в таблице, штуцер Ду50 на
+чертеже vs Ду20 в ПЗ, опечатки на чертеже («Возжушник»).
+
+Three steps, in order — **the third is the payoff**:
+1. **Accept drawing files** alongside the ПЗ on a long review (multi-file upload).
+2. **OCR each** with Yandex Vision (already wired in
+   [services/yandexVision.ts](backend/src/services/yandexVision.ts)) → pull
+   dimension callouts, штуцер tables, titles, title-block text.
+3. **Feed the OCR text into `findPremiseIssues`** as additional "sections" so the
+   Tier-5 cross-section pass surfaces **text-vs-drawing contradictions** — the
+   same machinery that already catches composition-vs-reaction, now spanning ПЗ
+   ↔ чертёж.
+
+- **Why:** This is the single biggest remaining slice of the depth gap vs. a
+  hand-prompted Opus review (~40% of its standout findings came from the
+  drawings). Steps 1–2 are plumbing; step 3 reuses the premise pass shipped this
+  session, so most of the value is one integration away once the OCR text exists.
+- **Touches:** long-review upload UI (multi-file), `routes/grading.ts` review
+  endpoints to accept drawing docs,
+  [services/documentExtractor.ts](backend/src/services/documentExtractor.ts) /
+  [services/yandexVision.ts](backend/src/services/yandexVision.ts) for per-file
+  OCR, [services/longReview.ts](backend/src/services/longReview.ts)
+  `findPremiseIssues` to ingest drawing text as pseudo-sections (tag the source
+  so the UI can label «чертёж» vs «раздел»).
+- **Note:** OCR won't recover pure geometry ("horizontal vs vertical" as shapes),
+  but it does recover the dimension/label *text* where most contradictions live.
+- **Pricing hook:** rides on `documentUpload` (already Pro-only); OCR cost is
+  ~$0.001/page (negligible).
+
 ---
 
 ## Intentionally NOT building

@@ -14,7 +14,40 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Changed
+- **DeepSeek V4 migration — tiered routing + thinking toggle.** Legacy
+  `deepseek-chat`/`deepseek-reasoner` deprecate 2026-07-24; V4 replaces the
+  two-model split with one model + a `thinking` body toggle (defaults ON, so
+  it's set explicitly on every call). `llm/deepseek.ts` now routes tiered:
+  **FLASH** (`deepseek-v4-flash`, thinking off) for bulk map/synthesis passes —
+  same price as the old chat model, stronger base — and **PRO**
+  (`deepseek-v4-pro`, thinking on + `reasoning_effort: high`) for
+  reasoning-critical passes via `opts.reasoner` (recomputation, calc grading).
+  Model ids are env-overridable (`DEEPSEEK_MODEL_FLASH`/`DEEPSEEK_MODEL_PRO`).
+  Thinking mode keeps the reasoner's constraints (no `response_format`/
+  `temperature` — `chatJSON`'s extractJSON+retry covers it); chain-of-thought
+  in `reasoning_content` is read but never returned. Pricing table updated
+  (flash 0.14/0.28, pro 0.435/0.87 per 1M; legacy rates retained for historical
+  usage rows). Verified live against the V4 API: both tiers route correctly,
+  thinking engages on PRO, JSON parses on both.
+
 ### Added
+- **ВКР review — Tier-5 cross-section premise pass (reasoner).** New
+  document-level pass (`findPremiseIssues` in `longReview.ts`) that reasons over
+  every section's summary + extracted quantities at once on v4-pro thinking —
+  catching what section-grained passes structurally can't: contradictions that
+  **span sections** (e.g. a combustion equation that burns methane when the
+  declared gas composition has none; an apparatus described differently in the
+  calc vs. another section) and **physically/logically implausible assumptions**
+  (phase equilibrium / saturation pressure at the stated p,T; stoichiometric
+  imbalance). New `PremiseFinding` type (`kind`: contradiction/physical/logical,
+  title, explanation, severity, corrective action, quote-validated evidence) on
+  `LongReviewResult.premise_findings`; new `PremiseFindingsBlock` rendered above
+  the numeric blocks in both the review page and assignment modal (a wrong
+  premise invalidates the numbers downstream). Soft-fail + quote-validated like
+  the other tiers; result stored in the existing JSONB so no migration; empty on
+  legacy rows. Verified live against V4: reproduces the cross-section
+  composition-vs-reaction contradiction that the reference Opus review found.
 - **Syllabus conformance — structure-aware redesign** (КНИТУ A2 v2). The check now
   **parses the РПД into ФГОС-shaped sections** before scoring: each requirement (цель /
   компетенция / индикатор достижения / Знать / Уметь / Владеть) is identified separately

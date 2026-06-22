@@ -79,11 +79,16 @@ export function canUseFeature(
 
 // USD per 1M tokens — update if DeepSeek rates change.
 const RATES: Record<string, { in: number; out: number }> = {
+  // V4 (current). Flash matches the old chat price; Pro ~3× for the reasoning
+  // tier. Cache-hit input is ~50× cheaper but we don't yet split it out here.
+  'deepseek-v4-flash': { in: 0.14,  out: 0.28 },
+  'deepseek-v4-pro':   { in: 0.435, out: 0.87 },
+  // Legacy — deprecate 2026-07-24. Kept so historical usage rows still cost out.
   'deepseek-chat':     { in: 0.14, out: 0.28 },
-  'deepseek-reasoner': { in: 0.55, out: 2.19 },   // R1 — pricier, used for calculation grading
+  'deepseek-reasoner': { in: 0.55, out: 2.19 },
 }
 
-export function calculateDeepSeekCost(inputTokens: number, outputTokens: number, model = 'deepseek-chat'): number {
-  const r = RATES[model] ?? RATES['deepseek-chat']
+export function calculateDeepSeekCost(inputTokens: number, outputTokens: number, model = 'deepseek-v4-flash'): number {
+  const r = RATES[model] ?? RATES['deepseek-v4-flash']
   return (inputTokens / 1_000_000) * r.in + (outputTokens / 1_000_000) * r.out
 }

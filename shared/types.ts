@@ -381,6 +381,28 @@ export interface RecomputationFinding {
   severity:         BulletSeverity
 }
 
+// A document-level finding from the cross-section premise pass (reasoner). Unlike
+// Inconsistency (numeric clusters with the same name) and RecomputationFinding
+// (arithmetic re-derivation), this catches reasoning that spans sections or
+// violates physics/chemistry:
+//   • 'contradiction' — an assumption/value in one section contradicts another
+//     (e.g. the gas composition vs. the combustion equation three sections later)
+//   • 'physical'      — an assumption is physically implausible given known
+//     constants (e.g. a component that stays gaseous at the stated p/T)
+//   • 'logical'       — a stoichiometric/balance/derivation error within an argument
+// `evidence` carries the supporting verbatim quotes (validated against the work);
+// 'physical' findings may stand on the explanation alone with zero quotes.
+export type PremiseFindingKind = 'contradiction' | 'physical' | 'logical'
+
+export interface PremiseFinding {
+  kind:        PremiseFindingKind
+  title:       string                                       // short label
+  explanation: string                                       // 2–3 sentences: what's wrong and why
+  evidence:    Array<{ chapter_index: number; quote: string }>
+  severity:    BulletSeverity
+  correction:  string                                       // one sentence: what to do
+}
+
 export interface LongReviewResult {
   overall_summary:   string
   suggested_score:   number | null
@@ -402,6 +424,11 @@ export interface LongReviewResult {
   // the DeepSeek reasoner. Empty when nothing was checked (no numeric
   // claims) OR everything matched OR on legacy rows.
   recomputation_findings: RecomputationFinding[]
+  // Tier-5: cross-section premise pass (reasoner). Document-level reasoning over
+  // all sections at once — catches contradictions that span sections and
+  // physically/logically implausible assumptions. Empty when nothing found OR
+  // on legacy rows. Frontend hides the block when empty.
+  premise_findings: PremiseFinding[]
 }
 
 // Returned by POST /api/grading/review and polled via GET /api/grading/review/:id

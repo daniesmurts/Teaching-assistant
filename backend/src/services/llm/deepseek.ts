@@ -10,8 +10,17 @@ import type {
 // hosted DeepSeek inference (vLLM on Yandex Cloud GPUs etc) without code
 // changes. Defaults to the public API.
 const DEFAULT_BASE_URL = 'https://api.deepseek.com'
-const CHAT_MODEL       = 'deepseek-chat'
-const REASONER_MODEL   = 'deepseek-reasoner'   // R1 — step-by-step, far better at math/physics
+
+// V4 migration (legacy deepseek-chat/deepseek-reasoner deprecate 2026-07-24).
+// V4 is one model + a thinking toggle, not two model ids. We run tiered:
+//   • FLASH (thinking off) for the bulk map/synthesis passes — same price as
+//     the old deepseek-chat, stronger base model.
+//   • PRO (thinking on, high effort) for reasoning-critical passes routed via
+//     opts.reasoner — recomputation, calc grading, premise checks.
+// Both ids are env-overridable so we can flip flash↔pro per tier, or point at
+// self-hosted weights, without a redeploy.
+const FLASH_MODEL = () => process.env.DEEPSEEK_MODEL_FLASH?.trim() || 'deepseek-v4-flash'
+const PRO_MODEL   = () => process.env.DEEPSEEK_MODEL_PRO?.trim()   || 'deepseek-v4-pro'
 
 const CAPABILITIES: ProviderCapabilities = {
   strictJsonMode:  true,
@@ -35,8 +44,12 @@ export class DeepSeekProvider implements LLMProvider {
 
   async chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<string> {
     const start = Date.now()
-    const isReasoner = !!opts.reasoner
-    const model = isReasoner ? REASONER_MODEL : CHAT_MODEL
+    // Tiered routing: reasoner → PRO with thinking on; everything else → FLASH
+    // with thinking off. Thinking is a body toggle in V4, not a separate model,
+    // and it defaults to ENABLED — so we must set it explicitly on every call,
+    // otherwise the bulk passes silently switch to slow/expensive reasoning.
+    const thinking = !!opts.reasoner
+    const model = thinking ? PRO_MODEL() : FLASH_MODEL()
     let errorCode: string | undefined
 
     try {
@@ -45,10 +58,15 @@ export class DeepSeekProvider implements LLMProvider {
         {
           model,
           messages,
-          // The reasoner does NOT support response_format
-          ...(opts.jsonMode && !isReasoner ? { response_format: { type: 'json_object' } } : {}),
-          // Temperature ignored by reasoner; only pass for the chat model.
-          ...(opts.temperature != null && !isReasoner ? { temperature: opts.temperature } : {}),
+          thinking: { type: thinking ? 'enabled' : 'disabled' },
+          // High effort only matters when thinking is on; it's the lever that
+          // drives the deep recomputation / premise-checking we want from PRO.
+          ...(thinking ? { reasoning_effort: 'high' } : {}),
+          // Thinking mode rejects response_format + sampling params (same
+          // constraint family as the old reasoner). chatJSON's extractJSON +
+          // retry covers the JSON path when thinking is on.
+          ...(opts.jsonMode && !thinking ? { response_format: { type: 'json_object' } } : {}),
+          ...(opts.temperature != null && !thinking ? { temperature: opts.temperature } : {}),
           ...(opts.maxTokens != null ? { max_tokens: opts.maxTokens } : {}),
         },
         {
@@ -56,7 +74,7 @@ export class DeepSeekProvider implements LLMProvider {
             Authorization:  `Bearer ${this.apiKey()}`,
             'Content-Type': 'application/json',
           },
-          timeout: isReasoner ? 110_000 : 60_000,
+          timeout: thinking ? 110_000 : 60_000,
         }
       )
 
@@ -76,6 +94,9 @@ export class DeepSeekProvider implements LLMProvider {
         }).catch((e) => logger.warn({ message: 'Failed to write usage log', error: e.message }))
       }
 
+      // In V4 thinking mode the chain-of-thought is in message.reasoning_content
+      // (billed as output tokens); the actual answer stays in message.content.
+      // We deliberately return only content — never the CoT.
       return response.data.choices[0].message.content as string
 
     } catch (err) {

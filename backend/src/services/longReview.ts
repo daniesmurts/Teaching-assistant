@@ -13,7 +13,7 @@ import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { logger } from '../lib/logger'
 import type { CallContext } from './deepseek'
-import type { LongReviewResult, ChapterReview, DefenseQuestion, GradeLetter, CriteriaSnapshotItem, KeyQuantity, Inconsistency, RecomputationFinding, BulletSeverity } from '../../../shared/types'
+import type { LongReviewResult, ChapterReview, DefenseQuestion, GradeLetter, CriteriaSnapshotItem, KeyQuantity, Inconsistency, RecomputationFinding, PremiseFinding, PremiseFindingKind, BulletSeverity } from '../../../shared/types'
 
 // ─── Tuning ────────────────────────────────────────────────────────────────────
 
@@ -104,6 +104,18 @@ export async function runLongReview(p: RunParams): Promise<void> {
     } catch (err) {
       logger.warn({ message: 'Recomputation pass failed', reviewId: p.reviewId, error: (err as Error).message })
       result.recomputation_findings = []
+    }
+
+    // Tier-5 cross-section premise pass. Document-level reasoning over every
+    // section's summary + quantities at once — catches contradictions spanning
+    // sections (composition vs. reaction equation) and physically/logically
+    // implausible assumptions (phase equilibrium, stoichiometry). Reasoner +
+    // soft-fail, same contract as the passes above.
+    try {
+      result.premise_findings = await findPremiseIssues(sections, analyses, result.chapter_reviews, p.submissionText, ctx)
+    } catch (err) {
+      logger.warn({ message: 'Premise pass failed', reviewId: p.reviewId, error: (err as Error).message })
+      result.premise_findings = []
     }
 
     // ── Draft assignment so it flows into history / approval / email / RAG ──────
@@ -516,6 +528,7 @@ ${analysisBlock}
     coverage_note:     (r.coverage_note ?? '').trim() || null,
     inconsistencies:   [],        // populated by findInconsistencies in the orchestrator
     recomputation_findings: [],   // populated by findRecomputations in the orchestrator
+    premise_findings:  [],        // populated by findPremiseIssues in the orchestrator
   }
 }
 
@@ -919,6 +932,165 @@ function normaliseRecomputations(
     })
   }
   return out.slice(0, 8)   // cap UI noise
+}
+
+// ─── Tier 5: cross-section premise pass via the reasoner ───────────────────────
+//
+// Why this exists: the consistency pass (Tier-2) only clusters numeric
+// quantities by name — it can't catch a contradiction between *concepts* across
+// sections (e.g. a combustion equation that burns methane when the declared gas
+// has none) or a physically implausible *assumption* (a component that stays
+// gaseous at the stated p/T). Those need a single reasoner pass that sees the
+// whole work's claims at once. V4-pro + thinking + large context makes this
+// affordable as one extra call.
+//
+// Soft-fail + reasoner, same contract as recomputation.
+
+const PREMISE_DIGEST_BUDGET = 70_000   // char cap on the document digest we send
+
+async function findPremiseIssues(
+  sections:       Section[],
+  analyses:       SectionAnalysis[],
+  chapterReviews: ChapterReview[],
+  submissionText: string,
+  ctx:            CallContext,
+): Promise<PremiseFinding[]> {
+  // Need at least a couple of sections with content to reason across them.
+  const contentful = analyses.filter((a) => a.summary && a.summary.length > 0)
+  if (contentful.length < 2) return []
+
+  const titleOf = (idx: number) =>
+    chapterReviews[idx]?.title ?? analyses[idx]?.title ?? sections[idx]?.title ?? `Раздел ${idx + 1}`
+
+  // Build a compact per-section digest: index, title, summary, and the
+  // quantities/materials already extracted (with quotes). This is the model's
+  // map of the whole work — enough to spot cross-section conflicts without
+  // re-sending every full section.
+  let budget = PREMISE_DIGEST_BUDGET
+  const blocks: string[] = []
+  analyses.forEach((a, idx) => {
+    if (sections[idx]?.kind === 'references') return
+    const qs = a.key_quantities.length
+      ? '\n' + a.key_quantities.map((q) => `  · ${q.name} = ${q.value}  («${q.quote}»)`).join('\n')
+      : ''
+    const block = `### Раздел ${idx}: ${titleOf(idx)}\n${a.summary}${qs}`
+    if (block.length > budget) return
+    budget -= block.length
+    blocks.push(block)
+  })
+  if (blocks.length < 2) return []
+
+  // Intro + conclusion verbatim — headline claims/assumptions usually live there.
+  const intro = sections.find((s) => s.kind === 'intro')
+  const concl = sections.find((s) => s.kind === 'conclusion')
+  const verbatim =
+    (intro ? `\n## Введение (фрагмент)\n${sanitiseForPrompt(capMiddle(intro.text, 4_000))}\n` : '') +
+    (concl ? `\n## Заключение (фрагмент)\n${sanitiseForPrompt(capMiddle(concl.text, 4_000))}\n` : '')
+
+  const system =
+    `Вы — рецензент, проверяющий ФИЗИЧЕСКУЮ, ХИМИЧЕСКУЮ и ЛОГИЧЕСКУЮ состоятельность ВКР В ЦЕЛОМ. ` +
+    `Перед вами карта всей работы: сводка каждого раздела и извлечённые величины. Ищите проблемы, ` +
+    `которые видны ТОЛЬКО при взгляде на работу целиком:\n` +
+    `1) МЕЖРАЗДЕЛОВЫЕ ПРОТИВОРЕЧИЯ — допущение, значение или описание объекта в одном разделе ` +
+    `несовместимо с другим (например, состав смеси не соответствует уравнению реакции; аппарат ` +
+    `описан по-разному в расчёте и в другом разделе);\n` +
+    `2) ФИЗИЧЕСКИ НЕПРАВДОПОДОБНЫЕ ДОПУЩЕНИЯ — проверяйте по известным константам (температуры ` +
+    `кипения, давления насыщенных паров, фазовое равновесие при заданных p и T, балансы масс и энергии);\n` +
+    `3) ЛОГИЧЕСКИЕ/СТЕХИОМЕТРИЧЕСКИЕ ОШИБКИ — небаланс уравнений реакций по элементам, неучтённые ` +
+    `компоненты, неверные допущения в выводе.\n` +
+    `Сообщайте только РЕАЛЬНЫЕ проблемы, обоснованные конкретными числами/фактами из работы. ` +
+    `Не выдумывайте данных, которых нет. Думайте пошагово. Отвечайте только валидным JSON на русском.`
+
+  const user =
+    `## Карта работы по разделам\n${blocks.join('\n\n')}\n${verbatim}\n\n` +
+    `Найдите проблемы уровня всей работы. Верните JSON:\n` +
+    `{\n  "items": [\n    {\n` +
+    `      "kind": "contradiction" (противоречие между разделами) | "physical" (неправдоподобное физ./хим. допущение) | "logical" (логическая/стехиометрическая ошибка),\n` +
+    `      "title": "краткий заголовок проблемы (до 90 символов)",\n` +
+    `      "explanation": "2–3 предложения: в чём проблема и почему это ошибка (с числами/константами)",\n` +
+    `      "evidence": [{"chapter_index": число (0-based, из карты выше), "quote": "точная цитата из работы"}],\n` +
+    `      "severity": "critical" | "substantial" | "minor",\n` +
+    `      "correction": "одно предложение — что сделать, чтобы устранить"\n` +
+    `    }\n  ]\n}\n` +
+    `Для kind="physical" допускается evidence без цитат (если допущение описано в сводке, а не одной фразой). ` +
+    `Для "contradiction"/"logical" приводите цитаты из соответствующих разделов. ` +
+    `Если проблем уровня всей работы нет — верните {"items": []}. ` +
+    `Не дублируйте чисто арифметические расхождения и числовые противоречия — они проверяются отдельно.`
+
+  const r = await chatJSON<{
+    items?: Array<{
+      kind?:        unknown
+      title?:       string
+      explanation?: string
+      evidence?:    Array<{ chapter_index?: number; quote?: string }>
+      severity?:    unknown
+      correction?:  string
+    }>
+  }>(
+    [{ role: 'system', content: system }, { role: 'user', content: user }],
+    'проверка состоятельности',
+    { context: ctx, reasoner: true, maxTokens: 4096 },
+  )
+
+  return normalisePremiseFindings(r.items, submissionText, sections.length)
+}
+
+function normalisePremiseFindings(
+  items:       unknown,
+  submissionText: string,
+  sectionCount: number,
+): PremiseFinding[] {
+  if (!Array.isArray(items)) return []
+  const haystack = submissionText.toLowerCase().replace(/\s+/g, ' ').trim()
+
+  const out: PremiseFinding[] = []
+  for (const it of items) {
+    if (!it || typeof it !== 'object') continue
+    const obj = it as Record<string, unknown>
+
+    const kind: PremiseFindingKind =
+      obj.kind === 'contradiction' || obj.kind === 'physical' || obj.kind === 'logical'
+        ? obj.kind
+        : 'contradiction'
+    const title       = typeof obj.title       === 'string' ? obj.title.trim()       : ''
+    const explanation = typeof obj.explanation === 'string' ? obj.explanation.trim() : ''
+    const correction  = typeof obj.correction  === 'string' ? obj.correction.trim()  : ''
+    if (!title || !explanation) continue
+
+    // Validate each evidence quote against the FULL submission — drop quotes
+    // that don't appear verbatim (same citation discipline as the other passes).
+    const evidence: PremiseFinding['evidence'] = []
+    for (const e of Array.isArray(obj.evidence) ? obj.evidence : []) {
+      if (!e || typeof e !== 'object') continue
+      const ci = typeof (e as { chapter_index?: unknown }).chapter_index === 'number'
+        ? (e as { chapter_index: number }).chapter_index : -1
+      const q = typeof (e as { quote?: unknown }).quote === 'string'
+        ? (e as { quote: string }).quote.trim() : ''
+      if (ci < 0 || ci >= sectionCount || !q) continue
+      const norm = q.toLowerCase().replace(/\s+/g, ' ').trim()
+      if (norm.length < 8 || !haystack.includes(norm)) continue
+      evidence.push({ chapter_index: ci, quote: q.slice(0, 220) })
+    }
+
+    // 'physical' findings may stand on the explanation alone; the others must
+    // cite at least one verified quote, else we can't trust the cross-reference.
+    if (kind !== 'physical' && evidence.length === 0) continue
+
+    const severity: BulletSeverity =
+      obj.severity === 'critical' || obj.severity === 'substantial' || obj.severity === 'minor'
+        ? obj.severity
+        : 'substantial'
+
+    out.push({
+      kind,
+      title:       title.slice(0, 120),
+      explanation: explanation.slice(0, 400),
+      evidence:    evidence.slice(0, 3),
+      severity,
+      correction:  correction.slice(0, 200),
+    })
+  }
+  return out.slice(0, 5)   // cap UI noise
 }
 
 function normaliseChapters(

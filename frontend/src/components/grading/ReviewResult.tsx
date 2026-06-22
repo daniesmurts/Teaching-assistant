@@ -5,6 +5,7 @@ import { GRADES, gradeColor, gradeLabel, GRADE_BRACKETS, scoreToGrade, snapScore
 import LongReviewBullet, { sortGapsBySeverity } from './LongReviewBullet'
 import InconsistenciesBlock from './InconsistenciesBlock'
 import RecomputationBlock from './RecomputationBlock'
+import PremiseFindingsBlock from './PremiseFindingsBlock'
 import type { LongReview, GradeLetter, DefenseQuestion, ChapterReview } from '../../types'
 
 interface Props {
@@ -118,6 +119,12 @@ export default function ReviewResult({ review, onApproved }: Props) {
             </div>
           </div>
         )}
+
+        {/* Premise findings — Tier-5: document-level reasoning (contradictions
+            across sections + implausible physical/logical assumptions). A wrong
+            premise invalidates the numbers below it, so it leads the verification
+            blocks. Hidden when empty / on legacy rows. */}
+        <PremiseFindingsBlock items={r.premise_findings ?? []} chapters={r.chapter_reviews} />
 
         {/* Cross-section contradictions — Tier-2 addition. Hidden when empty
             (which is most reviews and all legacy rows). High-signal so it

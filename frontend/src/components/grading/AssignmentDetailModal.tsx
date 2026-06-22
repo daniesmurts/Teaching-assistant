@@ -8,6 +8,7 @@ import ConfidenceBadge from './ConfidenceBadge'
 import LongReviewBullet, { sortGapsBySeverity } from './LongReviewBullet'
 import InconsistenciesBlock from './InconsistenciesBlock'
 import RecomputationBlock from './RecomputationBlock'
+import PremiseFindingsBlock from './PremiseFindingsBlock'
 import { getReviewByAssignment, getAssignmentCrossUses, getApprovalHistory } from '../../api/grading'
 import { gradeColor } from '../../lib/grades'
 import type { Assignment, GradeLetter, AssignmentStatus, BulletItem, DefenseQuestion, ChapterReview, VerificationQuestion, Handout, ApprovedRevision } from '../../types'
@@ -224,6 +225,12 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
                 ))}
               </div>
             </section>
+          )}
+
+          {/* Premise findings (ВКР review) — Tier-5: document-level reasoning.
+              Leads the verification blocks. Hidden when empty. */}
+          {r && (
+            <PremiseFindingsBlock items={r.premise_findings ?? []} chapters={r.chapter_reviews} />
           )}
 
           {/* Cross-section contradictions (ВКР review) — Tier-2 addition.

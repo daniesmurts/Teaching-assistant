@@ -38,6 +38,8 @@ export type {
   KeyQuantity,
   Inconsistency,
   RecomputationFinding,
+  PremiseFinding,
+  PremiseFindingKind,
   TopicSet,
   TopicItem,
   TaskSet,
