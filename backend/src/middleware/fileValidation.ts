@@ -28,6 +28,30 @@ export const uploadConfig = multer({
   },
 })
 
+// ─── Multi-file intake with clean error mapping ───────────────────────────────
+// Multer reports oversize/limit problems as a MulterError mid-stream — without
+// mapping, those reach the global handler as a generic 500. This wrapper turns
+// them into a DocumentProcessingError (422) with a Russian message so the user
+// sees what went wrong. Used by the program-import route (описание + учебный план).
+
+export function uploadFields(fields: { name: string; maxCount?: number }[]) {
+  const middleware = uploadConfig.fields(fields)
+  return (req: Request, res: Response, next: NextFunction): void => {
+    middleware(req, res, (err: unknown) => {
+      if (err) {
+        if (err instanceof multer.MulterError) {
+          const msg = err.code === 'LIMIT_FILE_SIZE'
+            ? `Файл слишком большой. Максимум ${Math.round(MAX_FILE_SIZE / 1024 / 1024)} МБ на документ.`
+            : 'Не удалось загрузить файл. Проверьте формат и размер.'
+          return next(new DocumentProcessingError(msg))
+        }
+        return next(err)
+      }
+      next()
+    })
+  }
+}
+
 // ─── Magic bytes — verifies actual file content matches declared MIME type ────
 // Prevents disguised files (e.g. .exe renamed to .pdf).
 

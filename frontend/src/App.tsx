@@ -49,6 +49,8 @@ import InstitutionRubricPresets from './pages/institution/InstitutionRubricPrese
 import InstitutionSharedRag from './pages/institution/InstitutionSharedRag'
 import InstitutionModel from './pages/institution/InstitutionModel'
 import InstitutionAudit from './pages/institution/InstitutionAudit'
+import InstitutionPrograms from './pages/institution/InstitutionPrograms'
+import InstitutionProgramDetail from './pages/institution/InstitutionProgramDetail'
 import Landing from './pages/Landing'
 import About from './pages/About'
 import Institutions from './pages/Institutions'
@@ -211,6 +213,8 @@ export default function App() {
             <Route path="teachers" element={<InstitutionTeachers />} />
             <Route path="rubrics"  element={<InstitutionRubrics />} />
             <Route path="rubric-presets" element={<InstitutionRubricPresets />} />
+            <Route path="programs"        element={<InstitutionPrograms />} />
+            <Route path="programs/:id"    element={<InstitutionProgramDetail />} />
             <Route path="shared-rag"   element={<InstitutionSharedRag />} />
             <Route path="model"        element={<InstitutionModel />} />
             <Route path="audit"    element={<InstitutionAudit />} />

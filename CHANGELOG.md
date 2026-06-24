@@ -32,6 +32,41 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   thinking engages on PRO, JSON parses on both.
 
 ### Added
+- **Учебные планы — program-level architecture analysis (institution admin).**
+  New persisted entity: a department head builds an образовательная программа
+  (`programs` + `program_disciplines` + `program_competencies`, migration `042`)
+  as an ordered, semester-by-semester discipline list plus the ФГОС
+  competencies/goals it must deliver, then runs a four-part analysis
+  (`services/programAnalysis.ts`): (1) **sequencing & prerequisites** — one LLM
+  pass infers prerequisite edges and flags **inversions** (a discipline taught no
+  later than its basis); (2) **competency progression** — per-competency
+  introduce→develop→master timeline across semesters, flagging
+  uncovered/thin/late; (3) **gaps & redundancy** — orphan disciplines (no
+  competency contribution) and uncovered competencies; (4) **relatedness & load**
+  — embedding+cosine clusters/isolated subjects (reuses the `curriculumAnalysis`
+  engine) + per-semester credit/count balance. Routes under
+  `/api/institution/programs/*` (`requireInstitutionAdmin`, institution-scoped);
+  UI at `/institution/programs` with a semester-grid builder, a one-click example
+  track (09.03.01), and a report dashboard (score, prerequisite cards, competency
+  heatmap, gap columns, load bars). Latest analysis cached in `program_analyses`.
+  **PDF export:** «Экспорт в PDF» downloads a **server-rendered, branded PDF**
+  (`services/programReportPdf.ts`, `GET …/:id/analysis.pdf`) — hand-laid with
+  pdfkit (no headless Chrome → off Google infra, works offline on the VM),
+  embedding vendored PT Serif/PT Sans (Cyrillic-native). Fixed premium layout:
+  cover header, score disc + verdict, stat row, sequencing/inversion cards,
+  competency heatmap grid, gap columns, load bars, page footers. The frontend
+  fetches it as an authenticated blob and saves it.
+  **Intake by document (migration `043`):** an admin fills the official ОП header
+  fields (код, наименование специальности/направления, уровень образования,
+  профиль, формы обучения) and uploads two PDFs — **описание ОП** (УК/ОПК/ПК
+  competencies extracted deterministically from the full document, robust to
+  50–100k-char files where the matrix is deep in the text) and **учебный план**
+  (parsed → disciplines/semesters/ЗЕТ/форма контроля by `services/programImport.ts`).
+  `POST /api/institution/programs/import` reuses the document-extraction pipeline
+  (`extractText` + Yandex Vision OCR fallback), maps multer/oversize errors to
+  clean messages, degrades gracefully (a failed extraction/parse never aborts the
+  import — the program is still created with warnings), and hands the admin an
+  editable, ready-to-analyse plan.
 - **ВКР review — Tier-5 cross-section premise pass (reasoner).** New
   document-level pass (`findPremiseIssues` in `longReview.ts`) that reasons over
   every section's summary + extracted quantities at once on v4-pro thinking —

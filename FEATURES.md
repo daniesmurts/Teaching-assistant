@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-06-19
+**Last updated:** 2026-06-24
 
 ---
 
@@ -96,6 +96,7 @@ Panel at `/institution` (gated to `institution_admin` / `platform_admin`):
 - **Usage** — tokens + grade/presentation counts over time, **CSV export** (never shows cost)
 - **Teachers** — list, activate/deactivate (frees a seat), single invite, **bulk invite** (paste list), revoke invites
 - **Criteria** — create institution-shared criteria (appear in every member's grading picker)
+- **Учебные планы (program architecture analysis)** — register an образовательная программа (header reqs + upload **описание ОП** and **учебный план** PDFs → disciplines & ФГОС competencies/goals auto-extracted), or build it manually by semester. Then analyse the whole plan: sequencing & prerequisite inversions, competency progression map (introduce→develop→master across semesters), gaps & redundancy (orphan disciplines / uncovered competencies), relatedness clusters & per-semester load. Persisted; last analysis cached. One-click example track for evaluation. **Export the analysis as a server-rendered branded PDF** (pdfkit, embedded PT Serif/PT Sans, fixed premium layout).
 - **Audit log** — record of admin actions (invites, activations, shared-criterion creation)
 - Invite flow: branded email (Unisender) → `/register?invite=` → auto-joins institution
 

@@ -7,6 +7,7 @@ const NAV = [
   { to: '/institution/teachers', label: 'Преподаватели', end: false },
   { to: '/institution/rubrics',  label: 'Критерии',      end: false },
   { to: '/institution/rubric-presets', label: 'Рубрики',  end: false },
+  { to: '/institution/programs',  label: 'Образовательные программы', end: false },
   { to: '/institution/shared-rag', label: 'Общий цикл',  end: false },
   { to: '/institution/model',      label: 'Модель ИИ',   end: false },
   { to: '/institution/audit',    label: 'Журнал действий', end: false },
@@ -24,7 +25,7 @@ export default function InstitutionLayout() {
 
   return (
     <div className="flex min-h-screen bg-bg">
-      <aside className="w-[210px] min-h-screen bg-sidebar flex flex-col flex-shrink-0">
+      <aside className="w-[210px] min-h-screen bg-sidebar flex flex-col flex-shrink-0 print:hidden">
         <div className="px-4 py-4 border-b border-white/5">
           <span className="font-display text-[19px] font-bold text-ink-inverse tracking-tight">
             ИСПУМ <span className="text-amber-mid">Организация</span>

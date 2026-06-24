@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
+import Select from '../components/ui/Select'
 import Badge from '../components/ui/Badge'
 import AssignmentDetailModal from '../components/grading/AssignmentDetailModal'
 import { gradeColor } from '../lib/grades'
@@ -124,16 +125,20 @@ export default function Students() {
             <StudentDetail student={selected} courseId={courseId || undefined} onBack={() => setSelected(null)} />
           ) : (
             <>
-              <div className="flex items-center justify-between mb-4">
-                <select
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <Select
                   value={courseId}
-                  onChange={(e) => setCourseId(e.target.value)}
-                  className="text-sm font-sans bg-surface border border-border rounded-md px-3 py-2"
-                >
-                  <option value="">Все предметы</option>
-                  {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-                <span className="text-xs font-sans text-ink-tertiary">{students.length} студ.</span>
+                  onChange={setCourseId}
+                  ariaLabel="Фильтр по предмету"
+                  className="w-full max-w-xs"
+                  options={[
+                    { value: '', label: 'Все предметы' },
+                    ...courses.map((c) => ({ value: c.id, label: c.name })),
+                  ]}
+                />
+                <span className="text-xs font-sans text-ink-tertiary whitespace-nowrap">
+                  {students.length}&nbsp;студ.
+                </span>
               </div>
 
               {students.length === 0 ? (

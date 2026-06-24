@@ -691,6 +691,128 @@ export interface SyllabusDraft {
   generated_at: string
 }
 
+// ─── Academic programs / учебные планы (institution-admin) ──────────────────────
+// A department head defines an образовательная программа as an ordered list of
+// disciplines across semesters + the ФГОС competencies/goals it must deliver.
+// The platform analyses the whole plan: sequencing & prerequisites, competency
+// progression, gaps & redundancy, relatedness & load. Persisted (unlike the
+// teacher-scoped curriculum tools); the latest analysis is cached.
+
+export type ProgramLevel = 'bachelor' | 'master' | 'specialist'
+export type CompetencyKind = 'goal' | 'competency'
+
+export interface ProgramCompetency {
+  id?:         string
+  kind:        CompetencyKind
+  code:        string | null      // 'УК-1' / 'ОПК-2' / 'ПК-3'; null for goals
+  title:       string
+  sort_order:  number
+}
+
+export interface ProgramDiscipline {
+  id?:               string
+  course_id:         string | null    // optional link to a real РПД-bearing course
+  name:              string
+  semester:          number           // 1..duration_semesters
+  credits:           number | null
+  control_form:      string | null    // форма контроля: экзамен / зачёт / …
+  competency_codes:  string[]         // program competency codes this discipline develops
+  sort_order:        number
+}
+
+export interface Program {
+  id:                 string
+  institution_id:     string
+  created_by:         string | null
+  name:               string
+  code:               string | null
+  level:              ProgramLevel | null
+  duration_semesters: number
+  description:        string | null
+  // Official образовательная-программа header fields (intake form)
+  specialty_name:     string | null   // Наименование профессии/специальности/направления/группы научных специальностей
+  education_level:    string | null   // Уровень образования (free text)
+  profile:            string | null   // Образовательная программа/направленность/профиль, шифр и наименование научной специальности
+  forms_of_study:     string | null   // Реализуемые формы обучения
+  has_description_doc: boolean         // описание ОП PDF was imported
+  has_plan_doc:        boolean         // учебный план PDF was imported
+  created_at:         string
+  updated_at:         string
+}
+
+export interface ProgramDetail extends Program {
+  disciplines:  ProgramDiscipline[]
+  competencies: ProgramCompetency[]
+}
+
+// ── Analysis result shapes ──
+
+// One inferred prerequisite edge between two disciplines. `inverted` = the
+// dependent discipline is taught no later than its prerequisite (a sequencing bug).
+export interface PrerequisiteEdge {
+  from_name:      string    // prerequisite (foundation)
+  from_semester:  number
+  to_name:        string    // dependent discipline
+  to_semester:    number
+  reason:         string    // why `to` depends on `from`
+  inverted:       boolean
+  recommendation: string    // RU fix (e.g. «перенести … на 3 семестр»)
+}
+
+export interface SequencingResult {
+  verdict:        string             // 2–3 sentence overall flow assessment
+  flow_score:     number             // 0–100 logical-sequencing score
+  edges:          PrerequisiteEdge[] // all detected prerequisite links
+  inversions:     PrerequisiteEdge[] // subset where inverted === true (convenience)
+}
+
+export type CoverageLevel = 'introduce' | 'develop' | 'master'
+
+export interface CompetencyTimelineCell {
+  semester: number
+  level:    CoverageLevel
+  via:      string         // discipline delivering it at this point
+}
+
+export interface CompetencyProgressionRow {
+  kind:        CompetencyKind
+  code:        string | null
+  title:       string
+  cells:       CompetencyTimelineCell[]   // chronological coverage points
+  status:      'ok' | 'late' | 'thin' | 'uncovered'  // never-covered / once-only / too-late / fine
+  note:        string                     // RU explanation + recommendation
+}
+
+export interface RedundancyItem {
+  name:           string    // discipline name (orphan) or competency code/title (missing)
+  reason:         string
+  recommendation: string
+}
+
+export interface RelatednessCluster {
+  label:       string       // short RU theme label
+  disciplines: string[]     // discipline names in the cluster
+}
+
+export interface SemesterLoad {
+  semester:         number
+  discipline_count: number
+  credits:          number | null   // null when no credits entered
+}
+
+export interface ProgramAnalysis {
+  generated_at:  string
+  overall_score: number              // 0–100 headline score
+  summary:       string              // 2–3 sentence verdict for the report header
+  sequencing:    SequencingResult
+  progression:   CompetencyProgressionRow[]
+  orphans:       RedundancyItem[]    // disciplines serving no competency — remove candidates
+  missing:       RedundancyItem[]    // competencies with no delivering discipline — add candidates
+  clusters:      RelatednessCluster[]
+  isolated:      string[]            // discipline names weakly related to everything else
+  load:          SemesterLoad[]
+}
+
 // ─── API error shape ──────────────────────────────────────────────────────────
 
 export interface ApiError {

@@ -22,6 +22,7 @@ import feedbackRouter from './routes/feedback'
 import topicsRouter from './routes/topics'
 import tasksRouter from './routes/tasks'
 import curriculumRouter from './routes/curriculum'
+import programsRouter from './routes/programs'
 import quizzesRouter from './routes/quizzes'
 import paymentsRouter from './routes/payments'
 import accountRouter from './routes/account'
@@ -120,6 +121,7 @@ app.use('/api/quizzes',       quizzesRouter)
 app.use('/api/documents',     documentsRouter)
 app.use('/api/admin/evals',   adminEvalsRouter)   // before /api/admin so /evals isn't shadowed
 app.use('/api/admin',         adminRouter)
+app.use('/api/institution/programs', programsRouter)   // before /api/institution so it isn't shadowed
 app.use('/api/institution',   institutionRouter)
 app.use('/api/feedback',      feedbackRouter)
 app.use('/api/payments',      paymentsRouter)

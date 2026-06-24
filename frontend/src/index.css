@@ -71,3 +71,21 @@ body {
 
 .page-enter    { animation: fadeIn       250ms ease forwards; }
 .result-appear { animation: resultAppear 350ms ease forwards; }
+
+/* ── Print: PDF export of the program-analysis report ──────────────────────────
+   The "Экспорт в PDF" button calls window.print(). App chrome is tagged
+   print:hidden / .no-print; here we let the report flow across pages, keep the
+   warm colors (heatmap, badges), and give the page sensible margins. */
+@media print {
+  html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
+  .no-print { display: none !important; }
+  #program-report, #program-report * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  /* Avoid splitting small cards across pages; tables may break by row. */
+  #program-report .bg-surface:not(.allow-break),
+  #program-report section > .grid > div { break-inside: avoid; }
+  .result-appear { animation: none !important; }
+  @page { margin: 14mm; }
+}
