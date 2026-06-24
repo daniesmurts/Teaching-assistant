@@ -38,8 +38,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   as an ordered, semester-by-semester discipline list plus the ФГОС
   competencies/goals it must deliver, then runs a four-part analysis
   (`services/programAnalysis.ts`): (1) **sequencing & prerequisites** — one LLM
-  pass infers prerequisite edges and flags **inversions** (a discipline taught no
-  later than its basis); (2) **competency progression** — per-competency
+  pass infers prerequisite edges; ordering is classified deterministically from
+  semesters (an **inversion** = a discipline taught strictly earlier than its
+  prerequisite), with verdict + recommendation generated to always match the
+  computed count (same-semester links are valid, not violations); (2)
+  **competency progression** — per-competency
   introduce→develop→master timeline across semesters, flagging
   uncovered/thin/late; (3) **gaps & redundancy** — orphan disciplines (no
   competency contribution) and uncovered competencies; (4) **relatedness & load**

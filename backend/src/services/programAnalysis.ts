@@ -186,56 +186,79 @@ async function analyzeSequencing(
   const semesterOf = new Map(disciplines.map((d) => [norm(d.name), d.semester]))
 
   const system =
-    'Вы — методист российского вуза, эксперт по проектированию учебных планов. Вы анализируете ' +
-    'логику последовательности дисциплин: какие дисциплины являются предпосылкой (фундаментом) ' +
-    'для других, и нет ли нарушений порядка (зависимая дисциплина изучается раньше или одновременно ' +
-    'с той, на которую опирается). Отвечайте только валидным JSON на русском.'
+    'Вы — методист российского вуза, эксперт по проектированию учебных планов. Вы выявляете ' +
+    'предпосылки между дисциплинами: какая дисциплина является фундаментом для другой. ' +
+    'Классификацию порядка делает система по номерам семестров — вам нужно лишь определить ' +
+    'сами связи и обосновать их. Отвечайте только валидным JSON на русском.'
 
+  // The model only proposes prerequisite links + reasons. Whether a link is an
+  // ordering violation is decided here, deterministically, from the semesters —
+  // so the verdict, the flag and the recommendation can never contradict.
   const user =
     `## Учебный план (по семестрам)\n${layout}\n\n` +
     `## Задача\n` +
-    `1) Определите ключевые пары «предпосылка → зависимая дисциплина»: дисциплина B опирается на ` +
-    `знания/умения из дисциплины A. Сосредоточьтесь на фундаментальных и профессиональных ` +
-    `дисциплинах (математика, физика, механика, материаловедение, профильные), где есть реальные ` +
-    `связи. У общеобразовательных дисциплин (история, философия, физкультура, иностранный язык) ` +
-    `предпосылок обычно нет — их не включайте. Найдите 8–20 наиболее значимых связей. ` +
-    `Используйте ТОЧНЫЕ названия из плана.\n` +
-    `2) Особо отметьте НАРУШЕНИЯ порядка: зависимая дисциплина изучается раньше или в том же ` +
-    `семестре, что и её предпосылка.\n` +
-    `3) Дайте общий вердикт (verdict, 2–3 предложения) и оценку flow_score (0–100): насколько ` +
-    `грамотно выстроен порядок (фундамент → продвинутые темы).\n\n` +
+    `1) Определите ключевые пары «предпосылка → зависимая дисциплина» (A → B: B опирается на ` +
+    `знания/умения из A). Сосредоточьтесь на фундаментальных и профессиональных дисциплинах ` +
+    `(математика, физика, механика, материаловедение, профильные). У общеобразовательных ` +
+    `(история, философия, физкультура, иностранный язык) предпосылок обычно нет — не включайте их. ` +
+    `Найдите 8–20 наиболее значимых связей. Используйте ТОЧНЫЕ названия из плана. Для каждой связи ` +
+    `дайте reason — почему B опирается на A (1 предложение). Рекомендации НЕ пишите.\n` +
+    `2) Дайте краткую оценку общей логики (verdict, 1–2 предложения): выстроены ли дисциплины от ` +
+    `фундаментальных к профильным. НЕ упоминайте количество нарушений и НЕ утверждайте об их ` +
+    `наличии или отсутствии — это определит система автоматически по семестрам. Также дайте ` +
+    `flow_score (0–100): насколько грамотно выстроен порядок.\n\n` +
     `## Формат ответа\nВерните JSON: {"verdict":"...","flow_score":75,"edges":[` +
-    `{"from":"<название A>","to":"<название B>","reason":"почему B зависит от A (1 предложение)",` +
-    `"recommendation":"что сделать, если порядок нарушен (1 предложение)"}]}. Только JSON.`
+    `{"from":"<название A>","to":"<название B>","reason":"почему B зависит от A"}]}. Только JSON.`
 
   const result = await chatJSON<{
     verdict?: string; flow_score?: number
-    edges?: { from?: string; to?: string; reason?: string; recommendation?: string }[]
+    edges?: { from?: string; to?: string; reason?: string }[]
   }>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'анализ последовательности дисциплин',
-    { context: { teacherId, institutionId, feature: 'grading' }, maxTokens: 4000 },
+    { context: { teacherId, institutionId, feature: 'grading' }, maxTokens: 3500 },
   )
 
   const edges: PrerequisiteEdge[] = []
+  const seen = new Set<string>()
   for (const e of result.edges ?? []) {
-    const fromSem = semesterOf.get(norm(String(e.from ?? '')))
-    const toSem   = semesterOf.get(norm(String(e.to ?? '')))
+    const fromName = String(e.from ?? '').trim()
+    const toName   = String(e.to ?? '').trim()
+    const fromSem  = semesterOf.get(norm(fromName))
+    const toSem    = semesterOf.get(norm(toName))
     if (fromSem == null || toSem == null) continue   // unmatched name — skip
+    const key = `${norm(fromName)}>${norm(toName)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    // Strict inversion only: dependent is taught in an EARLIER semester than its
+    // prerequisite. Same-semester links are valid (intra-semester order is the
+    // teacher's call) and stay as ordinary justified links.
+    const inverted = toSem < fromSem
     edges.push({
-      from_name: String(e.from).trim(), from_semester: fromSem,
-      to_name: String(e.to).trim(),     to_semester: toSem,
+      from_name: fromName, from_semester: fromSem,
+      to_name: toName,     to_semester: toSem,
       reason: String(e.reason ?? '').trim(),
-      inverted: toSem <= fromSem,
-      recommendation: String(e.recommendation ?? '').trim(),
+      inverted,
+      recommendation: inverted
+        ? `«${toName}» (сем. ${toSem}) опирается на «${fromName}» (сем. ${fromSem}), но изучается раньше — перенесите «${fromName}» на более ранний семестр или «${toName}» на более поздний.`
+        : '',
     })
   }
 
+  const inversions = edges.filter((e) => e.inverted)
+  // Append a verdict sentence that always agrees with the deterministic count,
+  // so the prose never contradicts the «нарушений порядка» stat.
+  const invSentence = inversions.length === 0
+    ? 'Нарушений хронологии — когда дисциплина изучается раньше своей предпосылки — не выявлено.'
+    : `Выявлено нарушений хронологии: ${inversions.length} — подробности ниже.`
+  const baseVerdict = String(result.verdict ?? '').trim()
+
   return {
-    verdict:    String(result.verdict ?? '').trim(),
+    verdict:    [baseVerdict, invSentence].filter(Boolean).join(' '),
     flow_score: clampScore(result.flow_score),
     edges,
-    inversions: edges.filter((e) => e.inverted),
+    inversions,
   }
 }
 

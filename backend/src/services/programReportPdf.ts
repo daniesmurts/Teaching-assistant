@@ -231,6 +231,16 @@ export async function generateProgramReportPdf(
       const cellW = gridW / duration
       const rowH = 17
 
+      // Trim a string to fit maxW at the given font/size (adds an ellipsis).
+      // Guarantees a single line so rows never wrap and misalign.
+      const fitLabel = (s: string, maxW: number, font: 'sans' | 'sansB', size: number): string => {
+        doc.font(fontMap[font]).fontSize(size)
+        if (doc.widthOfString(s) <= maxW) return s
+        let t = s
+        while (t.length > 1 && doc.widthOfString(t + '…') > maxW) t = t.slice(0, -1)
+        return t.replace(/\s+$/, '') + '…'
+      }
+
       const drawColHeader = () => {
         ensure(rowH)
         doc.font('sansB').fontSize(7.5).fillColor(C.ink3)
@@ -247,13 +257,18 @@ export async function generateProgramReportPdf(
         ensure(rowH)
         if (y === M) drawColHeader()   // grid spilled to a new page — repeat the header
         const bySem = new Map(row.cells.map((c) => [c.semester, c]))
-        // row label (uncovered → danger tint)
+        // row label (uncovered → danger tint) — single line, never spills into the grid
         if (row.status === 'uncovered') doc.rect(M, y, labelW - 6, rowH).fill(C.dangerBg)
-        const codeStr = row.code ? `${row.code}  ` : ''
-        doc.font('sansB').fontSize(8).fillColor(row.status === 'uncovered' ? C.danger : C.ink)
-          .text(codeStr, M, y + 4.5, { continued: true })
-        doc.font('sans').fontSize(8).fillColor(C.ink2)
-          .text(clip(row.title, 64), { width: labelW - 8 })
+        const labelY = y + 4.5
+        if (row.code) {
+          doc.font('sansB').fontSize(8).fillColor(row.status === 'uncovered' ? C.danger : C.ink)
+            .text(row.code, M, labelY, { lineBreak: false })
+          doc.font('sans').fontSize(8).fillColor(C.ink2)
+            .text(fitLabel(row.title, labelW - 44 - 8, 'sans', 8), M + 44, labelY, { lineBreak: false })
+        } else {
+          doc.font('sansB').fontSize(8).fillColor(C.ink)
+            .text(fitLabel(row.title, labelW - 8, 'sansB', 8), M, labelY, { lineBreak: false })
+        }
         // cells
         for (let s = 1; s <= duration; s++) {
           const cx = M + labelW + (s - 1) * cellW
@@ -325,14 +340,19 @@ export async function generateProgramReportPdf(
     }
 
     // ── FOOTERS (buffered) ────────────────────────────────────────────────────────
+    // Footers — drop the bottom margin to 0 while writing so a line near the page
+    // edge doesn't trigger pdfkit to append a blank page.
     const range = doc.bufferedPageRange()
+    const fy = H - 30
     for (let i = 0; i < range.count; i++) {
       doc.switchToPage(range.start + i)
-      const fy = H - M + 4
+      const ob = doc.page.margins.bottom
+      doc.page.margins.bottom = 0
       doc.font('sans').fontSize(7.5).fillColor(C.ink3)
-        .text('ИСПУМ · gradeassist', M, fy, { width: CW / 2 })
+        .text('ИСПУМ · gradeassist', M, fy, { width: CW / 2, lineBreak: false })
       doc.font('sans').fontSize(7.5).fillColor(C.ink3)
-        .text(`${i + 1} / ${range.count}`, M + CW / 2, fy, { width: CW / 2, align: 'right' })
+        .text(`${i + 1} / ${range.count}`, M + CW / 2, fy, { width: CW / 2, align: 'right', lineBreak: false })
+      doc.page.margins.bottom = ob
     }
 
     doc.end()
@@ -378,8 +398,4 @@ function gapColumns(
   const leftEnd  = renderCol(M, left)
   const rightEnd = renderCol(M + colW + colGap, right)
   setY(Math.max(leftEnd, rightEnd) + 4)
-}
-
-function clip(s: string, n: number): string {
-  return s.length <= n ? s : s.slice(0, n - 1).trimEnd() + '…'
 }
