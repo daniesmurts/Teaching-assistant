@@ -11,7 +11,9 @@
     "test:watch": "vitest",
     "eval": "node --env-file=../.env ../node_modules/.bin/tsx scripts/runEval.ts",
     "backfill:embeddings": "node --env-file=../.env ../node_modules/.bin/tsx scripts/backfillEmbeddings.ts",
-    "eval:confidence": "node --env-file=../.env ../node_modules/.bin/tsx scripts/runConfidenceEval.ts"
+    "eval:confidence": "node --env-file=../.env ../node_modules/.bin/tsx scripts/runConfidenceEval.ts",
+    "test:yandex-images": "node --env-file=../.env ../node_modules/.bin/tsx scripts/testYandexImages.ts",
+    "repair:filenames": "node --env-file=../.env ../node_modules/.bin/tsx scripts/repairFilenames.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1059.0",

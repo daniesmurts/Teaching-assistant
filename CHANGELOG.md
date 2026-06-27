@@ -14,7 +14,88 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Added
+- **Lecture presentations — typed slide layouts, KaTeX, Yandex Images.** The
+  generator used to emit one shape (title + 3–6 bullets + notes) for every
+  slide, which read as dry and uniform. New format: the model picks per slide
+  from a typed set — `title` / `bullets` / `concept` (определение + раскрытие)
+  / `formula` (KaTeX LaTeX block с подписью) / `comparison` (2–3 колонки) /
+  `diagram` (изображение + подпись + пункты) / `discussion` (вопрос + подвопросы)
+  / `summary`. Schema is a discriminated union in `shared/types.ts`; backend
+  uses `chatJSON` with a JSON-mode prompt, validates+coerces each slide,
+  demotes invalid `comparison` to `bullets`, accumulates inline `[N]` markers
+  into a per-slide `citations[]` (also strips dead markers via the existing
+  `filterCitations` utility). Migration `044_presentation_slides_json.sql`
+  adds a `slides JSONB` column; legacy `generated_content` text stays for
+  back-compat and is also written for new rows (copy-all fallback). **No
+  backfill** — pre-migration presentations keep rendering via the original
+  text parser.
+- **Yandex Images picker on diagram slides.** Backend `services/yandexImages.ts`
+  drives the Yandex Cloud Search API v2 image endpoint at
+  `POST https://searchapi.api.cloud.yandex.net/v2/image/search`. Note: image
+  search is **sync-only** — the corresponding `/v2/image/searchAsync` path
+  doesn't exist and 404s (initial implementation guessed wrong by analogy
+  with the async web endpoint). The sync call returns the result inline in
+  one POST, base64-encoded under `rawData`, no operation polling. Same
+  credentials as web grounding (`YANDEX_SEARCH_API_KEY` + `YANDEX_FOLDER_ID`);
+  picker disables itself if either is blank. Routes
+  `POST /api/presentations/:id/slides/:idx/images` and
+  `PATCH /api/presentations/:id/slides/:idx` expose search candidates and
+  commit the chosen image (or clear it). Image selection never happens
+  server-side — teacher curates from a 3-column thumbnail grid in
+  `SlideImagePicker.tsx`, with attribution link + licensing disclaimer.
+  Modal renders through `createPortal(modal, document.body)` so it can't be
+  trapped off-screen by a transformed/contained ancestor; body scroll locks
+  while open.
+- **CLI verifier for the integration:** `npm run test:yandex-images -- "query"`
+  (script at `backend/scripts/testYandexImages.ts`) checks env, calls the
+  service, prints parsed candidates. Add `--raw` to dump the actual XML for
+  parser debugging.
+- **Rich-clipboard copy for slides — image actually pastes, not the URL.** The
+  per-slide and "Скопировать всё" buttons now write `text/html` alongside
+  `text/plain` via `ClipboardItem`. PowerPoint / Word / Google Slides /
+  Google Docs read the HTML, download every `<img src>` and embed the bytes
+  — so diagram slides paste as actual pictures, not as link text. As bonus
+  side-effects, `comparison` slides paste as native `<table>`s and `bullets` /
+  `summary` slides paste as native `<ul>`. New helpers
+  `frontend/src/components/presentations/slideHtml.ts` (rendering) and
+  `clipboard.ts` (writes both formats with a `writeText` fallback for
+  browsers/permission contexts where `ClipboardItem` isn't available). Math
+  delimiters (`$..$` / `$$..$$`) are preserved as text — the target apps'
+  own equation editors can pick them up; we don't try to push KaTeX HTML
+  across, which renders inconsistently outside the source DOM.
+- **KaTeX rendering.** `katex` added as a frontend dep + `@types/katex` in
+  devDeps; `katex.min.css` imported once in `main.tsx`. New `Math.tsx`
+  exports `BlockMath` and `InlineText`; the latter tokenises mixed prose +
+  `$inline$` / `$$block$$` math. `SlideContent.tsx` runs every text field
+  through a `RichText` wrapper that handles both citation chips and math in
+  one pass.
+- A temporary `src/types/katex-shim.d.ts` ships so the typecheck passes
+  before `npm install` runs; once installed, `@types/katex` supersedes it
+  and the shim can be deleted.
+
+### Fixed
+- **Cyrillic upload filenames no longer arrive as mojibake.** Browsers send
+  multipart Content-Disposition filenames as raw UTF-8 bytes; multer (and
+  Express more generally) decode the header as Latin-1, so "Расчёт.docx"
+  landed in `documents.file_name` as "Đ Đ°Ñ Ñ‘Ñ‚.docx" and then showed up
+  garbled in the presentation sources list and elsewhere. New
+  `repairUploadFilename` util in `middleware/fileValidation.ts` round-trips
+  latin1→utf8 only when the input could plausibly be mojibake (every char
+  ≤ 0xFF, round-trip yields no replacement chars) — pure ASCII and
+  already-correct Cyrillic / real Latin-1 filenames pass through unchanged.
+  Applied inside the multer `fileFilter` so every upload route gets the
+  repair for free. One-shot backfill for existing rows via
+  `npm run repair:filenames` (add `--dry-run` to preview).
+
 ### Changed
+- **Registration form — phone is now optional + auto-masked.** Телефон is
+  labelled «· необязательно» (name/university/email/password are required); the
+  phone field auto-prefixes `+7`, strips a leading `8`/`7`, forces the first
+  national digit to `9` (RU mobile), and formats live to `+7 (9XX) XXX-XX-XX`
+  (`formatPhone` in `frontend/src/pages/Register.tsx`). The password field shows
+  a live requirements checklist (8+ chars / uppercase A–Z / digit) that colours
+  each rule grey→green(✓)/red(✕) as the user types.
 - **DeepSeek V4 migration — tiered routing + thinking toggle.** Legacy
   `deepseek-chat`/`deepseek-reasoner` deprecate 2026-07-24; V4 replaces the
   two-model split with one model + a `thinking` body toggle (defaults ON, so

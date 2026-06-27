@@ -6,6 +6,11 @@ import SubscriptionModal from './SubscriptionModal'
 
 const PLANS = ['free', 'pro', 'institution']
 const ROLES = ['teacher', 'institution_admin', 'platform_admin']
+const ROLE_LABELS: Record<string, string> = {
+  teacher:          'Преподаватель',
+  institution_admin: 'Администратор организации',
+  platform_admin:   'Администратор платформы',
+}
 
 interface SubTeacher { id: string; name: string | null; email: string; plan_tier: string }
 
@@ -79,7 +84,7 @@ export default function AdminTeachers() {
                       onChange={(e) => patchMut.mutate({ id: t.id, data: { role: e.target.value } })}
                       className="text-xs bg-transparent border border-border rounded px-1.5 py-1"
                     >
-                      {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                      {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r] ?? r}</option>)}
                     </select>
                   </td>
                   <td className="px-3 py-2">

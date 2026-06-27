@@ -2,6 +2,35 @@ import multer from 'multer'
 import { Request, Response, NextFunction } from 'express'
 import { DocumentProcessingError } from '../errors/AppError'
 
+// ─── Filename encoding repair ─────────────────────────────────────────────────
+//
+// Browsers send multipart filenames with raw UTF-8 bytes in the Content-
+// Disposition header. Multer (and Express more generally) decode the header
+// as Latin-1 by default, so a file called "Расчёт.docx" arrives as
+// "Đ Đ°Ñ Ñ‘Ñ‚.docx". We round-trip latin1→utf8 to recover the original
+// bytes, but only when the string looks like it could be latin1-encoded
+// UTF-8 (every codepoint ≤ 0xFF) and the round-trip produces valid UTF-8
+// (no replacement chars). Filenames that already contain real high-plane
+// characters, or pure ASCII, pass through untouched.
+//
+// Exported so the one-off backfill script (scripts/repairFilenames.ts) can
+// use the exact same heuristic the upload path uses.
+
+export function repairUploadFilename(name: string): string {
+  if (!name) return name
+  // Already contains real Cyrillic/CJK/emoji etc. — trust it.
+  if (/[^\x00-\xFF]/.test(name)) return name
+  try {
+    const decoded = Buffer.from(name, 'latin1').toString('utf8')
+    // Replacement chars mean the bytes weren't valid UTF-8 — this string
+    // was genuinely Latin-1 (e.g. "café.pdf"), not mojibake. Leave alone.
+    if (decoded.includes('�')) return name
+    return decoded
+  } catch {
+    return name
+  }
+}
+
 // ─── Allowed MIME types ───────────────────────────────────────────────────────
 
 export const ALLOWED_MIME_TYPES = new Set([
@@ -24,6 +53,10 @@ export const uploadConfig = multer({
         'Неподдерживаемый формат файла. Загружайте PDF, Word-документ или изображение.'
       ))
     }
+    // Repair Cyrillic filenames mangled by the Latin-1 header decode. Mutate
+    // here so every downstream consumer (route handler, storage path, DB)
+    // sees the correct name without each having to remember.
+    file.originalname = repairUploadFilename(file.originalname)
     cb(null, true)
   },
 })

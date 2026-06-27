@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Button from '../../components/ui/Button'
+import CreateButton from '../../components/ui/CreateButton'
 import { useUIStore } from '../../store/uiStore'
 import {
   getInstitutions, createInstitution, updateInstitution, type AdminInstitution,
@@ -59,7 +60,7 @@ export default function AdminInstitutions() {
               Создавайте организации и назначайте администраторов на странице «Преподаватели»
             </p>
           </div>
-          {!showForm && <Button size="sm" onClick={() => setShowForm(true)}>+ Новая организация</Button>}
+          {!showForm && <CreateButton onClick={() => setShowForm(true)}>Новая организация</CreateButton>}
         </div>
 
         {showForm && (

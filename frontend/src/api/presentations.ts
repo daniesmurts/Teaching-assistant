@@ -1,5 +1,7 @@
 import client from './client'
-import type { Presentation, PresentationSource } from '../types'
+import type {
+  Presentation, PresentationSource, Slide, SlideImage, ImageCandidate,
+} from '../types'
 
 export interface GenerateRequest {
   topic: string
@@ -14,6 +16,9 @@ export interface GenerateRequest {
 
 export interface GenerateResponse {
   presentation_id:   string
+  // New generations include the typed slide array. Old presentations loaded
+  // through `getPresentation` won't — renderer falls back to text parsing.
+  slides:            Slide[] | null
   generated_content: string
   sources:           PresentationSource[]
 }
@@ -35,4 +40,35 @@ export async function getPresentation(id: string): Promise<Presentation> {
 
 export async function deletePresentation(id: string): Promise<void> {
   await client.delete(`/api/presentations/${id}`)
+}
+
+// ── Image picker for diagram slides ──────────────────────────────────────────
+
+export interface ImageSearchResponse {
+  query:      string
+  candidates: ImageCandidate[]
+}
+
+export async function searchSlideImages(
+  presentationId: string,
+  slideIdx: number,
+  query?: string,
+): Promise<ImageSearchResponse> {
+  const res = await client.post<ImageSearchResponse>(
+    `/api/presentations/${presentationId}/slides/${slideIdx}/images`,
+    query ? { query } : {},
+  )
+  return res.data
+}
+
+export async function setSlideImage(
+  presentationId: string,
+  slideIdx: number,
+  image: SlideImage | null,
+): Promise<Presentation> {
+  const res = await client.patch<Presentation>(
+    `/api/presentations/${presentationId}/slides/${slideIdx}`,
+    { image },
+  )
+  return res.data
 }

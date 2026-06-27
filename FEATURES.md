@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-06-24
+**Last updated:** 2026-06-26
 
 ---
 
@@ -59,7 +59,7 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 - **РПД-студия** (T5) — select a discipline → AI drafts РПД content (цели, результаты по компетенциям, темы, формы контроля) aimed at its ОПК/ПК/УК + goals, then self-checks coverage. Sections editable; «Перепроверить покрытие» re-scores the edited text (write→check→fix loop). AI assists; teacher is author of record
 **Материалы (хаб генерации)** — single sidebar entry (`/materials`) that launches all generators below (Презентации / Тесты / Темы работ / Задания / Кейсы / Проекты), replacing separate menu items; clear "what can I create?" overview for new users
 **Задания / Кейсы / Проекты** — one practical-material generator (`/materials/:kind`): topic + difficulty (базовый/средний/продвинутый) + optional subject → задания (условие), кейсы (ситуация + вопросы для разбора), or проекты (цель, результат, этапы), each with developed skills and a teacher hint. Copy-all + per-kind history. Free: 3/mo, Pro: unlimited
-**Presentations** — slide-by-slide generator (title, bullets, speaker notes), copy-per-slide
+**Presentations** — slide-by-slide generator with typed layouts (title, понятие, формула с KaTeX, сравнение, схема, обсуждение, итоги — модель выбирает тип под содержание) + спикерские заметки и подбор изображения Yandex Images для слайдов-схем, copy-per-slide
 **Quizzes («Тесты»)** — 5–20 multiple-choice questions on a topic, at one of three Bloom-style levels (recall / understanding / application), grounded in the subject's materials via RAG with source citations. Answer reveal, history. Free: 3/mo, Pro: unlimited
 **Onboarding** — welcome modal (first login), getting-started checklist (persists until first grade), per-page "how it works" intros, no-subject hints on every generator page, and a **progressive sidebar** (new users see only essential start-here items + a «Показать всё» toggle; full nav unlocks automatically after the first grade)
 **Account** — feedback page, in-app help center, settings, password change, account deletion (152-ФЗ cascade)

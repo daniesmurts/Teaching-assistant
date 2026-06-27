@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type DragEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import FeatureIntro from '../../components/ui/FeatureIntro'
@@ -178,6 +178,23 @@ function FileField({ label, file, onPick, inputRef, required = false }: {
   label: string; file: File | null; onPick: (f: File | null) => void
   inputRef: React.RefObject<HTMLInputElement>; required?: boolean
 }) {
+  const [dragOver, setDragOver] = useState(false)
+
+  // Quietly reject non-PDFs dropped onto the zone. The file picker uses
+  // `accept="application/pdf"` so it already filters; the drop path needs
+  // its own gate. We use an extension check as a fallback because some
+  // PDF clients leave `file.type` blank.
+  function isPdf(f: File): boolean {
+    return f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
+  }
+
+  function handleDrop(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    setDragOver(false)
+    const f = e.dataTransfer.files[0]
+    if (f && isPdf(f)) onPick(f)
+  }
+
   return (
     <div>
       <span className="text-xs font-sans font-medium text-ink-secondary block mb-1">{label}</span>
@@ -185,15 +202,59 @@ function FileField({ label, file, onPick, inputRef, required = false }: {
         ref={inputRef} type="file" accept="application/pdf" className="hidden"
         onChange={(e) => onPick(e.target.files?.[0] ?? null)}
       />
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        className={`w-full text-left text-sm font-sans rounded-md px-3 py-2 border transition-colors truncate ${
-          file ? 'border-amber/40 bg-amber-light/40 text-ink' : 'border-dashed border-border-mid text-ink-tertiary hover:bg-surface-warm'
-        }`}
-      >
-        {file ? `📄 ${file.name}` : (required ? 'Выбрать PDF…' : 'Выбрать PDF (необязательно)…')}
-      </button>
+
+      {file ? (
+        // Selected — compact pill with replace + clear controls.
+        <div className="flex items-center gap-2 border border-amber/40 bg-amber-light/40 rounded-md px-3 py-2">
+          <span className="text-base leading-none">📄</span>
+          <span className="text-sm font-sans text-ink truncate flex-1">{file.name}</span>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="text-[11px] font-sans text-ink-secondary hover:text-amber transition-colors flex-shrink-0"
+          >
+            Заменить
+          </button>
+          <button
+            type="button"
+            onClick={() => onPick(null)}
+            className="text-ink-tertiary hover:text-danger transition-colors text-lg leading-none flex-shrink-0"
+            aria-label="Убрать файл"
+          >
+            ×
+          </button>
+        </div>
+      ) : (
+        // Idle — proper drop zone matching the grading uploader's vocabulary.
+        <div
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          className={`flex flex-col items-center justify-center gap-1.5 px-4 py-6 rounded-md border-2 border-dashed cursor-pointer transition-colors text-center
+            ${dragOver
+              ? 'border-amber bg-amber-light'
+              : 'border-amber/40 bg-amber-light/40 hover:border-amber/70 hover:bg-amber-light/70'}`}
+        >
+          <span className="flex items-center justify-center w-10 h-10 rounded-full bg-amber text-white">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 16V4" />
+              <path d="M6 10l6-6 6 6" />
+              <path d="M4 20h16" />
+            </svg>
+          </span>
+          <span className="text-xs font-sans text-ink">
+            Перетащите PDF или{' '}
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-sm bg-amber text-white font-medium">
+              выберите
+            </span>
+          </span>
+          <span className="text-[11px] font-sans text-ink-tertiary">
+            PDF{required ? ' · обязательно' : ' · необязательно'}
+          </span>
+        </div>
+      )}
     </div>
   )
 }

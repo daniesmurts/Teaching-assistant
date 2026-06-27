@@ -493,6 +493,131 @@ export interface PresentationSource {
   chunk_type:  string | null
 }
 
+// ─── Typed slides (new format) ────────────────────────────────────────────────
+//
+// The model picks `type` per slide based on what the content actually wants
+// (a definition vs. a formula vs. a comparison). The frontend renders each
+// type with its own layout. Any text field may contain inline $...$ or $$...$$
+// LaTeX (rendered with KaTeX) and inline [N] citation markers.
+
+export type SlideType =
+  | 'title'
+  | 'bullets'
+  | 'concept'
+  | 'formula'
+  | 'comparison'
+  | 'diagram'
+  | 'discussion'
+  | 'summary'
+
+// An image the teacher picked from Yandex Images for a diagram-class slide.
+// Stored on the slide itself; never auto-selected — search returns candidates,
+// teacher picks one. `source_url` is the page the image lives on (attribution).
+export interface SlideImage {
+  url:         string        // direct image URL
+  source_url:  string        // page that hosts the image (attribution / verify)
+  thumbnail:   string        // smaller preview for grid + slide rendering
+  width:       number | null
+  height:      number | null
+  query:       string        // what we searched for
+  source_host: string | null // e.g. "wikipedia.org" — shown as the credit
+}
+
+interface SlideBase {
+  type:      SlideType
+  title:     string
+  notes:     string          // speaker notes — always present
+  citations: number[]        // source idx values referenced anywhere on the slide
+}
+
+export interface TitleSlide extends SlideBase {
+  type: 'title'
+  body: {
+    subtitle: string | null    // course / discipline line
+    lecturer: string | null    // "[ФИО лектора]" placeholder is fine
+  }
+}
+
+export interface BulletsSlide extends SlideBase {
+  type: 'bullets'
+  body: {
+    items: string[]            // each item may contain $...$ LaTeX and [N] markers
+  }
+}
+
+// One concept, defined and unpacked. Better than 5 bullets for a definition.
+export interface ConceptSlide extends SlideBase {
+  type: 'concept'
+  body: {
+    definition: string         // one or two sentences
+    supporting: string[]       // 2–4 short clarifying points
+  }
+}
+
+// One or more formulas, with a one-line explanation each.
+export interface FormulaSlide extends SlideBase {
+  type: 'formula'
+  body: {
+    formulas: Array<{
+      latex:   string          // raw LaTeX, no surrounding $$
+      caption: string          // "Полезная мощность насоса" — short label
+    }>
+    explanation: string | null // optional 1–2 sentence framing
+  }
+}
+
+// Two columns of comparable items. Good for "X vs Y", classification splits.
+export interface ComparisonSlide extends SlideBase {
+  type: 'comparison'
+  body: {
+    columns: Array<{
+      header: string
+      items:  string[]
+    }>                          // length 2 (sometimes 3 — renderer tolerates both)
+  }
+}
+
+// A diagram / equipment / process image. `imageQuery` is what we'd ask
+// Yandex Images. `image` is set after the teacher picks from candidates.
+export interface DiagramSlide extends SlideBase {
+  type: 'diagram'
+  body: {
+    image_query: string        // ru search query, e.g. "осевой насос разрез"
+    caption:     string        // short caption shown under image
+    points:      string[]      // 1–3 supporting bullet points (optional)
+    image:       SlideImage | null
+  }
+}
+
+// A provocative question + facilitation prompts. Drives engagement, not info.
+export interface DiscussionSlide extends SlideBase {
+  type: 'discussion'
+  body: {
+    question:        string
+    prompts:         string[]  // 2–4 follow-up sub-questions for the lecturer
+    expected_angles: string[]  // brief hints in notes-style for the teacher
+  }
+}
+
+// Closing slide — what we learned + what's next.
+export interface SummarySlide extends SlideBase {
+  type: 'summary'
+  body: {
+    takeaways:  string[]
+    next_steps: string[]       // pre-reading, next lecture topic, etc.
+  }
+}
+
+export type Slide =
+  | TitleSlide
+  | BulletsSlide
+  | ConceptSlide
+  | FormulaSlide
+  | ComparisonSlide
+  | DiagramSlide
+  | DiscussionSlide
+  | SummarySlide
+
 export interface Presentation {
   id: string
   teacher_id: string
@@ -504,9 +629,25 @@ export interface Presentation {
   learning_goals: string[] | null
   style: PresentationStyle | null
   slide_count_target: number | null
+  // New (preferred): typed slide array. When non-null the frontend renders
+  // from this and ignores `generated_content`.
+  slides: Slide[] | null
+  // Legacy: original text DSL. Still populated for new rows as a text
+  // rendering used by copy-all / fallback. Pre-migration rows have this
+  // and `slides = null` — frontend falls back to the text parser.
   generated_content: string | null
   sources: PresentationSource[] | null
   created_at: string
+}
+
+// Candidate from a Yandex Images search — pre-pick, before it lives on a slide.
+export interface ImageCandidate {
+  url:         string
+  source_url:  string
+  thumbnail:   string
+  width:       number | null
+  height:      number | null
+  source_host: string | null
 }
 
 // ─── Quiz (быстрая проверочная по материалам курса) ───────────────────────────

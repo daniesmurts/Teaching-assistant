@@ -169,6 +169,14 @@ gradeassist/
 
 This is the authoritative schema. Always refer to this, never invent new tables.
 
+> **Target after [Research.md](Research.md) §7 ships:** the org-structure
+> migration adds `org_units` and `org_unit_roles` tables plus a
+> `primary_org_unit_id` column on `teachers`. Full DDL is documented below
+> in *Admin System → Schema Additions* with a target-state marker. Until
+> that migration ships, the codebase still implements the flat
+> `institutions` + `teachers.role` enum model; do not write code that
+> queries `org_units` against the existing database.
+
 ```sql
 -- Enable pgvector
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -510,16 +518,38 @@ Work in this order. Do not skip ahead.
 
 ## What This Is Not
 
-To avoid scope creep, the MVP explicitly does NOT include:
+Things GradeAssist deliberately does not build, on principle. Items that are
+unbuilt but planned live in [TODO.md](TODO.md), not here. This is a forward-
+looking principles list — not a snapshot of what hasn't shipped yet.
 
-- PPTX / PDF file export
-- Student-facing portal or accounts
-- Plagiarism detection
-- Real-time collaboration
-- Email sending from the platform (generate draft only, teacher sends from their own email client)
-- Mobile native app (PWA is sufficient)
-- Payment processing (collect interest manually at first)
-- Admin panel (manage teachers manually via database for MVP)
+- **A GradeAssist-owned student account system** — no logins, no passwords, no
+  cross-course student identity stored by us. Student *presence* is supported
+  via two rails only: (a) ephemeral tokenised links for standalone deployments,
+  (b) LTI 1.3 launch from the institution's LMS for institutional deployments.
+  Student credentials are never stored by GradeAssist. See
+  [Research.md](Research.md) §6 for the full policy and rationale.
+
+- **Our own output-based plagiarism or AI-text classifier.** Antiplagiat.ru is
+  the Russian institutional standard; integrate with it if a deployment needs
+  it. Building a competing classifier is an unwinnable arms race and politically
+  fragile. Note this does *not* preclude process-of-creation attestation
+  ([Research.md](Research.md) §5.1) — that is a different surface (authorship
+  process, not output classification) and is explicitly in scope.
+
+- **Real-time collaboration on grading.** Teachers grade async; they do not
+  co-grade live. Revisit only if institutional pilots specifically demand it.
+
+- **A mobile native app.** The PWA is the supported mobile experience. Revisit
+  only when churn data points at the PWA as the cause.
+
+- **Direct delivery of feedback emails to students from the platform.** For
+  grading feedback the platform generates the draft; the teacher sends it from
+  their own email client. This preserves the teacher's role as the
+  communicating authority and avoids the platform sitting in a regulated
+  teacher↔student communication channel. *Transactional* email — registration,
+  password reset, payment receipts, teacher invites, admin notifications — IS
+  sent by the platform; that is a separate concern handled by the email
+  service.
 
 ---
 
@@ -1453,13 +1483,54 @@ ___
 
 ## Admin System
 
-### Two Admin Roles — Never Conflate Them
+### Role and scope model — see Research.md §7
 
-**Platform Admin — the product owner (single user).** Full visibility across the entire platform. All teachers, all institutions, all token spend, system health, revenue metrics. Protected under `/admin/*` routes.
+Authorisation resolves through a **hierarchical org tree**, not through a
+flat role enum. Each `institution` is the root of a tree of `org_units`
+typed by `governance` / `admin_office` / `cluster` / `division` /
+`department` — full design in [Research.md](Research.md) §7. Teachers
+belong to one `department` via `primary_org_unit_id`. Roles are scoped per
+unit via `org_unit_roles(teacher_id, org_unit_id, role)` where
+`role ∈ {admin, head, viewer}`.
 
-**Institution Admin — a department head or IT coordinator at a client university.** Scoped to their institution only. Manages their teachers, creates shared rubrics, sees their team's usage in units (never in cost). Protected under `/institution/*` routes. This is a feature of the Institution pricing tier.
+A teacher may hold multiple roles across the tree — common in Russian
+universities (a kafedra head is also a teacher; a deputy УМЦ head may
+also head one cluster). The model accommodates this naturally; the
+legacy enum cannot.
 
-Both roles are part of the same React PWA — no separate admin app. Role is determined by the `role` column on the `teachers` table and enforced via middleware on every protected route.
+**Two operationally distinct admin concepts** both manifest as
+`role='admin'` on different units in the tree, but they land in
+different UIs and have different responsibilities:
+
+- **Org / IT admin** — `admin` on the root `institution` unit. IT
+  department contact; manages billing, LTI/SSO setup, AD sync, tree
+  configuration. Not a daily user. Lands in a thin Settings →
+  Organisation surface.
+- **Academic admin** — `admin` on an `admin_office`, `division`, or
+  `department` subtree. УМЦ head, institute head, kafedra head. Daily
+  user. Lands in dashboards, rubric library, reports.
+
+`viewer` covers governance-level read-only access (vice-rector
+dashboards).
+
+The **`platform_admin`** role — the product owner, full visibility
+across all institutions — remains orthogonal to the tree. The tree is
+per-institution and does not contain the platform owner; treat
+`platform_admin` as a flat flag on the teacher record that short-circuits
+unit-scope checks.
+
+All admin and institution-admin UIs are part of the same React PWA — no
+separate admin app. Routes are protected by middleware that walks the
+tree (see *Role Middleware* below).
+
+> **Migration status:** until [Research.md](Research.md) §7.8 step 2
+> ships, the implemented code still uses the original 3-value
+> `teachers.role` enum (`teacher` / `institution_admin` / `platform_admin`)
+> and a flat `institutions` table — see the legacy DDL in *Schema
+> Additions* below. **Do not query `org_units` against the existing
+> database; do not write new code that assumes the legacy 3-role enum
+> will remain.** After §7 migration: existing `institution_admin` rows
+> map to `org_unit_roles(role='admin', org_unit_id=<institution root>)`.
 
 ---
 
@@ -1528,9 +1599,69 @@ CREATE TABLE teacher_invites (
 );
 ```
 
+#### §7 additions — target state, ships with the org-structure migration
+
+> Not yet implemented in code. See [Research.md](Research.md) §7 for the
+> full design including the canonical `type_code` taxonomy, materialised-
+> path scheme, and backfill plan. The DDL below is the authoritative
+> target.
+
+```sql
+-- Canonical org-unit tree (one tree per institution)
+CREATE TABLE org_units (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  institution_id  UUID NOT NULL REFERENCES institutions(id) ON DELETE CASCADE,
+  parent_id       UUID REFERENCES org_units(id) ON DELETE CASCADE,
+  type_code       TEXT NOT NULL,        -- 'institution' | 'governance' | 'admin_office' | 'cluster' | 'division' | 'department'
+  name            TEXT NOT NULL,        -- full Russian name
+  short_name      TEXT,                 -- УМЦ, ОАиД, etc.
+  external_code   TEXT,                 -- LMS / LTI / AD mapping key
+  path            TEXT NOT NULL,        -- materialised path, e.g. '/inst-uuid/admin-uuid/dept-uuid/'
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (institution_id, parent_id, name)
+);
+
+CREATE INDEX ON org_units (institution_id);
+CREATE INDEX ON org_units (parent_id);
+CREATE INDEX ON org_units (path text_pattern_ops);
+CREATE INDEX ON org_units (institution_id, type_code);
+
+-- Unit-scoped roles. A teacher may hold multiple rows.
+CREATE TABLE org_unit_roles (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  teacher_id    UUID NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+  org_unit_id   UUID NOT NULL REFERENCES org_units(id) ON DELETE CASCADE,
+  role          TEXT NOT NULL,          -- 'admin' | 'head' | 'viewer'
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (teacher_id, org_unit_id, role)
+);
+
+CREATE INDEX ON org_unit_roles (teacher_id);
+CREATE INDEX ON org_unit_roles (org_unit_id);
+
+-- Teachers point at their primary department (kafedra)
+ALTER TABLE teachers
+  ADD COLUMN primary_org_unit_id UUID REFERENCES org_units(id) ON DELETE SET NULL;
+
+-- Backfill plan (executed by the migration, not on every deploy):
+--   1. For each existing institutions row, INSERT a root org_units row
+--      with type_code='institution', parent_id=NULL.
+--   2. INSERT a placeholder type_code='department' row under each root
+--      and assign all teachers in that institution to it via
+--      primary_org_unit_id.
+--   3. For each teacher with role='institution_admin', INSERT
+--      org_unit_roles(role='admin', org_unit_id=<institution root>).
+--   4. teachers.role is retained but deprecated; new code reads from
+--      org_unit_roles and the is_platform_admin flag (added separately
+--      to preserve the orthogonal platform-owner concept).
+```
+
 ---
 
 ### Role Middleware
+
+**Legacy — what's in code today, before [Research.md](Research.md) §7
+migration ships:**
 
 ```typescript
 // backend/src/middleware/requireRole.ts
@@ -1552,6 +1683,57 @@ export function requireRole(allowed: Role | Role[]) {
 export const requireAdmin             = requireRole('platform_admin')
 export const requireInstitutionAdmin  = requireRole(['institution_admin', 'platform_admin'])
 ```
+
+**Target — sketch of the post-§7 authoriser.** The middleware shifts from
+"does this teacher hold this role" to "can this teacher act on this unit
+in this role." Authorisation walks the materialised path: a role on any
+ancestor unit grants the same role on descendants.
+
+```typescript
+// backend/src/middleware/requireUnitRole.ts (target — not yet in code)
+
+import { canActOnUnit } from '../services/orgScope'
+
+type UnitRole = 'admin' | 'head' | 'viewer'
+
+// platform_admin remains orthogonal: a flat flag, not a unit role.
+// It short-circuits every unit-scope check.
+export const requireAdmin = (req: AuthRequest, res: Response, next: NextFunction) =>
+  req.teacher.is_platform_admin
+    ? next()
+    : res.status(403).json({ error: 'Insufficient permissions' })
+
+// Per-route guard: resolve the target unit from the request, then ask
+// whether the calling teacher holds any of `roles` on that unit or any
+// ancestor.
+export function requireUnitRole(
+  resolveUnit: (req: AuthRequest) => Promise<string>,   // returns org_unit_id
+  roles: UnitRole[],
+) {
+  return async (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (req.teacher.is_platform_admin) return next()
+    const unitId = await resolveUnit(req)
+    const ok    = await canActOnUnit(req.teacher.id, unitId, roles)
+    if (!ok) return res.status(403).json({ error: 'Insufficient permissions' })
+    next()
+  }
+}
+
+// Legacy "institution admin" — admin on the root unit of the teacher's
+// own institution — preserved as a convenience export so callers do not
+// have to resolve the unit themselves.
+export const requireInstitutionAdmin = requireUnitRole(
+  async (req) => req.teacher.institution_root_unit_id,
+  ['admin'],
+)
+```
+
+`canActOnUnit` walks the path: given `(teacher_id, target_unit_id, roles)`
+it joins `org_unit_roles` to `org_units` and returns true if any of the
+teacher's role rows sits on a unit whose `path` is a prefix of the target
+unit's `path` and whose `role` is in `roles`. Single SQL query, hot path
+should land under 1ms with the indexes on `org_units(path text_pattern_ops)`
+and `org_unit_roles(teacher_id)`.
 
 ---
 

@@ -5,6 +5,7 @@ import {
   getCriterionTemplates, type RubricTemplatePayload,
 } from '../../api/admin'
 import Button from '../../components/ui/Button'
+import CreateButton from '../../components/ui/CreateButton'
 import { Input } from '../../components/ui/Input'
 import { evenWeights } from '../../components/grading/GradingForm'
 import { useUIStore } from '../../store/uiStore'
@@ -124,7 +125,7 @@ export default function AdminRubricTemplates() {
             Готовые наборы критериев с весами, видимые всем преподавателям как стартовые шаблоны.
           </p>
         </div>
-        {!showForm && <Button size="sm" onClick={openNew}>+ Новый шаблон</Button>}
+        {!showForm && <CreateButton onClick={openNew}>Новый шаблон</CreateButton>}
       </div>
 
       {showForm ? (

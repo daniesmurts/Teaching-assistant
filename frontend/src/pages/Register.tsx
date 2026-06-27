@@ -7,6 +7,46 @@ import { validatePassword } from '../lib/validatePassword'
 import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 
+// Russian mobile mask → +7 (9XX) XXX-XX-XX. Drops a leading 8/7 (trunk/country
+// code), forces the first national digit to 9 (RU mobile), and formats live.
+function formatPhone(raw: string): string {
+  let d = raw.replace(/\D/g, '')
+  if (d.startsWith('7') || d.startsWith('8')) d = d.slice(1)   // strip country/trunk code
+  if (d.length > 0 && d[0] !== '9') d = '9' + d                // mobile always starts with 9
+  d = d.slice(0, 10)
+  if (!d) return ''
+  let out = `+7 (${d.slice(0, 3)}`
+  if (d.length > 3) out += `) ${d.slice(3, 6)}`
+  if (d.length > 6) out += `-${d.slice(6, 8)}`
+  if (d.length > 8) out += `-${d.slice(8, 10)}`
+  return out
+}
+
+// Live password checklist — mirrors validatePassword / backend authValidation.
+const PW_RULES: { label: string; test: (p: string) => boolean }[] = [
+  { label: 'Не менее 8 символов', test: (p) => p.length >= 8 },
+  { label: 'Заглавная буква (A–Z)', test: (p) => /[A-Z]/.test(p) },
+  { label: 'Цифра', test: (p) => /[0-9]/.test(p) },
+]
+
+function RuleIcon({ state }: { state: 'idle' | 'ok' | 'bad' }) {
+  if (state === 'ok') {
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M5 13l4 4L19 7" />
+      </svg>
+    )
+  }
+  if (state === 'bad') {
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18" />
+      </svg>
+    )
+  }
+  return <span className="inline-block w-[5px] h-[5px] rounded-full bg-current opacity-50" aria-hidden="true" />
+}
+
 export default function Register() {
   const [params] = useSearchParams()
   const inviteToken = params.get('invite') ?? undefined
@@ -83,6 +123,7 @@ export default function Register() {
               value={form.name}
               onChange={set('name')}
               placeholder="Иванов Иван Иванович"
+              required
             />
 
             <Input
@@ -90,13 +131,16 @@ export default function Register() {
               value={form.university}
               onChange={set('university')}
               placeholder="МГУ им. М.В. Ломоносова"
+              required
             />
 
             <Input
-              label="Телефон"
+              label={<>Телефон <span className="font-normal text-ink-tertiary">· необязательно</span></>}
               type="tel"
+              inputMode="tel"
+              autoComplete="tel"
               value={form.phone}
-              onChange={set('phone')}
+              onChange={(e) => setForm((f) => ({ ...f, phone: formatPhone(e.target.value) }))}
               placeholder="+7 (___) ___-__-__"
             />
 
@@ -121,9 +165,26 @@ export default function Register() {
                 required
                 autoComplete="new-password"
               />
-              {pwError && (
-                <p className="mt-1 text-xs font-sans text-danger">{pwError}</p>
-              )}
+              <ul className="mt-2 space-y-1">
+                {PW_RULES.map((rule) => {
+                  const empty = form.password.length === 0
+                  const met   = rule.test(form.password)
+                  const state = empty ? 'idle' : met ? 'ok' : 'bad'
+                  const color = state === 'ok'
+                    ? 'var(--color-success)'
+                    : state === 'bad'
+                      ? 'var(--color-danger)'
+                      : 'var(--color-ink-tertiary)'
+                  return (
+                    <li key={rule.label} className="flex items-center gap-2 text-xs font-sans transition-colors" style={{ color }}>
+                      <span className="w-3.5 flex items-center justify-center flex-shrink-0">
+                        <RuleIcon state={state} />
+                      </span>
+                      <span>{rule.label}</span>
+                    </li>
+                  )
+                })}
+              </ul>
             </div>
 
             {/* TOS checkbox */}

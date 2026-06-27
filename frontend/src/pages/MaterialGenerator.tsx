@@ -84,10 +84,13 @@ export default function MaterialGenerator() {
     genMut.mutate()
   }
 
+  // Copy only the student-facing parts (title + statement). "Развивает" and
+  // "Для преподавателя" are teacher-only metadata — including them in the
+  // copy ends up pasted into the student handout by accident.
   function copyAll(set: TaskSet) {
-    const text = set.tasks.map((t, i) =>
-      `${i + 1}. ${t.title}\n${t.statement}\nРазвивает: ${t.skills}${t.guidance ? `\nДля преподавателя: ${t.guidance}` : ''}`
-    ).join('\n\n')
+    const text = set.tasks
+      .map((t, i) => `${i + 1}. ${t.title}\n${t.statement}`)
+      .join('\n\n')
     navigator.clipboard.writeText(text).then(() => addToast('Скопировано', 'success'))
   }
 

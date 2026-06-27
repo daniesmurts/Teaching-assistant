@@ -382,6 +382,134 @@ Three steps, in order — **the third is the payoff**:
 - **Pricing hook:** rides on `documentUpload` (already Pro-only); OCR cost is
   ~$0.001/page (negligible).
 
+### O. Course knowledge graph — concept extraction + prerequisite inference · Effort: L+ (research-track)
+
+Build a per-course concept graph: nodes are concepts taught/tested, edges are
+prerequisite relationships. Concepts extracted from syllabus + lectures + rubric
+criteria via structured-output LLM calls. Prerequisite edges from two signals
+combined: (a) LLM-suggested from concept descriptions, (b) data-discovered from
+conditional performance patterns in approved grades. Once built, lights up
+diagnostic feedback ("which concept did the student actually miss"),
+syllabus-vs-content gap detection, accreditation-grade coverage reporting, and
+becomes the substrate for a student-facing tutor down the line.
+
+- **Why:** the missing connective tissue between syllabus, lectures, rubrics,
+  and grades. Today these are four isolated data piles. With the graph, every
+  downstream feature (feedback, remediation, audit, tutor) gets dramatically
+  sharper. Also the strongest single research/patent contribution on the
+  roadmap — see [Research.md](Research.md) §3.2 for the full case and patent-
+  claim framing.
+- **Touches:** new `concepts`, `concept_edges`, `concept_to_content`,
+  `concept_to_criterion` tables (Apache AGE optional, relations table over
+  pgvector sufficient for v1); new `services/conceptExtractor.ts` and
+  `services/conceptGraph.ts`; instrumentation hooks in grading and presentation
+  services to attach concept IDs; admin/teacher views to inspect the graph.
+- **Sequencing:** explicit research-track. Don't start before grant scoping is
+  done — the patent-claim language and demo scope should be locked first so
+  what we ship matches what we claim. Cross-link with #3 (Russian embeddings)
+  since concept extraction quality rides on embedding quality.
+
+### P. Organisational structure model — canonical-typed org tree · Effort: L+ (foundational)
+
+Replace today's flat `institutions` + 3-value `teachers.role` enum with a
+self-referencing `org_units` table (canonical `type_code` taxonomy:
+`institution` / `governance` / `admin_office` / `cluster` / `division` /
+`department`) and a `org_unit_roles` junction (admin / head / viewer per
+unit). Authorisation resolves via materialised path walk. Teachers belong
+to a primary `department`; roles attach at any level above. See
+[Research.md](Research.md) §7 for full design including KSTU/КНИТУ mapping,
+schema sketch, and onboarding-variability decision (self-service tree
+builder for v1).
+
+- **Why:** the 2-level model collapses the moment we touch a real Russian
+  university. Each of §2.1 fairness audit, §2.2 coverage audit, §2.4
+  federated benchmarking, §5.1 published assignments, §6 LTI integration
+  needs a real org tree to resolve scope correctly. Retrofitting after any
+  of those ship is a painful migration that risks scoping bugs in the
+  first institutional pilot. Doing this first is the cheapest path.
+- **Touches:** new `org_units`, `org_unit_roles` tables + migration;
+  `teachers.primary_org_unit_id`; new authorisation helper
+  (`services/orgScope.ts`) that walks paths; revision of every existing
+  admin route to scope via the tree instead of `institution_id`;
+  IT-admin tree-builder UI (Settings → Organisation); backfill script that
+  creates one root unit per existing institution + a placeholder
+  `department` per existing teacher; CLAUDE.md *Admin System* and
+  *Database Schema* sections rewritten to match.
+- **Sequencing:** ships **before** §5.1 build (Feature N+ work) and
+  before §6 LTI. Estimated 3–4 weeks of focused work for schema +
+  middleware + minimal admin UI. Defer rich per-level dashboards,
+  template library, AD sync.
+
+### Q. Published assignments + process-of-creation attestation (§5.1) · Effort: L
+
+In-platform writing surface where students compose published assignments
+(per-student tokenised link, or LTI launch once §6 ships). Captures authoring
+*aggregates* and produces a transparent provenance report the teacher reads
+alongside the grade. Ships the §5.1 + §5.3 + §5.5 v1 authenticity bundle. Full
+design and the legal/UX constraints are in [Research.md](Research.md) §5.1.1–
+§5.1.4 and §5.6–§5.7.
+
+- **Why:** the platform's answer to "won't we end up using AI to grade AI?" —
+  it moves assessment onto authorship *process*, which AI cannot reproduce.
+  Strongest single patent claim on the roadmap and a flagship institutional
+  differentiator. Available on Pro (tokenised rail) and Institution (LTI rail).
+- **Touches:** new writing-surface component (editor stack decided — **TipTap,
+  MIT core only**, see §5.1.3 for rationale + integration shape); browser-side
+  telemetry that emits **aggregates only** (never raw keystroke streams — see
+  §5.1.2);
+  `assignments` columns `is_published`, `student_token`, `published_at`,
+  `due_at`, `submission_telemetry` (JSONB), consent record; published-link
+  distribution UI; provenance-report panel in the grading view; rule-based
+  provenance scorer (§5.1.3); a metacognition rubric template (§5.5).
+- **Hard constraints (do not skip):** aggregate-only telemetry + explicit
+  Russian consent gate + Russia-resident storage (§5.1.2); strict publish
+  mode — link is the only submission route (§5.1.1); connectivity required on
+  this surface, overriding offline-first (§5.1.4).
+- **Sequencing:** ships **after** Feature P (org tree) — visibility scoping
+  resolves through the tree. Pairs with §6 LTI for the institutional rail but
+  the tokenised rail does not depend on it, so v1 can ship standalone first.
+
+### R. LTI 1.3 integration + IT-admin configuration UX (§6) · Effort: L
+
+LTI 1.3 + Advantage (launch, NRPS roster sync, AGS grade write-back) so
+GradeAssist plugs into Moodle and the wider LMS ecosystem. Includes the
+IT-admin self-serve configuration surface designed in [Research.md](Research.md)
+§6.5 (Setup + Test Connection, Course Mapping, Activity Log). Full strategy in
+§6.
+
+- **Why:** the institutional wedge. Without LTI, GradeAssist is "another system
+  to migrate to" and procurement stalls; with it, it is "a compatible tool."
+  Sources verified student identity from the LMS, so we never store student
+  credentials (§6.1). The §6.5 config UX is what keeps each institutional sale
+  from becoming a hand-held engineering engagement.
+- **Touches:** LTI 1.3 OIDC/JWT launch handling; JWKS endpoint; NRPS + AGS
+  clients; `org_units.external_code` mapping; Settings → Organisation → LTI
+  surface (gated on root-unit `admin`); course-context-to-org-unit mapping.
+- **Sequencing:** after Feature P (needs the org tree to map course contexts
+  into) and alongside Feature Q (provides Q's institutional identity rail).
+
+---
+
+## Build order — locked design (§5–§7)
+
+The §5–§7 design is locked (2026-06-27). Full institutional path is the build
+target, not a demo. Committed order:
+
+1. **Feature P — org structure tree (§7).** Foundational. Everything scopes
+   through it. ~3–4 weeks. Rewrite CLAUDE.md *Admin System* + *Database Schema*
+   to drop the legacy-vs-target markers **as this lands**, not before.
+2. **Feature Q — published assignments + attestation (§5.1/5.3/5.5).** The
+   flagship authenticity feature. ~4–6 weeks. Honour the §5.1.2 legal
+   constraints from the first commit — retrofitting consent/aggregation is
+   painful and an institutional legal blocker.
+3. **Feature R — LTI 1.3 + IT-admin UX (§6).** Institutional rail. ~3–4 weeks
+   incl. the §6.5 surface.
+
+Deferred, designed but not in this build: §5.2 oral defense (cost model owed),
+§5.4 concept probing (gated on Feature O knowledge graph), §3.x new-infra
+ideas. Update the CLAUDE.md pricing matrix (Pro gains process attestation)
+when Feature Q ships.
+
 ---
 
 ## Intentionally NOT building

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Button from '../../components/ui/Button'
+import CreateButton from '../../components/ui/CreateButton'
 import { useUIStore } from '../../store/uiStore'
 import { getInstitutionCriteria, createInstitutionCriterion } from '../../api/institution'
 import type { CriterionSubject } from '../../types'
@@ -48,7 +49,7 @@ export default function InstitutionRubrics() {
             <h1 className="font-display text-2xl font-bold text-ink">Критерии организации</h1>
             <p className="text-xs font-sans text-ink-tertiary mt-1">Общие критерии оценки для преподавателей организации</p>
           </div>
-          {!showForm && <Button size="sm" onClick={() => setShowForm(true)}>+ Новый критерий</Button>}
+          {!showForm && <CreateButton onClick={() => setShowForm(true)}>Новый критерий</CreateButton>}
         </div>
 
         {showForm && (

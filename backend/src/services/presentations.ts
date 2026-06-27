@@ -1,11 +1,24 @@
-import { chat, embed } from './deepseek'
+import { chatJSON, embed } from './deepseek'
 import { findCourseById } from '../db/queries/courses'
 import { findPresentationsByTeacher, createPresentation } from '../db/queries/presentations'
 import { findRelevantChunks, type RelevantChunk } from '../db/queries/chunks'
 import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { logger } from '../lib/logger'
-import type { Presentation, PresentationSource } from '../../../shared/types'
+import type {
+  Presentation,
+  PresentationSource,
+  Slide,
+  SlideType,
+  TitleSlide,
+  BulletsSlide,
+  ConceptSlide,
+  FormulaSlide,
+  ComparisonSlide,
+  DiagramSlide,
+  DiscussionSlide,
+  SummarySlide,
+} from '../../../shared/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,7 +36,8 @@ export interface GenerateParams {
 
 export interface GenerateResult {
   presentation_id:   string
-  generated_content: string
+  slides:            Slide[]
+  generated_content: string             // text rendering, for copy-all UX
   sources:           PresentationSource[]
 }
 
@@ -37,9 +51,6 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
     ? await findCourseById(params.courseId, params.teacherId)
     : null
 
-  // Pull the teacher's uploaded syllabus/material chunks most relevant to the
-  // requested lecture. We embed a compact query string (topic + first 3 goals
-  // + course name) so the cosine search lands on contextually similar passages.
   const sources = params.courseId
     ? await retrieveSources(params)
     : []
@@ -52,24 +63,38 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
 
   const systemPrompt =
     `Вы опытный разработчик учебных программ и методист. ` +
-    `Ваша задача — создавать структурированные, содержательные и педагогически выверенные лекции. ` +
-    `Пишите на русском языке, если не указано иное.`
+    `Ваша задача — создавать структурированные, разнообразные и педагогически выверенные лекции. ` +
+    `Вы выбираете подходящий тип слайда под содержание: определение → concept, формула → formula, ` +
+    `сравнение → comparison, схема/оборудование → diagram, вопрос для обсуждения → discussion. ` +
+    `Длинные перечни маркеров — последний выбор, не первый. ` +
+    `Пишите на русском языке. Отвечайте строго в формате JSON.`
 
   const userPrompt = buildPrompt(params, course, previousTopics, slideTarget, sources)
 
-  const content = await chat(
+  // chatJSON handles "respond only with JSON" + a parse-and-retry loop.
+  const raw = await chatJSON<{ slides: unknown[] }>(
     [
       { role: 'system', content: systemPrompt },
       { role: 'user',   content: userPrompt },
     ],
+    'slides',
     { context: { teacherId: params.teacherId, feature: 'presentation' } }
   )
 
-  // Strip [N] markers pointing at sources that don't exist (model invented a
-  // citation). Leave valid ones in place. The list returned to the frontend
-  // covers only sources the AI actually cited at least once — drops dead
-  // weight from the popover list.
-  const { cleaned, used } = filterCitations(content, sources)
+  const validSourceIdx = new Set(sources.map((s) => s.idx))
+  const slides = normaliseSlides(raw?.slides, validSourceIdx)
+
+  // Union of structured citations and inline [N] markers found in slide
+  // text — both are first-class. Sources nothing references get dropped from
+  // the legend.
+  const citedIdx = new Set<number>()
+  slides.forEach((s) => s.citations.forEach((c) => citedIdx.add(c)))
+  const usedSources = sources.filter((s) => citedIdx.has(s.idx))
+
+  // Text rendering — populates `generated_content` so copy-all keeps working
+  // and so the existing list/detail UIs (some of which still read text) don't
+  // explode if they encounter a new-format row.
+  const generatedContent = renderSlidesAsText(slides)
 
   const presentation = await createPresentation({
     teacherId:        params.teacherId,
@@ -81,13 +106,19 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
     learningGoals:    params.learningGoals,
     style:            params.style,
     slideCountTarget: slideTarget,
-    generatedContent: cleaned,
-    sources:          used,
+    generatedContent,
+    slides,
+    sources:          usedSources,
   })
 
   incrementUsage(params.teacherId, 'presentation').catch(() => null)
 
-  return { presentation_id: presentation.id, generated_content: cleaned, sources: used }
+  return {
+    presentation_id:   presentation.id,
+    slides,
+    generated_content: generatedContent,
+    sources:           usedSources,
+  }
 }
 
 // ─── RAG retrieval ───────────────────────────────────────────────────────────
@@ -103,8 +134,6 @@ async function retrieveSources(params: GenerateParams): Promise<PresentationSour
     const chunks = await findRelevantChunks(params.courseId!, vector, MAX_SOURCES)
     return chunks.map((c, i) => toSource(c, i + 1))
   } catch (err) {
-    // RAG is a quality boost, not a hard requirement. Generation still
-    // works without sources — slides just won't carry citations.
     logger.warn({ message: '[RAG presentations] could not retrieve sources', error: (err as Error).message })
     return []
   }
@@ -123,30 +152,6 @@ function toSource(c: RelevantChunk, idx: number): PresentationSource {
     excerpt,
     chunk_type:  c.chunk_type ?? null,
   }
-}
-
-// ─── Citation cleanup ─────────────────────────────────────────────────────────
-
-export function filterCitations(
-  content: string,
-  sources: PresentationSource[]
-): { cleaned: string; used: PresentationSource[] } {
-  const validIdx = new Set(sources.map((s) => s.idx))
-  const seenIdx  = new Set<number>()
-
-  // Drop bracketed numbers that point at no source; e.g. "[7]" when we only
-  // surfaced 4 sources. Multi-number forms like "[1, 3]" are split first.
-  const cleaned = content.replace(/\[(\d+(?:\s*,\s*\d+)*)\]/g, (_, group: string) => {
-    const nums = group
-      .split(',')
-      .map((s) => parseInt(s.trim(), 10))
-      .filter((n) => validIdx.has(n))
-    nums.forEach((n) => seenIdx.add(n))
-    return nums.length ? `[${nums.join(', ')}]` : ''
-  })
-
-  const used = sources.filter((s) => seenIdx.has(s.idx))
-  return { cleaned, used }
 }
 
 // ─── Prompt ───────────────────────────────────────────────────────────────────
@@ -177,9 +182,9 @@ function buildPrompt(
     lines.push('')
   }
 
-  // Source corpus — numbered so the model can cite [N] in slides.
   if (sources.length > 0) {
-    lines.push(`## Материалы для ссылок (используйте маркер [N] после тезисов и в заметках, опирающихся на эти источники)`)
+    lines.push(`## Материалы для ссылок`)
+    lines.push(`Используйте маркер [N] в полях слайдов после тезисов/определений/заметок, опирающихся на эти источники.`)
     sources.forEach((s) => {
       const meta: string[] = [s.file_name]
       if (s.page_start && s.page_end && s.page_start !== s.page_end) {
@@ -207,34 +212,401 @@ function buildPrompt(
   }
 
   const citationsClause = sources.length > 0
-    ? `\n- ПОСЛЕ тезисов и фрагментов заметок, опирающихся на материалы выше, добавляйте маркер источника в квадратных скобках, например «[1]» или «[2, 4]». Не выдумывайте номера, которых нет в списке материалов. Если тезис общеизвестен и не опирается на материалы — НЕ ставьте маркер.`
+    ? `\n- Помечайте источники маркером [N] прямо в тексте полей слайда (definition, items, caption, и т.д.) и одновременно дублируйте номера в поле "citations" слайда. Не выдумывайте номера, которых нет в списке материалов.`
     : ''
 
   lines.push(`
-## Инструкция по формату
+## Формат ответа
 
-Создайте ровно ${slideTarget} слайдов. Используйте СТРОГО следующий формат для каждого слайда:
+Верните JSON объект с одним ключом "slides" — массивом из ${slideTarget} элементов.
+Каждый слайд имеет поля "type", "title", "notes", "citations" (массив номеров источников) и "body" в форме, зависящей от type.
 
-СЛАЙД [N]: [Заголовок слайда]
-• [Тезис 1]
-• [Тезис 2]
-• [Тезис 3]
-(3–6 тезисов на слайд; краткие, ёмкие фразы)
+ДОСТУПНЫЕ ТИПЫ СЛАЙДОВ:
 
-ЗАМЕТКИ ДОКЛАДЧИКА:
-[2–4 предложения с пояснениями, примерами или советами для преподавателя]
+• title (только слайд 1 — обложка)
+  body: { "subtitle": "<предмет/курс>", "lecturer": "[ФИО лектора]" }
 
----
+• bullets (универсальный, 3–5 кратких тезисов; используйте только когда никакой другой тип не подходит)
+  body: { "items": ["...", "...", "..."] }
 
-Правила:
-- Каждый слайд начинается с "СЛАЙД [N]:" — ровно в таком виде
-- После каждого слайда обязательно ставьте разделитель "---"
-- Заметки докладчика — только после ключевого слова "ЗАМЕТКИ ДОКЛАДЧИКА:"
-- Первый слайд — титульный (название темы, предмет, имя лектора-заглушка)
-- Последний слайд — итоги и вопросы для обсуждения
-- Не добавляйте ничего за пределами этого формата${citationsClause}`)
+• concept (для введения и раскрытия одного понятия)
+  body: { "definition": "1–2 предложения", "supporting": ["уточнение 1", "уточнение 2", "уточнение 3"] }
+
+• formula (для уравнений и формул; LaTeX без обрамляющих $$)
+  body: {
+    "formulas": [{ "latex": "P = \\\\rho g Q H", "caption": "Полезная мощность насоса" }],
+    "explanation": "1–2 предложения, что означают переменные"
+  }
+
+• comparison (для сопоставления двух подходов/типов)
+  body: {
+    "columns": [
+      { "header": "Динамические насосы", "items": ["...", "..."] },
+      { "header": "Объёмные насосы",     "items": ["...", "..."] }
+    ]
+  }
+
+• diagram (для оборудования, схем, процессов — где визуал критичен)
+  body: {
+    "image_query": "осевой насос разрез схема",  // короткий поисковый запрос на русском
+    "caption": "Конструкция центробежного насоса",
+    "points": ["сразу под изображением — 1–3 уточняющих пункта"],
+    "image": null  // изображение подберёт преподаватель
+  }
+
+• discussion (для вовлечения; обычно ближе к концу)
+  body: {
+    "question": "Главный провокационный вопрос",
+    "prompts": ["подвопрос 1", "подвопрос 2"],
+    "expected_angles": ["направление ответа 1", "направление ответа 2"]
+  }
+
+• summary (только последний слайд — итоги)
+  body: { "takeaways": ["...", "...", "..."], "next_steps": ["к следующей лекции...", "литература..."] }
+
+ПРАВИЛА ВЫБОРА ТИПА:
+- Первый слайд всегда type="title".
+- Последний слайд всегда type="summary".
+- Минимум 1 слайд "discussion" если стиль "Дискуссионный".
+- Используйте "concept" вместо "bullets" когда вводите новое понятие.
+- Используйте "formula" для любого слайда с уравнением.
+- Используйте "comparison" когда содержание естественно делится на 2 (реже 3) колонки.
+- Используйте "diagram" для слайдов, где визуальное представление критично (оборудование, процесс, анатомия).
+- "bullets" — резервный тип. В лекции из ${slideTarget} слайдов их должно быть не больше трети.
+
+ЗАМЕТКИ ДОКЛАДЧИКА (поле "notes" каждого слайда):
+- 2–4 предложения.
+- Включайте КАК МИНИМУМ ОДНО из: провокационный вопрос для аудитории, типичное заблуждение, конкретный реальный пример из практики.
+- Не дублируйте текст слайда — добавляйте контекст для лектора.
+
+ФОРМУЛЫ В ТЕКСТЕ:
+- В любом текстовом поле можно использовать LaTeX inline: $Q$, $\\\\eta$, $\\\\rho g Q H$. Не используйте $$ внутри полей text.${citationsClause}
+
+Верните строго JSON без обрамляющего текста. Не добавляйте поля кроме перечисленных.`)
 
   return lines.join('\n')
+}
+
+// ─── Citation utilities ──────────────────────────────────────────────────────
+//
+// Slide text fields can still contain inline [N] markers (and we ask the model
+// to include them so the rendered chips land at the right place in a sentence).
+// This strips markers pointing at non-existent sources and reports which idx
+// values were referenced. Kept as a named export for the test suite.
+
+export function filterCitations(
+  content: string,
+  sources: PresentationSource[]
+): { cleaned: string; used: PresentationSource[] } {
+  const validIdx = new Set(sources.map((s) => s.idx))
+  const { text, cited } = stripInvalidCitations(content, validIdx)
+  const used = sources.filter((s) => cited.has(s.idx))
+  return { cleaned: text, used }
+}
+
+function stripInvalidCitations(
+  text: string,
+  validIdx: Set<number>
+): { text: string; cited: Set<number> } {
+  const cited = new Set<number>()
+  const cleaned = text.replace(/\[(\d+(?:\s*,\s*\d+)*)\]/g, (_, group: string) => {
+    const nums = group
+      .split(',')
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => validIdx.has(n))
+    nums.forEach((n) => cited.add(n))
+    return nums.length ? `[${nums.join(', ')}]` : ''
+  })
+  return { text: cleaned, cited }
+}
+
+function cleanInline(text: string, validIdx: Set<number>, citedAcc: Set<number>): string {
+  const { text: out, cited } = stripInvalidCitations(text, validIdx)
+  cited.forEach((c) => citedAcc.add(c))
+  return out
+}
+
+// ─── Validation / coercion ───────────────────────────────────────────────────
+//
+// The model occasionally invents fields, misspells types, returns numbers
+// where strings are expected, etc. We normalise once at the boundary so the
+// rest of the system can trust the Slide union.
+
+const KNOWN_TYPES: ReadonlyArray<SlideType> =
+  ['title', 'bullets', 'concept', 'formula', 'comparison', 'diagram', 'discussion', 'summary']
+
+function normaliseSlides(raw: unknown, validIdx: Set<number>): Slide[] {
+  if (!Array.isArray(raw)) return []
+  const out: Slide[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const slide = coerceSlide(raw[i], validIdx, i + 1)
+    if (slide) out.push(slide)
+  }
+  return out
+}
+
+function coerceSlide(input: unknown, validIdx: Set<number>, slideNumber: number): Slide | null {
+  if (!input || typeof input !== 'object') return null
+  const o = input as Record<string, unknown>
+
+  const type = typeof o.type === 'string' && (KNOWN_TYPES as string[]).includes(o.type)
+    ? (o.type as SlideType)
+    : 'bullets'
+
+  // Track citations from both the structured field and any inline [N] markers
+  // we encounter while cleaning text bodies below.
+  const citedAcc = new Set<number>()
+  if (Array.isArray(o.citations)) {
+    o.citations
+      .map((c) => Number(c))
+      .filter((n) => Number.isInteger(n) && validIdx.has(n))
+      .forEach((n) => citedAcc.add(n))
+  }
+
+  const rawTitle = typeof o.title === 'string' && o.title.trim()
+    ? o.title.trim()
+    : `Слайд ${slideNumber}`
+  const rawNotes = typeof o.notes === 'string' ? o.notes.trim() : ''
+
+  const title = cleanInline(rawTitle, validIdx, citedAcc)
+  const notes = cleanInline(rawNotes, validIdx, citedAcc)
+
+  const body = (o.body && typeof o.body === 'object' ? o.body : {}) as Record<string, unknown>
+
+  // Build body first (which may add to citedAcc), then snapshot citations.
+  let result: Omit<Slide, 'citations'> & { citations?: number[] } | null = null
+
+  switch (type) {
+    case 'title': {
+      const slide: Omit<TitleSlide, 'citations'> = {
+        type: 'title',
+        title,
+        notes,
+        body: {
+          subtitle: strOrNull(body.subtitle, validIdx, citedAcc),
+          lecturer: strOrNull(body.lecturer, validIdx, citedAcc),
+        },
+      }
+      result = slide
+      break
+    }
+    case 'bullets': {
+      const slide: Omit<BulletsSlide, 'citations'> = {
+        type: 'bullets',
+        title,
+        notes,
+        body: { items: cleanArray(body.items, validIdx, citedAcc) },
+      }
+      result = slide
+      break
+    }
+    case 'concept': {
+      const slide: Omit<ConceptSlide, 'citations'> = {
+        type: 'concept',
+        title,
+        notes,
+        body: {
+          definition: cleanInline(strOr(body.definition, ''), validIdx, citedAcc),
+          supporting: cleanArray(body.supporting, validIdx, citedAcc),
+        },
+      }
+      result = slide
+      break
+    }
+    case 'formula': {
+      const formulasRaw = Array.isArray(body.formulas) ? body.formulas : []
+      const formulas = formulasRaw
+        .map((f) => {
+          if (!f || typeof f !== 'object') return null
+          const fo = f as Record<string, unknown>
+          const latex   = typeof fo.latex   === 'string' ? fo.latex.trim()   : ''
+          const caption = typeof fo.caption === 'string'
+            ? cleanInline(fo.caption.trim(), validIdx, citedAcc)
+            : ''
+          return latex ? { latex, caption } : null
+        })
+        .filter((f): f is { latex: string; caption: string } => f !== null)
+
+      const slide: Omit<FormulaSlide, 'citations'> = {
+        type: 'formula',
+        title,
+        notes,
+        body: {
+          formulas,
+          explanation: strOrNull(body.explanation, validIdx, citedAcc),
+        },
+      }
+      result = slide
+      break
+    }
+    case 'comparison': {
+      const colsRaw = Array.isArray(body.columns) ? body.columns : []
+      const columns = colsRaw
+        .map((c) => {
+          if (!c || typeof c !== 'object') return null
+          const co = c as Record<string, unknown>
+          const header = typeof co.header === 'string'
+            ? cleanInline(co.header.trim(), validIdx, citedAcc)
+            : ''
+          const items = cleanArray(co.items, validIdx, citedAcc)
+          return header || items.length ? { header, items } : null
+        })
+        .filter((c): c is { header: string; items: string[] } => c !== null)
+
+      // Need at least 2 columns to be a comparison. Otherwise demote to bullets.
+      if (columns.length < 2) {
+        const slide: Omit<BulletsSlide, 'citations'> = {
+          type: 'bullets',
+          title,
+          notes,
+          body: { items: columns[0]?.items ?? [] },
+        }
+        result = slide
+        break
+      }
+
+      const slide: Omit<ComparisonSlide, 'citations'> = {
+        type: 'comparison',
+        title,
+        notes,
+        body: { columns },
+      }
+      result = slide
+      break
+    }
+    case 'diagram': {
+      const slide: Omit<DiagramSlide, 'citations'> = {
+        type: 'diagram',
+        title,
+        notes,
+        body: {
+          image_query: typeof body.image_query === 'string' ? body.image_query.trim() : title,
+          caption:     typeof body.caption     === 'string'
+            ? cleanInline(body.caption.trim(), validIdx, citedAcc)
+            : '',
+          points:      cleanArray(body.points, validIdx, citedAcc),
+          image:       null,   // teacher picks via UI — never trust an inline URL
+        },
+      }
+      result = slide
+      break
+    }
+    case 'discussion': {
+      const slide: Omit<DiscussionSlide, 'citations'> = {
+        type: 'discussion',
+        title,
+        notes,
+        body: {
+          question:        cleanInline(strOr(body.question, ''), validIdx, citedAcc),
+          prompts:         cleanArray(body.prompts, validIdx, citedAcc),
+          expected_angles: cleanArray(body.expected_angles, validIdx, citedAcc),
+        },
+      }
+      result = slide
+      break
+    }
+    case 'summary': {
+      const slide: Omit<SummarySlide, 'citations'> = {
+        type: 'summary',
+        title,
+        notes,
+        body: {
+          takeaways:  cleanArray(body.takeaways, validIdx, citedAcc),
+          next_steps: cleanArray(body.next_steps, validIdx, citedAcc),
+        },
+      }
+      result = slide
+      break
+    }
+  }
+
+  if (!result) return null
+  return { ...result, citations: Array.from(citedAcc).sort((a, b) => a - b) } as Slide
+}
+
+function strOr(v: unknown, fallback: string): string {
+  return typeof v === 'string' ? v.trim() : fallback
+}
+
+function strOrNull(v: unknown, validIdx: Set<number>, citedAcc: Set<number>): string | null {
+  if (typeof v !== 'string') return null
+  const t = cleanInline(v.trim(), validIdx, citedAcc)
+  return t.length ? t : null
+}
+
+function cleanArray(v: unknown, validIdx: Set<number>, citedAcc: Set<number>): string[] {
+  if (!Array.isArray(v)) return []
+  return v
+    .filter((x): x is string => typeof x === 'string')
+    .map((s) => cleanInline(s.trim(), validIdx, citedAcc))
+    .filter(Boolean)
+}
+
+// ─── Text rendering (for copy-all + legacy `generated_content`) ──────────────
+//
+// Keeps a plain-text fallback alive so teachers can still "Скопировать всё"
+// and dump the lecture into anywhere. Not parsed back — just for humans.
+
+function renderSlidesAsText(slides: Slide[]): string {
+  return slides
+    .map((s, i) => renderSlideAsText(s, i + 1))
+    .join('\n---\n')
+}
+
+function renderSlideAsText(s: Slide, n: number): string {
+  const out: string[] = [`СЛАЙД ${n}: ${s.title}`]
+
+  switch (s.type) {
+    case 'title':
+      if (s.body.subtitle) out.push(s.body.subtitle)
+      if (s.body.lecturer) out.push(s.body.lecturer)
+      break
+    case 'bullets':
+      s.body.items.forEach((b) => out.push(`• ${b}`))
+      break
+    case 'concept':
+      out.push(s.body.definition)
+      s.body.supporting.forEach((b) => out.push(`• ${b}`))
+      break
+    case 'formula':
+      s.body.formulas.forEach((f) => {
+        out.push(`  ${f.latex}`)
+        if (f.caption) out.push(`  — ${f.caption}`)
+      })
+      if (s.body.explanation) out.push(s.body.explanation)
+      break
+    case 'comparison':
+      s.body.columns.forEach((c) => {
+        out.push(c.header.toUpperCase())
+        c.items.forEach((it) => out.push(`  • ${it}`))
+      })
+      break
+    case 'diagram':
+      if (s.body.caption) out.push(s.body.caption)
+      s.body.points.forEach((p) => out.push(`• ${p}`))
+      if (s.body.image) out.push(`[Изображение: ${s.body.image.source_url}]`)
+      else out.push(`[Подобрать изображение: «${s.body.image_query}»]`)
+      break
+    case 'discussion':
+      out.push(`? ${s.body.question}`)
+      s.body.prompts.forEach((p) => out.push(`  • ${p}`))
+      break
+    case 'summary':
+      out.push('Главное:')
+      s.body.takeaways.forEach((t) => out.push(`• ${t}`))
+      if (s.body.next_steps.length) {
+        out.push('Что дальше:')
+        s.body.next_steps.forEach((t) => out.push(`• ${t}`))
+      }
+      break
+  }
+
+  if (s.notes) {
+    out.push('')
+    out.push('ЗАМЕТКИ ДОКЛАДЧИКА:')
+    out.push(s.notes)
+  }
+  return out.join('\n')
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -263,3 +635,7 @@ function styleLabel(style: string): string {
   }
   return map[style] ?? style
 }
+
+// Re-export so existing imports keep working even though we removed the old
+// citation-filter approach (citations now live structurally on each slide).
+export type { Presentation }

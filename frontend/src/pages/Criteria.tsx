@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
+import CreateButton from '../components/ui/CreateButton'
 import { Input } from '../components/ui/Input'
 import TemplatePicker from '../components/ui/TemplatePicker'
 import { getCourses } from '../api/courses'
@@ -104,7 +105,7 @@ export default function Criteria() {
     <div className="flex-1 flex flex-col">
       <TopBar
         title="Критерии оценки"
-        actions={!showForm && <Button size="sm" onClick={openNew}>+ Новый критерий</Button>}
+        actions={!showForm && <CreateButton onClick={openNew}>Новый критерий</CreateButton>}
       />
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 md:px-6 py-6">

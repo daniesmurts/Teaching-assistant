@@ -41,6 +41,65 @@ function StatCard({
   )
 }
 
+// ─── Subjects card ────────────────────────────────────────────────────────────
+//
+// Sibling to StatCard but list-shaped: shows the count up top (same visual
+// weight as the other stat values so the row reads as one unit) and a short
+// truncated list of up to 2 subject names underneath, each clickable. The
+// previous version stuffed one arbitrary subject name into the `sub` slot of
+// a generic StatCard, which blew out the card height on long Russian
+// programme names (САПР… 6+ lines uppercase). Empty state nudges first add.
+
+const PREVIEW_COUNT = 2
+
+function SubjectsCard({ courses }: { courses: Array<{ id: string; name: string }> }) {
+  const count    = courses.length
+  const preview  = courses.slice(0, PREVIEW_COUNT)
+  const overflow = count - preview.length
+
+  if (count === 0) {
+    return (
+      <Link
+        to="/courses"
+        className="border border-dashed border-border-mid rounded-lg p-4 bg-surface hover:border-amber/50 hover:bg-amber-light/40 transition-colors flex flex-col justify-between min-h-[112px]"
+      >
+        <div className="text-xs font-sans font-medium text-ink-secondary">Предметы</div>
+        <div className="text-sm font-sans font-medium text-amber">+ Добавить первый →</div>
+      </Link>
+    )
+  }
+
+  return (
+    <Link
+      to="/courses"
+      className="group bg-surface border border-border rounded-lg p-4 hover:border-amber/40 hover:bg-amber-light/30 transition-colors flex flex-col"
+    >
+      <div className="text-xs font-sans font-medium text-ink-secondary mb-2 group-hover:text-amber transition-colors">
+        Предметы
+      </div>
+      <div className="font-display text-3xl font-bold leading-none text-ink">
+        {count}
+      </div>
+      <div className="mt-2 space-y-0.5">
+        {preview.map((c) => (
+          <div
+            key={c.id}
+            title={c.name}
+            className="text-[11px] font-sans text-ink-tertiary truncate leading-snug"
+          >
+            · {c.name}
+          </div>
+        ))}
+        {overflow > 0 && (
+          <div className="text-[11px] font-sans text-amber/80 group-hover:text-amber transition-colors leading-snug">
+            +{overflow} ещё →
+          </div>
+        )}
+      </div>
+    </Link>
+  )
+}
+
 // ─── Delta badge ──────────────────────────────────────────────────────────────
 
 function Delta({ current, previous }: { current: number; previous: number }) {
@@ -128,11 +187,7 @@ export default function Dashboard() {
               value={stats?.avg_score != null ? `${stats.avg_score}` : '—'}
               sub={stats?.avg_score != null ? 'из 100' : 'нет данных'}
             />
-            <StatCard
-              label="Предметы"
-              value={courses.length}
-              sub={courses.length > 0 ? courses[0].name : undefined}
-            />
+            <SubjectsCard courses={courses} />
           </div>
 
           {/* Learning loop — single hero card, full breakdown at /learning-loop */}

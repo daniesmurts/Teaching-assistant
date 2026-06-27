@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
@@ -7,7 +7,7 @@ import SlideContent from '../components/presentations/SlideContent'
 import Button from '../components/ui/Button'
 import { getPresentations, deletePresentation, type GenerateResponse } from '../api/presentations'
 import { useUIStore } from '../store/uiStore'
-import type { Presentation } from '../types'
+import type { Presentation, Slide } from '../types'
 
 // ─── History list ─────────────────────────────────────────────────────────────
 
@@ -82,11 +82,22 @@ export default function Presentations() {
     setResult(null)
     setOpenHistory(null)
     setFormCollapsed(false)
+    setLocalSlides(null)
   }
 
-  const displayContent = result?.generated_content ?? openHistory?.generated_content ?? null
-  const displaySources = result?.sources ?? openHistory?.sources ?? []
-  const displayTitle   = openHistory?.topic ?? null
+  // Image picks mutate persisted slides; we mirror the change locally so the
+  // renderer updates without a full refetch. Cleared when the viewer closes.
+  const [localSlides, setLocalSlides] = useState<Slide[] | null>(null)
+  useEffect(() => {
+    setLocalSlides(result?.slides ?? openHistory?.slides ?? null)
+  }, [result, openHistory])
+
+  const displayPresentationId =
+    result?.presentation_id ?? openHistory?.id ?? ''
+  const displaySlides   = localSlides
+  const displayContent  = result?.generated_content ?? openHistory?.generated_content ?? null
+  const displaySources  = result?.sources ?? openHistory?.sources ?? []
+  const displayTitle    = openHistory?.topic ?? null
 
   return (
     <div className="flex-1 flex flex-col">
@@ -165,14 +176,20 @@ export default function Presentations() {
           )}
 
           {/* Generated slides */}
-          {displayContent && (
+          {(displaySlides || displayContent) && (
             <div className="result-appear">
               {displayTitle && !result && (
                 <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-4">
                   {displayTitle}
                 </div>
               )}
-              <SlideContent content={displayContent} sources={displaySources} />
+              <SlideContent
+                slides={displaySlides}
+                content={displayContent ?? undefined}
+                sources={displaySources}
+                presentationId={displayPresentationId}
+                onSlidesChange={setLocalSlides}
+              />
             </div>
           )}
 

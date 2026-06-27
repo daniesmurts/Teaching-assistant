@@ -54,10 +54,17 @@ export default function AppShell() {
         />
       )}
 
-      {/* Sidebar — drawer on mobile, static on desktop */}
+      {/* Sidebar — drawer on mobile, viewport-pinned on desktop.
+          `md:sticky md:top-0 md:h-screen` keeps the menu visible while a
+          long page (e.g. a 10-slide presentation) scrolls past it. Without
+          this the sidebar lives in normal document flow and the user has
+          to scroll back to the top to reach navigation. `md:self-start`
+          stops the flex container from stretching the sticky element to
+          the page's full content height. */}
       <div
         className={`
-          fixed inset-y-0 left-0 z-50 md:relative md:z-auto
+          fixed inset-y-0 left-0 z-50
+          md:sticky md:top-0 md:z-auto md:h-screen md:self-start
           transition-transform duration-300 ease-in-out
           ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
         `}

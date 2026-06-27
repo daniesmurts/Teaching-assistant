@@ -8,6 +8,7 @@ import {
 import { getAdminTeachers } from '../../api/admin'
 import { useAuthStore } from '../../store/authStore'
 import Button from '../../components/ui/Button'
+import CreateButton from '../../components/ui/CreateButton'
 import { useUIStore } from '../../store/uiStore'
 
 const fmt = (d: string) => new Date(d).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -37,7 +38,7 @@ export default function AdminEvals() {
       <div className="max-w-4xl mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-1">
           <h1 className="font-display text-2xl font-bold text-ink">Эксперименты (eval harness)</h1>
-          {!showForm && <Button size="sm" onClick={() => setShowForm(true)}>+ Новый запуск</Button>}
+          {!showForm && <CreateButton onClick={() => setShowForm(true)}>Новый запуск</CreateButton>}
         </div>
         <p className="text-xs font-sans text-ink-tertiary mb-5">
           Офлайн-воспроизведение оценивания: эффект RAG-маховика (flywheel) и калибровка уверенности (confidence).

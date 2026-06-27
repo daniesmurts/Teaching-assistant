@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Button from '../../components/ui/Button'
+import CreateButton from '../../components/ui/CreateButton'
 import { Input } from '../../components/ui/Input'
 import { useUIStore } from '../../store/uiStore'
 import { getInstitutionRubrics, createInstitutionRubric } from '../../api/institution'
@@ -96,7 +97,7 @@ export default function InstitutionRubricPresets() {
             Общие рубрики появляются в библиотеке у всех преподавателей кафедры.
           </p>
         </div>
-        {!showForm && <Button size="sm" onClick={() => setShowForm(true)}>+ Новая рубрика</Button>}
+        {!showForm && <CreateButton onClick={() => setShowForm(true)}>Новая рубрика</CreateButton>}
       </div>
 
       {showForm ? (

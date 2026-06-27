@@ -4,6 +4,7 @@ import {
   getCriterionTemplates, createCriterionTemplate, deleteCriterionTemplate,
 } from '../../api/admin'
 import Button from '../../components/ui/Button'
+import CreateButton from '../../components/ui/CreateButton'
 import { useUIStore } from '../../store/uiStore'
 
 const SUBJECTS = ['general', 'business', 'economics', 'law', 'medicine', 'engineering', 'humanities']
@@ -45,7 +46,7 @@ export default function AdminRubrics() {
       <div className="max-w-3xl mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-5">
           <h1 className="font-display text-2xl font-bold text-ink">Шаблоны критериев</h1>
-          {!showForm && <Button size="sm" onClick={() => setShowForm(true)}>+ Новый критерий</Button>}
+          {!showForm && <CreateButton onClick={() => setShowForm(true)}>Новый критерий</CreateButton>}
         </div>
 
         {showForm && (

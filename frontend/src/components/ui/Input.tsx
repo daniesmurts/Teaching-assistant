@@ -1,13 +1,13 @@
-import { InputHTMLAttributes, TextareaHTMLAttributes, forwardRef, useState } from 'react'
+import { InputHTMLAttributes, TextareaHTMLAttributes, ReactNode, forwardRef, useState } from 'react'
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
-  label?: string
+  label?: ReactNode
   error?: string
   reveal?: boolean   // show an eye toggle for password fields
 }
 
 interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
-  label?: string
+  label?: ReactNode
   error?: string
 }
 

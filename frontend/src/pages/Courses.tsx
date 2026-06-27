@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
+import CreateButton from '../components/ui/CreateButton'
 import { Input, Textarea } from '../components/ui/Input'
 import DocumentUpload from '../components/ui/DocumentUpload'
 import { getCourses, createCourse, updateCourse, deleteCourse } from '../api/courses'
@@ -102,7 +103,7 @@ export default function Courses() {
       <TopBar
         title="Предметы"
         subtitle={courses.length > 0 ? `${courses.length} ${courses.length === 1 ? 'предмет' : courses.length < 5 ? 'предмета' : 'предметов'}` : undefined}
-        actions={<Button size="sm" onClick={() => { setShowForm(true); setEditing(null); setForm(emptyForm) }}>+ Новый предмет</Button>}
+        actions={<CreateButton onClick={() => { setShowForm(true); setEditing(null); setForm(emptyForm) }}>Новый предмет</CreateButton>}
       />
 
       <div className="flex-1 p-6 max-w-4xl w-full mx-auto">

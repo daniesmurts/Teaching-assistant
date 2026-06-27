@@ -1,5 +1,11 @@
 import { pool } from '../connection'
-import type { Presentation, PresentationStyle, PresentationSource } from '../../../../shared/types'
+import type {
+  Presentation,
+  PresentationStyle,
+  PresentationSource,
+  Slide,
+  SlideImage,
+} from '../../../../shared/types'
 
 interface PresentationRow {
   id: string
@@ -12,6 +18,7 @@ interface PresentationRow {
   learning_goals: string[] | null
   style: string | null
   slide_count_target: number | null
+  slides: Slide[] | null
   generated_content: string | null
   sources: PresentationSource[] | null
   created_at: Date
@@ -29,6 +36,7 @@ function toPresentation(row: PresentationRow): Presentation {
     learning_goals: row.learning_goals,
     style: row.style as PresentationStyle | null,
     slide_count_target: row.slide_count_target,
+    slides: row.slides,
     generated_content: row.generated_content,
     sources: row.sources,
     created_at: row.created_at.toISOString(),
@@ -46,14 +54,15 @@ export async function createPresentation(data: {
   style?: string
   slideCountTarget?: number
   generatedContent: string
+  slides?: Slide[]
   sources?: PresentationSource[]
 }): Promise<Presentation> {
   const { rows } = await pool.query<PresentationRow>(
     `INSERT INTO presentations
        (teacher_id, course_id, lecture_number, topic, duration_minutes,
         audience_level, learning_goals, style, slide_count_target,
-        generated_content, sources)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        generated_content, slides, sources)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      RETURNING *`,
     [
       data.teacherId,
@@ -66,10 +75,46 @@ export async function createPresentation(data: {
       data.style ?? null,
       data.slideCountTarget ?? null,
       data.generatedContent,
+      data.slides && data.slides.length > 0 ? JSON.stringify(data.slides) : null,
       data.sources && data.sources.length > 0 ? JSON.stringify(data.sources) : null,
     ]
   )
   return toPresentation(rows[0])
+}
+
+// Replace a single slide's image (used by the picker UI). Returns the updated
+// presentation or null if the id/teacher/idx combo doesn't match. We update
+// the whole `slides` array in one shot — there's no concurrent writer per
+// presentation so optimistic overwrite is fine.
+export async function setSlideImage(
+  id: string,
+  teacherId: string,
+  slideIdx: number,
+  image: SlideImage | null
+): Promise<Presentation | null> {
+  const existing = await findPresentationById(id, teacherId)
+  if (!existing || !existing.slides) return null
+  if (slideIdx < 0 || slideIdx >= existing.slides.length) return null
+
+  const slide = existing.slides[slideIdx]
+  // Only diagram slides carry an image slot. Anything else is a programmer
+  // error — return null so the route returns 400/404.
+  if (slide.type !== 'diagram') return null
+
+  const next = existing.slides.map((s, i) =>
+    i === slideIdx && s.type === 'diagram'
+      ? { ...s, body: { ...s.body, image } }
+      : s
+  )
+
+  const { rows } = await pool.query<PresentationRow>(
+    `UPDATE presentations
+        SET slides = $1
+      WHERE id = $2 AND teacher_id = $3
+      RETURNING *`,
+    [JSON.stringify(next), id, teacherId]
+  )
+  return rows[0] ? toPresentation(rows[0]) : null
 }
 
 export async function findPresentationsByTeacher(
