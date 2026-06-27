@@ -13,6 +13,7 @@ import {
   listInstitutionsWithCounts, createInstitution, updateInstitution,
   getSamlConfig, setSamlConfig,
 } from '../db/queries/institutions'
+import { syncRoleToTree } from '../db/queries/orgUnits'
 import { metadataUrlForInstitution, acsUrlForInstitution } from '../services/saml'
 import { listFeedback } from '../db/queries/feedback'
 import {
@@ -289,6 +290,15 @@ router.patch('/teachers/:id', asyncHandler(async (req, res) => {
     [req.params.id, role ?? null, plan_tier ?? null, is_active ?? null, hasInstitution, institutionId]
   )
   if (!rows[0]) { res.status(404).json({ error: 'Преподаватель не найден' }); return }
+
+  // Keep the §7 org tree authoritative: when the role changes, mirror it into
+  // is_platform_admin + admin-on-root so the (tree-based) guards stay correct.
+  // Only when role was actually part of this PATCH — plan/active-only edits
+  // must not touch authorisation.
+  if (role !== undefined) {
+    await syncRoleToTree(rows[0].id, rows[0].role, rows[0].institution_id)
+  }
+
   res.json(rows[0])
 }))
 

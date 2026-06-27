@@ -409,7 +409,22 @@ becomes the substrate for a student-facing tutor down the line.
   what we ship matches what we claim. Cross-link with #3 (Russian embeddings)
   since concept extraction quality rides on embedding quality.
 
-### P. Organisational structure model — canonical-typed org tree · Effort: L+ (foundational)
+### P. Organisational structure model — canonical-typed org tree · Effort: L+ (foundational) · 🟢 MOSTLY SHIPPED
+
+**Status (2026-06-27):** core shipped — migration 045 (schema + guarded
+backfill, applied+verified on dev); scope service + `requireUnitRole`
+authoriser (unit-tested); tree-builder UI + teacher/role assignment at
+`/institution/structure`; admin guards (`requireAdmin` /
+`requireInstitutionAdmin`) reimplemented on the tree with `syncRoleToTree`
+keeping the legacy enum mirror in step. See CHANGELOG increments 1 / 1b / 3.
+**Remaining:** (a) run migration 045 on prod at next deploy; (b) frontend
+route gate still reads `teachers.role` (synced, fails closed) — move it to
+org-derived admin-ness when `/auth/me` exposes roles; (c) **true per-subtree
+admin scoping** (a division head limited to their division) — institution
+routes are still institution-wide; this is genuinely new product behaviour,
+not done here.
+
+Original design notes below.
 
 Replace today's flat `institutions` + 3-value `teachers.role` enum with a
 self-referencing `org_units` table (canonical `type_code` taxonomy:

@@ -2,8 +2,9 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 
 const NAV = [
-  { to: '/institution',          label: 'Обзор',         end: true },
-  { to: '/institution/usage',    label: 'Использование', end: false },
+  { to: '/institution',           label: 'Обзор',         end: true },
+  { to: '/institution/structure', label: 'Структура',     end: false },
+  { to: '/institution/usage',     label: 'Использование', end: false },
   { to: '/institution/teachers', label: 'Преподаватели', end: false },
   { to: '/institution/rubrics',  label: 'Критерии',      end: false },
   { to: '/institution/rubric-presets', label: 'Рубрики',  end: false },

@@ -51,6 +51,7 @@ import InstitutionModel from './pages/institution/InstitutionModel'
 import InstitutionAudit from './pages/institution/InstitutionAudit'
 import InstitutionPrograms from './pages/institution/InstitutionPrograms'
 import InstitutionProgramDetail from './pages/institution/InstitutionProgramDetail'
+import InstitutionStructure from './pages/institution/InstitutionStructure'
 import Landing from './pages/Landing'
 import About from './pages/About'
 import Institutions from './pages/Institutions'
@@ -209,6 +210,7 @@ export default function App() {
           {/* Institution admin — institution_admin or platform_admin */}
           <Route path="/institution" element={<InstitutionRoute><InstitutionLayout /></InstitutionRoute>}>
             <Route index           element={<InstitutionOverview />} />
+            <Route path="structure" element={<InstitutionStructure />} />
             <Route path="usage"    element={<InstitutionUsage />} />
             <Route path="teachers" element={<InstitutionTeachers />} />
             <Route path="rubrics"  element={<InstitutionRubrics />} />

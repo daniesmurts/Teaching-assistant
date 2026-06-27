@@ -169,13 +169,14 @@ gradeassist/
 
 This is the authoritative schema. Always refer to this, never invent new tables.
 
-> **Target after [Research.md](Research.md) §7 ships:** the org-structure
-> migration adds `org_units` and `org_unit_roles` tables plus a
-> `primary_org_unit_id` column on `teachers`. Full DDL is documented below
-> in *Admin System → Schema Additions* with a target-state marker. Until
-> that migration ships, the codebase still implements the flat
-> `institutions` + `teachers.role` enum model; do not write code that
-> queries `org_units` against the existing database.
+> **§7 org tree — SHIPPED (migration 045).** `org_units` + `org_unit_roles`
+> tables and `teachers.primary_org_unit_id` / `teachers.is_platform_admin`
+> exist and are **authoritative for admin authorisation**. Full DDL below in
+> *Admin System → Schema Additions*. The legacy `teachers.role` enum is
+> **retained as a synced mirror** (kept in step by `syncRoleToTree`, still
+> read by the role-based frontend route gate) — do not treat it as the
+> source of truth server-side. The flat `institutions` table is unchanged;
+> the tree is additive on top. Applied on dev; runs on prod at next deploy.
 
 ```sql
 -- Enable pgvector
@@ -1523,14 +1524,17 @@ All admin and institution-admin UIs are part of the same React PWA — no
 separate admin app. Routes are protected by middleware that walks the
 tree (see *Role Middleware* below).
 
-> **Migration status:** until [Research.md](Research.md) §7.8 step 2
-> ships, the implemented code still uses the original 3-value
-> `teachers.role` enum (`teacher` / `institution_admin` / `platform_admin`)
-> and a flat `institutions` table — see the legacy DDL in *Schema
-> Additions* below. **Do not query `org_units` against the existing
-> database; do not write new code that assumes the legacy 3-role enum
-> will remain.** After §7 migration: existing `institution_admin` rows
-> map to `org_unit_roles(role='admin', org_unit_id=<institution root>)`.
+> **Status — SHIPPED (migration 045 + increment 3).** Admin authorisation is
+> now resolved from the tree: `requireAdmin` reads `teachers.is_platform_admin`;
+> `requireInstitutionAdmin` reads `admin` on the institution root unit (query
+> `isInstitutionAdmin`). The 3-value `teachers.role` enum is **retained as a
+> synced mirror** — the platform-admin teacher-management PATCH calls
+> `syncRoleToTree` to keep `is_platform_admin` + admin-on-root in step with the
+> enum, and the role-based **frontend** route gate still reads it. New
+> server-side code should read the tree (`org_unit_roles` / `is_platform_admin`),
+> not the enum. **Still institution-wide**, not yet per-subtree: a sub-unit
+> admin is not an institution admin — true subtree-scoped admin routes (a
+> division head limited to their division) are future work.
 
 ---
 
@@ -1660,73 +1664,65 @@ ALTER TABLE teachers
 
 ### Role Middleware
 
-**Legacy — what's in code today, before [Research.md](Research.md) §7
-migration ships:**
+Two layers, both shipped:
+
+**1. Institution-wide convenience guards** (`backend/src/middleware/requireRole.ts`)
+— the checks every existing admin/institution route already used, same export
+names, now resolved from the tree instead of the enum:
 
 ```typescript
-// backend/src/middleware/requireRole.ts
-
-type Role = 'teacher' | 'institution_admin' | 'platform_admin'
-
-export function requireRole(allowed: Role | Role[]) {
-  const allowedRoles = Array.isArray(allowed) ? allowed : [allowed]
-
-  return (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!allowedRoles.includes(req.teacher.role as Role)) {
-      return res.status(403).json({ error: 'Insufficient permissions' })
-    }
-    next()
-  }
+// requireAdmin — platform owner only (orthogonal flag, not a unit role)
+export function requireAdmin(req, _res, next) {
+  if (req.teacher?.is_platform_admin) return next()
+  next(new ForbiddenError('Недостаточно прав для выполнения этого действия'))
 }
 
-// Convenience exports used throughout routes
-export const requireAdmin             = requireRole('platform_admin')
-export const requireInstitutionAdmin  = requireRole(['institution_admin', 'platform_admin'])
+// requireInstitutionAdmin — admin on the institution ROOT unit, or platform owner
+export async function requireInstitutionAdmin(req, _res, next) {
+  if (req.teacher?.is_platform_admin) return next()
+  const instId = req.teacher?.institution_id
+  if (instId && (await isInstitutionAdmin(req.teacher.id, instId))) return next()
+  next(new ForbiddenError('Недостаточно прав для выполнения этого действия'))
+}
 ```
 
-**Target — sketch of the post-§7 authoriser.** The middleware shifts from
-"does this teacher hold this role" to "can this teacher act on this unit
-in this role." Authorisation walks the materialised path: a role on any
-ancestor unit grants the same role on descendants.
+`isInstitutionAdmin` is one indexed query: does the teacher hold `admin` on the
+`type_code='institution'` root of that institution. Admin on a *sub-unit* is not
+institution admin — institution-wide routes need root admin. (Per-subtree routes
+that scope to a sub-unit are future work.)
+
+**2. Per-unit authoriser** (`backend/src/middleware/requireUnitRole.ts`) — for
+routes that act on a specific unit. Shifts from "does this teacher hold this
+role" to "can this teacher act on THIS unit in this role," walking the
+materialised path: a role on any ancestor unit grants it on descendants.
 
 ```typescript
-// backend/src/middleware/requireUnitRole.ts (target — not yet in code)
-
 import { canActOnUnit } from '../services/orgScope'
 
-type UnitRole = 'admin' | 'head' | 'viewer'
+export const requirePlatformAdmin = (req, _res, next) =>
+  req.teacher?.is_platform_admin ? next()
+    : next(new ForbiddenError('Недостаточно прав...'))
 
-// platform_admin remains orthogonal: a flat flag, not a unit role.
-// It short-circuits every unit-scope check.
-export const requireAdmin = (req: AuthRequest, res: Response, next: NextFunction) =>
-  req.teacher.is_platform_admin
-    ? next()
-    : res.status(403).json({ error: 'Insufficient permissions' })
-
-// Per-route guard: resolve the target unit from the request, then ask
-// whether the calling teacher holds any of `roles` on that unit or any
-// ancestor.
 export function requireUnitRole(
-  resolveUnit: (req: AuthRequest) => Promise<string>,   // returns org_unit_id
-  roles: UnitRole[],
+  resolveUnit: (req) => Promise<string | null>,   // returns org_unit_id
+  roles: ('admin' | 'head' | 'viewer')[],
 ) {
-  return async (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (req.teacher.is_platform_admin) return next()
+  return async (req, _res, next) => {
+    if (req.teacher?.is_platform_admin) return next()
     const unitId = await resolveUnit(req)
-    const ok    = await canActOnUnit(req.teacher.id, unitId, roles)
-    if (!ok) return res.status(403).json({ error: 'Insufficient permissions' })
+    if (!unitId) return next(new ForbiddenError('Недостаточно прав...'))
+    const ok = await canActOnUnit(req.teacher.id, unitId, roles)
+    if (!ok) return next(new ForbiddenError('Недостаточно прав...'))
     next()
   }
 }
-
-// Legacy "institution admin" — admin on the root unit of the teacher's
-// own institution — preserved as a convenience export so callers do not
-// have to resolve the unit themselves.
-export const requireInstitutionAdmin = requireUnitRole(
-  async (req) => req.teacher.institution_root_unit_id,
-  ['admin'],
-)
 ```
+
+**Keeping the enum mirror in sync:** the platform-admin teacher-management PATCH
+calls `syncRoleToTree(teacherId, role, institutionId)` whenever `role` changes —
+`platform_admin` → `is_platform_admin=true`; `institution_admin` → grant
+admin-on-root; anything else → clear the flag + revoke admin-on-root. This keeps
+`teachers.role` (still read by the frontend route gate) agreeing with the tree.
 
 `canActOnUnit` walks the path: given `(teacher_id, target_unit_id, roles)`
 it joins `org_unit_roles` to `org_units` and returns true if any of the

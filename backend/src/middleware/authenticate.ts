@@ -7,12 +7,15 @@ import { UnauthorizedError } from '../errors/AppError'
 // ─── Extended teacher context attached to every authenticated request ─────────
 
 export interface AuthTeacher {
-  id:             string
-  email:          string
-  role:           string       // 'teacher' | 'institution_admin' | 'platform_admin'
-  plan_tier:      string       // effective tier (may be downgraded if expired)
-  institution_id: string | null
-  is_active:      boolean
+  id:                  string
+  email:               string
+  role:                string       // legacy enum: 'teacher' | 'institution_admin' | 'platform_admin'
+  plan_tier:           string       // effective tier (may be downgraded if expired)
+  institution_id:      string | null
+  is_active:           boolean
+  // §7 org tree — additive, alongside the legacy `role` until routes migrate.
+  primary_org_unit_id: string | null
+  is_platform_admin:   boolean       // orthogonal platform-owner flag (preferred over role)
 }
 
 declare global {
@@ -80,12 +83,14 @@ export async function authenticate(
     const effectiveTier = computeEffectiveTier(row)
 
     req.teacher = {
-      id:             row.id,
-      email:          row.email,
-      role:           row.role           ?? 'teacher',
-      plan_tier:      effectiveTier,
-      institution_id: row.institution_id ?? null,
-      is_active:      row.is_active,
+      id:                  row.id,
+      email:               row.email,
+      role:                row.role           ?? 'teacher',
+      plan_tier:           effectiveTier,
+      institution_id:      row.institution_id ?? null,
+      is_active:           row.is_active,
+      primary_org_unit_id: row.primary_org_unit_id ?? null,
+      is_platform_admin:   row.is_platform_admin   ?? false,
     }
     next()
   } catch (err) {

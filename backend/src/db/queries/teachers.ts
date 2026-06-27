@@ -24,6 +24,8 @@ export interface TeacherRow {
   auto_renew:          boolean
   subscription_plan:   string | null
   renewal_failed_at:   Date | null
+  primary_org_unit_id: string | null   // §7 org tree — teacher's primary department
+  is_platform_admin:   boolean         // §7 orthogonal platform-owner flag
   institution_plan_tier:         string | null   // tier of the teacher's institution (if any)
   institution_shared_rag_enabled: boolean | null // mirror of institutions.shared_rag_enabled
   created_at:          Date

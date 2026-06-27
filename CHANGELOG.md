@@ -14,7 +14,85 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Changed
+- **Admin authorisation now resolves from the §7 org tree (Feature P increment 3).**
+  `requireAdmin` / `requireInstitutionAdmin` (still the same export names, all 5
+  route files unchanged) are reimplemented on the tree: `requireAdmin` reads
+  `teachers.is_platform_admin`; `requireInstitutionAdmin` reads `admin` on the
+  institution root via the new `isInstitutionAdmin` query. The legacy
+  `teachers.role` enum is **no longer authoritative server-side** — it's kept as
+  a synced mirror by `syncRoleToTree`, called from `PATCH /api/admin/teachers/:id`
+  whenever role changes (platform_admin → `is_platform_admin`; institution_admin
+  → grant admin-on-root; else clear flag + revoke admin-on-root). This closes the
+  critical coupling where a teacher promoted after migration 045 would otherwise
+  be locked out. The role-based **frontend** route gate still reads `teachers.role`
+  (which stays in sync), so no frontend change needed. **Still institution-wide**
+  — admin on a sub-unit is not institution admin; true per-subtree admin routes
+  are future work. Behaviour-equivalent to before for existing admins (verified
+  against dev DB: backfilled admin recognised, promotion/demotion sync correctly);
+  typecheck clean, 132/132 tests green.
+
 ### Added
+- **Org structure — teacher assignment + per-unit roles (Feature P increment 1b).**
+  Builds on the tree builder: a «Преподаватели и роли» section on
+  `/institution/structure` lists every institution teacher with a kafedra
+  selector (sets `primary_org_unit_id`; restricted to `department` units per
+  §7.1) and their unit-role chips. Grant/revoke admin/head/viewer on any unit
+  via an inline picker; roles cascade down the tree through the §7 authoriser.
+  Backend adds to `routes/orgUnits.ts`: `GET /members`,
+  `PUT /members/:id/primary`, `POST /roles`, `DELETE /roles` — all
+  institution-scoped (teacher membership + unit ownership re-checked per op),
+  with a **lockout guard** refusing removal of the last `admin` on the
+  institution root. Queries: `listInstitutionMembersWithRoles` (json_agg of
+  role rows per teacher), `isTeacherInInstitution`, `countRoleOnUnit`.
+  Tree-builder icons swapped from Unicode glyphs to stroke-style SVGs matching
+  the app vocabulary. Both typechecks clean, 132/132 unit tests green, member/
+  role query stack smoke-tested against dev DB (aggregation, grant/revoke,
+  count, scoping). Still on the legacy `requireInstitutionAdmin` guard pending
+  the all-routes switch to `requireUnitRole`.
+- **Org structure tree builder — IT-admin UI (Feature P increment 1).**
+  First user-facing surface for the §7 org model. New institution-admin page at
+  `/institution/structure` (nav: «Структура») to build the unit tree at flexible
+  depth — add units of any creatable type (governance/admin_office/cluster/
+  division/department) under any node, rename inline, delete. Each unit shows its
+  subtree headcount. Deletes are refused while a unit still has child units or
+  teachers (clear Russian error, no mass-orphaning). Backend: `routes/orgUnits.ts`
+  mounted at `/api/institution/structure` (before `/api/institution` so it isn't
+  shadowed), guarded by `requireInstitutionAdmin` and scoped to the admin's own
+  institution (target unit ownership re-checked on every op; 404 not 403 so other
+  institutions' unit ids never leak); `orgUnitValidation.ts`; query helpers
+  `listOrgUnitsWithCounts` (subtree headcount per unit) + `getOrgUnitDependents`
+  (delete guard). Frontend: `api/orgStructure.ts`, `pages/institution/
+  InstitutionStructure.tsx`, route + nav wired. **Still on the legacy
+  `requireInstitutionAdmin` guard** — the switch to the unit-scoped
+  `requireUnitRole` authoriser happens for all admin routes together in a later
+  increment, to avoid a half-migrated middleware layer. Query stack verified
+  end-to-end against dev DB (path computation, counts, dependents, cleanup) via a
+  throwaway integration test; both typechecks clean, 132/132 unit tests green.
+- **Org structure model — backend foundation (Feature P, Research.md §7).**
+  First, non-breaking increment of the canonical-typed org tree that replaces
+  flat `institutions` + 3-value `teachers.role` scoping. Migration
+  `045_org_structure.sql` adds `org_units` (self-referencing tree, canonical
+  `type_code` ∈ institution/governance/admin_office/cluster/division/department,
+  materialised `path` for ancestor/subtree queries) and `org_unit_roles`
+  (per-unit admin/head/viewer, a teacher may hold many), plus
+  `teachers.primary_org_unit_id` and an orthogonal `teachers.is_platform_admin`
+  flag. Backfill is guarded + idempotent: one root `institution` unit per
+  existing institution, a placeholder `department` under each with all the
+  institution's teachers assigned, existing `institution_admin` → `admin` on
+  the root unit, existing `platform_admin` → `is_platform_admin`. Query layer
+  `db/queries/orgUnits.ts` (tree CRUD with atomic path computation, role
+  assignment, single-query `teacherCanActOnUnit`); pure path semantics +
+  in-memory evaluator in `services/orgScope.ts` (unit-tested, 12 cases);
+  target authoriser `middleware/requireUnitRole.ts` (`requirePlatformAdmin`,
+  `requireUnitRole(resolveUnit, roles)`). **Additive only** — legacy
+  `teachers.role` + `requireRole` middleware are untouched and still guard
+  every existing admin route; routes migrate onto the unit-scoped authoriser
+  in later increments. `req.teacher` now carries `primary_org_unit_id` +
+  `is_platform_admin`. Migration applied + verified on local dev (paths
+  well-formed, zero mis-nested units, no unassigned institutional teachers,
+  legacy `institution_admin` mapped 1:1, live authorizer SQL confirms
+  ancestor-role inheritance); not yet run on staging/production.
 - **Lecture presentations — typed slide layouts, KaTeX, Yandex Images.** The
   generator used to emit one shape (title + 3–6 bullets + notes) for every
   slide, which read as dry and uniform. New format: the model picks per slide
