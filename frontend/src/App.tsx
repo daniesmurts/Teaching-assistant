@@ -134,16 +134,20 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const teacher = useAuthStore((s) => s.teacher)
   if (!teacher) return <Navigate to="/login" replace />
-  if (teacher.role !== 'platform_admin') return <Navigate to="/dashboard" replace />
+  // Org-tree-derived (§7). Falls back to the legacy enum for sessions stored
+  // before the flag was added — refreshed on next /me.
+  const isPlatformAdmin = teacher.is_platform_admin ?? teacher.role === 'platform_admin'
+  if (!isPlatformAdmin) return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }
 
 function InstitutionRoute({ children }: { children: React.ReactNode }) {
   const teacher = useAuthStore((s) => s.teacher)
   if (!teacher) return <Navigate to="/login" replace />
-  if (teacher.role !== 'institution_admin' && teacher.role !== 'platform_admin') {
-    return <Navigate to="/dashboard" replace />
-  }
+  const canAdmin =
+    (teacher.is_platform_admin ?? teacher.role === 'platform_admin') ||
+    (teacher.is_institution_admin ?? teacher.role === 'institution_admin')
+  if (!canAdmin) return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }
 

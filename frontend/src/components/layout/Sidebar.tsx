@@ -111,7 +111,10 @@ export default function Sidebar({ onClose }: Props) {
   const initials =
     initialsForAvatar(teacher?.name) || teacher?.email?.[0]?.toUpperCase() || '?'
 
-  const isInstitutionAdmin = teacher?.role === 'institution_admin' || teacher?.role === 'platform_admin'
+  // Org-tree-derived (§7), with legacy-enum fallback for pre-upgrade sessions.
+  const isInstitutionAdmin =
+    (teacher?.is_platform_admin ?? teacher?.role === 'platform_admin') ||
+    (teacher?.is_institution_admin ?? teacher?.role === 'institution_admin')
 
   function logout() { clearAuth(); navigate('/login') }
 

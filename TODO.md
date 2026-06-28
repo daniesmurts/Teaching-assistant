@@ -411,18 +411,26 @@ becomes the substrate for a student-facing tutor down the line.
 
 ### P. Organisational structure model — canonical-typed org tree · Effort: L+ (foundational) · 🟢 MOSTLY SHIPPED
 
-**Status (2026-06-27):** core shipped — migration 045 (schema + guarded
-backfill, applied+verified on dev); scope service + `requireUnitRole`
-authoriser (unit-tested); tree-builder UI + teacher/role assignment at
-`/institution/structure`; admin guards (`requireAdmin` /
-`requireInstitutionAdmin`) reimplemented on the tree with `syncRoleToTree`
-keeping the legacy enum mirror in step. See CHANGELOG increments 1 / 1b / 3.
-**Remaining:** (a) run migration 045 on prod at next deploy; (b) frontend
-route gate still reads `teachers.role` (synced, fails closed) — move it to
-org-derived admin-ness when `/auth/me` exposes roles; (c) **true per-subtree
-admin scoping** (a division head limited to their division) — institution
-routes are still institution-wide; this is genuinely new product behaviour,
-not done here.
+**Status (2026-06-28):** core shipped + deployed (commit a619377; migration 045
+ran on prod via deploy). Increments: foundation, tree-builder UI (1),
+teacher/role assignment (1b), tree-based admin guards + `syncRoleToTree` (3),
+and **frontend gate now reads org-tree-derived `is_platform_admin` /
+`is_institution_admin` from the auth payload (b)** — legacy enum fallback kept
+for pre-upgrade sessions. See CHANGELOG.
+
+**Done:** (a) prod migration, (b) frontend gate coherence.
+
+**Deferred — (c) true per-subtree admin scoping.** A division/department head
+limited to their own subtree. NOT a small tail: every institution route would
+need its query scope reworked, plus product decisions on what each role level
+sees. **No current demand** — every admin today is an institution-root admin
+(from the backfill); there are no sub-unit admins to scope. Current state is
+coherent and fail-closed: per-unit `head`/`viewer` and sub-unit `admin` grants
+from the 1b UI are *recorded but inert* — nothing consumes them yet; only
+admin-on-root grants institution access. Build (c) when a real institutional
+customer needs scoped sub-unit access, so requirements are concrete rather than
+speculative. Pairs with the deferred read-only dashboards (viewer role) and
+the §2.x analytics features that would consume `head`/`viewer`.
 
 Original design notes below.
 

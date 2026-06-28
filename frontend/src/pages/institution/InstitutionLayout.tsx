@@ -75,7 +75,7 @@ export default function InstitutionLayout() {
               <p className="font-sans text-sm text-ink-secondary mb-5">
                 Ваш аккаунт не привязан к организации. Управление организациями и их администраторами доступно в админ-панели платформы.
               </p>
-              {teacher?.role === 'platform_admin' && (
+              {(teacher?.is_platform_admin ?? teacher?.role === 'platform_admin') && (
                 <button
                   onClick={() => navigate('/admin/institutions')}
                   className="px-5 py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity"

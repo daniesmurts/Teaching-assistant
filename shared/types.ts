@@ -34,6 +34,10 @@ export interface Teacher {
   university:  string | null
   phone:       string | null
   role?:       TeacherRole
+  // §7 org-tree-derived admin signals — authoritative for route gating.
+  // `role` is retained as a synced mirror; prefer these for access decisions.
+  is_platform_admin?:    boolean
+  is_institution_admin?: boolean   // holds `admin` on the institution root unit
   institution_id?: string | null
   // Mirror of the teacher's institution's shared_rag_enabled flag — surfaced
   // here so the Courses page can decide whether to show / enable the "поделиться

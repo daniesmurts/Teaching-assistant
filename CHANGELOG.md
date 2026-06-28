@@ -15,6 +15,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Changed
+- **Frontend route gates read org-tree-derived admin flags (Feature P tail b).**
+  `/api/auth/login` and `/api/auth/me` now return `is_platform_admin` and
+  `is_institution_admin` (the latter = holds `admin` on the institution root,
+  via `isInstitutionAdmin`) on the teacher payload. The React gates
+  (`AdminRoute`, `InstitutionRoute`, `Sidebar`, `InstitutionLayout`) read these
+  instead of the legacy `teachers.role` enum, with a `?? role` fallback so
+  sessions stored before the upgrade keep working until the next `/me`. Closes
+  the divergence where a teacher granted `admin` purely via the org-role UI
+  (which doesn't touch `teachers.role`) was authorised by the backend but
+  bounced by the frontend gate. Both typechecks clean, 132/132 tests green.
+  (Tail c — true per-subtree admin scoping — deliberately deferred; see TODO
+  Feature P.)
 - **Admin authorisation now resolves from the §7 org tree (Feature P increment 3).**
   `requireAdmin` / `requireInstitutionAdmin` (still the same export names, all 5
   route files unchanged) are reimplemented on the tree: `requireAdmin` reads

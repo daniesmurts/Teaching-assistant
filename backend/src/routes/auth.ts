@@ -27,6 +27,17 @@ import {
 } from '../lib/emailTemplates'
 import { findValidInviteByToken, markInviteAccepted } from '../db/queries/teacherInvites'
 import { getInstitutionById, findInstitutionByEmailDomain, countInstitutionTeachers } from '../db/queries/institutions'
+import { isInstitutionAdmin } from '../db/queries/orgUnits'
+
+// Tree-derived admin signals exposed on the auth payload so the frontend route
+// gates read authoritative org-tree state, not the legacy `teachers.role` enum.
+// is_institution_admin = holds `admin` on the institution root unit (§7).
+async function adminFlags(row: { id: string; institution_id: string | null; is_platform_admin: boolean }) {
+  return {
+    is_platform_admin:    row.is_platform_admin ?? false,
+    is_institution_admin: row.institution_id ? await isInstitutionAdmin(row.id, row.institution_id) : false,
+  }
+}
 
 const router = Router()
 
@@ -139,6 +150,7 @@ router.post(
         role:                            row.role ?? 'teacher',
         institution_id:                  row.institution_id ?? null,
         institution_shared_rag_enabled:  row.institution_shared_rag_enabled ?? false,
+        ...(await adminFlags(row)),
         created_at:                      row.created_at.toISOString(),
       },
       plan,
@@ -162,6 +174,7 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
     role:                            req.teacher.role,
     institution_id:                  row.institution_id ?? null,
     institution_shared_rag_enabled:  row.institution_shared_rag_enabled ?? false,
+    ...(await adminFlags(row)),
     plan,
   })
 }))
