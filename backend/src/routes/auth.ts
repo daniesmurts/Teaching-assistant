@@ -296,6 +296,7 @@ async function buildPlanData(
       confidenceCheck:       canUseFeature(tier, 'confidenceCheck'),
       verificationQuestions: canUseFeature(tier, 'verificationQuestions'),
       handout:               canUseFeature(tier, 'handout'),
+      publishedAssignments:  canUseFeature(tier, 'publishedAssignments'),
     },
   }
 }

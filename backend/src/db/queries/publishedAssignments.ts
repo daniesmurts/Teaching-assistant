@@ -1,0 +1,232 @@
+import { randomBytes } from 'node:crypto'
+import { pool } from '../connection'
+
+// Process-of-creation attestation (Research.md §5.1, Feature Q). Teacher
+// publishes a definition; students write against per-student tokenised invites.
+
+export type PublishedStatus = 'draft' | 'open' | 'closed'
+export type InviteStatus    = 'invited' | 'writing' | 'submitted'
+
+export interface PublishedAssignmentRow {
+  id:           string
+  teacher_id:   string
+  course_id:    string | null
+  rubric_id:    string | null
+  title:        string
+  instructions: string | null
+  due_at:       Date | null
+  status:       string
+  published_at: Date | null
+  created_at:   Date
+}
+
+export interface PublishedAssignmentWithCounts extends PublishedAssignmentRow {
+  invite_count:    number
+  submitted_count: number
+}
+
+export interface AssignmentInviteRow {
+  id:                      string
+  published_assignment_id: string
+  student_name:            string | null
+  student_email:           string | null
+  token:                   string
+  status:                  string
+  submitted_at:            Date | null
+  created_at:              Date
+}
+
+/** URL-safe per-student token (the link credential). */
+export function generateInviteToken(): string {
+  return randomBytes(24).toString('hex')   // 48 hex chars
+}
+
+// ─── Definitions ──────────────────────────────────────────────────────────────
+
+export async function createPublishedAssignment(data: {
+  teacherId: string
+  courseId?: string | null
+  rubricId?: string | null
+  title: string
+  instructions?: string | null
+  dueAt?: string | null
+}): Promise<PublishedAssignmentRow> {
+  const { rows } = await pool.query<PublishedAssignmentRow>(
+    `INSERT INTO published_assignments (teacher_id, course_id, rubric_id, title, instructions, due_at)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING *`,
+    [data.teacherId, data.courseId ?? null, data.rubricId ?? null,
+     data.title, data.instructions ?? null, data.dueAt ?? null]
+  )
+  return rows[0]
+}
+
+/** Scoped to the owning teacher — returns null if not found or not theirs. */
+export async function getPublishedAssignment(id: string, teacherId: string): Promise<PublishedAssignmentRow | null> {
+  const { rows } = await pool.query<PublishedAssignmentRow>(
+    'SELECT * FROM published_assignments WHERE id = $1 AND teacher_id = $2',
+    [id, teacherId]
+  )
+  return rows[0] ?? null
+}
+
+export async function listPublishedAssignments(teacherId: string): Promise<PublishedAssignmentWithCounts[]> {
+  const { rows } = await pool.query<PublishedAssignmentWithCounts>(
+    `SELECT pa.*,
+            (SELECT COUNT(*)::int FROM assignment_invites i WHERE i.published_assignment_id = pa.id) AS invite_count,
+            (SELECT COUNT(*)::int FROM assignment_invites i
+               WHERE i.published_assignment_id = pa.id AND i.status = 'submitted') AS submitted_count
+       FROM published_assignments pa
+      WHERE pa.teacher_id = $1
+      ORDER BY pa.created_at DESC`,
+    [teacherId]
+  )
+  return rows
+}
+
+export async function updatePublishedAssignment(
+  id: string,
+  teacherId: string,
+  patch: { title?: string; instructions?: string | null; dueAt?: string | null; status?: PublishedStatus }
+): Promise<PublishedAssignmentRow | null> {
+  // status → 'open' stamps published_at the first time.
+  const { rows } = await pool.query<PublishedAssignmentRow>(
+    `UPDATE published_assignments
+        SET title        = COALESCE($3, title),
+            instructions = CASE WHEN $4 THEN $5 ELSE instructions END,
+            due_at       = CASE WHEN $6 THEN $7 ELSE due_at END,
+            status       = COALESCE($8, status),
+            published_at = CASE WHEN $8 = 'open' AND published_at IS NULL THEN NOW() ELSE published_at END
+      WHERE id = $1 AND teacher_id = $2
+      RETURNING *`,
+    [id, teacherId,
+     patch.title ?? null,
+     patch.instructions !== undefined, patch.instructions ?? null,
+     patch.dueAt        !== undefined, patch.dueAt ?? null,
+     patch.status ?? null]
+  )
+  return rows[0] ?? null
+}
+
+// ─── Invites (per-student) ────────────────────────────────────────────────────
+
+export async function addInvite(
+  publishedAssignmentId: string,
+  data: { studentName?: string | null; studentEmail?: string | null }
+): Promise<AssignmentInviteRow> {
+  const { rows } = await pool.query<AssignmentInviteRow>(
+    `INSERT INTO assignment_invites (published_assignment_id, student_name, student_email, token)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, published_assignment_id, student_name, student_email, token, status, submitted_at, created_at`,
+    [publishedAssignmentId, data.studentName ?? null, data.studentEmail ?? null, generateInviteToken()]
+  )
+  return rows[0]
+}
+
+export async function listInvites(publishedAssignmentId: string): Promise<AssignmentInviteRow[]> {
+  const { rows } = await pool.query<AssignmentInviteRow>(
+    `SELECT id, published_assignment_id, student_name, student_email, token, status, submitted_at, created_at
+       FROM assignment_invites
+      WHERE published_assignment_id = $1
+      ORDER BY created_at`,
+    [publishedAssignmentId]
+  )
+  return rows
+}
+
+/** Delete an invite — only allowed while the student has not yet submitted. */
+export async function deleteInvite(inviteId: string, publishedAssignmentId: string): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `DELETE FROM assignment_invites
+      WHERE id = $1 AND published_assignment_id = $2 AND status <> 'submitted'`,
+    [inviteId, publishedAssignmentId]
+  )
+  return (rowCount ?? 0) > 0
+}
+
+// ─── Public student writing surface (token-authed, no teacher JWT) ────────────
+
+export interface InviteWithAssignment {
+  id:                   string
+  status:               string
+  student_name:         string | null
+  draft_content:        unknown
+  consent_accepted_at:  Date | null
+  submitted_at:         Date | null
+  // joined from the parent definition
+  title:                string
+  instructions:         string | null
+  due_at:               Date | null
+  assignment_status:    string         // 'draft' | 'open' | 'closed'
+}
+
+/** Resolve a token to its invite + parent definition. The only credential on
+ *  the public route — returns null for an unknown token (caller 404s). */
+export async function getInviteByToken(token: string): Promise<InviteWithAssignment | null> {
+  const { rows } = await pool.query<InviteWithAssignment>(
+    `SELECT i.id, i.status, i.student_name, i.draft_content, i.consent_accepted_at, i.submitted_at,
+            pa.title, pa.instructions, pa.due_at, pa.status AS assignment_status
+       FROM assignment_invites i
+       JOIN published_assignments pa ON pa.id = i.published_assignment_id
+      WHERE i.token = $1`,
+    [token]
+  )
+  return rows[0] ?? null
+}
+
+export async function recordConsent(token: string, version: string): Promise<void> {
+  await pool.query(
+    `UPDATE assignment_invites
+        SET consent_accepted_at = COALESCE(consent_accepted_at, NOW()),
+            consent_version     = COALESCE(consent_version, $2),
+            status              = CASE WHEN status = 'invited' THEN 'writing' ELSE status END
+      WHERE token = $1`,
+    [token, version]
+  )
+}
+
+/** Autosave: overwrite the live draft + aggregate telemetry, mark 'writing'. */
+export async function saveDraft(token: string, draftContent: unknown, telemetry: unknown): Promise<void> {
+  await pool.query(
+    `UPDATE assignment_invites
+        SET draft_content        = $2,
+            submission_telemetry = $3,
+            status               = CASE WHEN status = 'submitted' THEN status
+                                        ELSE 'writing' END
+      WHERE token = $1`,
+    [token, draftContent === undefined ? null : JSON.stringify(draftContent),
+     telemetry === undefined ? null : JSON.stringify(telemetry)]
+  )
+}
+
+/** Append a trajectory snapshot (§5.3). Sequence is per-invite, monotonic. */
+export async function createSnapshot(inviteId: string, content: unknown, charCount: number): Promise<void> {
+  await pool.query(
+    `INSERT INTO submission_snapshots (invite_id, seq, content, char_count)
+     VALUES ($1,
+             COALESCE((SELECT MAX(seq) + 1 FROM submission_snapshots WHERE invite_id = $1), 1),
+             $2, $3)`,
+    [inviteId, content === undefined ? null : JSON.stringify(content), charCount]
+  )
+}
+
+/** Finalise: mark the invite submitted. Does NOT create the gradeable
+ *  `assignments` row — that materialisation happens in Q4 (grading integration),
+ *  keeping ungraded rows out of history until the teacher grades. */
+export async function markInviteSubmitted(token: string): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE assignment_invites
+        SET status = 'submitted', submitted_at = NOW()
+      WHERE token = $1 AND status <> 'submitted'`,
+    [token]
+  )
+  return (rowCount ?? 0) > 0
+}
+
+export async function getInviteIdByToken(token: string): Promise<string | null> {
+  const { rows } = await pool.query<{ id: string }>(
+    'SELECT id FROM assignment_invites WHERE token = $1',
+    [token]
+  )
+  return rows[0]?.id ?? null
+}

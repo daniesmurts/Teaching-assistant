@@ -22,6 +22,7 @@ const NAV_GROUPS: NavGroup[] = [
   ]},
   { label: 'Проверка', items: [
     { icon: 'sparkle',      label: 'Проверка работ', to: '/grading', essential: true },
+    { icon: 'list-checks',  label: 'Задания',        to: '/published', match: ['/published'] },
     { icon: 'clock',        label: 'Журнал',         to: '/history' },
     { icon: 'users',        label: 'Студенты',       to: '/students' },
     { icon: 'list-checks',  label: 'Библиотека',     to: '/library' },

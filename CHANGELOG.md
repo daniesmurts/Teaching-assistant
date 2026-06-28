@@ -45,6 +45,51 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   typecheck clean, 132/132 tests green.
 
 ### Added
+- **Published assignments — public student writing backend (Feature Q3a).**
+  Token-authenticated public route group at `/api/write/:token` (no teacher JWT —
+  the per-student token is the credential; `generalLimiter` applied). `GET`
+  returns the assignment definition + any saved draft + consent state (never
+  leaks teacher/institution internals or the token); `POST /consent` records the
+  consent gate (versioned); `PUT /draft` autosaves the TipTap doc + **aggregate-
+  only** telemetry (raw stream never sent) with an optional trajectory snapshot;
+  `POST /submit` finalises the invite after validating consent + non-empty draft.
+  Writing is gated to `status='open'` assignments and blocked once submitted
+  (strict publish mode — this is the only submission route). Submit deliberately
+  does **not** create the gradeable `assignments` row — that materialisation is
+  Q4, keeping ungraded rows out of history. New `lib/tiptapText.ts`
+  (ProseMirror-JSON → plain text, 5 unit tests) and `SubmissionTelemetry` type in
+  `shared/types`. Verified end-to-end against dev DB (synthetic, zero residue);
+  typecheck clean, 137/137 tests green. Student UI (TipTap surface) is Q3b.
+- **Published assignments — teacher publish UI (Feature Q2).** New teacher pages
+  at `/published` (list + create) and `/published/:id` (detail): create an
+  assignment definition (title, condition, due date), build a student roster
+  (name + optional email → per-student tokenised link with copy-to-clipboard),
+  track «N сдано из M», and drive status (draft → опубликовать → закрыть/
+  возобновить). Plan-gated client-side via the new `publishedAssignments`
+  feature flag (now surfaced on `/auth/me` + login plan payload and in
+  `shared/types` PlanState.features) — Free tier sees a locked upgrade card;
+  backend `checkFeatureAccess` is the real enforcement. Nav: «Задания» under
+  Проверка. The shared student-link URL points at `/write/:token` (the public
+  writing surface, built next in Q3 — links won't resolve until then). Both
+  typechecks clean, 132/132 tests green.
+- **Published assignments — publish backend (Feature Q1, Research.md §5.1).**
+  First slice of process-of-creation attestation — the platform's answer to
+  "won't we end up using AI to grade AI?". Migration `046_published_assignments`
+  adds `published_assignments` (the teacher's assignment definition),
+  `assignment_invites` (per-student writing workspace with a unique tokenised
+  link, draft, aggregate-only telemetry, consent fields), and
+  `submission_snapshots` (for §5.3 trajectory); `assignments` gains
+  `published_assignment_id` / `submission_telemetry` / `submitted_at` (additive —
+  existing rows behave unchanged, and a submitted published assignment becomes an
+  ordinary gradeable row so the grading pipeline is untouched). Query layer
+  `db/queries/publishedAssignments.ts` (definition CRUD scoped to owner, invite
+  roster with per-definition submission counts, secure token generation) and
+  teacher routes at `/api/published-assignments`, **gated to Pro/Institution**
+  via a new `publishedAssignments` plan flag (Free stays on copy/paste grading).
+  No UI yet (Q2); the public `/write/:token` student surface is Q3. Migration
+  applied on dev (verified end-to-end with synthetic data, zero residue);
+  typecheck clean, 132/132 tests green. Deviates from the literal §5.1.1 "no new
+  tables" — see Research.md §5.1.5 for the three-table model and rationale.
 - **Org structure — teacher assignment + per-unit roles (Feature P increment 1b).**
   Builds on the tree builder: a «Преподаватели и роли» section on
   `/institution/structure` lists every institution teacher with a kafedra

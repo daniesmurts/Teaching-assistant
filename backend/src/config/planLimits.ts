@@ -17,6 +17,7 @@ export const PLAN_LIMITS = {
     emailGeneration:       false,
     verificationQuestions: false,
     handout:               false,
+    publishedAssignments:  false,   // §5.1 process-of-creation attestation — Pro/Institution
     historyDays:           30,
     presentationHistory:   false,
     watermark:             true,
@@ -36,6 +37,7 @@ export const PLAN_LIMITS = {
     emailGeneration:       true,
     verificationQuestions: true,
     handout:               true,
+    publishedAssignments:  true,
     historyDays:           Infinity,
     presentationHistory:   true,
     watermark:             false,
@@ -55,6 +57,7 @@ export const PLAN_LIMITS = {
     emailGeneration:       true,
     verificationQuestions: true,
     handout:               true,
+    publishedAssignments:  true,
     historyDays:           Infinity,
     presentationHistory:   true,
     watermark:             false,

@@ -24,6 +24,8 @@ import Presentations from './pages/Presentations'
 import Topics from './pages/Topics'
 import Curriculum from './pages/Curriculum'
 import Quizzes from './pages/Quizzes'
+import PublishedAssignments from './pages/PublishedAssignments'
+import PublishedAssignmentDetail from './pages/PublishedAssignmentDetail'
 import MaterialGenerator from './pages/MaterialGenerator'
 import Materials from './pages/Materials'
 import Billing from './pages/Billing'
@@ -181,6 +183,8 @@ export default function App() {
             <Route path="/dashboard"     element={<Dashboard />} />
             <Route path="/courses"       element={<Courses />} />
             <Route path="/grading"       element={<Grading />} />
+            <Route path="/published"     element={<PublishedAssignments />} />
+            <Route path="/published/:id" element={<PublishedAssignmentDetail />} />
             <Route path="/criteria"      element={<Criteria />} />
             <Route path="/rubrics"       element={<Rubrics />} />
             <Route path="/learning-loop" element={<LearningLoop />} />

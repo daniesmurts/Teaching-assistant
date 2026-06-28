@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-06-27
+**Last updated:** 2026-06-28
 
 ---
 
@@ -74,6 +74,7 @@ Everything in Free, plus:
 - **RAG flywheel** — grading learns from approved grades (course-scoped few-shot)
 - **Тщательная проверка (confidence)** — opt-in per grade; runs a grader ensemble and flags low-confidence works for closer review (selective-prediction triage)
 - **Long-document review** — ВКР/диплом section-aware map-reduce: chapter-by-chapter analysis, defense questions, suggested grade
+- **Задания студентам (published assignments)** 🚧 — publish an assignment definition (condition + due date), build a student roster, and share per-student tokenised links; track «N сдано из M» and open/close the assignment. Students write in-platform (no account) and the platform attests the writing process (§5.1). *Teacher publish side shipped; the student writing surface + provenance report land next.*
 - **Feedback email generation** — draft email to student (teacher sends from own client)
 - **Presentation history**
 - Full grading history, no watermark

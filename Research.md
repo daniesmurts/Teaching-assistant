@@ -424,6 +424,41 @@ ProseMirror objects when needed.
   - Serialise the document as JSON for autosave / resume; snapshot at
     intervals for §5.3 trajectory.
 
+#### 5.1.5 Implementation plan (Feature Q) — agreed 2026-06-28
+
+**Architecture shift.** Q inverts the existing flow: the teacher publishes an
+assignment *definition*, students write against it via tokenised links (no
+accounts), submissions flow back into the existing grading pipeline. Two new
+surfaces: a **public token-authenticated route group** (`/write/:token`, no
+teacher JWT) and a **standalone student writing page** (no teacher chrome).
+
+**Data model (refines §5.1.1 — uses three tables, not "columns only").** The
+literal "no new tables" under-scoped a class roster. Model:
+- `published_assignments` — the definition (teacher_id, course_id?, rubric_id?,
+  title, instructions, due_at, status draft|open|closed, published_at).
+- `assignment_invites` — per-student writing workspace (published_assignment_id,
+  student_name, student_email, token UNIQUE, status invited|writing|submitted,
+  `draft_content` JSONB (live TipTap doc), `submission_telemetry` JSONB
+  **aggregates only**, consent_accepted_at/version, assignment_id set on submit,
+  submitted_at). Keeps invited/draft rows OUT of the core `assignments` table.
+- `submission_snapshots` — draft snapshots for §5.3 trajectory (invite_id, seq,
+  content, char_count, captured_at).
+- `assignments` gains only `published_assignment_id`, `submission_telemetry`,
+  `submitted_at` — populated on submit, so the **grading pipeline is unchanged**
+  (a submitted published assignment becomes an ordinary gradeable row).
+
+**Increments.** Q1 schema + publish backend (gated `publishedAssignments`,
+Pro/Institution). Q2 teacher publish UI (create, roster, copy links, track
+status). Q3 public `/write/:token` — consent gate, TipTap surface, autosave,
+submit, aggregate-only telemetry, offline-blocked. Q4 submit→grading +
+provenance report (rule-based facts). Q5 §5.3 trajectory + §5.5 metacognition.
+
+**Constraints baked in:** aggregate-only telemetry (raw stream never leaves the
+browser), Russian consent gate before the editor activates, strict publish mode
+(token link is the only submission route), transparent rule-based provenance
+(no ML, no opaque score), connectivity required on the writing surface, TipTap
+MIT core only.
+
 #### 5.1.4 Offline PWA exception
 
 The platform is an offline-capable PWA. A student could compose offline in

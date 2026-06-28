@@ -1,3 +1,19 @@
+// ─── Process-of-creation attestation (Research.md §5.1) ───────────────────────
+
+// DERIVED AGGREGATES ONLY — the raw keystroke stream never leaves the browser
+// (152-FZ, §5.1.2). Computed client-side, persisted on the invite, surfaced to
+// the teacher as transparent facts (§5.1.3) — never an opaque score.
+export interface SubmissionTelemetry {
+  total_chars:    number   // final length
+  active_ms:      number   // active editing time (idle gaps excluded)
+  revision_count: number   // count of meaningful edit transactions
+  paste_count:    number
+  pasted_chars:   number   // total chars introduced by paste
+  largest_paste:  number   // largest single insertion (big paste = suspicious)
+  started_at:     string   // ISO — first edit
+  last_edit_at:   string   // ISO — most recent edit
+}
+
 // ─── Teacher ──────────────────────────────────────────────────────────────────
 
 export type TeacherRole = 'teacher' | 'institution_admin' | 'platform_admin'
@@ -24,6 +40,7 @@ export interface PlanState {
     confidenceCheck:     boolean
     verificationQuestions: boolean
     handout:               boolean
+    publishedAssignments:  boolean
   }
 }
 

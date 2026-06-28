@@ -24,6 +24,8 @@ import tasksRouter from './routes/tasks'
 import curriculumRouter from './routes/curriculum'
 import programsRouter from './routes/programs'
 import orgStructureRouter from './routes/orgUnits'
+import publishedAssignmentsRouter from './routes/publishedAssignments'
+import publicWriteRouter from './routes/publicWrite'
 import quizzesRouter from './routes/quizzes'
 import paymentsRouter from './routes/payments'
 import accountRouter from './routes/account'
@@ -109,6 +111,7 @@ app.get('/api/health', async (_req, res) => {
 
 app.use('/api/auth',          authRouter)
 app.use('/api/sso',           ssoRouter)
+app.use('/api/write',         publicWriteRouter)   // public — token-authed student writing surface
 app.use('/api/courses',       coursesRouter)
 app.use('/api/criteria',      criteriaRouter)
 app.use('/api/rubrics',       rubricsRouter)
@@ -119,6 +122,7 @@ app.use('/api/topics',        topicsRouter)
 app.use('/api/tasks',         tasksRouter)
 app.use('/api/curriculum',    curriculumRouter)
 app.use('/api/quizzes',       quizzesRouter)
+app.use('/api/published-assignments', publishedAssignmentsRouter)
 app.use('/api/documents',     documentsRouter)
 app.use('/api/admin/evals',   adminEvalsRouter)   // before /api/admin so /evals isn't shadowed
 app.use('/api/admin',         adminRouter)
