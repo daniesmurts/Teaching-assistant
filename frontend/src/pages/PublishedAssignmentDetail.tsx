@@ -8,9 +8,6 @@ import {
   type PublishedStatus, type InviteStatus,
 } from '../api/publishedAssignments'
 
-const STATUS_LABEL: Record<PublishedStatus, string> = {
-  draft: 'Черновик', open: 'Опубликовано', closed: 'Закрыто',
-}
 const INVITE_LABEL: Record<InviteStatus, string> = {
   invited: 'Приглашён', writing: 'Пишет', submitted: 'Сдано',
 }
@@ -71,29 +68,42 @@ export default function PublishedAssignmentDetail() {
         <button onClick={() => navigate('/published')}
           className="text-xs font-sans text-ink-secondary hover:text-ink mb-4">← К заданиям</button>
 
-        <div className="flex items-start justify-between gap-4 mb-1">
-          <h1 className="font-display text-2xl font-bold text-ink">{a.title}</h1>
-          <span className="text-xs font-sans px-2 py-1 rounded-sm bg-surface-warm text-ink-secondary flex-shrink-0">
-            {STATUS_LABEL[a.status]}
-          </span>
-        </div>
+        <h1 className="font-display text-2xl font-bold text-ink mb-1">{a.title}</h1>
         {a.instructions && <p className="text-sm font-sans text-ink-secondary whitespace-pre-wrap mb-4">{a.instructions}</p>}
 
-        {/* Status controls */}
-        <div className="flex items-center gap-2 mb-6">
+        {/* Status bar — current state + the relevant action */}
+        <div className="flex items-center justify-between gap-3 bg-surface border border-border rounded-lg px-4 py-3 mb-6">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+              a.status === 'open' ? 'bg-success' : a.status === 'draft' ? 'bg-amber' : 'bg-ink-tertiary'
+            }`} />
+            <div className="min-w-0">
+              <div className="text-sm font-sans font-medium text-ink">
+                {a.status === 'open' ? 'Приём работ открыт' : a.status === 'draft' ? 'Черновик' : 'Приём работ закрыт'}
+              </div>
+              <div className="text-xs font-sans text-ink-tertiary">
+                {a.status === 'open'
+                  ? 'Студенты пишут и сдают работы по персональным ссылкам'
+                  : a.status === 'draft'
+                  ? 'Студенты не видят задание, пока оно не опубликовано'
+                  : 'Новые работы не принимаются'}
+              </div>
+            </div>
+          </div>
+
           {a.status === 'draft' && (
             <Button onClick={() => statusMut.mutate('open')} loading={statusMut.isPending}>Опубликовать</Button>
           )}
           {a.status === 'open' && (
-            <button onClick={() => statusMut.mutate('closed')}
-              className="px-4 py-2 rounded-md border border-border-mid text-ink-secondary font-sans text-sm hover:bg-surface-warm transition-colors">
-              Закрыть приём работ
+            <button onClick={() => statusMut.mutate('closed')} disabled={statusMut.isPending}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-md border border-border-mid text-ink-secondary font-sans text-sm hover:bg-surface-warm hover:text-ink transition-colors disabled:opacity-60 flex-shrink-0">
+              <LockIcon /> Закрыть приём
             </button>
           )}
           {a.status === 'closed' && (
-            <button onClick={() => statusMut.mutate('open')}
-              className="px-4 py-2 rounded-md border border-border-mid text-ink-secondary font-sans text-sm hover:bg-surface-warm transition-colors">
-              Возобновить приём
+            <button onClick={() => statusMut.mutate('open')} disabled={statusMut.isPending}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-md border border-border-mid text-ink-secondary font-sans text-sm hover:bg-surface-warm hover:text-ink transition-colors disabled:opacity-60 flex-shrink-0">
+              <UnlockIcon /> Возобновить
             </button>
           )}
         </div>
@@ -150,3 +160,16 @@ export default function PublishedAssignmentDetail() {
     </div>
   )
 }
+
+const LockIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+)
+const UnlockIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 9.9-1" />
+  </svg>
+)

@@ -3,6 +3,7 @@ export type {
   TeacherRole,
   PlanTier,
   PlanState,
+  SubmissionTelemetry,
   AuthResponse,
   Course,
   CourseLevel,

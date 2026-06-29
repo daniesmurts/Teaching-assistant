@@ -89,3 +89,19 @@ body {
   .result-appear { animation: none !important; }
   @page { margin: 14mm; }
 }
+
+/* ── Student writing surface (TipTap) ──────────────────────────────────── */
+.student-prose p { margin: 0 0 0.75rem; }
+.student-prose h2 { font-size: 1.15rem; font-weight: 600; margin: 1.25rem 0 0.5rem; }
+.student-prose ul { list-style: disc; padding-left: 1.4rem; margin: 0 0 0.75rem; }
+.student-prose ol { list-style: decimal; padding-left: 1.4rem; margin: 0 0 0.75rem; }
+.student-prose li { margin: 0.15rem 0; }
+.student-prose:focus { outline: none; }
+/* Placeholder when empty (TipTap exposes is-editor-empty on the first node) */
+.student-prose p.is-editor-empty:first-child::before {
+  content: 'Начните писать здесь…';
+  color: var(--color-ink-tertiary);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

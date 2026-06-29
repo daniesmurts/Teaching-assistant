@@ -26,6 +26,7 @@ import Curriculum from './pages/Curriculum'
 import Quizzes from './pages/Quizzes'
 import PublishedAssignments from './pages/PublishedAssignments'
 import PublishedAssignmentDetail from './pages/PublishedAssignmentDetail'
+import StudentWrite from './pages/StudentWrite'
 import MaterialGenerator from './pages/MaterialGenerator'
 import Materials from './pages/Materials'
 import Billing from './pages/Billing'
@@ -178,6 +179,7 @@ export default function App() {
           <Route path="/forgot-password"  element={<ForgotPassword />} />
           <Route path="/reset-password"   element={<ResetPassword />} />
           <Route path="/sso/callback"     element={<SsoCallback />} />
+          <Route path="/write/:token"     element={<StudentWrite />} />
           <Route path="/payment/result"   element={<PaymentResult />} />
           <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
             <Route path="/dashboard"     element={<Dashboard />} />

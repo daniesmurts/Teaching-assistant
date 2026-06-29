@@ -374,11 +374,17 @@ department *will* ask about this. Design around it from the start:
    browser to compute aggregates, but only aggregates cross the wire and
    land in `submission_telemetry`.
 3. **Explicit consent gate before the writing surface activates.** The
-   student sees a plain-language Russian notice ("this assignment records
-   how it is written — time spent, revisions, pasted content") and must
-   accept before composing. Works identically on the tokenised-link and
-   LTI rails. Consent acceptance is itself recorded (timestamp + notice
-   version) on the submission.
+   student sees a plain-language Russian notice and must accept before
+   composing; acceptance is recorded (timestamp + notice version) on the
+   invite. **Framing matters** (decided 2026-06): the copy is written around
+   *student benefit* — autosave so nothing is lost + "your effort is
+   credited as your own work" — not "проверка авторства". This keeps the
+   gate aligned with the "help, don't catch" ethos while still serving as
+   the lawful-basis record. **Consent delivery is rail-dependent:** the
+   per-session gate is the only consent mechanism on the standalone
+   tokenised rail, so it stays there; on the LTI/institutional rail (§6) the
+   institution can carry consent via enrolment terms, so the gate becomes
+   institution-configurable (skippable) — future work.
 4. **Data residency.** All telemetry stays on Yandex infrastructure
    inside Russia — already the platform default, but stated explicitly
    for this data class because it is the first behavioural data we

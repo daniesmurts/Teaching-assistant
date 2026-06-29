@@ -45,6 +45,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   typecheck clean, 132/132 tests green.
 
 ### Added
+- **Published assignments — student writing surface (Feature Q3b).** Public,
+  account-less page at `/write/:token` (outside the app shell) where a student
+  writes their submission. **TipTap v3 MIT core** added to the frontend
+  (`@tiptap/core`, `@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/pm`) — first
+  new dependency in this effort. State machine handles invalid link / not-yet-open
+  / closed / already-submitted / consent-needed / writing. **Consent gate** (§5.1.2)
+  explains the process is recorded before the editor activates. The composer
+  captures **aggregate-only telemetry** (active time with a 30s idle threshold,
+  revision count, total chars, and paste size via `editorProps.handlePaste`),
+  debounced autosaves to `PUT /api/write/:token/draft` (with a ≤90s-cadence
+  trajectory snapshot), and submits via `POST /submit`. Connectivity required —
+  offline banner + disabled submit (§5.1.4). Dedicated `api/publicWrite.ts` axios
+  client with **no JWT and no 401→login redirect** (a student has no account).
+  `SubmissionTelemetry` re-exported through the frontend types barrel; minimal
+  `.student-prose` editor styling + empty-state placeholder. Both typechecks
+  clean, 137/137 tests green. Feature Q is now usable end-to-end (publish →
+  student writes → submit); the teacher-facing provenance report is Q4.
 - **Published assignments — public student writing backend (Feature Q3a).**
   Token-authenticated public route group at `/api/write/:token` (no teacher JWT —
   the per-student token is the credential; `generalLimiter` applied). `GET`
