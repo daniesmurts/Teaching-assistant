@@ -4,6 +4,7 @@ export type {
   PlanTier,
   PlanState,
   SubmissionTelemetry,
+  ProvenanceFacts,
   AuthResponse,
   Course,
   CourseLevel,

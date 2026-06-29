@@ -26,6 +26,7 @@ import Curriculum from './pages/Curriculum'
 import Quizzes from './pages/Quizzes'
 import PublishedAssignments from './pages/PublishedAssignments'
 import PublishedAssignmentDetail from './pages/PublishedAssignmentDetail'
+import SubmissionReview from './pages/SubmissionReview'
 import StudentWrite from './pages/StudentWrite'
 import MaterialGenerator from './pages/MaterialGenerator'
 import Materials from './pages/Materials'
@@ -187,6 +188,7 @@ export default function App() {
             <Route path="/grading"       element={<Grading />} />
             <Route path="/published"     element={<PublishedAssignments />} />
             <Route path="/published/:id" element={<PublishedAssignmentDetail />} />
+            <Route path="/published/:id/submissions/:inviteId" element={<SubmissionReview />} />
             <Route path="/criteria"      element={<Criteria />} />
             <Route path="/rubrics"       element={<Rubrics />} />
             <Route path="/learning-loop" element={<LearningLoop />} />

@@ -10,7 +10,11 @@ import {
 import {
   createPublishedAssignment, getPublishedAssignment, listPublishedAssignments,
   updatePublishedAssignment, addInvite, listInvites, deleteInvite,
+  getSubmissionForTeacher,
 } from '../db/queries/publishedAssignments'
+import { tiptapToText } from '../lib/tiptapText'
+import { computeProvenance } from '../services/provenance'
+import type { SubmissionTelemetry } from '../../../shared/types'
 
 // Teacher-side publish backend (Feature Q1). Mounted at /api/published-assignments.
 // Gated to Pro/Institution via the publishedAssignments plan flag — Free tier
@@ -80,6 +84,20 @@ router.delete('/:id/invites/:inviteId', asyncHandler(async (req, res) => {
   const ok = await deleteInvite(req.params.inviteId, pa.id)
   if (!ok) throw new ValidationError('Нельзя удалить: приглашение не найдено или работа уже сдана')
   res.status(204).end()
+}))
+
+// ─── Submission review + provenance (Q4) ──────────────────────────────────────
+
+router.get('/:id/submissions/:inviteId', asyncHandler(async (req, res) => {
+  const sub = await getSubmissionForTeacher(req.params.id, req.params.inviteId, req.teacher.id)
+  if (!sub) throw new NotFoundError('Работа')
+  res.json({
+    student_name:  sub.student_name,
+    student_email: sub.student_email,
+    submitted_at:  sub.submitted_at,
+    submission_text: tiptapToText(sub.draft_content),
+    provenance:    computeProvenance(sub.submission_telemetry as SubmissionTelemetry | null),
+  })
 }))
 
 export default router

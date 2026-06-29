@@ -230,3 +230,35 @@ export async function getInviteIdByToken(token: string): Promise<string | null> 
   )
   return rows[0]?.id ?? null
 }
+
+// ─── Teacher-side submission review (Q4) ──────────────────────────────────────
+
+export interface SubmittedInvite {
+  id:                   string
+  student_name:         string | null
+  student_email:        string | null
+  draft_content:        unknown
+  submission_telemetry: unknown
+  submitted_at:         Date | null
+}
+
+/** A submitted invite's content + telemetry, scoped to the owning teacher.
+ *  Returns null unless the invite belongs to a definition this teacher owns and
+ *  has been submitted. */
+export async function getSubmissionForTeacher(
+  publishedAssignmentId: string,
+  inviteId: string,
+  teacherId: string,
+): Promise<SubmittedInvite | null> {
+  const { rows } = await pool.query<SubmittedInvite>(
+    `SELECT i.id, i.student_name, i.student_email, i.draft_content, i.submission_telemetry, i.submitted_at
+       FROM assignment_invites i
+       JOIN published_assignments pa ON pa.id = i.published_assignment_id
+      WHERE i.id = $1
+        AND i.published_assignment_id = $2
+        AND pa.teacher_id = $3
+        AND i.status = 'submitted'`,
+    [inviteId, publishedAssignmentId, teacherId]
+  )
+  return rows[0] ?? null
+}

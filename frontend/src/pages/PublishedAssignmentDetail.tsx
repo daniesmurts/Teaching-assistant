@@ -143,14 +143,21 @@ export default function PublishedAssignmentDetail() {
                 <span className={`text-[11px] font-sans px-1.5 py-0.5 rounded-sm flex-shrink-0 ${INVITE_STYLE[inv.status]}`}>
                   {INVITE_LABEL[inv.status]}
                 </span>
-                <button onClick={() => copyLink(inv.token)}
-                  className="text-xs font-sans text-amber hover:opacity-80 transition-opacity flex-shrink-0">
-                  Скопировать ссылку
-                </button>
-                {inv.status !== 'submitted' && (
-                  <button onClick={() => { if (confirm('Удалить студента?')) delMut.mutate(inv.id) }}
-                    aria-label="Удалить" title="Удалить"
-                    className="text-ink-tertiary hover:text-danger transition-colors text-base leading-none flex-shrink-0">×</button>
+                {inv.status === 'submitted' ? (
+                  <button onClick={() => navigate(`/published/${id}/submissions/${inv.id}`)}
+                    className="text-xs font-sans font-medium text-amber hover:opacity-80 transition-opacity flex-shrink-0">
+                    Открыть работу →
+                  </button>
+                ) : (
+                  <>
+                    <button onClick={() => copyLink(inv.token)}
+                      className="text-xs font-sans text-amber hover:opacity-80 transition-opacity flex-shrink-0">
+                      Скопировать ссылку
+                    </button>
+                    <button onClick={() => { if (confirm('Удалить студента?')) delMut.mutate(inv.id) }}
+                      aria-label="Удалить" title="Удалить"
+                      className="text-ink-tertiary hover:text-danger transition-colors text-base leading-none flex-shrink-0">×</button>
+                  </>
                 )}
               </div>
             ))}

@@ -45,6 +45,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   typecheck clean, 132/132 tests green.
 
 ### Added
+- **Published assignments — provenance report (Feature Q4a).** The attestation
+  payoff: a teacher opens a submitted work at `/published/:id/submissions/:inviteId`
+  and sees the **process-of-creation facts** alongside the text. New pure
+  `services/provenance.ts` (`computeProvenance`, 6 unit tests) turns the stored
+  aggregate telemetry into transparent numbers — active editing time, wall-clock
+  span, revision count, total chars, pasted chars + paste ratio, largest single
+  insertion — with **no score and no verdict** (§5.1.3); the teacher judges.
+  Owner-scoped query `getSubmissionForTeacher` + route
+  `GET /api/published-assignments/:id/submissions/:inviteId` (renders the draft to
+  text via `tiptapToText`, returns facts). Frontend `SubmissionReview` page shows
+  the facts grid, a paste-ratio bar, neutral observations (e.g. «текст набран
+  вручную, без вставок» vs «вставкой введено N% текста»), and the submission text;
+  submitted students on the detail page now link through («Открыть работу →»).
+  `ProvenanceFacts` type in `shared`. Verified owner-scoping + computation against
+  dev DB (synthetic, zero residue); both typechecks clean, 143/143 tests green.
+  Submitted works are now viewable + attested; **AI grading of them is Q4b**.
 - **Published assignments — student writing surface (Feature Q3b).** Public,
   account-less page at `/write/:token` (outside the app shell) where a student
   writes their submission. **TipTap v3 MIT core** added to the frontend

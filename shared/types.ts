@@ -14,6 +14,21 @@ export interface SubmissionTelemetry {
   last_edit_at:   string   // ISO — most recent edit
 }
 
+// Provenance facts derived from telemetry — transparent numbers the teacher
+// reads alongside the work (§5.1.3). Deliberately NOT a score or verdict; the
+// teacher judges, the platform attests.
+export interface ProvenanceFacts {
+  activeMinutes: number       // active editing time (idle gaps excluded)
+  spanMinutes:   number       // wall-clock from first to last edit
+  revisionCount: number
+  totalChars:    number
+  pastedChars:   number
+  largestPaste:  number       // largest single insertion
+  pasteRatio:    number       // pastedChars / totalChars, 0..1
+  startedAt:     string | null
+  lastEditAt:    string | null
+}
+
 // ─── Teacher ──────────────────────────────────────────────────────────────────
 
 export type TeacherRole = 'teacher' | 'institution_admin' | 'platform_admin'

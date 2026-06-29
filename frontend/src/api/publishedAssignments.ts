@@ -1,4 +1,5 @@
 import client from './client'
+import type { ProvenanceFacts } from '../types'
 
 export type PublishedStatus = 'draft' | 'open' | 'closed'
 export type InviteStatus    = 'invited' | 'writing' | 'submitted'
@@ -62,6 +63,18 @@ export async function addInvite(
 
 export async function deleteInvite(id: string, inviteId: string): Promise<void> {
   await client.delete(`/api/published-assignments/${id}/invites/${inviteId}`, { skipErrorToast: true })
+}
+
+export interface SubmissionReview {
+  student_name:    string | null
+  student_email:   string | null
+  submitted_at:    string | null
+  submission_text: string
+  provenance:      ProvenanceFacts
+}
+
+export async function getSubmission(id: string, inviteId: string): Promise<SubmissionReview> {
+  return (await client.get<SubmissionReview>(`/api/published-assignments/${id}/submissions/${inviteId}`)).data
 }
 
 /** The student writing-surface URL for an invite token (the link to share). */
