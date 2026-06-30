@@ -28,10 +28,14 @@ export interface InstitutionTeacher {
 }
 
 export interface PendingInvite {
-  id:         string
-  email:      string
-  expires_at: string
-  created_at: string
+  id:               string
+  email:            string
+  expires_at:       string
+  created_at:       string
+  // Migration 048 — tri-state. NULL = pre-migration row (status unknown,
+  // render as if no signal). TRUE = delivered, FALSE = send rejected.
+  email_delivered?: boolean | null
+  email_error?:     string  | null
 }
 
 export interface InstitutionCriterion extends Criterion {

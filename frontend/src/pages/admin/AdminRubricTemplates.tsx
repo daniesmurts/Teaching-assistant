@@ -117,7 +117,8 @@ export default function AdminRubricTemplates() {
   const weightInputClass = 'w-14 px-1.5 py-1 text-xs font-sans text-ink bg-surface border border-border rounded-md text-center'
 
   return (
-    <div>
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-5xl mx-auto px-6 py-6">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display text-2xl font-bold text-ink">Шаблоны рубрик</h1>
@@ -229,6 +230,7 @@ export default function AdminRubricTemplates() {
           )}
         </>
       )}
+      </div>
     </div>
   )
 }

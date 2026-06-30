@@ -1,14 +1,17 @@
 import { pool } from '../connection'
 
 export interface TeacherInviteRow {
-  id:             string
-  institution_id: string
-  invited_by:     string
-  email:          string
-  token:          string
-  accepted:       boolean
-  expires_at:     string
-  created_at:     string
+  id:               string
+  institution_id:   string
+  invited_by:       string
+  email:            string
+  token:            string
+  accepted:         boolean
+  expires_at:       string
+  created_at:       string
+  // Tri-state — see migration 048. NULL = pre-migration row (unknown).
+  email_delivered:  boolean | null
+  email_error:      string  | null
 }
 
 export async function createInvite(data: {
@@ -39,6 +42,18 @@ export async function findValidInviteByToken(token: string): Promise<TeacherInvi
 
 export async function markInviteAccepted(id: string): Promise<void> {
   await pool.query(`UPDATE teacher_invites SET accepted = TRUE WHERE id = $1`, [id])
+}
+
+/** Record whether the invite email was actually delivered. Called after the
+ *  send completes — fire-and-forget from the caller's perspective, never lets a
+ *  DB error mask the original send-result the caller already returned. */
+export async function markInviteEmailStatus(id: string, ok: boolean, error: string | null): Promise<void> {
+  try {
+    await pool.query(
+      `UPDATE teacher_invites SET email_delivered = $2, email_error = $3 WHERE id = $1`,
+      [id, ok, error]
+    )
+  } catch { /* ignore — logging is fine, but a DB blip here shouldn't crash the request */ }
 }
 
 // Pending = not accepted and not expired. Scoped to the institution.

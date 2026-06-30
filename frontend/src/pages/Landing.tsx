@@ -69,7 +69,7 @@ export default function Landing() {
         <h2 className="font-display text-2xl font-bold mb-4">Академическое выгорание — это реальность</h2>
         <div className="prose prose-sm text-ink-secondary leading-relaxed space-y-4">
           <p>
-            Десятки часов в неделю уходят на проверку студенческих работ — вместо исследований, живых лекций и отдыха. ИСПУМ сокращает это время на 80%: вы задаёте критерии, ИИ анализирует и даёт развёрнутый отзыв, вы — просматриваете и утверждаете.
+            Десятки часов в неделю уходят на проверку студенческих работ — вместо исследований, живых лекций и отдыха. ИСПУМ сокращает это время на 80%: вы задаёте критерии, платформа анализирует и даёт развёрнутый отзыв, вы — просматриваете и утверждаете.
           </p>
         </div>
       </section>
@@ -84,7 +84,7 @@ export default function Landing() {
               <div className="text-xs font-bold text-amber uppercase tracking-wider">Интеллектуальная проверка</div>
               <h3 className="font-display text-3xl font-bold">Обучается на ваших оценках</h3>
               <p className="text-ink-secondary leading-relaxed">
-                ИСПУМ не даёт шаблонных ответов. Каждая утверждённая оценка — это сигнал: система запоминает ваши стандарты и требования. Чем больше работ вы проверяете, тем точнее ИИ понимает именно ваш стиль.
+                ИСПУМ не даёт шаблонных ответов. Каждая утверждённая оценка — это сигнал: система запоминает ваши стандарты и требования. Чем больше работ вы проверяете, тем точнее ИСПУМ понимает именно ваш стиль.
               </p>
             </div>
             <div className="flex-1 w-full bg-surface border border-border rounded-xl p-6 shadow-sm">
@@ -228,7 +228,7 @@ export default function Landing() {
           </div>
           <div className="space-y-3">
             <div className="w-10 h-10 rounded-full bg-amber-light text-amber flex items-center justify-center font-bold text-lg mb-4">2</div>
-            <h4 className="font-bold text-lg">Доверьте рутину ИИ</h4>
+            <h4 className="font-bold text-lg">Доверьте рутину ИСПУМ</h4>
             <p className="text-sm text-ink-secondary leading-relaxed">Алгоритмы DeepSeek анализируют текст и формируют подробный черновик отзыва или структуры лекции.</p>
           </div>
           <div className="space-y-3">
@@ -302,7 +302,7 @@ export default function Landing() {
                 <li className="flex gap-2 text-ink"><span>•</span> Рецензирование больших работ (ВКР, диплом)</li>
                 <li className="flex gap-2 text-ink"><span>•</span> Расчётные задачи: физика, математика, инженерия</li>
                 <li className="flex gap-2 text-ink"><span>•</span> Загрузка документов (PDF, Word, OCR)</li>
-                <li className="flex gap-2 text-ink"><span>•</span> ИИ обучается на ваших оценках (RAG)</li>
+                <li className="flex gap-2 text-ink"><span>•</span> ИСПУМ обучается на ваших оценках (RAG)</li>
                 <li className="flex gap-2 text-ink"><span>•</span> Журнал проверок и экспорт в Moodle (CSV)</li>
                 <li className="flex gap-2 text-ink"><span>•</span> Письма с отзывами для студентов</li>
                 <li className="flex gap-2 text-ink"><span>•</span> Без водяных знаков, приоритетная поддержка</li>
@@ -402,7 +402,7 @@ export default function Landing() {
                   <td className="py-3 px-4 text-success">✓</td>
                 </tr>
                 <tr className="border-b border-border hover:bg-surface transition-colors">
-                  <td className="py-3 px-4">Обучение ИИ на ваших оценках (RAG)</td>
+                  <td className="py-3 px-4">Обучение ИСПУМ на ваших оценках (RAG)</td>
                   <td className="py-3 px-4 text-ink-tertiary">✕</td>
                   <td className="py-3 px-4 text-success">✓</td>
                   <td className="py-3 px-4 text-success">✓</td>

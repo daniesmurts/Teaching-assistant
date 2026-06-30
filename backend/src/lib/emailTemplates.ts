@@ -111,6 +111,60 @@ export function registrationEmail(name: string): Omit<EmailPayload, 'to'> {
   }
 }
 
+// ─── Pro tier granted by an admin (free comp / pilot / institutional) ────────
+
+export function proGrantedEmail(
+  name: string,
+  days: number,
+  expiresAt: Date
+): Omit<EmailPayload, 'to'> {
+  const fn  = firstName(name)
+  const url = `${process.env.FRONTEND_URL ?? ''}/dashboard`
+  return {
+    subject: 'Вам предоставлен бесплатный доступ к ИСПУМ Pro',
+    html: wrap(`
+      <p>Здравствуйте, ${fn}!</p>
+      <p>Поздравляем — вам предоставлен <strong>бесплатный доступ к ИСПУМ Pro</strong> на ${days} ${pluralDays(days)}.</p>
+      <p style="color:#6B6560;font-size:13px">
+        Доступ активен до <strong>${fmtRu(expiresAt)}</strong>. По истечении срока аккаунт автоматически вернётся на бесплатный план — оплата не списывается.
+      </p>
+      <p>Что включает Pro:</p>
+      <ul style="color:#1A1A1A;font-size:14px;line-height:1.7;padding-left:18px;margin:8px 0">
+        <li>Безлимитные проверки работ и презентации</li>
+        <li>Загрузка PDF / Word / изображений</li>
+        <li>RAG-маховик — точность растёт с каждой проверкой</li>
+        <li>Генерация писем со студенческой обратной связью</li>
+        <li>Полная история проверок</li>
+      </ul>
+      ${btn(url, 'Перейти в ИСПУМ')}
+      <p style="color:#6B6560;font-size:13px">
+        Если у вас есть вопросы, напишите нам: <a href="mailto:support@ispum.ru" style="color:#C8860A">support@ispum.ru</a>.
+      </p>
+    `),
+    text:
+      `Здравствуйте, ${fn}!\n\n` +
+      `Вам предоставлен бесплатный доступ к ИСПУМ Pro на ${days} ${pluralDays(days)}.\n` +
+      `Доступ активен до ${fmtRu(expiresAt)}. По истечении срока аккаунт автоматически вернётся на бесплатный план.\n\n` +
+      `Что включает Pro:\n` +
+      `· Безлимитные проверки и презентации\n` +
+      `· Загрузка PDF / Word / изображений\n` +
+      `· RAG-маховик — точность растёт с каждой проверкой\n` +
+      `· Генерация писем со студенческой обратной связью\n` +
+      `· Полная история проверок\n\n` +
+      `Перейти в ИСПУМ: ${url}\n\n` +
+      `Вопросы: support@ispum.ru\n\nИСПУМ · ispum.ru`,
+  }
+}
+
+// Russian plural for «дн.» — 1 день / 2 дня / 5 дней / 21 день / 22 дня / 25 дней.
+function pluralDays(n: number): string {
+  const mod10  = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return 'день'
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return 'дня'
+  return 'дней'
+}
+
 // ─── Password reset ───────────────────────────────────────────────────────────
 
 export function passwordResetEmail(
@@ -119,6 +173,7 @@ export function passwordResetEmail(
 ): Omit<EmailPayload, 'to'> {
   const fn = firstName(name)
   return {
+    category: 'security',
     subject: 'Сброс пароля ИСПУМ',
     html: wrap(`
       <p>Здравствуйте, ${fn}!</p>
@@ -142,6 +197,7 @@ export function passwordResetEmail(
 export function passwordChangedEmail(name: string): Omit<EmailPayload, 'to'> {
   const fn = firstName(name)
   return {
+    category: 'security',
     subject: 'Пароль ИСПУМ изменён',
     html: wrap(`
       <p>Здравствуйте, ${fn}!</p>
@@ -165,7 +221,7 @@ export function adminSignupEmail(data: {
 }): Omit<EmailPayload, 'to'> {
   const when = fmtRu(new Date())
   return {
-    subject: `🎉 Новая регистрация — ${data.email}`,
+    subject: `[ИСПУМ] Новая регистрация — ${data.email}`,
     html: wrap(`
       <p><strong>Новый преподаватель зарегистрировался в ИСПУМ.</strong></p>
       <p>
@@ -189,7 +245,7 @@ export function adminPurchaseEmail(data: {
 }): Omit<EmailPayload, 'to'> {
   const when = fmtRu(new Date())
   return {
-    subject: `💰 Оплата — ${data.planLabel} (${data.email})`,
+    subject: `[ИСПУМ] Оплата — ${data.planLabel} (${data.email})`,
     html: wrap(`
       <p><strong>Поступила оплата в ИСПУМ.</strong></p>
       <p>
@@ -214,7 +270,7 @@ export function feedbackEmail(data: {
   const cat = labels[data.category] ?? data.category
   const safe = data.message.replace(/</g, '&lt;').replace(/>/g, '&gt;')
   return {
-    subject: `💬 Отзыв (${cat}) — ${data.email}`,
+    subject: `[ИСПУМ] Отзыв (${cat}) — ${data.email}`,
     html: wrap(`
       <p><strong>Новый отзыв в ИСПУМ.</strong></p>
       <p style="color:#6B6560;font-size:13px">

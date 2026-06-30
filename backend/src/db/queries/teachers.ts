@@ -81,6 +81,15 @@ export async function findTeacherRowById(id: string): Promise<TeacherRow | null>
   return rows[0] ?? null
 }
 
+/** Update the teacher's display name. Used by the Settings page so a mistyped
+ *  name at signup can be corrected without rebuilding the account. */
+export async function updateTeacherName(teacherId: string, name: string): Promise<void> {
+  await pool.query(
+    `UPDATE teachers SET name = $2 WHERE id = $1`,
+    [teacherId, name]
+  )
+}
+
 export async function updateTeacherPassword(
   id: string,
   passwordHash: string

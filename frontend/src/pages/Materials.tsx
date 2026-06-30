@@ -57,7 +57,7 @@ const CARDS: MaterialCard[] = [
 export default function Materials() {
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Материалы" subtitle="Что подготовить с помощью ИИ" />
+      <TopBar title="Материалы" subtitle="Что подготовить с помощью ИСПУМ" />
 
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="max-w-[960px] mx-auto page-enter">

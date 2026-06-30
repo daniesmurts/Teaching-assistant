@@ -662,7 +662,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
             <Button type="submit" className="w-full" loading={loading} disabled={atGradeLimit || !weightsValid}>
               {loading
                 ? (isLong ? 'Рецензируем…' : thorough ? 'Тщательная проверка…' : isCalc ? 'Пошаговая проверка…' : 'Проверяем…')
-                : (isLong ? 'Рецензировать работу' : 'Проверить с ИИ')}
+                : (isLong ? 'Рецензировать работу' : 'Проверить')}
               {!loading && gradesLimit !== null && (
                 <span className="ml-2 opacity-60 text-xs">
                   ({gradesUsed}/{gradesLimit})

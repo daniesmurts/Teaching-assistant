@@ -4,6 +4,11 @@ export async function deleteAccount(password: string): Promise<void> {
   await client.delete('/api/account', { data: { password } })
 }
 
+/** Update the teacher's display name. Returns the new name on success. */
+export async function updateProfileName(name: string): Promise<{ id: string; name: string }> {
+  return (await client.patch<{ id: string; name: string }>('/api/account/profile', { name })).data
+}
+
 /**
  * Stream a JSON export of the teacher's account to disk. Submissions and
  * syllabuses default to OFF — the teacher opts in.

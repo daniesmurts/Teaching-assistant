@@ -66,7 +66,14 @@ export default function Register() {
     enabled: !!inviteToken,
   })
   useEffect(() => {
-    if (invite?.valid && invite.email) setForm((f) => ({ ...f, email: invite.email! }))
+    if (!invite?.valid) return
+    setForm((f) => ({
+      ...f,
+      email:      invite.email          ?? f.email,
+      // Prefill university with the institution name — they're joining it by
+      // definition, so leaving the field empty just makes them retype it.
+      university: invite.institution_name ?? f.university,
+    }))
   }, [invite])
   const invited = invite?.valid === true
 

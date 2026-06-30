@@ -130,20 +130,43 @@ export default function InstitutionTeachers() {
               Ожидают принятия ({invites.length})
             </div>
             <div className="bg-surface border border-border rounded-lg overflow-hidden">
-              {invites.map((inv, i, arr) => (
-                <div key={inv.id} className={`flex items-center gap-3 px-4 py-3 ${i < arr.length - 1 ? 'border-b border-border' : ''}`}>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-sans text-ink truncate">{inv.email}</div>
-                    <div className="text-xs font-sans text-ink-tertiary">приглашён · до {fmt(inv.expires_at)}</div>
+              {invites.map((inv, i, arr) => {
+                // Migration 048 surfaces email delivery on the row.
+                // FALSE → send was attempted and rejected (Unisender 403, SMTP error, …).
+                // NULL  → pre-migration row, status unknown; render as if no signal.
+                const failed = inv.email_delivered === false
+                return (
+                  <div key={inv.id} className={`flex items-center gap-3 px-4 py-3 ${i < arr.length - 1 ? 'border-b border-border' : ''}`}>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-sans text-ink truncate">{inv.email}</span>
+                        {failed && (
+                          <span
+                            className="text-[10px] font-sans font-semibold uppercase tracking-wider text-danger bg-danger-bg border border-danger/20 rounded-sm px-1.5 py-0.5 flex-shrink-0"
+                            title={inv.email_error ?? 'Не удалось отправить письмо'}
+                          >
+                            Письмо не доставлено
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs font-sans text-ink-tertiary">
+                        приглашён · до {fmt(inv.expires_at)}
+                        {failed && inv.email_error && (
+                          <span className="text-danger ml-1.5" title={inv.email_error}>
+                            · {inv.email_error.length > 80 ? inv.email_error.slice(0, 80) + '…' : inv.email_error}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => revokeMut.mutate(inv.id)}
+                      className="text-xs font-sans text-ink-secondary hover:text-danger transition-colors"
+                    >
+                      Отозвать
+                    </button>
                   </div>
-                  <button
-                    onClick={() => revokeMut.mutate(inv.id)}
-                    className="text-xs font-sans text-ink-secondary hover:text-danger transition-colors"
-                  >
-                    Отозвать
-                  </button>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )}

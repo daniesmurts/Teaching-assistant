@@ -168,7 +168,7 @@ function AiGradeSection({ grade, grading, onGrade, onOpenJournal }: {
             Получите предварительную оценку. Итоговую проверку и утверждение вы делаете в Журнале.
           </div>
         </div>
-        <Button onClick={onGrade} loading={grading}>Проверить с ИИ</Button>
+        <Button onClick={onGrade} loading={grading}>Проверить</Button>
       </div>
     )
   }

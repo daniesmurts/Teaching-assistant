@@ -13,6 +13,7 @@ import {
 } from '../db/queries/institutions'
 import {
   createInvite, listPendingInvites, deleteInvite, findActiveInviteForEmail,
+  markInviteEmailStatus,
 } from '../db/queries/teacherInvites'
 import { findTeacherByEmail, findTeacherById } from '../db/queries/teachers'
 import { findCriteriaByInstitution, createCriterion, findCriteriaByIds } from '../db/queries/criteria'
@@ -117,11 +118,20 @@ router.post('/teachers/invite', validate(inviteRules), asyncHandler(async (req, 
   const inviteUrl = `${process.env.FRONTEND_URL ?? ''}/register?invite=${invite.token}`
   const inviter = await findTeacherById(req.teacher.id)
   const inviterName = inviter?.name ?? req.teacher.email
-  sendEmail({ ...teacherInviteEmail(inviterName, institution.name, inviteUrl), to: email }) // fire-and-forget
+
+  // Await delivery so the panel reflects the real outcome on its next fetch.
+  // Send result errors are already logged inside sendEmail; we just record on
+  // the invite row so the admin sees the status without SSH'ing into a VM.
+  const send = await sendEmail({ ...teacherInviteEmail(inviterName, institution.name, inviteUrl), to: email })
+  await markInviteEmailStatus(invite.id, send.ok, send.ok ? null : (send.error ?? 'unknown'))
+
   recordAudit({ institutionId: id, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
     action: 'teacher.invited', target: email })
 
-  res.status(201).json({ id: invite.id, email: invite.email, expires_at: invite.expires_at })
+  res.status(201).json({
+    id: invite.id, email: invite.email, expires_at: invite.expires_at,
+    email_delivered: send.ok, email_error: send.ok ? null : (send.error ?? null),
+  })
 }))
 
 // Bulk invite — paste many addresses at once (CSV-style onboarding).
@@ -161,7 +171,8 @@ router.post('/teachers/invite-bulk', validate(bulkInviteRules), asyncHandler(asy
     available -= 1
 
     const inviteUrl = `${process.env.FRONTEND_URL ?? ''}/register?invite=${invite.token}`
-    sendEmail({ ...teacherInviteEmail(inviterName, institution.name, inviteUrl), to: email }) // fire-and-forget
+    const send = await sendEmail({ ...teacherInviteEmail(inviterName, institution.name, inviteUrl), to: email })
+    await markInviteEmailStatus(invite.id, send.ok, send.ok ? null : (send.error ?? 'unknown'))
     invited.push(email)
   }
 

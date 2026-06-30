@@ -82,7 +82,7 @@ export default function Pricing() {
                   <li className="flex gap-2 text-ink"><span>•</span> Рецензирование больших работ (ВКР, диплом)</li>
                   <li className="flex gap-2 text-ink"><span>•</span> Расчётные задачи: физика, математика, инженерия</li>
                   <li className="flex gap-2 text-ink"><span>•</span> Загрузка документов (PDF, Word, OCR)</li>
-                  <li className="flex gap-2 text-ink"><span>•</span> ИИ обучается на ваших оценках (RAG)</li>
+                  <li className="flex gap-2 text-ink"><span>•</span> ИСПУМ обучается на ваших оценках (RAG)</li>
                   <li className="flex gap-2 text-ink"><span>•</span> Журнал проверок и экспорт в Moodle (CSV)</li>
                   <li className="flex gap-2 text-ink"><span>•</span> Письма с отзывами для студентов</li>
                   <li className="flex gap-2 text-ink"><span>•</span> Без водяных знаков, приоритетная поддержка</li>
@@ -176,7 +176,7 @@ export default function Pricing() {
                     <td className="py-3 px-4 text-success">✓</td>
                   </tr>
                   <tr className="border-b border-border hover:bg-surface-warm transition-colors">
-                    <td className="py-3 px-4">Обучение ИИ на ваших оценках (RAG)</td>
+                    <td className="py-3 px-4">Обучение ИСПУМ на ваших оценках (RAG)</td>
                     <td className="py-3 px-4 text-ink-tertiary">✕</td>
                     <td className="py-3 px-4 text-success">✓</td>
                     <td className="py-3 px-4 text-success">✓</td>

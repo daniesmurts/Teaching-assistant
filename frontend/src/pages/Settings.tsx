@@ -5,21 +5,51 @@ import { Input } from '../components/ui/Input'
 import Button from '../components/ui/Button'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
-import { deleteAccount, downloadAccountExport } from '../api/account'
+import { deleteAccount, downloadAccountExport, updateProfileName } from '../api/account'
 
 const CONFIRM_WORD = 'УДАЛИТЬ'
 
 export default function Settings() {
-  const teacher   = useAuthStore((s) => s.teacher)
-  const clearAuth = useAuthStore((s) => s.clearAuth)
-  const addToast  = useUIStore((s) => s.addToast)
-  const navigate  = useNavigate()
+  const teacher       = useAuthStore((s) => s.teacher)
+  const plan          = useAuthStore((s) => s.plan)
+  const updateAccount = useAuthStore((s) => s.updateAccount)
+  const clearAuth     = useAuthStore((s) => s.clearAuth)
+  const addToast      = useUIStore((s) => s.addToast)
+  const navigate      = useNavigate()
 
   const [open, setOpen]         = useState(false)
   const [password, setPassword] = useState('')
   const [confirm, setConfirm]   = useState('')
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
+
+  // Name edit — inline on the account row. State stays local until Save.
+  const [nameEditing, setNameEditing] = useState(false)
+  const [nameDraft, setNameDraft]     = useState('')
+  const [nameSaving, setNameSaving]   = useState(false)
+
+  function startNameEdit() {
+    setNameDraft(teacher?.name ?? '')
+    setNameEditing(true)
+  }
+  async function saveName() {
+    const trimmed = nameDraft.trim()
+    if (trimmed.length < 2)   { addToast('Имя должно содержать минимум 2 символа', 'error'); return }
+    if (trimmed.length > 100) { addToast('Имя не длиннее 100 символов', 'error'); return }
+    if (trimmed === teacher?.name) { setNameEditing(false); return }
+
+    setNameSaving(true)
+    try {
+      const updated = await updateProfileName(trimmed)
+      if (teacher && plan) updateAccount({ ...teacher, name: updated.name }, plan)
+      addToast('Имя обновлено', 'success')
+      setNameEditing(false)
+    } catch {
+      // Axios interceptor handles the toast.
+    } finally {
+      setNameSaving(false)
+    }
+  }
 
   // Export — both toggles default OFF per the privacy decision.
   const [includeSubmissions, setIncludeSubmissions] = useState(false)
@@ -72,7 +102,41 @@ export default function Settings() {
               Аккаунт
             </div>
             <dl className="space-y-2 text-sm font-sans">
-              <div className="flex justify-between"><dt className="text-ink-secondary">Имя</dt><dd className="text-ink">{teacher?.name ?? '—'}</dd></div>
+              <div className="flex justify-between items-center gap-3">
+                <dt className="text-ink-secondary flex-shrink-0">Имя</dt>
+                {nameEditing ? (
+                  <dd className="flex items-center gap-2 flex-1 justify-end">
+                    <input
+                      autoFocus
+                      value={nameDraft}
+                      onChange={(e) => setNameDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter')  saveName()
+                        if (e.key === 'Escape') { setNameEditing(false); setNameDraft('') }
+                      }}
+                      maxLength={100}
+                      className="flex-1 max-w-[280px] text-sm font-sans bg-surface border border-border-strong rounded-md px-2 py-1 outline-none"
+                    />
+                    <Button size="sm" loading={nameSaving} onClick={saveName}>Сохранить</Button>
+                    <button
+                      onClick={() => { setNameEditing(false); setNameDraft('') }}
+                      className="text-xs font-sans text-ink-secondary hover:text-ink px-1.5 py-1"
+                    >
+                      Отмена
+                    </button>
+                  </dd>
+                ) : (
+                  <dd className="flex items-center gap-3">
+                    <span className="text-ink">{teacher?.name ?? '—'}</span>
+                    <button
+                      onClick={startNameEdit}
+                      className="text-xs font-sans text-amber hover:underline"
+                    >
+                      Изменить
+                    </button>
+                  </dd>
+                )}
+              </div>
               <div className="flex justify-between"><dt className="text-ink-secondary">Эл. почта</dt><dd className="text-ink">{teacher?.email}</dd></div>
               {teacher?.university && (
                 <div className="flex justify-between"><dt className="text-ink-secondary">Организация</dt><dd className="text-ink">{teacher.university}</dd></div>

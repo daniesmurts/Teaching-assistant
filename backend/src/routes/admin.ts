@@ -9,6 +9,8 @@ import {
   getUsageByFeature, getRecentErrors,
 } from '../db/queries/usageLog'
 import { upgradeTeacherToPro, cancelTeacherSubscription } from '../db/queries/teachers'
+import { sendEmail } from '../services/emailTransport'
+import { proGrantedEmail } from '../lib/emailTemplates'
 import {
   listInstitutionsWithCounts, createInstitution, updateInstitution,
   getSamlConfig, setSamlConfig,
@@ -315,10 +317,23 @@ router.post('/teachers/:id/subscription/grant', asyncHandler(async (req, res) =>
 
   await upgradeTeacherToPro(req.params.id, days, 'admin_grant')
   const { rows: fresh } = await pool.query(
-    'SELECT id, email, plan_tier, plan_expires_at FROM teachers WHERE id = $1',
+    'SELECT id, email, name, plan_tier, plan_expires_at FROM teachers WHERE id = $1',
     [req.params.id]
   )
-  res.json(fresh[0])
+
+  // Congratulations email — only from the freebie grant path (the paid path in
+  // paymentFulfillment sends its own receipt). Fire-and-forget so a Unisender
+  // hiccup doesn't fail the admin's grant action; status surfacing for this
+  // one is not worth a schema column.
+  const t = fresh[0]
+  if (t?.email && t.plan_expires_at) {
+    sendEmail({
+      ...proGrantedEmail(t.name ?? t.email, days, new Date(t.plan_expires_at)),
+      to: t.email,
+    })
+  }
+
+  res.json(t)
 }))
 
 // Cancel a subscription — immediate downgrade to free.

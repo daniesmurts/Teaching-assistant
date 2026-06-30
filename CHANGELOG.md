@@ -14,7 +14,83 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Changed
+- **Email deliverability — Reply-To + List-Unsubscribe + emoji-free admin subjects.**
+  Three additive sender-reputation wins after observing invites landing in
+  Yandex's Спам folder despite verified SPF/DKIM/DMARC: (a) admin-notification
+  subjects in [emailTemplates.ts](backend/src/lib/emailTemplates.ts) no longer
+  start with 🎉 💰 💬 (Yandex/Mail.ru classifiers weight emoji-loaded subjects
+  against the whole sender reputation, even though those go to the owner);
+  replaced with `[ИСПУМ]` prefix. (b) Every send now carries a `Reply-To`
+  header (default `support@ispum.ru`, override via `EMAIL_REPLY_TO`) instead
+  of leaving replies to bounce into the `noreply@` void. (c) Non-security
+  emails now carry `List-Unsubscribe: <mailto:unsubscribe@ispum.ru?…>` +
+  `List-Unsubscribe-Post: List-Unsubscribe=One-Click` — Gmail/Yahoo's Feb-2024
+  sender rules made these de facto required for inbox placement, and they
+  signal legitimacy to spam classifiers. `EmailPayload` gains an optional
+  `category: 'security' | 'transactional'`; `passwordResetEmail` /
+  `passwordChangedEmail` mark themselves `security` so they skip the
+  unsubscribe headers (security-critical mail must not be unsubscribable).
+  Wired through both the Unisender Go API (`message.reply_to` + `message.headers`)
+  and the nodemailer SMTP fallback. Env-overridable: `EMAIL_REPLY_TO`,
+  `EMAIL_UNSUBSCRIBE_MAILTO`.
+
+### Changed
+- **Copy sweep: «ИИ» → «ИСПУМ» in marketing, onboarding and FeatureIntro cards.**
+  Replaced the generic «ИИ» placeholder with the product name (or «платформа»)
+  in selling / onboarding copy across: Grading FeatureIntro (per-screenshot
+  rewording), Onboarding checklist, WelcomeModal, UpgradeModal feature
+  bullets, Landing.tsx (intro, "Обучается на ваших оценках" section, the
+  "Доверьте рутину" three-step block, both feature/comparison tables),
+  Pricing (feature list + comparison row), UseCases, MaterialGenerator x3,
+  Topics, Courses (description + step), Criteria FeatureIntro title,
+  Quizzes, Presentations, Institutions STEM block, CurriculumStudio
+  (description + step + tagline), LearningLoop FeatureIntro
+  (title + description + steps), Materials TopBar subtitle, helpArticles.ts
+  intro bullets. **Left untouched** where «ИИ» is genuinely the topic, not a
+  stand-in for the product: Ethics page, About page philosophy taglines,
+  FAQ questions (users search by «ИИ»), ConfidenceBadge labels, error
+  messages naming the AI subsystem, internal admin metric titles, Перерасчёт
+  ИИ artefact labels, the «ПроверитьИ» action button name, the helpArticles
+  technical sections about provider switching and the «Модель ИИ под капотом»
+  article (they describe the AI model itself).
+
 ### Added
+- **Settings page — edit display name.** New `PATCH /api/account/profile` (2–100
+  char validated) lets a teacher fix a name they mistyped at signup without
+  going through support. Inline «Изменить» affordance on the Аккаунт card —
+  switches to an input with Enter-to-save / Esc-to-cancel, updates the auth
+  store on success so the sidebar avatar reflects the change immediately.
+  Scope deliberately tiny: name only. Email stays auth-coupled; university
+  stays institution-derived. Adding more profile fields later is additive.
+- **Invite link prefills university from the invite.** When a teacher arrives
+  at `/register?invite=<token>`, the университет field now prefills with the
+  inviting institution's name alongside the already-prefilled email. They're
+  joining that institution by definition — leaving the field empty just made
+  them retype it. Still editable in case the institution display name differs
+  from how they want to spell it.
+- **«Вам предоставлен бесплатный доступ к ИСПУМ Pro» email on admin grant.**
+  When the platform owner comps a teacher via
+  `POST /api/admin/teachers/:id/subscription/grant` (the existing freebie path
+  used for pilots / support / institutional gifts), the teacher now gets a
+  congratulations email listing what Pro includes and the expiry date.
+  Triggered only from the admin grant path — the paid path in
+  `services/paymentFulfillment.ts` continues to send its own receipt
+  (no duplicate). Fire-and-forget; respects the new Reply-To +
+  List-Unsubscribe sender-reputation headers. New `proGrantedEmail` template
+  with Russian-correct день/дня/дней pluralisation.
+- **Invite email delivery status surfaced in the admin panel.** Until now invite
+  send was fire-and-forget: the admin saw «приглашён» the moment the row was
+  inserted, even when Unisender / SMTP rejected the recipient (e.g. free-tier
+  domain-whitelist 403s). Migration 048 adds `teacher_invites.email_delivered`
+  + `email_error` (tri-state, NULL = pre-migration). `sendEmail` now returns
+  `{ ok, error? }` so callers can record the outcome; the single + bulk invite
+  routes await it and call `markInviteEmailStatus`. The «Ожидают принятия»
+  panel renders a danger «Письмо не доставлено» chip and shows the provider's
+  error message inline when `email_delivered === false`. Existing pending
+  invites (`email_delivered = NULL`) render unchanged. Diagnosed by a live
+  prod log audit — the smoking-gun example was Unisender code 903 on
+  yandex.ru / mail.ru recipients (free tier whitelists checked domains only).
 - **«Руководство» dashboard — V1 (Feature P tail d, grades-only).** New
   `/leadership` surface visible to any teacher holding `head` or `admin` on a
   unit (or the platform owner). Until now those role grants were recorded but
@@ -104,7 +180,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ### Added
 - **Published assignments — AI grading of submissions (Feature Q4b).** Closes the
-  loop: from the submission-review page, «Проверить с ИИ» grades the work through
+  loop: from the submission-review page, «Проверить» grades the work through
   the existing grader (`POST /api/published-assignments/:id/submissions/:inviteId/grade`,
   `aiLimiter`). The grader materialises an ordinary `assignments` row, then
   `attachSubmissionToGrade` (transactional) stamps it with `published_assignment_id`
@@ -113,7 +189,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   in the Журнал (approval feeds RAG as usual). Idempotent: re-grading returns the
   existing grade. `getSubmissionForTeacher` now LEFT JOINs the linked assignment so
   the review page shows the AI grade (letter + score + feedback + strengths/
-  improvements) inline next to the provenance report; «Проверить с ИИ» appears only
+  improvements) inline next to the provenance report; «Проверить» appears only
   while ungraded. **Holistic for v1** — published assignments don't yet carry
   criteria; criteria-scoped grading is a follow-up. Verified attach + grade-join
   against dev DB (synthetic, no AI call, zero residue); both typechecks clean,

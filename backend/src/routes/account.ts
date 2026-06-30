@@ -5,7 +5,7 @@ import { authLimiter } from '../middleware/rateLimits'
 import { asyncHandler } from '../lib/asyncHandler'
 import { ValidationError, UnauthorizedError } from '../errors/AppError'
 import { logger } from '../lib/logger'
-import { findTeacherByEmail, deleteTeacher } from '../db/queries/teachers'
+import { findTeacherByEmail, deleteTeacher, updateTeacherName } from '../db/queries/teachers'
 import { getStoragePathsByTeacher } from '../db/queries/documents'
 import { deleteObject } from '../services/objectStorage'
 import { buildAccountExport } from '../services/accountExport'
@@ -35,6 +35,25 @@ router.get(
     res.setHeader('Content-Type', 'application/json; charset=utf-8')
     res.setHeader('Content-Disposition', `attachment; filename="ispum-export-${stamp}.json"`)
     res.send(JSON.stringify(data, null, 2))
+  })
+)
+
+// ─── PATCH /api/account/profile ─ edit own name ──────────────────────────────
+// Scope is deliberately tiny: just the display name. Email lives in a separate
+// flow (it carries auth implications). University is fixed once the teacher is
+// in an institution. Adding more fields later is additive.
+
+router.patch(
+  '/profile',
+  asyncHandler(async (req, res) => {
+    const raw = (req.body as { name?: unknown }).name
+    if (typeof raw !== 'string') throw new ValidationError('Укажите имя')
+    const name = raw.trim()
+    if (name.length < 2)   throw new ValidationError('Имя должно содержать минимум 2 символа')
+    if (name.length > 100) throw new ValidationError('Имя не длиннее 100 символов')
+
+    await updateTeacherName(req.teacher.id, name)
+    res.json({ id: req.teacher.id, name })
   })
 )
 
