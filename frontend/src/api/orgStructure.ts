@@ -2,10 +2,11 @@ import client from './client'
 
 // Canonical org-unit taxonomy (Research.md §7.1). 'institution' is the root and
 // is not creatable via the tree-builder. `cluster` is displayed as «Полигруппа»;
-// `program` is «Образовательная программа» (РОП is `head` on this unit).
+// `direction` is «Направление» (sits under a polygroup); `program` is
+// «Образовательная программа» (РОП is `head` on this unit).
 export type OrgUnitType =
   | 'institution' | 'governance' | 'admin_office'
-  | 'cluster' | 'division' | 'program' | 'department'
+  | 'cluster' | 'direction' | 'division' | 'program' | 'department'
 
 export interface OrgUnit {
   id:             string

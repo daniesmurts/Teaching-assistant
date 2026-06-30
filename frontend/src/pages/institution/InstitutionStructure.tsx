@@ -14,6 +14,7 @@ const TYPE_LABEL: Record<OrgUnitType, string> = {
   governance:   'Руководство',
   admin_office: 'Управление / центр',
   cluster:      'Полигруппа',
+  direction:    'Направление',
   division:     'Институт / факультет',
   program:      'Образовательная программа',
   department:   'Кафедра',
@@ -31,7 +32,7 @@ const unitLabel = (u?: OrgUnit) => (u ? (u.short_name || u.name) : '—')
 // Order offered in the "add child" picker — institution excluded (roots are not
 // created here). Flexible depth: any of these may nest under any parent (§7.1).
 const CREATABLE: Exclude<OrgUnitType, 'institution'>[] =
-  ['governance', 'admin_office', 'cluster', 'division', 'program', 'department']
+  ['governance', 'admin_office', 'cluster', 'direction', 'division', 'program', 'department']
 
 // Default-collapsed types — at the институт level and below, kafedra lists get
 // long fast. Management chain (root / governance / admin_office / cluster)
