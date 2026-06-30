@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import FeatureIntro from '../../components/ui/FeatureIntro'
 import Button from '../../components/ui/Button'
@@ -33,6 +33,12 @@ const unitLabel = (u?: OrgUnit) => (u ? (u.short_name || u.name) : '—')
 const CREATABLE: Exclude<OrgUnitType, 'institution'>[] =
   ['governance', 'admin_office', 'cluster', 'division', 'program', 'department']
 
+// Default-collapsed types — at the институт level and below, kafedra lists get
+// long fast. Management chain (root / governance / admin_office / cluster)
+// stays open so the overall shape of the org is always visible.
+const DEFAULT_COLLAPSED_TYPES = new Set<OrgUnitType>(['division', 'program', 'department'])
+const EXPANDED_STORAGE_KEY = 'ga_org_expanded_v1'
+
 interface TreeNode extends OrgUnit { children: TreeNode[] }
 
 function buildTree(units: OrgUnit[]): TreeNode[] {
@@ -55,6 +61,54 @@ export default function InstitutionStructure() {
 
   const [addingUnder, setAddingUnder] = useState<string | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
+
+  // Expand/collapse state. Init from localStorage on first units-load; new
+  // units (added after init) fall through to the type-default rule via
+  // `isDefaultExpanded`. Persisted whenever the user toggles.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  const initialised = useRef(false)
+  useEffect(() => {
+    if (initialised.current || units.length === 0) return
+    initialised.current = true
+    try {
+      const saved = localStorage.getItem(EXPANDED_STORAGE_KEY)
+      if (saved) {
+        setExpanded(new Set(JSON.parse(saved) as string[]))
+        return
+      }
+    } catch { /* fall through to defaults */ }
+    setExpanded(new Set(units.filter((u) => !DEFAULT_COLLAPSED_TYPES.has(u.type_code)).map((u) => u.id)))
+  }, [units])
+  useEffect(() => {
+    if (!initialised.current) return
+    try { localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify([...expanded])) } catch { /* quota — ignore */ }
+  }, [expanded])
+
+  // For nodes the page hasn't seen before (e.g. just added), fall back to the
+  // type-default rule rather than treating "not in set" as "collapsed".
+  const isExpanded = (u: OrgUnit): boolean =>
+    expanded.has(u.id) || (!initialised.current && !DEFAULT_COLLAPSED_TYPES.has(u.type_code))
+
+  const toggleExpanded = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+
+  // Opening the «+» on a node should also expand it — otherwise the newly
+  // created child wouldn't be visible after the mutation resolves.
+  const openAddUnder = (id: string) => {
+    setAddingUnder((cur) => (cur === id ? null : id))
+    setExpanded((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+  }
+
+  // Header toggle — flips between "expand everything" and "collapse everything
+  // except roots". Roots stay expanded on collapse-all so the page never
+  // renders as a single closed strip.
+  const anyExpanded = units.some((u) => u.parent_id && expanded.has(u.id))
+  const expandAll   = () => setExpanded(new Set(units.map((u) => u.id)))
+  const collapseAll = () => setExpanded(new Set(units.filter((u) => !u.parent_id).map((u) => u.id)))
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['org-structure'] })
 
@@ -107,16 +161,27 @@ export default function InstitutionStructure() {
             Корневое подразделение не найдено. Обратитесь в поддержку платформы.
           </div>
         ) : (
-          <div className="space-y-1">
-            {tree.map((node) => (
-              <UnitRow
-                key={node.id} node={node} depth={0}
-                addingUnder={addingUnder} setAddingUnder={setAddingUnder}
-                editing={editing} setEditing={setEditing}
-                createMut={createMut} bulkMut={bulkMut} updateMut={updateMut} deleteMut={deleteMut}
-              />
-            ))}
-          </div>
+          <>
+            <div className="flex items-center justify-end mb-2">
+              <button
+                onClick={anyExpanded ? collapseAll : expandAll}
+                className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors px-2 py-1"
+              >
+                {anyExpanded ? 'Свернуть всё' : 'Развернуть всё'}
+              </button>
+            </div>
+            <div className="space-y-1">
+              {tree.map((node) => (
+                <UnitRow
+                  key={node.id} node={node} depth={0}
+                  addingUnder={addingUnder} openAddUnder={openAddUnder}
+                  editing={editing} setEditing={setEditing}
+                  isExpanded={isExpanded} toggleExpanded={toggleExpanded}
+                  createMut={createMut} bulkMut={bulkMut} updateMut={updateMut} deleteMut={deleteMut}
+                />
+              ))}
+            </div>
+          </>
         )}
 
         {units.length > 0 && <MembersSection units={units} />}
@@ -272,11 +337,15 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
 }
 
 function UnitRow({
-  node, depth, addingUnder, setAddingUnder, editing, setEditing, createMut, bulkMut, updateMut, deleteMut,
+  node, depth, addingUnder, openAddUnder, editing, setEditing,
+  isExpanded, toggleExpanded,
+  createMut, bulkMut, updateMut, deleteMut,
 }: {
   node: TreeNode; depth: number
-  addingUnder: string | null; setAddingUnder: (v: string | null) => void
+  addingUnder: string | null; openAddUnder: (id: string) => void
   editing: string | null; setEditing: (v: string | null) => void
+  isExpanded: (u: OrgUnit) => boolean
+  toggleExpanded: (id: string) => void
   createMut: ReturnType<typeof useMutation<any, any, any>>
   bulkMut:   ReturnType<typeof useMutation<any, any, any>>
   updateMut: ReturnType<typeof useMutation<any, any, any>>
@@ -284,6 +353,8 @@ function UnitRow({
 }) {
   const isRoot = !node.parent_id
   const [editName, setEditName] = useState(node.name)
+  const hasChildren = node.children.length > 0
+  const expanded = isExpanded(node)
 
   return (
     <div>
@@ -291,6 +362,20 @@ function UnitRow({
         className="flex items-center gap-2.5 bg-surface border border-border rounded-lg px-3 py-2.5 hover:border-border-mid transition-colors"
         style={{ marginLeft: depth * 22 }}
       >
+        {/* Chevron — only when there's something to expand. Placeholder keeps */}
+        {/* type chips vertically aligned across rows. */}
+        {hasChildren ? (
+          <button
+            onClick={() => toggleExpanded(node.id)}
+            aria-label={expanded ? 'Свернуть' : 'Развернуть'}
+            className="w-5 h-5 flex items-center justify-center rounded-sm text-ink-tertiary hover:text-ink hover:bg-surface-warm transition-colors flex-shrink-0"
+          >
+            <ChevronIcon open={expanded} />
+          </button>
+        ) : (
+          <span className="w-5 h-5 flex-shrink-0" aria-hidden="true" />
+        )}
+
         <span className="text-[10px] font-sans font-semibold uppercase tracking-wider text-ink-tertiary bg-surface-warm border border-border rounded-sm px-1.5 py-0.5 flex-shrink-0">
           {TYPE_LABEL[node.type_code]}
         </span>
@@ -308,6 +393,11 @@ function UnitRow({
           </div>
         )}
 
+        {hasChildren && !expanded && (
+          <span className="text-[11px] font-sans text-ink-tertiary flex-shrink-0">
+            {node.children.length} внутри
+          </span>
+        )}
         {node.member_count > 0 && (
           <span className="text-[11px] font-sans text-ink-tertiary flex-shrink-0">{node.member_count} чел.</span>
         )}
@@ -320,7 +410,7 @@ function UnitRow({
             </>
           ) : (
             <>
-              <IconBtn label="Добавить подразделение" onClick={() => setAddingUnder(addingUnder === node.id ? null : node.id)}><PlusIcon /></IconBtn>
+              <IconBtn label="Добавить подразделение" onClick={() => openAddUnder(node.id)}><PlusIcon /></IconBtn>
               {!isRoot && <IconBtn label="Переименовать" onClick={() => { setEditing(node.id); setEditName(node.name) }}><PencilIcon /></IconBtn>}
               {!isRoot && (
                 <IconBtn
@@ -336,18 +426,19 @@ function UnitRow({
       {addingUnder === node.id && (
         <AddChildForm
           parentId={node.id} depth={depth + 1}
-          onCancel={() => setAddingUnder(null)}
+          onCancel={() => openAddUnder(node.id)}
           onSubmit={(input) => createMut.mutate(input)}
           onSubmitBulk={(input) => bulkMut.mutate(input)}
           pending={createMut.isPending || bulkMut.isPending}
         />
       )}
 
-      {node.children.map((child) => (
+      {expanded && node.children.map((child) => (
         <UnitRow
           key={child.id} node={child} depth={depth + 1}
-          addingUnder={addingUnder} setAddingUnder={setAddingUnder}
+          addingUnder={addingUnder} openAddUnder={openAddUnder}
           editing={editing} setEditing={setEditing}
+          isExpanded={isExpanded} toggleExpanded={toggleExpanded}
           createMut={createMut} bulkMut={bulkMut} updateMut={updateMut} deleteMut={deleteMut}
         />
       ))}
@@ -511,3 +602,10 @@ const CheckIcon  = () => <Svg><path d="M20 6 9 17l-5-5" /></Svg>
 const XIcon      = () => <Svg><path d="M18 6 6 18" /><path d="M6 6l12 12" /></Svg>
 const PencilIcon = () => <Svg><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></Svg>
 const TrashIcon  = () => <Svg><path d="M3 6h18" /><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></Svg>
+const ChevronIcon = ({ open }: { open: boolean }) => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+       style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 150ms ease' }}>
+    <path d="M9 6l6 6-6 6" />
+  </svg>
+)

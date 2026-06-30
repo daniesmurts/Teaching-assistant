@@ -6,7 +6,11 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt' (not autoUpdate) so the new SW waits for explicit confirmation —
+      // the <NewVersionToast> in App.tsx surfaces the prompt as a bottom-left card
+      // with a one-click reload. Avoids silent mid-session reloads, especially in
+      // the grading flow where unsaved edits would be wiped.
+      registerType: 'prompt',
       includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'],
       manifest: {
         name: 'ИСПУМ — Интеллектуальная Система Проверки и Подготовки Учебных Материалов',

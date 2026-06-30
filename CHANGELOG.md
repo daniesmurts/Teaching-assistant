@@ -15,6 +15,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Added
+- **«Доступна новая версия» prompt on deploy.** Switched vite-plugin-pwa from
+  `autoUpdate` to `prompt` mode so a freshly deployed service worker waits for
+  explicit user action instead of silently reloading mid-session (which would
+  wipe unsaved grading edits). New `<NewVersionToast>` (mounted in App.tsx)
+  uses `useRegisterSW` to surface the prompt as a bottom-left card with
+  «Обновить» (calls `updateServiceWorker(true)`) and «Позже». Periodic check
+  every 10 min while the tab is visible so long-running sessions notice
+  deploys instead of waiting for the next manual reload. Added
+  `vite-plugin-pwa/client` to tsconfig types so the `virtual:pwa-register/react`
+  module resolves.
+- **Collapse/expand for the org structure tree.** Each unit with children gets
+  a chevron; clicking toggles its subtree. Default-collapsed for `division`,
+  `program`, `department` so a 9-institute / 100-kafedra tree no longer renders
+  as a scroll wall — the management chain stays expanded. Collapsed nodes show
+  «N внутри» so you know there's content underneath. Expanded state persists
+  per-browser in `localStorage` (`ga_org_expanded_v1`). Page-level «Свернуть
+  всё / Развернуть всё» toggle at the top of the tree. Opening the «+» on a
+  node auto-expands it so a newly added child is immediately visible.
 - **Paste-many bulk add for org units.** The «+» form on every unit in the
   structure page gained a «Списком» tab: pick a type once, paste one unit per
   line (`Название | Сокращение`, short optional), and the whole batch is

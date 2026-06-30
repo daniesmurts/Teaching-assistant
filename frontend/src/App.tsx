@@ -69,6 +69,7 @@ import Offer from './pages/legal/Offer'
 import Privacy from './pages/legal/Privacy'
 import Terms from './pages/legal/Terms'
 import Cookies from './pages/legal/Cookies'
+import NewVersionToast from './components/NewVersionToast'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -161,6 +162,7 @@ export default function App() {
       <BrowserRouter>
         <PlanSync />
         <RouteTracker />
+        <NewVersionToast />
         <Routes>
           <Route path="/"         element={<Landing />} />
           <Route path="/about"    element={<About />} />
