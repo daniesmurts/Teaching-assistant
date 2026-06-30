@@ -22,6 +22,28 @@ export const createOrgUnitRules = [
     .isLength({ max: 100 }).withMessage('Внешний код не длиннее 100 символов'),
 ]
 
+// Bulk create: one parent + type, many child units in a single transaction.
+// Cap the batch — a paste of thousands would block the connection and is almost
+// certainly a paste accident, not a real org structure.
+export const BULK_UNITS_MAX = 200
+
+export const bulkCreateOrgUnitsRules = [
+  body('parentId')
+    .isUUID().withMessage('Некорректный идентификатор родителя'),
+  body('typeCode')
+    .isIn(CREATABLE_TYPES).withMessage('Недопустимый тип подразделения'),
+  body('units')
+    .isArray({ min: 1, max: BULK_UNITS_MAX })
+    .withMessage(`Список подразделений должен содержать от 1 до ${BULK_UNITS_MAX} элементов`),
+  body('units.*.name')
+    .isString().trim()
+    .isLength({ min: 2, max: 200 }).withMessage('Каждое название — от 2 до 200 символов'),
+  body('units.*.shortName')
+    .optional({ nullable: true })
+    .isString().trim()
+    .isLength({ max: 50 }).withMessage('Сокращение не длиннее 50 символов'),
+]
+
 const UNIT_ROLES = ['admin', 'head', 'viewer']
 
 export const grantRoleRules = [

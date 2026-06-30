@@ -71,7 +71,10 @@ export interface OrgUnitWithCount extends OrgUnitRow {
 }
 
 /** The whole tree for an institution, each unit annotated with the number of
- *  teachers in its subtree (path-prefix match). Ordered by path. */
+ *  teachers in its subtree (path-prefix match). Ordered by `created_at` so the
+ *  frontend tree-builder renders siblings in the order the admin added them —
+ *  `path` would sort siblings by their trailing UUID (random), which surfaces
+ *  as 6-6 / 6-3 / 6-5 / … in the structure list. */
 export async function listOrgUnitsWithCounts(institutionId: string): Promise<OrgUnitWithCount[]> {
   const { rows } = await pool.query<OrgUnitWithCount>(
     `SELECT u.*,
@@ -81,7 +84,7 @@ export async function listOrgUnitsWithCounts(institutionId: string): Promise<Org
               WHERE pu.path LIKE u.path || '%') AS member_count
        FROM org_units u
       WHERE u.institution_id = $1
-      ORDER BY u.path`,
+      ORDER BY u.created_at`,
     [institutionId]
   )
   return rows
@@ -194,6 +197,58 @@ export async function createOrgUnit(data: {
 
     await client.query('COMMIT')
     return updated.rows[0]
+  } catch (err) {
+    await client.query('ROLLBACK')
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
+/** Create many sibling units under one parent, all of the same type, in a
+ *  single transaction. Used by the paste-many bulk-add UI. Caller validates
+ *  per-unit names; the DB UNIQUE (institution_id, parent_id, name) catches
+ *  collisions both within the batch and against existing siblings. */
+export async function bulkCreateOrgUnits(data: {
+  institutionId: string
+  parentId:      string
+  typeCode:      OrgUnitType
+  units:         { name: string; shortName?: string | null; externalCode?: string | null }[]
+}): Promise<OrgUnitRow[]> {
+  if (data.units.length === 0) return []
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+
+    const parent = await client.query<{ path: string; institution_id: string }>(
+      'SELECT path, institution_id FROM org_units WHERE id = $1 FOR UPDATE',
+      [data.parentId]
+    )
+    if (!parent.rows[0]) throw new Error('Parent org unit not found')
+    if (parent.rows[0].institution_id !== data.institutionId) {
+      throw new Error('Parent org unit belongs to a different institution')
+    }
+    const parentPath = parent.rows[0].path
+
+    const inserted: OrgUnitRow[] = []
+    for (const u of data.units) {
+      const row = await client.query<OrgUnitRow>(
+        `INSERT INTO org_units (institution_id, parent_id, type_code, name, short_name, external_code, path)
+         VALUES ($1, $2, $3, $4, $5, $6, '')
+         RETURNING *`,
+        [data.institutionId, data.parentId, data.typeCode, u.name,
+         u.shortName ?? null, u.externalCode ?? null]
+      )
+      const updated = await client.query<OrgUnitRow>(
+        'UPDATE org_units SET path = $2 WHERE id = $1 RETURNING *',
+        [row.rows[0].id, `${parentPath}${row.rows[0].id}/`]
+      )
+      inserted.push(updated.rows[0])
+    }
+
+    await client.query('COMMIT')
+    return inserted
   } catch (err) {
     await client.query('ROLLBACK')
     throw err

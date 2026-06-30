@@ -4,7 +4,7 @@ import FeatureIntro from '../../components/ui/FeatureIntro'
 import Button from '../../components/ui/Button'
 import { useUIStore } from '../../store/uiStore'
 import {
-  getOrgStructure, createOrgUnit, updateOrgUnit, deleteOrgUnit,
+  getOrgStructure, createOrgUnit, bulkCreateOrgUnits, updateOrgUnit, deleteOrgUnit,
   getMembers, setPrimaryUnit, grantRole, revokeRole,
   type OrgUnit, type OrgUnitType, type InstitutionMember, type UnitRole,
 } from '../../api/orgStructure'
@@ -62,6 +62,13 @@ export default function InstitutionStructure() {
     mutationFn: createOrgUnit,
     onSuccess: () => { invalidate(); setAddingUnder(null); addToast('Подразделение создано', 'success') },
   })
+  const bulkMut = useMutation({
+    mutationFn: bulkCreateOrgUnits,
+    onSuccess: (created) => {
+      invalidate(); setAddingUnder(null)
+      addToast(`Добавлено подразделений: ${created.length}`, 'success')
+    },
+  })
   const updateMut = useMutation({
     mutationFn: (v: { id: string; name: string }) => updateOrgUnit(v.id, { name: v.name }),
     onSuccess: () => { invalidate(); setEditing(null); addToast('Сохранено', 'success') },
@@ -106,7 +113,7 @@ export default function InstitutionStructure() {
                 key={node.id} node={node} depth={0}
                 addingUnder={addingUnder} setAddingUnder={setAddingUnder}
                 editing={editing} setEditing={setEditing}
-                createMut={createMut} updateMut={updateMut} deleteMut={deleteMut}
+                createMut={createMut} bulkMut={bulkMut} updateMut={updateMut} deleteMut={deleteMut}
               />
             ))}
           </div>
@@ -265,12 +272,13 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
 }
 
 function UnitRow({
-  node, depth, addingUnder, setAddingUnder, editing, setEditing, createMut, updateMut, deleteMut,
+  node, depth, addingUnder, setAddingUnder, editing, setEditing, createMut, bulkMut, updateMut, deleteMut,
 }: {
   node: TreeNode; depth: number
   addingUnder: string | null; setAddingUnder: (v: string | null) => void
   editing: string | null; setEditing: (v: string | null) => void
   createMut: ReturnType<typeof useMutation<any, any, any>>
+  bulkMut:   ReturnType<typeof useMutation<any, any, any>>
   updateMut: ReturnType<typeof useMutation<any, any, any>>
   deleteMut: ReturnType<typeof useMutation<any, any, any>>
 }) {
@@ -330,7 +338,8 @@ function UnitRow({
           parentId={node.id} depth={depth + 1}
           onCancel={() => setAddingUnder(null)}
           onSubmit={(input) => createMut.mutate(input)}
-          pending={createMut.isPending}
+          onSubmitBulk={(input) => bulkMut.mutate(input)}
+          pending={createMut.isPending || bulkMut.isPending}
         />
       )}
 
@@ -339,33 +348,74 @@ function UnitRow({
           key={child.id} node={child} depth={depth + 1}
           addingUnder={addingUnder} setAddingUnder={setAddingUnder}
           editing={editing} setEditing={setEditing}
-          createMut={createMut} updateMut={updateMut} deleteMut={deleteMut}
+          createMut={createMut} bulkMut={bulkMut} updateMut={updateMut} deleteMut={deleteMut}
         />
       ))}
     </div>
   )
 }
 
-function AddChildForm({ parentId, depth, onCancel, onSubmit, pending }: {
+// Parse the bulk-add textarea. One unit per line; "Название | Сокращение"
+// (pipe-separated; short optional). Empty lines and duplicates within the batch
+// are dropped silently — the backend also validates and the duplicate check
+// there returns a clearer error if two non-empty lines collide on name.
+function parseBulkUnits(text: string): { name: string; shortName: string | null }[] {
+  const seen = new Set<string>()
+  const out: { name: string; shortName: string | null }[] = []
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (!line) continue
+    const [namePart, shortPart] = line.split('|')
+    const name = namePart.trim()
+    if (name.length < 2) continue
+    const key = name.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ name, shortName: shortPart?.trim() || null })
+  }
+  return out
+}
+
+function AddChildForm({ parentId, depth, onCancel, onSubmit, onSubmitBulk, pending }: {
   parentId: string; depth: number; pending: boolean
-  onCancel: () => void
-  onSubmit: (input: { parentId: string; typeCode: Exclude<OrgUnitType, 'institution'>; name: string; shortName: string | null }) => void
+  onCancel:     () => void
+  onSubmit:     (input: { parentId: string; typeCode: Exclude<OrgUnitType, 'institution'>; name: string; shortName: string | null }) => void
+  onSubmitBulk: (input: { parentId: string; typeCode: Exclude<OrgUnitType, 'institution'>; units: { name: string; shortName: string | null }[] }) => void
 }) {
+  const [mode, setMode] = useState<'single' | 'bulk'>('single')
   const [typeCode, setTypeCode] = useState<Exclude<OrgUnitType, 'institution'>>('department')
   const [name, setName] = useState('')
   const [shortName, setShortName] = useState('')
+  const [bulkText, setBulkText] = useState('')
 
-  function submit() {
+  const parsed = useMemo(() => parseBulkUnits(bulkText), [bulkText])
+
+  function submitSingle() {
     if (name.trim().length < 2) return
     onSubmit({ parentId, typeCode, name: name.trim(), shortName: shortName.trim() || null })
     setName(''); setShortName('')
   }
+  function submitBulk() {
+    if (parsed.length === 0) return
+    onSubmitBulk({ parentId, typeCode, units: parsed })
+    setBulkText('')
+  }
+
+  const tabBase  = 'text-xs font-sans px-2.5 py-1 rounded-sm transition-colors cursor-pointer'
+  const tabOn    = 'bg-amber-light text-amber font-medium'
+  const tabOff   = 'text-ink-secondary hover:text-ink'
 
   return (
     <div
       className="bg-surface-warm border border-border rounded-lg px-3 py-3 mt-1 space-y-2"
       style={{ marginLeft: depth * 22 }}
     >
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-sans text-ink-tertiary uppercase tracking-wider">Режим</span>
+        <button type="button" onClick={() => setMode('single')}    className={`${tabBase} ${mode === 'single' ? tabOn : tabOff}`}>Одно</button>
+        <button type="button" onClick={() => setMode('bulk')}      className={`${tabBase} ${mode === 'bulk'   ? tabOn : tabOff}`}>Списком</button>
+      </div>
+
       <div className="flex flex-wrap items-end gap-2">
         <label className="block">
           <span className="text-[11px] font-sans text-ink-secondary block mb-1">Тип</span>
@@ -376,27 +426,56 @@ function AddChildForm({ parentId, depth, onCancel, onSubmit, pending }: {
             {CREATABLE.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
           </select>
         </label>
-        <label className="block flex-1 min-w-[180px]">
-          <span className="text-[11px] font-sans text-ink-secondary block mb-1">Название</span>
-          <input
-            autoFocus value={name} onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
-            placeholder="Кафедра физики"
-            className="w-full text-sm font-sans bg-surface border border-border rounded-md px-2 py-1.5 outline-none focus:border-border-strong"
-          />
-        </label>
-        <label className="block w-28">
-          <span className="text-[11px] font-sans text-ink-secondary block mb-1">Сокращение</span>
-          <input
-            value={shortName} onChange={(e) => setShortName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
-            placeholder="КФ"
-            className="w-full text-sm font-sans bg-surface border border-border rounded-md px-2 py-1.5 outline-none focus:border-border-strong"
-          />
-        </label>
+
+        {mode === 'single' ? (
+          <>
+            <label className="block flex-1 min-w-[180px]">
+              <span className="text-[11px] font-sans text-ink-secondary block mb-1">Название</span>
+              <input
+                autoFocus value={name} onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submitSingle() }}
+                placeholder="Кафедра физики"
+                className="w-full text-sm font-sans bg-surface border border-border rounded-md px-2 py-1.5 outline-none focus:border-border-strong"
+              />
+            </label>
+            <label className="block w-28">
+              <span className="text-[11px] font-sans text-ink-secondary block mb-1">Сокращение</span>
+              <input
+                value={shortName} onChange={(e) => setShortName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submitSingle() }}
+                placeholder="КФ"
+                className="w-full text-sm font-sans bg-surface border border-border rounded-md px-2 py-1.5 outline-none focus:border-border-strong"
+              />
+            </label>
+          </>
+        ) : (
+          <label className="block flex-1 min-w-[260px]">
+            <span className="text-[11px] font-sans text-ink-secondary block mb-1">
+              По одному в строке: <span className="font-mono text-ink-tertiary">Название | Сокращение</span> (сокращение необязательно)
+            </span>
+            <textarea
+              autoFocus value={bulkText} onChange={(e) => setBulkText(e.target.value)}
+              rows={6}
+              placeholder={'Кафедра физики | КФ\nКафедра химии | КХ\nКафедра математики'}
+              className="w-full text-sm font-sans bg-surface border border-border rounded-md px-2 py-1.5 outline-none focus:border-border-strong resize-y"
+            />
+          </label>
+        )}
       </div>
+
       <div className="flex items-center gap-2">
-        <Button onClick={submit} loading={pending}>Добавить</Button>
+        {mode === 'single' ? (
+          <Button onClick={submitSingle} loading={pending}>Добавить</Button>
+        ) : (
+          <>
+            <Button onClick={submitBulk} loading={pending} disabled={parsed.length === 0}>
+              Добавить {parsed.length > 0 ? `(${parsed.length})` : ''}
+            </Button>
+            {bulkText.trim() !== '' && parsed.length === 0 && (
+              <span className="text-xs font-sans text-warning">Каждое название — минимум 2 символа</span>
+            )}
+          </>
+        )}
         <button onClick={onCancel} className="text-xs font-sans text-ink-secondary hover:text-ink px-2 py-1">Отмена</button>
       </div>
     </div>

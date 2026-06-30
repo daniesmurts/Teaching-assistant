@@ -14,6 +14,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Added
+- **Paste-many bulk add for org units.** The «+» form on every unit in the
+  structure page gained a «Списком» tab: pick a type once, paste one unit per
+  line (`Название | Сокращение`, short optional), and the whole batch is
+  created under the parent in a single transaction. Server-side cap of 200 per
+  request. Cuts setup time from N round-trips to one when adding a wave of
+  institutes / kafedras at the same level. New endpoint
+  `POST /api/institution/structure/units/bulk` (validated by
+  `bulkCreateOrgUnitsRules`); query `bulkCreateOrgUnits` reuses the existing
+  path-from-parent calculation. The single-add mode is unchanged.
+
 ### Fixed
 - **New institutions now seed an org-tree root + default department.** Migration
   045 backfilled a root `institution` org_unit + `Кафедра (по умолчанию)` for

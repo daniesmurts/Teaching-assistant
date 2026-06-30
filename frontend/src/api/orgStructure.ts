@@ -34,6 +34,15 @@ export async function createOrgUnit(input: {
   return (await client.post<OrgUnit>('/api/institution/structure/units', input)).data
 }
 
+// Paste-many: create N siblings under one parent in a single transaction.
+export async function bulkCreateOrgUnits(input: {
+  parentId: string
+  typeCode: Exclude<OrgUnitType, 'institution'>
+  units:    { name: string; shortName?: string | null }[]
+}): Promise<OrgUnit[]> {
+  return (await client.post<{ units: OrgUnit[] }>('/api/institution/structure/units/bulk', input)).data.units
+}
+
 export async function updateOrgUnit(
   unitId: string,
   patch: { name?: string; shortName?: string | null; externalCode?: string | null }

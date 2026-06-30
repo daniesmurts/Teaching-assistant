@@ -5,11 +5,12 @@ import { validate } from '../middleware/validate'
 import { asyncHandler } from '../lib/asyncHandler'
 import { ValidationError, NotFoundError } from '../errors/AppError'
 import {
-  createOrgUnitRules, updateOrgUnitRules, grantRoleRules, setPrimaryRules,
+  createOrgUnitRules, bulkCreateOrgUnitsRules, updateOrgUnitRules,
+  grantRoleRules, setPrimaryRules,
 } from '../validation/orgUnitValidation'
 import {
   listOrgUnitsWithCounts, getOrgUnitById, getOrgUnitDependents,
-  createOrgUnit, updateOrgUnit, deleteOrgUnit,
+  createOrgUnit, bulkCreateOrgUnits, updateOrgUnit, deleteOrgUnit,
   listInstitutionMembersWithRoles, isTeacherInInstitution, countRoleOnUnit,
   addUnitRole, removeUnitRole, setPrimaryOrgUnit, getRootUnitForInstitution,
   type OrgUnitType, type UnitRole,
@@ -63,6 +64,39 @@ router.post('/units', validate(createOrgUnitRules), asyncHandler(async (req, res
     externalCode:  externalCode?.trim() || null,
   })
   res.status(201).json(unit)
+}))
+
+// ─── Bulk create siblings under one parent (paste-many UI) ───────────────────
+
+router.post('/units/bulk', validate(bulkCreateOrgUnitsRules), asyncHandler(async (req, res) => {
+  const instId = institutionId(req)
+  const { parentId, typeCode, units } = req.body as {
+    parentId: string; typeCode: string
+    units: { name: string; shortName?: string | null }[]
+  }
+
+  await unitInInstitution(parentId, instId)
+
+  // Reject batches that contain duplicate names — clearer error than letting the
+  // DB UNIQUE fire mid-transaction on the second row.
+  const normalized = units.map((u) => ({
+    name:      u.name.trim(),
+    shortName: u.shortName?.trim() || null,
+  }))
+  const seen = new Set<string>()
+  for (const u of normalized) {
+    const key = u.name.toLowerCase()
+    if (seen.has(key)) throw new ValidationError(`В списке есть повторяющееся название: «${u.name}»`)
+    seen.add(key)
+  }
+
+  const created = await bulkCreateOrgUnits({
+    institutionId: instId,
+    parentId,
+    typeCode:      typeCode as OrgUnitType,
+    units:         normalized,
+  })
+  res.status(201).json({ units: created })
 }))
 
 // ─── Rename / edit a unit ─────────────────────────────────────────────────────

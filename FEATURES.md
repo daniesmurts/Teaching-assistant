@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-06-29
+**Last updated:** 2026-06-30
 
 ---
 
@@ -94,7 +94,7 @@ A teacher in an institution-tier org (via invite or email-domain auto-join):
 
 Panel at `/institution` (gated to `institution_admin` / `platform_admin`):
 - **Overview** — teacher / grade / presentation counts, 30-day activity chart
-- **Структура (org-structure tree builder)** 🚧 — build the institution's unit tree (управления/центры → институты/факультеты → кафедры) at flexible depth: add units under any node, rename, delete (blocked until the unit is emptied of sub-units and teachers). Each unit shows its subtree headcount. Below the tree, **«Преподаватели и роли»**: assign each teacher to a kafedra and grant per-unit roles — Администратор / Руководитель / Наблюдатель — that cascade down the tree (revoking the last root admin is blocked to prevent lockout). §7 org model; remaining step is switching all admin routes onto the unit-scoped authoriser.
+- **Структура (org-structure tree builder)** 🚧 — build the institution's unit tree (управления/центры → институты/факультеты → полигруппы → образовательные программы → кафедры) at flexible depth: add units under any node (one at a time *or* «Списком» — paste many siblings of one type in a single batch, up to 200), rename, delete (blocked until the unit is emptied of sub-units and teachers). Each unit shows its subtree headcount. Below the tree, **«Преподаватели и роли»**: assign each teacher to a kafedra and grant per-unit roles — Администратор / Руководитель / Наблюдатель — that cascade down the tree (revoking the last root admin is blocked to prevent lockout). §7 org model; remaining step is switching all admin routes onto the unit-scoped authoriser.
 - **Usage** — tokens + grade/presentation counts over time, **CSV export** (never shows cost)
 - **Teachers** — list, activate/deactivate (frees a seat), single invite, **bulk invite** (paste list), revoke invites
 - **Criteria** — create institution-shared criteria (appear in every member's grading picker)
