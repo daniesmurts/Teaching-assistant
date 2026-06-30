@@ -1488,10 +1488,9 @@ ___
 
 Authorisation resolves through a **hierarchical org tree**, not through a
 flat role enum. Each `institution` is the root of a tree of `org_units`
-typed by `governance` / `admin_office` / `cluster` / `direction` /
-`division` / `program` / `department` — full design in
-[Research.md](Research.md) §7. `cluster` surfaces as «Полигруппа» in the
-UI; `direction` is «Направление» (sits under a polygroup); `program` is
+typed by `governance` / `admin_office` / `cluster` / `division` /
+`program` / `department` — full design in [Research.md](Research.md) §7.
+`cluster` surfaces as «Полигруппа» in the UI; `program` is
 «Образовательная программа» (РОП is `head` on this unit). Teachers
 belong to one `department` via `primary_org_unit_id`. Roles are scoped per
 unit via `org_unit_roles(teacher_id, org_unit_id, role)` where
@@ -1619,7 +1618,7 @@ CREATE TABLE org_units (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   institution_id  UUID NOT NULL REFERENCES institutions(id) ON DELETE CASCADE,
   parent_id       UUID REFERENCES org_units(id) ON DELETE CASCADE,
-  type_code       TEXT NOT NULL,        -- 'institution' | 'governance' | 'admin_office' | 'cluster' | 'direction' | 'division' | 'program' | 'department'
+  type_code       TEXT NOT NULL,        -- 'institution' | 'governance' | 'admin_office' | 'cluster' | 'division' | 'program' | 'department'
   name            TEXT NOT NULL,        -- full Russian name
   short_name      TEXT,                 -- УМЦ, ОАиД, etc.
   external_code   TEXT,                 -- LMS / LTI / AD mapping key

@@ -23,6 +23,7 @@ export type IconName =
   | 'layers'          // curriculum overlap analysis
   | 'grid'            // materials hub
   | 'log-out'
+  | 'bar-chart'       // leadership dashboard
 
 const PATHS: Record<IconName, JSX.Element> = {
   home: (
@@ -157,6 +158,15 @@ const PATHS: Record<IconName, JSX.Element> = {
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
       <path d="M16 17l5-5-5-5" />
       <path d="M21 12H9" />
+    </>
+  ),
+
+  'bar-chart': (
+    <>
+      <path d="M3 21h18" />
+      <path d="M7 17V11" />
+      <path d="M12 17V6" />
+      <path d="M17 17v-8" />
     </>
   ),
 }

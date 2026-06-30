@@ -28,14 +28,23 @@ import {
 import { findValidInviteByToken, markInviteAccepted } from '../db/queries/teacherInvites'
 import { getInstitutionById, findInstitutionByEmailDomain, countInstitutionTeachers } from '../db/queries/institutions'
 import { isInstitutionAdmin } from '../db/queries/orgUnits'
+import { hasLeadershipRole } from '../db/queries/leadership'
 
 // Tree-derived admin signals exposed on the auth payload so the frontend route
 // gates read authoritative org-tree state, not the legacy `teachers.role` enum.
 // is_institution_admin = holds `admin` on the institution root unit (§7).
+// is_leader = head/admin on any unit (or platform owner) — drives «Руководство»
+// sidebar visibility without an extra round trip on every page load.
 async function adminFlags(row: { id: string; institution_id: string | null; is_platform_admin: boolean }) {
+  const [is_institution_admin, has_role] = await Promise.all([
+    row.institution_id ? isInstitutionAdmin(row.id, row.institution_id) : Promise.resolve(false),
+    hasLeadershipRole(row.id),
+  ])
+  const is_platform_admin = row.is_platform_admin ?? false
   return {
-    is_platform_admin:    row.is_platform_admin ?? false,
-    is_institution_admin: row.institution_id ? await isInstitutionAdmin(row.id, row.institution_id) : false,
+    is_platform_admin,
+    is_institution_admin,
+    is_leader: is_platform_admin || has_role,
   }
 }
 

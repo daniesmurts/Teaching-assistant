@@ -432,6 +432,22 @@ customer needs scoped sub-unit access, so requirements are concrete rather than
 speculative. Pairs with the deferred read-only dashboards (viewer role) and
 the §2.x analytics features that would consume `head`/`viewer`.
 
+**Tail (d) — Leadership dashboard V2 · Effort: S–M.** V1 (shipped this
+session) is grades-only: subtree teacher list + 30-day grade activity. V2
+expands the same `/leadership` surface with:
+- Presentations generated in the subtree over 30 days (counts + by-teacher).
+- Published assignments in the subtree: counts of definitions, submissions,
+  active student writers, completion rate.
+- Per-teacher drill-down page (`/leadership/teachers/:id` scoped via
+  `canActOnUnit`) — recent grades, approval rate, edit-distance from AI,
+  active subjects.
+- Optional: viewer-role variant of the same page (read-only governance —
+  same data, no actions if/when we add actions to V2).
+Touches: `routes/leadership.ts` (new endpoints or extend `/overview`),
+`db/queries/leadership.ts`, `pages/Leadership.tsx` (tabs or extra sections).
+The per-teacher drill needs the canActOnUnit walk on the *teacher's*
+primary unit, not on the leadership unit — careful in the gate.
+
 Original design notes below.
 
 Replace today's flat `institutions` + 3-value `teachers.role` enum with a

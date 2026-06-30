@@ -15,6 +15,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Added
+- **«Руководство» dashboard — V1 (Feature P tail d, grades-only).** New
+  `/leadership` surface visible to any teacher holding `head` or `admin` on a
+  unit (or the platform owner). Until now those role grants were recorded but
+  inert; this is the first surface that consumes them. Backend:
+  `requireLeader` middleware (cheap existence check); `GET /api/leadership/units`
+  returns the picker list — direct holdings for regular leaders, all
+  institution roots for platform owner; `GET /api/leadership/overview?unitId`
+  scoped per-request via the existing `canActOnUnit` path-walk, returns the
+  subtree's teacher list (most-active first) and a zero-filled 30-day daily
+  grade series via a `generate_series` LEFT JOIN. Frontend: `Leadership.tsx`
+  with a unit picker (single-unit holders see a chip, multi-unit holders a
+  select; choice persists in `localStorage` so revisits land on the same
+  subtree), two cards (teachers, grades 30d), bar chart, teacher table. Auth
+  payload gains `is_leader: boolean` so the sidebar entry renders without an
+  extra round trip. V2 (presentations, published assignments, per-teacher
+  drill) tracked under Feature P tail d in TODO.md.
 - **«Доступна новая версия» prompt on deploy.** Switched vite-plugin-pwa from
   `autoUpdate` to `prompt` mode so a freshly deployed service worker waits for
   explicit user action instead of silently reloading mid-session (which would

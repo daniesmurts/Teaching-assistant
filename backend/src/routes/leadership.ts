@@ -1,0 +1,66 @@
+import { Router } from 'express'
+import { authenticate } from '../middleware/authenticate'
+import { requireLeader } from '../middleware/requireLeader'
+import { asyncHandler } from '../lib/asyncHandler'
+import { NotFoundError, ForbiddenError, ValidationError } from '../errors/AppError'
+import { canActOnUnit } from '../services/orgScope'
+import {
+  listDirectLeadershipUnits, listAllInstitutionRoots,
+  listSubtreeTeachers, getSubtreeActivity,
+} from '../db/queries/leadership'
+import { getOrgUnitById } from '../db/queries/orgUnits'
+
+// «Руководство» (head dashboard) — read-only. Discoverability check is
+// requireLeader; the per-target access check on /overview is canActOnUnit so a
+// head can only view subtrees they actually lead (not arbitrary unit ids passed
+// in the query).
+
+const router = Router()
+router.use(authenticate)
+router.use(requireLeader)
+
+// ─── GET /api/leadership/units ────────────────────────────────────────────────
+// Returns the picker list. Direct holdings for regular heads/admins; all
+// institution roots for the platform owner.
+
+router.get('/units', asyncHandler(async (req, res) => {
+  if (req.teacher.is_platform_admin) {
+    res.json({ units: await listAllInstitutionRoots() })
+    return
+  }
+  res.json({ units: await listDirectLeadershipUnits(req.teacher.id) })
+}))
+
+// ─── GET /api/leadership/overview?unitId=… ────────────────────────────────────
+// Subtree teachers + 30-day grade activity. Caller must hold head/admin on the
+// unit or any ancestor (or be platform admin).
+
+router.get('/overview', asyncHandler(async (req, res) => {
+  const unitId = String(req.query.unitId ?? '')
+  if (!unitId) throw new ValidationError('unitId required')
+
+  const unit = await getOrgUnitById(unitId)
+  if (!unit) throw new NotFoundError('Подразделение')
+
+  if (!req.teacher.is_platform_admin) {
+    const ok = await canActOnUnit(req.teacher.id, unitId, ['head', 'admin'])
+    if (!ok) throw new ForbiddenError('Нет доступа к этому подразделению')
+  }
+
+  const [activity, teachers] = await Promise.all([
+    getSubtreeActivity(unitId),
+    listSubtreeTeachers(unit.path),
+  ])
+
+  res.json({
+    unit:     { id: unit.id, name: unit.name, short_name: unit.short_name, type_code: unit.type_code },
+    teachers,
+    activity: {
+      grades_by_day:    activity.grades_by_day,
+      total_grades_30d: activity.total_grades_30d,
+      teacher_count:    activity.teacher_count,
+    },
+  })
+}))
+
+export default router

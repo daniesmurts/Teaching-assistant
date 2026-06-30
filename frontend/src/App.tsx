@@ -32,6 +32,7 @@ import MaterialGenerator from './pages/MaterialGenerator'
 import Materials from './pages/Materials'
 import Billing from './pages/Billing'
 import Settings from './pages/Settings'
+import Leadership from './pages/Leadership'
 import Help from './pages/Help'
 import Feedback from './pages/Feedback'
 import AdminLayout from './pages/admin/AdminLayout'
@@ -156,6 +157,20 @@ function InstitutionRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+// «Руководство» — visible to any head/admin on a unit (or platform admin).
+// is_leader is derived server-side; falls back to the institution-admin signal
+// for sessions stored before the flag was added.
+function LeadershipRoute({ children }: { children: React.ReactNode }) {
+  const teacher = useAuthStore((s) => s.teacher)
+  if (!teacher) return <Navigate to="/login" replace />
+  const isLeader =
+    (teacher.is_leader ?? false) ||
+    (teacher.is_platform_admin ?? teacher.role === 'platform_admin') ||
+    (teacher.is_institution_admin ?? teacher.role === 'institution_admin')
+  if (!isLeader) return <Navigate to="/dashboard" replace />
+  return <>{children}</>
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -204,6 +219,7 @@ export default function App() {
             <Route path="/quizzes"       element={<Quizzes />} />
             <Route path="/materials/:kind" element={<MaterialGenerator />} />
             <Route path="/billing"       element={<Billing />} />
+            <Route path="/leadership"    element={<LeadershipRoute><Leadership /></LeadershipRoute>} />
             <Route path="/settings"      element={<Settings />} />
             <Route path="/help"          element={<Help />} />
             <Route path="/feedback"      element={<Feedback />} />

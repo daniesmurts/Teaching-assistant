@@ -7,7 +7,6 @@ export const ORG_UNIT_TYPES = [
   'governance',
   'admin_office',
   'cluster',     // displayed as «Полигруппа» — renamed from «Кластер направлений»
-  'direction',   // «Направление» — sits under a polygroup, above kafedras
   'division',
   'program',     // «Образовательная программа» — РОП is `head` on this unit
   'department',

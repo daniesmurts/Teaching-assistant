@@ -24,6 +24,7 @@ import tasksRouter from './routes/tasks'
 import curriculumRouter from './routes/curriculum'
 import programsRouter from './routes/programs'
 import orgStructureRouter from './routes/orgUnits'
+import leadershipRouter from './routes/leadership'
 import publishedAssignmentsRouter from './routes/publishedAssignments'
 import publicWriteRouter from './routes/publicWrite'
 import quizzesRouter from './routes/quizzes'
@@ -128,6 +129,7 @@ app.use('/api/admin/evals',   adminEvalsRouter)   // before /api/admin so /evals
 app.use('/api/admin',         adminRouter)
 app.use('/api/institution/programs',  programsRouter)      // before /api/institution so it isn't shadowed
 app.use('/api/institution/structure', orgStructureRouter)  // before /api/institution so it isn't shadowed
+app.use('/api/leadership', leadershipRouter)
 app.use('/api/institution',   institutionRouter)
 app.use('/api/feedback',      feedbackRouter)
 app.use('/api/payments',      paymentsRouter)

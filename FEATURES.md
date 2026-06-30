@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-06-30
+**Last updated:** 2026-06-30 (Руководство V1 shipped)
 
 ---
 
@@ -87,6 +87,18 @@ Everything in Free, plus:
 A teacher in an institution-tier org (via invite or email-domain auto-join):
 - Automatically gets **full institution entitlements** (= Pro-level: unlimited, uploads, RAG, email)
 - Sees **institution-shared criteria** in the grading criteria picker, alongside own + global templates
+
+---
+
+## Unit leader (head / sub-unit admin) ✅
+
+A teacher granted `Руководитель` or sub-unit `Администратор` on any org_unit gets a dedicated read-only **«Руководство»** panel at `/leadership`:
+- **Unit picker** — single direct holding shown as a chip, multiple as a select (choice persists per browser). Platform owner sees all institution roots.
+- **Two cards** — teachers in the subtree, проверки за 30 дней.
+- **30-day activity chart** — daily grades, zero-filled.
+- **Teacher table** — name, primary kafedra, проверок за 30 дней, последняя активность (most-active first).
+- Subtree resolved via the materialised path on org_units; per-request scope re-checked through `canActOnUnit` so a head on кафедра X cannot peek into кафедра Y.
+- V1 is **grades-only and read-only**. Presentations / published-assignments / per-teacher drill tracked under Feature P tail d in TODO.md.
 
 ---
 

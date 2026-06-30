@@ -116,6 +116,9 @@ export default function Sidebar({ onClose }: Props) {
   const isInstitutionAdmin =
     (teacher?.is_platform_admin ?? teacher?.role === 'platform_admin') ||
     (teacher?.is_institution_admin ?? teacher?.role === 'institution_admin')
+  // Any head/admin on a unit (or platform/institution admin transitively).
+  const isLeader =
+    (teacher?.is_leader ?? false) || isInstitutionAdmin
 
   function logout() { clearAuth(); navigate('/login') }
 
@@ -177,10 +180,15 @@ export default function Sidebar({ onClose }: Props) {
           )}
         </NavLink>
 
-        {/* Institution admin — only for institution/platform admins */}
-        {isInstitutionAdmin && (
-          <div className="mt-3 pt-3 border-t border-white/5">
-            <NavRow item={{ icon: 'building', label: 'Организация', to: '/institution' }} />
+        {/* Leadership — visible to any head/admin on a unit (or institution/platform admin) */}
+        {(isLeader || isInstitutionAdmin) && (
+          <div className="mt-3 pt-3 border-t border-white/5 space-y-0.5">
+            {isLeader && (
+              <NavRow item={{ icon: 'bar-chart', label: 'Руководство', to: '/leadership' }} />
+            )}
+            {isInstitutionAdmin && (
+              <NavRow item={{ icon: 'building', label: 'Организация', to: '/institution' }} />
+            )}
           </div>
         )}
       </nav>
