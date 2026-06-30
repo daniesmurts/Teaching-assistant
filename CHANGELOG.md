@@ -14,6 +14,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Fixed
+- **New institutions now seed an org-tree root + default department.** Migration
+  045 backfilled a root `institution` org_unit + `Кафедра (по умолчанию)` for
+  every institution that existed when §7 shipped, but `createInstitution()`
+  (POST /api/admin/institutions) was never updated to do the same — so any
+  institution created since then arrived with zero org_units and the structure
+  page rendered "Корневое подразделение не найдено. Обратитесь в поддержку
+  платформы." `createInstitution` now seeds the root + default dept in the same
+  transaction as the institutions insert. Migration 047 re-runs the same
+  guarded backfill (idempotent — institutions already healed are skipped) to
+  fix existing prod institutions in this state and attach any teacher whose
+  `primary_org_unit_id` was left NULL by the same gap.
+
 ### Changed
 - **Frontend route gates read org-tree-derived admin flags (Feature P tail b).**
   `/api/auth/login` and `/api/auth/me` now return `is_platform_admin` and
@@ -45,6 +58,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   typecheck clean, 132/132 tests green.
 
 ### Added
+- **Published assignments — AI grading of submissions (Feature Q4b).** Closes the
+  loop: from the submission-review page, «Проверить с ИИ» grades the work through
+  the existing grader (`POST /api/published-assignments/:id/submissions/:inviteId/grade`,
+  `aiLimiter`). The grader materialises an ordinary `assignments` row, then
+  `attachSubmissionToGrade` (transactional) stamps it with `published_assignment_id`
+  + the submission telemetry + `submitted_at` and links `assignment_invites.assignment_id`
+  — so the graded work is a normal journal entry the teacher reviews/edits/approves
+  in the Журнал (approval feeds RAG as usual). Idempotent: re-grading returns the
+  existing grade. `getSubmissionForTeacher` now LEFT JOINs the linked assignment so
+  the review page shows the AI grade (letter + score + feedback + strengths/
+  improvements) inline next to the provenance report; «Проверить с ИИ» appears only
+  while ungraded. **Holistic for v1** — published assignments don't yet carry
+  criteria; criteria-scoped grading is a follow-up. Verified attach + grade-join
+  against dev DB (synthetic, no AI call, zero residue); both typechecks clean,
+  143/143 tests green.
 - **Published assignments — provenance report (Feature Q4a).** The attestation
   payoff: a teacher opens a submitted work at `/published/:id/submissions/:inviteId`
   and sees the **process-of-creation facts** alongside the text. New pure

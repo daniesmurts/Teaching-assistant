@@ -65,16 +65,32 @@ export async function deleteInvite(id: string, inviteId: string): Promise<void> 
   await client.delete(`/api/published-assignments/${id}/invites/${inviteId}`, { skipErrorToast: true })
 }
 
+export interface GradeSummary {
+  assignment_id:   string
+  ai_score:        number | null
+  ai_grade:        string | null
+  ai_grade_label:  string | null
+  ai_feedback:     string | null
+  ai_strengths:    string[]
+  ai_improvements: string[]
+  status:          string | null
+}
+
 export interface SubmissionReview {
   student_name:    string | null
   student_email:   string | null
   submitted_at:    string | null
   submission_text: string
   provenance:      ProvenanceFacts
+  grade:           GradeSummary | null
 }
 
 export async function getSubmission(id: string, inviteId: string): Promise<SubmissionReview> {
   return (await client.get<SubmissionReview>(`/api/published-assignments/${id}/submissions/${inviteId}`)).data
+}
+
+export async function gradeSubmission(id: string, inviteId: string): Promise<GradeSummary> {
+  return (await client.post<GradeSummary>(`/api/published-assignments/${id}/submissions/${inviteId}/grade`)).data
 }
 
 /** The student writing-surface URL for an invite token (the link to share). */

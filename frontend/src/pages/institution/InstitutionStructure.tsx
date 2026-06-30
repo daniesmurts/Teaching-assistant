@@ -13,8 +13,9 @@ const TYPE_LABEL: Record<OrgUnitType, string> = {
   institution:  'Организация',
   governance:   'Руководство',
   admin_office: 'Управление / центр',
-  cluster:      'Кластер направлений',
+  cluster:      'Полигруппа',
   division:     'Институт / факультет',
+  program:      'Образовательная программа',
   department:   'Кафедра',
 }
 
@@ -30,7 +31,7 @@ const unitLabel = (u?: OrgUnit) => (u ? (u.short_name || u.name) : '—')
 // Order offered in the "add child" picker — institution excluded (roots are not
 // created here). Flexible depth: any of these may nest under any parent (§7.1).
 const CREATABLE: Exclude<OrgUnitType, 'institution'>[] =
-  ['governance', 'admin_office', 'cluster', 'division', 'department']
+  ['governance', 'admin_office', 'cluster', 'division', 'program', 'department']
 
 interface TreeNode extends OrgUnit { children: TreeNode[] }
 

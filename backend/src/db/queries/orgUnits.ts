@@ -6,8 +6,9 @@ export const ORG_UNIT_TYPES = [
   'institution',
   'governance',
   'admin_office',
-  'cluster',
+  'cluster',     // displayed as «Полигруппа» — renamed from «Кластер направлений»
   'division',
+  'program',     // «Образовательная программа» — РОП is `head` on this unit
   'department',
 ] as const
 export type OrgUnitType = (typeof ORG_UNIT_TYPES)[number]

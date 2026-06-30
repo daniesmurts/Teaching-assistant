@@ -240,20 +240,34 @@ export interface SubmittedInvite {
   draft_content:        unknown
   submission_telemetry: unknown
   submitted_at:         Date | null
+  course_id:            string | null      // from the parent definition
+  // linked graded assignment (null until the teacher grades — Q4b)
+  assignment_id:        string | null
+  ai_score:             number | null
+  ai_grade:             string | null
+  ai_grade_label:       string | null
+  ai_feedback:          string | null
+  ai_strengths:         string[] | null
+  ai_improvements:      string[] | null
+  grade_status:         string | null
 }
 
-/** A submitted invite's content + telemetry, scoped to the owning teacher.
- *  Returns null unless the invite belongs to a definition this teacher owns and
- *  has been submitted. */
+/** A submitted invite's content + telemetry + any linked grade, scoped to the
+ *  owning teacher. Returns null unless the invite belongs to a definition this
+ *  teacher owns and has been submitted. */
 export async function getSubmissionForTeacher(
   publishedAssignmentId: string,
   inviteId: string,
   teacherId: string,
 ): Promise<SubmittedInvite | null> {
   const { rows } = await pool.query<SubmittedInvite>(
-    `SELECT i.id, i.student_name, i.student_email, i.draft_content, i.submission_telemetry, i.submitted_at
+    `SELECT i.id, i.student_name, i.student_email, i.draft_content, i.submission_telemetry,
+            i.submitted_at, i.assignment_id, pa.course_id,
+            a.ai_score, a.ai_grade, a.ai_grade_label, a.ai_feedback,
+            a.ai_strengths, a.ai_improvements, a.status AS grade_status
        FROM assignment_invites i
        JOIN published_assignments pa ON pa.id = i.published_assignment_id
+       LEFT JOIN assignments a ON a.id = i.assignment_id
       WHERE i.id = $1
         AND i.published_assignment_id = $2
         AND pa.teacher_id = $3
@@ -261,4 +275,36 @@ export async function getSubmissionForTeacher(
     [inviteId, publishedAssignmentId, teacherId]
   )
   return rows[0] ?? null
+}
+
+/** After grading materialises an `assignments` row, attach the published-
+ *  assignment provenance to it and link the invite — atomically. */
+export async function attachSubmissionToGrade(
+  assignmentId: string,
+  inviteId: string,
+  publishedAssignmentId: string,
+  telemetry: unknown,
+  submittedAt: Date | null,
+): Promise<void> {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query(
+      `UPDATE assignments
+          SET published_assignment_id = $2, submission_telemetry = $3, submitted_at = $4
+        WHERE id = $1`,
+      [assignmentId, publishedAssignmentId,
+       telemetry == null ? null : JSON.stringify(telemetry), submittedAt]
+    )
+    await client.query(
+      `UPDATE assignment_invites SET assignment_id = $2 WHERE id = $1`,
+      [inviteId, assignmentId]
+    )
+    await client.query('COMMIT')
+  } catch (err) {
+    await client.query('ROLLBACK')
+    throw err
+  } finally {
+    client.release()
+  }
 }

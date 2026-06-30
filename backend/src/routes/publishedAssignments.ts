@@ -10,11 +10,30 @@ import {
 import {
   createPublishedAssignment, getPublishedAssignment, listPublishedAssignments,
   updatePublishedAssignment, addInvite, listInvites, deleteInvite,
-  getSubmissionForTeacher,
+  getSubmissionForTeacher, attachSubmissionToGrade, type SubmittedInvite,
 } from '../db/queries/publishedAssignments'
 import { tiptapToText } from '../lib/tiptapText'
 import { computeProvenance } from '../services/provenance'
+import { grade } from '../services/grading'
+import { aiLimiter } from '../middleware/rateLimits'
 import type { SubmissionTelemetry } from '../../../shared/types'
+
+// Shape the inline grade summary shown on the submission-review page. null until
+// the teacher grades; final review/approval happens in the Журнал (the row is an
+// ordinary assignment, now carrying published_assignment_id + telemetry).
+function gradeView(s: SubmittedInvite) {
+  if (!s.assignment_id) return null
+  return {
+    assignment_id:  s.assignment_id,
+    ai_score:       s.ai_score,
+    ai_grade:       s.ai_grade,
+    ai_grade_label: s.ai_grade_label,
+    ai_feedback:    s.ai_feedback,
+    ai_strengths:   s.ai_strengths ?? [],
+    ai_improvements: s.ai_improvements ?? [],
+    status:         s.grade_status,
+  }
+}
 
 // Teacher-side publish backend (Feature Q1). Mounted at /api/published-assignments.
 // Gated to Pro/Institution via the publishedAssignments plan flag — Free tier
@@ -97,6 +116,46 @@ router.get('/:id/submissions/:inviteId', asyncHandler(async (req, res) => {
     submitted_at:  sub.submitted_at,
     submission_text: tiptapToText(sub.draft_content),
     provenance:    computeProvenance(sub.submission_telemetry as SubmissionTelemetry | null),
+    grade:         gradeView(sub),
+  })
+}))
+
+// Grade a submitted work with AI. Materialises the gradeable assignment via the
+// existing grader, then attaches the published-assignment provenance + links the
+// invite. Holistic for v1 (published assignments don't yet carry criteria).
+router.post('/:id/submissions/:inviteId/grade', aiLimiter, asyncHandler(async (req, res) => {
+  const sub = await getSubmissionForTeacher(req.params.id, req.params.inviteId, req.teacher.id)
+  if (!sub) throw new NotFoundError('Работа')
+
+  if (sub.assignment_id) { res.json(gradeView(sub)); return }   // already graded — idempotent
+
+  const text = tiptapToText(sub.draft_content)
+  if (text.length < 1) throw new ValidationError('Нельзя проверить пустую работу')
+
+  const result = await grade({
+    teacherId:      req.teacher.id,
+    institutionId:  req.teacher.institution_id,
+    planTier:       req.teacher.plan_tier,
+    submissionText: text,
+    courseId:       sub.course_id ?? undefined,
+    studentName:    sub.student_name ?? undefined,
+    studentEmail:   sub.student_email ?? undefined,
+  })
+
+  await attachSubmissionToGrade(
+    result.assignment_id, req.params.inviteId, req.params.id,
+    sub.submission_telemetry, sub.submitted_at,
+  )
+
+  res.status(201).json({
+    assignment_id:   result.assignment_id,
+    ai_score:        result.ai_score,
+    ai_grade:        result.ai_grade,
+    ai_grade_label:  result.ai_grade_label,
+    ai_feedback:     result.ai_feedback,
+    ai_strengths:    result.ai_strengths,
+    ai_improvements: result.ai_improvements,
+    status:          'pending',
   })
 }))
 

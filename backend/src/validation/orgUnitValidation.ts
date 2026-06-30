@@ -2,7 +2,7 @@ import { body } from 'express-validator'
 
 // Creatable types — 'institution' is excluded: roots come from the migration /
 // institution creation, never from the tree-builder.
-const CREATABLE_TYPES = ['governance', 'admin_office', 'cluster', 'division', 'department']
+const CREATABLE_TYPES = ['governance', 'admin_office', 'cluster', 'division', 'program', 'department']
 
 export const createOrgUnitRules = [
   body('parentId')

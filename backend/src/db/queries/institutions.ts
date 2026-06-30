@@ -127,15 +127,59 @@ export async function listInstitutionsWithCounts(): Promise<InstitutionWithCount
   return rows
 }
 
+// Creates the institution AND seeds the org-tree root + a default department in
+// a single transaction. Without the tree seed, /api/institution/structure
+// returns an empty array and the structure page shows "Корневое подразделение
+// не найдено" — see migration 045 §7 for the same backfill applied to
+// institutions that existed when the tree shipped.
 export async function createInstitution(data: {
   name: string; planTier: string; maxTeachers: number | null; emailDomain?: string | null
 }): Promise<InstitutionRow> {
-  const { rows } = await pool.query<InstitutionRow>(
-    `INSERT INTO institutions (name, plan_tier, max_teachers, email_domain)
-     VALUES ($1, $2, $3, $4) RETURNING *`,
-    [data.name, data.planTier, data.maxTeachers, data.emailDomain ?? null]
-  )
-  return rows[0]
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+
+    const { rows } = await client.query<InstitutionRow>(
+      `INSERT INTO institutions (name, plan_tier, max_teachers, email_domain)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [data.name, data.planTier, data.maxTeachers, data.emailDomain ?? null]
+    )
+    const inst = rows[0]
+
+    const { rows: rootRows } = await client.query<{ id: string }>(
+      `INSERT INTO org_units (institution_id, parent_id, type_code, name, path)
+       VALUES ($1, NULL, 'institution', $2, '')
+       RETURNING id`,
+      [inst.id, inst.name]
+    )
+    const rootId = rootRows[0].id
+    await client.query(
+      `UPDATE org_units SET path = '/' || id::text || '/' WHERE id = $1`,
+      [rootId]
+    )
+
+    const { rows: deptRows } = await client.query<{ id: string }>(
+      `INSERT INTO org_units (institution_id, parent_id, type_code, name, path)
+       VALUES ($1, $2, 'department', 'Кафедра (по умолчанию)', '')
+       RETURNING id`,
+      [inst.id, rootId]
+    )
+    await client.query(
+      `UPDATE org_units d
+          SET path = r.path || d.id::text || '/'
+         FROM org_units r
+        WHERE d.id = $1 AND r.id = d.parent_id`,
+      [deptRows[0].id]
+    )
+
+    await client.query('COMMIT')
+    return inst
+  } catch (err) {
+    await client.query('ROLLBACK')
+    throw err
+  } finally {
+    client.release()
+  }
 }
 
 export async function updateInstitution(
