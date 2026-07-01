@@ -33,6 +33,7 @@ import Materials from './pages/Materials'
 import Billing from './pages/Billing'
 import Settings from './pages/Settings'
 import Leadership from './pages/Leadership'
+import LeadershipTeacher from './pages/LeadershipTeacher'
 import Help from './pages/Help'
 import Feedback from './pages/Feedback'
 import AdminLayout from './pages/admin/AdminLayout'
@@ -233,7 +234,8 @@ export default function App() {
             <Route path="/quizzes"       element={<Quizzes />} />
             <Route path="/materials/:kind" element={<MaterialGenerator />} />
             <Route path="/billing"       element={<Billing />} />
-            <Route path="/leadership"    element={<LeadershipRoute><Leadership /></LeadershipRoute>} />
+            <Route path="/leadership"              element={<LeadershipRoute><Leadership /></LeadershipRoute>} />
+            <Route path="/leadership/teachers/:id" element={<LeadershipRoute><LeadershipTeacher /></LeadershipRoute>} />
             <Route path="/programs"      element={<ProgramsRoute><InstitutionPrograms /></ProgramsRoute>} />
             <Route path="/programs/:id"  element={<ProgramsRoute><InstitutionProgramDetail /></ProgramsRoute>} />
             <Route path="/settings"      element={<Settings />} />

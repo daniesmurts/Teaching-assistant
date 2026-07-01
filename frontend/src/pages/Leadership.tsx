@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getLeadershipUnits, getLeadershipOverview } from '../api/leadership'
 
@@ -40,6 +41,7 @@ function relativeDate(iso: string | null): string {
 }
 
 export default function Leadership() {
+  const navigate = useNavigate()
   const { data: units = [], isLoading: unitsLoading } = useQuery({
     queryKey: ['leadership-units'],
     queryFn:  getLeadershipUnits,
@@ -132,7 +134,7 @@ export default function Leadership() {
                   ) : (
                     <div className="flex items-end gap-1 h-32">
                       {overview.activity.grades_by_day.map((d) => (
-                        <div key={d.date} className="flex-1 flex flex-col items-center justify-end group relative"
+                        <div key={d.date} className="flex-1 h-full flex flex-col items-center justify-end group relative"
                              title={`${new Date(d.date).toLocaleDateString('ru-RU')} — ${d.count} проверок`}>
                           <div className="w-full rounded-t-sm bg-amber/80 transition-all"
                                style={{ height: `${Math.max(4, (d.count / maxGrades) * 100)}%` }} />
@@ -162,7 +164,9 @@ export default function Leadership() {
                       </thead>
                       <tbody>
                         {overview.teachers.map((t) => (
-                          <tr key={t.id} className="border-b border-border last:border-b-0">
+                          <tr key={t.id}
+                              onClick={() => navigate(`/leadership/teachers/${t.id}`)}
+                              className="border-b border-border last:border-b-0 cursor-pointer hover:bg-surface-warm transition-colors">
                             <td className="px-4 py-2.5">
                               <div className="text-ink">{t.name ?? t.email}</div>
                               {t.name && <div className="text-xs text-ink-tertiary">{t.email}</div>}

@@ -7,6 +7,8 @@ import { canActOnUnit } from '../services/orgScope'
 import {
   listDirectLeadershipUnits, listAllInstitutionRoots,
   listSubtreeTeachers, getSubtreeActivity,
+  getTeacherLeadershipProfile, getTeacherLeadershipActivity,
+  listTeacherActiveSubjects, listTeacherRecentGrades,
 } from '../db/queries/leadership'
 import { getOrgUnitById } from '../db/queries/orgUnits'
 
@@ -60,6 +62,47 @@ router.get('/overview', asyncHandler(async (req, res) => {
       total_grades_30d: activity.total_grades_30d,
       teacher_count:    activity.teacher_count,
     },
+  })
+}))
+
+// ─── GET /api/leadership/teachers/:id — per-teacher drill (V2) ────────────────
+// Access gate walks the tree on the TEACHER's primary_org_unit_id, not on the
+// caller's leadership unit. A head on кафедра X can drill into teachers whose
+// primary unit is X (or any descendant of X); a head on институт Y can drill
+// into any teacher in any of Y's kafedras. Platform admin bypasses.
+
+router.get('/teachers/:id', asyncHandler(async (req, res) => {
+  const teacherId = req.params.id
+  const profile   = await getTeacherLeadershipProfile(teacherId)
+  if (!profile) throw new NotFoundError('Преподаватель')
+
+  if (!req.teacher.is_platform_admin) {
+    // Same-institution guard first — never leak a teacher from a foreign org.
+    // (The primary-unit walk implicitly enforces this too, but a teacher with
+    // NULL primary_org_unit_id would otherwise slip through.)
+    if (!profile.primary_org_unit_id) {
+      throw new ForbiddenError('Нет доступа к этому преподавателю')
+    }
+    const ok = await canActOnUnit(req.teacher.id, profile.primary_org_unit_id, ['head', 'admin'])
+    if (!ok) throw new ForbiddenError('Нет доступа к этому преподавателю')
+  }
+
+  const [activity, active_subjects, recent_grades] = await Promise.all([
+    getTeacherLeadershipActivity(teacherId),
+    listTeacherActiveSubjects(teacherId),
+    listTeacherRecentGrades(teacherId, 20),
+  ])
+
+  res.json({
+    teacher: {
+      id:                 profile.id,
+      email:              profile.email,
+      name:               profile.name,
+      primary_unit_name:  profile.primary_unit_name,
+    },
+    activity,
+    active_subjects,
+    recent_grades,
   })
 }))
 

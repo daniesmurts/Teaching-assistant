@@ -35,3 +35,42 @@ export async function getLeadershipUnits(): Promise<LeadershipUnit[]> {
 export async function getLeadershipOverview(unitId: string): Promise<LeadershipOverview> {
   return (await client.get<LeadershipOverview>('/api/leadership/overview', { params: { unitId } })).data
 }
+
+// ─── Per-teacher drill (V2) ───────────────────────────────────────────────────
+
+export interface LeadershipTeacherDrill {
+  teacher: {
+    id:                string
+    email:             string
+    name:              string | null
+    primary_unit_name: string | null
+  }
+  activity: {
+    total_grades_30d:      number
+    approved_grades_30d:   number
+    approval_rate_30d:     number | null
+    avg_edit_distance_30d: number | null
+    grades_by_day:         { date: string; count: number }[]
+  }
+  active_subjects: {
+    course_id:  string
+    name:       string
+    grades_30d: number
+  }[]
+  recent_grades: {
+    id:              string
+    created_at:      string
+    status:          string
+    ai_score:        number | null
+    ai_grade:        string | null
+    approved_score:  number | null
+    approved_grade:  string | null
+    course_id:       string | null
+    course_name:     string | null
+    student_name:    string | null
+  }[]
+}
+
+export async function getLeadershipTeacher(teacherId: string): Promise<LeadershipTeacherDrill> {
+  return (await client.get<LeadershipTeacherDrill>(`/api/leadership/teachers/${teacherId}`)).data
+}

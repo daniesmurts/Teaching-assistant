@@ -160,6 +160,146 @@ export async function getSubtreeActivity(unitId: string): Promise<LeadershipActi
   }
 }
 
+// ─── Per-teacher drill (Leadership V2) ────────────────────────────────────────
+
+export interface LeadershipTeacherProfile {
+  id:                    string
+  email:                 string
+  name:                  string | null
+  primary_org_unit_id:   string | null
+  primary_unit_name:     string | null
+}
+
+export interface LeadershipTeacherActivity {
+  total_grades_30d:      number
+  approved_grades_30d:   number
+  approval_rate_30d:     number | null    // approved / total, null when total = 0
+  avg_edit_distance_30d: number | null    // mean(|approved_score - ai_score|), null when no approvals
+  grades_by_day:         { date: string; count: number }[]   // 30 entries, zero-filled
+}
+
+export interface LeadershipTeacherSubject {
+  course_id:   string
+  name:        string
+  grades_30d:  number
+}
+
+export interface LeadershipTeacherRecentGrade {
+  id:               string
+  created_at:       Date
+  status:           string
+  ai_score:         number | null
+  ai_grade:         string | null
+  approved_score:   number | null
+  approved_grade:   string | null
+  course_id:        string | null
+  course_name:      string | null
+  student_name:     string | null
+}
+
+/** Identity + primary kafedra for a teacher — foundation for the drill page. */
+export async function getTeacherLeadershipProfile(teacherId: string): Promise<LeadershipTeacherProfile | null> {
+  const { rows } = await pool.query<LeadershipTeacherProfile>(
+    `SELECT t.id, t.email, t.name, t.primary_org_unit_id,
+            pu.name AS primary_unit_name
+       FROM teachers t
+       LEFT JOIN org_units pu ON pu.id = t.primary_org_unit_id
+      WHERE t.id = $1
+      LIMIT 1`,
+    [teacherId]
+  )
+  return rows[0] ?? null
+}
+
+/** 30-day activity metrics for a single teacher — grades count, approval rate,
+ *  average edit distance (how far the teacher's approved score sits from the
+ *  AI's draft — a signal of RAG-flywheel quality), and a zero-filled daily
+ *  series for the sparkline. Single round trip via three sub-queries and a
+ *  generate_series LEFT JOIN. */
+export async function getTeacherLeadershipActivity(teacherId: string): Promise<LeadershipTeacherActivity> {
+  const [countsQ, seriesQ] = await Promise.all([
+    pool.query<{
+      total:                string
+      approved:             string
+      avg_edit_distance:    string | null
+    }>(
+      `SELECT
+         COUNT(*)::text AS total,
+         COUNT(*) FILTER (WHERE approved_at IS NOT NULL)::text AS approved,
+         AVG(ABS(approved_score - ai_score))
+           FILTER (WHERE approved_at IS NOT NULL AND approved_score IS NOT NULL AND ai_score IS NOT NULL)::text
+             AS avg_edit_distance
+        FROM assignments
+       WHERE teacher_id = $1
+         AND created_at >= NOW() - INTERVAL '30 days'`,
+      [teacherId]
+    ),
+    pool.query<{ date: string; count: string }>(
+      `WITH days AS (
+         SELECT generate_series(
+           (CURRENT_DATE - INTERVAL '29 days')::date,
+           CURRENT_DATE::date,
+           INTERVAL '1 day'
+         )::date AS d
+       )
+       SELECT to_char(days.d, 'YYYY-MM-DD') AS date,
+              COALESCE(COUNT(a.id), 0)::text AS count
+         FROM days
+         LEFT JOIN assignments a
+           ON a.created_at::date = days.d
+          AND a.teacher_id = $1
+        GROUP BY days.d
+        ORDER BY days.d`,
+      [teacherId]
+    ),
+  ])
+
+  const total    = parseInt(countsQ.rows[0].total, 10)
+  const approved = parseInt(countsQ.rows[0].approved, 10)
+  const editRaw  = countsQ.rows[0].avg_edit_distance
+
+  return {
+    total_grades_30d:      total,
+    approved_grades_30d:   approved,
+    approval_rate_30d:     total > 0 ? approved / total : null,
+    avg_edit_distance_30d: editRaw == null ? null : Number(parseFloat(editRaw).toFixed(2)),
+    grades_by_day:         seriesQ.rows.map((r) => ({ date: r.date, count: parseInt(r.count, 10) })),
+  }
+}
+
+/** Subjects the teacher has graded on in the last 30 days, most-active first. */
+export async function listTeacherActiveSubjects(teacherId: string): Promise<LeadershipTeacherSubject[]> {
+  const { rows } = await pool.query<LeadershipTeacherSubject>(
+    `SELECT c.id AS course_id, c.name, COUNT(a.id)::int AS grades_30d
+       FROM assignments a
+       JOIN courses c ON c.id = a.course_id
+      WHERE a.teacher_id = $1
+        AND a.created_at >= NOW() - INTERVAL '30 days'
+        AND a.course_id IS NOT NULL
+      GROUP BY c.id, c.name
+      ORDER BY grades_30d DESC, c.name`,
+    [teacherId]
+  )
+  return rows
+}
+
+/** Recent assignments for the drill page. Not paginated — cap at 20. */
+export async function listTeacherRecentGrades(teacherId: string, limit = 20): Promise<LeadershipTeacherRecentGrade[]> {
+  const { rows } = await pool.query<LeadershipTeacherRecentGrade>(
+    `SELECT a.id, a.created_at, a.status, a.ai_score, a.ai_grade,
+            a.approved_score, a.approved_grade,
+            a.course_id, c.name AS course_name,
+            a.student_name
+       FROM assignments a
+       LEFT JOIN courses c ON c.id = a.course_id
+      WHERE a.teacher_id = $1
+      ORDER BY a.created_at DESC
+      LIMIT $2`,
+    [teacherId, limit]
+  )
+  return rows
+}
+
 // ─── is_leader signal for the auth payload ────────────────────────────────────
 
 /** Cheap existence check — does this teacher hold any head/admin role anywhere?

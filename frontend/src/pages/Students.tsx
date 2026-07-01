@@ -49,7 +49,7 @@ function StudentDetail({ student, courseId, onBack }: { student: StudentSummary;
               const score = a.approved_score ?? a.ai_score ?? 0
               const grade = a.approved_grade ?? a.ai_grade
               return (
-                <div key={a.id} className="flex-1 flex flex-col items-center justify-end group relative" title={`${fmt(a.created_at)} — ${grade ?? '?'} (${score})`}>
+                <div key={a.id} className="flex-1 h-full flex flex-col items-center justify-end group relative" title={`${fmt(a.created_at)} — ${grade ?? '?'} (${score})`}>
                   <span className="text-[10px] font-display font-bold mb-1" style={{ color: gradeColor(grade) }}>{grade}</span>
                   <div className="w-full max-w-[40px] rounded-t-sm transition-all" style={{ height: `${Math.max(6, score)}%`, backgroundColor: gradeColor(grade), opacity: 0.85 }} />
                 </div>

@@ -200,7 +200,7 @@ export default function Landing() {
                   { h: 80, c: 'bg-success', g: 'A' },
                   { h: 92, c: 'bg-success', g: 'A' },
                 ].map((b, i) => (
-                  <div key={i} className="flex-1 flex flex-col items-center justify-end">
+                  <div key={i} className="flex-1 h-full flex flex-col items-center justify-end">
                     <span className="text-[10px] font-display font-bold text-ink-secondary mb-1">{b.g}</span>
                     <div className={`w-full max-w-[34px] rounded-t-sm ${b.c}`} style={{ height: `${b.h}%`, opacity: 0.85 }}></div>
                   </div>

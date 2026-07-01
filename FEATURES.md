@@ -106,7 +106,7 @@ A teacher granted `Руководитель` or sub-unit `Администрат
 - **30-day activity chart** — daily grades, zero-filled.
 - **Teacher table** — name, primary kafedra, проверок за 30 дней, последняя активность (most-active first).
 - Subtree resolved via the materialised path on org_units; per-request scope re-checked through `canActOnUnit` so a head on кафедра X cannot peek into кафедра Y.
-- V1 is **grades-only and read-only**. Presentations / published-assignments / per-teacher drill tracked under Feature P tail d in TODO.md.
+- V1 is **grades-only and read-only** for the subtree view. Clicking any teacher row opens a **per-teacher drill** at `/leadership/teachers/:id` with 30-day totals (проверок, доля утверждений, средняя правка балла), zero-filled activity sparkline, active subjects, and the last 20 grades — gated per-target by `canActOnUnit`. Presentations / published-assignments overview cards tracked under Feature P tail d in TODO.md.
 
 ---
 

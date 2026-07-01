@@ -104,6 +104,15 @@ export default function Sidebar({ onClose }: Props) {
       ]
     : NAV_GROUPS
 
+  // Count of hidden items — surfaced on the «Показать всё» button so a
+  // brand-new user knows there's more nav to reveal, rather than assuming
+  // the slimmed menu is the whole app.
+  const hiddenNavCount = NAV_GROUPS
+    .filter((g) => !g.alwaysShow)
+    .flatMap((g) => g.items)
+    .filter((i) => !i.essential)
+    .length
+
   function showAll() {
     try { localStorage.setItem(NAV_EXPANDED_KEY, '1') } catch { /* ignore */ }
     setExpanded(true)
@@ -159,14 +168,21 @@ export default function Sidebar({ onClose }: Props) {
           </div>
         ))}
 
-        {/* Show-all toggle — only while the slimmed nav is active */}
+        {/* Show-all toggle — only while the slimmed nav is active. Brighter
+            than a regular muted nav row and shows the hidden count so a
+            brand-new user recognises there's more to reveal. */}
         {minimal && (
           <button
             onClick={showAll}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md mt-2 text-ink-inv-muted hover:bg-sidebar-hover hover:text-ink-inverse transition-colors"
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md mt-3 pt-3 border-t border-white/10 text-ink-inverse hover:bg-sidebar-hover transition-colors"
           >
-            <span className="flex-shrink-0 w-4 text-center text-xs">▾</span>
-            <span className="text-sm font-sans">Показать всё</span>
+            <span className="flex-shrink-0 w-4 text-center text-xs text-amber-mid">▾</span>
+            <span className="text-sm font-sans font-medium flex-1 text-left">Показать всё</span>
+            {hiddenNavCount > 0 && (
+              <span className="text-[10px] font-sans font-semibold text-amber-mid bg-amber/15 border border-amber-mid/25 rounded-sm px-1.5 py-0.5">
+                +{hiddenNavCount}
+              </span>
+            )}
           </button>
         )}
 

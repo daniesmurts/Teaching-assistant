@@ -432,21 +432,26 @@ customer needs scoped sub-unit access, so requirements are concrete rather than
 speculative. Pairs with the deferred read-only dashboards (viewer role) and
 the §2.x analytics features that would consume `head`/`viewer`.
 
-**Tail (d) — Leadership dashboard V2 · Effort: S–M.** V1 (shipped this
-session) is grades-only: subtree teacher list + 30-day grade activity. V2
-expands the same `/leadership` surface with:
-- Presentations generated in the subtree over 30 days (counts + by-teacher).
+**Tail (d) — Leadership dashboard V2 · Effort: S.**
+
+**Slice 1 (shipped 2026-07-01):** per-teacher drill at `/leadership/teachers/:id`
+— canActOnUnit walk on the *teacher's* primary unit, 30-day totals (проверок,
+доля утверждений, средняя правка балла), activity sparkline, active subjects,
+last 20 grades. Backend: `GET /api/leadership/teachers/:id`, four new queries
+in `db/queries/leadership.ts`. Frontend: `LeadershipTeacher.tsx`, clickable
+teacher rows on the overview.
+
+**Remaining slices:**
+- Presentations generated in the subtree over 30 days (counts + by-teacher) —
+  extend `/api/leadership/overview` and the overview page cards / drill page.
 - Published assignments in the subtree: counts of definitions, submissions,
   active student writers, completion rate.
-- Per-teacher drill-down page (`/leadership/teachers/:id` scoped via
-  `canActOnUnit`) — recent grades, approval rate, edit-distance from AI,
-  active subjects.
 - Optional: viewer-role variant of the same page (read-only governance —
   same data, no actions if/when we add actions to V2).
-Touches: `routes/leadership.ts` (new endpoints or extend `/overview`),
-`db/queries/leadership.ts`, `pages/Leadership.tsx` (tabs or extra sections).
-The per-teacher drill needs the canActOnUnit walk on the *teacher's*
-primary unit, not on the leadership unit — careful in the gate.
+
+Touches (remaining): `routes/leadership.ts` (extend `/overview` + drill),
+`db/queries/leadership.ts` (presentations + published-assignments queries),
+`pages/Leadership.tsx` + `pages/LeadershipTeacher.tsx` (extra cards).
 
 Original design notes below.
 

@@ -36,6 +36,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   `EMAIL_UNSUBSCRIBE_MAILTO`.
 
 ### Added
+- **«Руководство → Преподаватель» drill page (Leadership V2 slice 1).** Any
+  teacher row on `/leadership` is now clickable and lands on
+  `/leadership/teachers/:id` — a read-only per-teacher panel scoped by the
+  caller's tree access. Backend: `GET /api/leadership/teachers/:id` gates via
+  `canActOnUnit` on the *target teacher's* `primary_org_unit_id` (not the
+  caller's leadership unit) so a кафедра head can only drill teachers whose
+  primary unit is theirs; an институт head reaches every teacher in their
+  subtree. Platform admin bypasses. Response includes: 30-day totals
+  (проверок, доля утверждений, средняя правка балла — the RAG-flywheel
+  quality signal), zero-filled daily activity, active subjects with
+  per-subject grade counts, and the last 20 assignments. Four new queries in
+  `db/queries/leadership.ts`: `getTeacherLeadershipProfile`,
+  `getTeacherLeadershipActivity`, `listTeacherActiveSubjects`,
+  `listTeacherRecentGrades`. Frontend: new `LeadershipTeacher.tsx` page with
+  three stat cards, sparkline (reuses the overview bar-chart style), active
+  subjects list, recent grades table. Presentations + published-assignments
+  slices tracked separately under Feature P tail d.
 - **Role-driven access to «Образовательные программы» (Feature P tail c/1 —
   РОП + начальник УМЦ + проректор).** Programs surface is no longer locked to
   institution-root admins. Migration 049 adds `programs.org_unit_id` linking a
