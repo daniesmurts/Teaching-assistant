@@ -1,9 +1,9 @@
-import { useRef, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import FeatureIntro from '../../components/ui/FeatureIntro'
 import Button from '../../components/ui/Button'
-import { listPrograms, importProgram } from '../../api/programs'
+import { listPrograms, importProgram, getPickableProgramUnits } from '../../api/programs'
 import { useUIStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
 import type { ProgramLevel } from '../../types'
@@ -19,10 +19,16 @@ export default function InstitutionPrograms() {
   const qc = useQueryClient()
   const addToast = useUIStore((s) => s.addToast)
   const programAccess = useAuthStore((s) => s.teacher?.program_access) ?? 'none'
-  // Only IT admin ('all-rw') can create programs. Oversight roles (all-ro)
-  // and РОП (specific) see the read-only list.
-  const canCreate = programAccess === 'all-rw'
+  // 'all-rw' (IT admin, УМЦ, проректор) and 'specific' (РОП, polygroup head,
+  // institute director — anyone with a subtree containing `program` units)
+  // can both import. 'all-ro' is reserved for a future viewer role — no
+  // active role maps to it today. `none` sees nothing.
+  const canImport = programAccess === 'all-rw' || programAccess === 'specific'
   const readOnly  = programAccess === 'all-ro'
+  // Server picks the right unit set per scope; frontend just renders it. If
+  // this ends up as a single option we auto-select; if empty for a scoped
+  // caller we hide the picker (no valid choice exists).
+  const isScoped  = programAccess === 'specific'
 
   const [creating, setCreating] = useState(false)
   const [code, setCode] = useState('')
@@ -30,12 +36,31 @@ export default function InstitutionPrograms() {
   const [educationLevel, setEducationLevel] = useState('')
   const [profile, setProfile] = useState('')
   const [forms, setForms] = useState('')
+  const [orgUnitId, setOrgUnitId] = useState<string>('')
   const [descFile, setDescFile] = useState<File | null>(null)
   const [planFile, setPlanFile] = useState<File | null>(null)
   const descRef = useRef<HTMLInputElement>(null)
   const planRef = useRef<HTMLInputElement>(null)
 
   const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: listPrograms })
+
+  // Program-unit options for the linker — single endpoint scoped by the
+  // server. РОП: only their directly-held program units. Polygroup /
+  // institute head: every `program` unit walked out of their subtree. IT
+  // admin / УМЦ: every program unit in the institution.
+  const { data: programUnitOptions = [] } = useQuery({
+    queryKey: ['program-pickable-units'],
+    queryFn:  getPickableProgramUnits,
+    enabled:  canImport,
+  })
+
+  // Auto-pick when there's exactly one option — friction-free for the common
+  // РОП-with-one-programme case; the picker still renders for clarity.
+  useEffect(() => {
+    if (!orgUnitId && programUnitOptions.length === 1) {
+      setOrgUnitId(programUnitOptions[0].id)
+    }
+  }, [programUnitOptions, orgUnitId])
 
   const importMut = useMutation({
     mutationFn: () => importProgram({
@@ -46,6 +71,7 @@ export default function InstitutionPrograms() {
       forms_of_study: forms.trim(),
       description: descFile,
       plan: planFile as File,
+      org_unit_id: orgUnitId || null,
     }),
     onSuccess: ({ program, imported, warnings }) => {
       qc.invalidateQueries({ queryKey: ['programs'] })
@@ -58,6 +84,12 @@ export default function InstitutionPrograms() {
   function submit() {
     if (specialtyName.trim().length < 2) { addToast('Укажите наименование специальности/направления', 'error'); return }
     if (!planFile) { addToast('Загрузите файл учебного плана (PDF)', 'error'); return }
+    // Scoped callers (РОП, polygroup / institute heads) must link to a program
+    // unit before importing — the backend enforces this too but a client-side
+    // check gives a clearer error.
+    if (isScoped && !orgUnitId) {
+      addToast('Выберите образовательную программу в структуре', 'error'); return
+    }
     importMut.mutate()
   }
 
@@ -81,19 +113,35 @@ export default function InstitutionPrograms() {
           )}
         </div>
 
-        <FeatureIntro
-          id="programs"
-          title="Как это работает"
-          description="Заполните карточку образовательной программы и загрузите два документа: описание ОП (из него извлекаются компетенции и цели) и учебный план (из него — дисциплины по семестрам). Система проверит логику последовательности дисциплин, формирование компетенций по годам, пробелы и избыточность."
-          steps={[
-            'Заполните реквизиты программы и загрузите описание ОП и учебный план (PDF)',
-            'Система извлекает дисциплины и компетенции из документов',
-            'Запустите анализ — последовательность, карта компетенций и рекомендации',
-          ]}
-        />
+        {/* Intro copy — analysis-first framing. Programme content is authored
+            in the university's own system; here we ingest, correct extracted
+            data, and analyse. */}
+        {readOnly ? (
+          <FeatureIntro
+            id="programs-oversight"
+            title="Что здесь"
+            description="Обзор архитектуры всех образовательных программ организации — дисциплины, компетенции, цели и результаты анализа. Только для просмотра."
+            steps={[
+              'Выберите программу из списка ниже, чтобы открыть её карточку',
+              'На вкладке «Конструктор» — дисциплины по семестрам и карта компетенций',
+              'На вкладке «Анализ» — последовательность, покрытие компетенций, пробелы',
+            ]}
+          />
+        ) : (
+          <FeatureIntro
+            id="programs-v2"
+            title="Как это работает"
+            description="Инструмент анализа образовательных программ. Импортируйте описание ОП и учебный план (PDF из вашей университетской системы) — ИСПУМ извлечёт дисциплины и компетенции, а затем проверит последовательность, покрытие ФГОС ВО, пробелы и избыточность. Программа создаётся в вашей университетской системе — здесь только её анализ."
+            steps={[
+              'Импортируйте описание ОП и учебный план (PDF)',
+              'При необходимости отредактируйте извлечённые дисциплины и компетенции',
+              'Запустите анализ — последовательность, карта компетенций и рекомендации',
+            ]}
+          />
+        )}
 
-        {/* Intake — only IT admin can create programs */}
-        {canCreate && (
+        {/* Intake — РОП, УМЦ, проректор, IT admin can all import */}
+        {canImport && (
         <div className="bg-surface border border-border rounded-lg overflow-hidden mb-6">
           <button
             onClick={() => setCreating((v) => !v)}
@@ -119,6 +167,37 @@ export default function InstitutionPrograms() {
               />
               <Field label="Реализуемые формы обучения" value={forms} onChange={setForms}
                 placeholder="очная, очно-заочная" />
+
+              {/* Program-unit linker — required for scoped callers (РОП,
+                  polygroup / institute heads: picker restricted to their
+                  subtree). Optional for all-rw (all program units in the
+                  tree; can link later via the detail page). */}
+              {programUnitOptions.length > 0 && (
+                <label className="block">
+                  <span className="text-xs font-sans text-ink-secondary block mb-1">
+                    Подразделение в структуре {isScoped && <span className="text-danger">*</span>}
+                    {!isScoped && <span className="text-ink-tertiary"> — необязательно, можно связать позже</span>}
+                  </span>
+                  <select
+                    value={orgUnitId}
+                    onChange={(e) => setOrgUnitId(e.target.value)}
+                    className="w-full text-sm font-sans bg-surface border border-border rounded-md px-2.5 py-2 outline-none focus:border-border-strong"
+                  >
+                    {!isScoped && <option value="">— не связывать сейчас —</option>}
+                    {isScoped && programUnitOptions.length > 1 && <option value="" disabled>Выберите программу</option>}
+                    {programUnitOptions.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}{u.short_name ? ` (${u.short_name})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {isScoped && (
+                    <span className="text-[11px] font-sans text-ink-tertiary block mt-1">
+                      Выберите образовательную программу, за которую вы отвечаете (или которая входит в ваше направление / институт).
+                    </span>
+                  )}
+                </label>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                 <FileField
@@ -147,10 +226,20 @@ export default function InstitutionPrograms() {
 
         {/* List */}
         {programs.length === 0 ? (
-          <div className="text-center py-12 text-sm font-sans text-ink-secondary">
-            {canCreate
-              ? 'Пока нет учебных планов. Импортируйте первую программу, чтобы проанализировать её архитектуру.'
-              : 'Пока нет программ, доступных вам для просмотра.'}
+          <div className="max-w-lg mx-auto py-12 text-center">
+            {canImport ? (
+              <p className="text-sm font-sans text-ink-secondary">
+                Пока нет учебных планов. Импортируйте первую программу, чтобы проанализировать её архитектуру.
+              </p>
+            ) : readOnly ? (
+              <p className="text-sm font-sans text-ink-secondary">
+                В организации пока нет образовательных программ. Когда РОП импортирует первую программу, она появится здесь.
+              </p>
+            ) : (
+              <p className="text-sm font-sans text-ink-secondary">
+                Нет программ, доступных вам для просмотра.
+              </p>
+            )}
           </div>
         ) : (
           <div className="space-y-2">

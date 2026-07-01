@@ -11,6 +11,7 @@ import {
 import {
   listPrograms, listProgramsForUnits, createProgram, findProgram, getProgramDetail, updateProgram, deleteProgram,
   replaceDisciplines, replaceCompetencies, saveAnalysis, getLatestAnalysis,
+  listProgramUnitsForInstitution, listProgramUnitsByIds,
 } from '../db/queries/programs'
 import { canEditProgram, canReadProgram } from '../services/programAccess'
 import { listAncestorsOfUnit } from '../db/queries/orgUnits'
@@ -55,6 +56,25 @@ function assertEdit(req: Request, programOrgUnitId: string | null): void {
   }
 }
 
+// ── Pickable program units — for the import form + detail linker ────────────
+// Returns `program` org_units the caller can link a new programme to. Kept as
+// a dedicated endpoint so РОПы and polygroup heads (who can't call the
+// institution-admin structure endpoint) can still populate the picker.
+
+router.get('/pickable-units', asyncHandler(async (req, res) => {
+  const scope = req.programAccessScope!
+  if (scope.kind === 'all-rw') {
+    res.json(await listProgramUnitsForInstitution(institutionId(req)))
+    return
+  }
+  if (scope.kind === 'specific') {
+    res.json(await listProgramUnitsByIds(scope.programUnitIds))
+    return
+  }
+  // all-ro (no active role today) — nothing to pick from
+  res.json([])
+}))
+
 // ── Programs CRUD ───────────────────────────────────────────────────────────────
 
 router.get('/', asyncHandler(async (req, res) => {
@@ -69,10 +89,19 @@ router.get('/', asyncHandler(async (req, res) => {
 }))
 
 router.post('/', validate(createProgramRules), asyncHandler(async (req, res) => {
-  // Only all-rw can create new programs; RОП and oversight roles can't spin up
-  // a new programme by themselves — that's an IT-admin act.
+  // РОП + УМЦ + IT admin can all create programmes. Creation is really the
+  // import step of an externally-authored ОП; the tool then analyses it.
+  // РОП (specific scope) MUST link the new programme to one of the `program`
+  // org_units they hold — otherwise the scope check on next access would
+  // 403 them from their own row.
   const scope = req.programAccessScope!
-  if (scope.kind !== 'all-rw') throw new ForbiddenError('Только администратор организации может создавать программы')
+  if (scope.kind === 'specific') {
+    const unit = req.body.org_unit_id
+    if (!unit) throw new ValidationError('Выберите вашу образовательную программу в структуре — обязательно для РОП')
+    if (!scope.programUnitIds.includes(unit)) {
+      throw new ForbiddenError('Можно связать программу только с подразделением, которым вы руководите')
+    }
+  }
   const program = await createProgram(institutionId(req), req.teacher.id, req.body)
   res.status(201).json(program)
 }))
@@ -85,9 +114,16 @@ router.post(
   aiLimiter,
   uploadFields([{ name: 'description', maxCount: 1 }, { name: 'plan', maxCount: 1 }]),
   asyncHandler(async (req, res) => {
-    // Import bootstraps a whole new program from PDFs — IT-admin territory.
+    // РОП + УМЦ + IT admin can all import. РОП must link on import to a
+    // program unit they hold (same rule as POST /).
     const scope = req.programAccessScope!
-    if (scope.kind !== 'all-rw') throw new ForbiddenError('Только администратор организации может импортировать программы')
+    if (scope.kind === 'specific') {
+      const unit = String(req.body.org_unit_id ?? '')
+      if (!unit) throw new ValidationError('Выберите вашу образовательную программу в структуре — обязательно для РОП')
+      if (!scope.programUnitIds.includes(unit)) {
+        throw new ForbiddenError('Можно связать программу только с подразделением, которым вы руководите')
+      }
+    }
     const inst = institutionId(req)
     const files = req.files as Record<string, Express.Multer.File[]> | undefined
     const planFile = files?.plan?.[0]
@@ -147,7 +183,9 @@ router.post(
 
     const duration = Math.max(8, ...disciplines.map((d) => d.semester), 1)
 
-    // 3) Always create + populate with whatever we got — the admin edits the rest.
+    // 3) Always create + populate with whatever we got — the caller edits the rest.
+    //    org_unit_id is validated above for `specific` scope; for all-rw it's
+    //    optional (blank = link later via the detail page's structure select).
     const program = await createProgram(inst, teacherId, {
       name,
       code:               req.body.code || null,
@@ -156,6 +194,7 @@ router.post(
       education_level:    req.body.education_level || null,
       profile:            req.body.profile || null,
       forms_of_study:     req.body.forms_of_study || null,
+      org_unit_id:        (req.body.org_unit_id as string | undefined) || null,
     })
 
     await setProgramDocs(program.id, { description_text: descText, plan_text: planText })
@@ -199,8 +238,9 @@ router.patch('/:id', validate(updateProgramRules), asyncHandler(async (req, res)
 }))
 
 router.delete('/:id', asyncHandler(async (req, res) => {
-  const scope = req.programAccessScope!
-  if (scope.kind !== 'all-rw') throw new ForbiddenError('Удаление программ доступно только администратору организации')
+  // РОП can delete their own linked programme; all-rw can delete any.
+  const detail = await loadReadable(req)
+  assertEdit(req, detail.org_unit_id)
   const ok = await deleteProgram(req.params.id, institutionId(req))
   if (!ok) throw new NotFoundError('Учебный план')
   res.status(204).end()

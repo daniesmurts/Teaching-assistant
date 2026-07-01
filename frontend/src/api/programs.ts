@@ -35,12 +35,28 @@ export interface ImportProgramInput {
   name?: string                 // falls back to specialty_name server-side
   description?: File | null      // описание ОП (PDF)
   plan: File                     // учебный план (PDF) — required
+  // Required when the caller is `specific` scope (РОП). Optional for `all-rw`
+  // (they may link later via the detail page's structure select).
+  org_unit_id?: string | null
 }
 
 export interface ImportProgramResult {
   program: Program
   imported: { disciplines: number; competencies: number }
   warnings: string[]
+}
+
+// Program units the caller may link a new/edited programme to. Server picks
+// the right set per scope: all program units in the institution for all-rw;
+// the caller's subtree-walked set for specific (РОПы, polygroup heads).
+export interface PickableProgramUnit {
+  id:         string
+  name:       string
+  short_name: string | null
+}
+
+export async function getPickableProgramUnits(): Promise<PickableProgramUnit[]> {
+  return (await client.get<PickableProgramUnit[]>('/api/institution/programs/pickable-units')).data
 }
 
 export async function importProgram(input: ImportProgramInput): Promise<ImportProgramResult> {
@@ -53,6 +69,7 @@ export async function importProgram(input: ImportProgramInput): Promise<ImportPr
   if (input.profile) fd.append('profile', input.profile)
   if (input.forms_of_study) fd.append('forms_of_study', input.forms_of_study)
   if (input.description) fd.append('description', input.description)
+  if (input.org_unit_id) fd.append('org_unit_id', input.org_unit_id)
   fd.append('plan', input.plan)
 
   // Extraction + two LLM parse passes — can take ~1–2 minutes.

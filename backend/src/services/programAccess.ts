@@ -2,16 +2,30 @@ import { pool } from '../db/connection'
 
 // Role-driven access to «Образовательные программы». Separate from
 // requireInstitutionAdmin because the РОП access path is unit-scoped (head on a
-// specific program unit) while начальник УМЦ / проректор get aggregate
-// read-only access by virtue of their unit *type* (governance / admin_office),
-// not by subtree containment.
+// specific program unit) while начальник УМЦ / проректор get aggregate access
+// by virtue of their unit *type* (governance / admin_office), not by subtree
+// containment.
 //
-// Resolution rule (default-on for unit type):
+// Correction (2026-07-01): programme content is authored in the university's
+// own system; this tool ingests + analyses. In practice РОП + УМЦ + проректор
+// all import, correct extracted content, and run analysis together — so unit
+// type alone (governance / admin_office) grants full read/write, not read-only
+// oversight. Between УМЦ and the РОПы, KNITU has 4 polygroup heads who each
+// oversee a subset of РОПы; they need `specific` scope covering their whole
+// subtree, not just direct program-unit grants. Same shape for institute
+// directors and any kafedra head who happens to have a `program` beneath them.
+// A single subtree walk resolves all these cases and dual roles.
+// The `all-ro` branch stays for a future viewer-role surface.
+//
+// Resolution rule:
 //   platform owner                            → all-rw
 //   admin on the institution root             → all-rw
-//   head/admin on a governance unit           → all-ro
-//   head/admin on an admin_office unit (УМЦ)  → all-ro
-//   head/admin on a program unit (РОП)        → specific
+//   head/admin on governance / admin_office   → all-rw   (проректор, УМЦ)
+//   any other head/admin (cluster, division,  → specific — union of every
+//   department, program — walks subtree)                  `program` unit in
+//                                                         the subtree of any
+//                                                         held unit + direct
+//                                                         program grants
 //   nothing of the above                      → none
 
 export type ProgramAccessScope =
@@ -50,17 +64,33 @@ export async function getProgramAccessScope(teacher: TeacherIdentity): Promise<P
     return { kind: 'all-rw' }
   }
 
-  // Governance or admin_office head/admin → aggregate read-only oversight.
-  // Default-on per unit type: any grant of these types implies oversight.
+  // Governance or admin_office head/admin → institution-wide read + write.
+  // Default-on per unit type: any grant of these types implies collaborative
+  // authorship rights on all programmes (проректор, начальник УМЦ).
   if (rows.some((r) => r.type_code === 'governance' || r.type_code === 'admin_office')) {
-    return { kind: 'all-ro' }
+    return { kind: 'all-rw' }
   }
 
-  // Specific program unit grants (РОП). May hold several.
-  const programUnitIds = rows.filter((r) => r.type_code === 'program').map((r) => r.org_unit_id)
-  if (programUnitIds.length > 0) return { kind: 'specific', programUnitIds }
+  // Everything else — cluster (polygroup), division (institute), department
+  // (kafedra), or program (РОП) — is subtree-scoped. Walk the materialised
+  // path of every held unit and collect every `program` unit within. Dual
+  // roles (e.g. polygroup head + direct РОП) fall out of the DISTINCT.
+  const authorityIds = rows.map((r) => r.org_unit_id)
+  if (authorityIds.length === 0) return { kind: 'none' }
 
-  return { kind: 'none' }
+  const { rows: programRows } = await pool.query<{ id: string }>(
+    `SELECT DISTINCT p.id
+       FROM org_units p
+       JOIN org_units auth ON auth.institution_id = p.institution_id
+                          AND p.path LIKE auth.path || '%'
+      WHERE p.type_code = 'program'
+        AND auth.id = ANY($1::uuid[])`,
+    [authorityIds]
+  )
+  const programUnitIds = programRows.map((r) => r.id)
+  if (programUnitIds.length === 0) return { kind: 'none' }
+
+  return { kind: 'specific', programUnitIds }
 }
 
 /** True if the scope grants edit access on the program identified by its

@@ -35,6 +35,41 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   and the nodemailer SMTP fallback. Env-overridable: `EMAIL_REPLY_TO`,
   `EMAIL_UNSUBSCRIBE_MAILTO`.
 
+### Changed
+- **Programme scope now walks the subtree — polygroup heads (and any
+  intermediate authority) fit naturally.** Between УМЦ (institution-wide via
+  `admin_office`) and the РОП (direct `program` grant), KNITU has 4 polygroup
+  heads managing groups of РОПs, some of whom are also РОПs themselves. The
+  previous scope helper knew only two shapes and left polygroup heads with
+  `none` — inaccessible page. `getProgramAccessScope` now walks the
+  materialised path of every unit the caller holds head/admin on
+  (cluster / division / department / program) and unions the `program` units
+  found underneath. Dual roles (polygroup head + direct РОП) fall out of the
+  same DISTINCT — one query resolves it. Governance / admin_office still get
+  `all-rw`. New `GET /api/institution/programs/pickable-units` returns the
+  server-computed set for the import picker so РОПы and polygroup heads
+  (who can't call the institution-admin structure endpoint) populate the
+  picker without leaking the tree. Frontend renamed `isRop → isScoped` since
+  the guard now covers polygroup and institute heads too; copy on the picker
+  hint reflects it («ваше направление / институт»).
+- **Programmes rescoped: РОП + УМЦ + проректор can all import and edit.**
+  Corrects a positioning mistake in the first version of Feature P role-driven
+  programme access. Programme content is authored in the university's own
+  system; ИСПУМ ingests via PDF and runs analysis. In practice, РОПы create
+  the import (of their own programmes) and collaborate on corrections and
+  analysis with УМЦ and проректор — so head/admin on `governance` or
+  `admin_office` now returns `all-rw` instead of `all-ro`, and `specific`
+  (РОП) can now POST /api/programs, POST /api/programs/import, and DELETE
+  their own programme (backend rejects any `org_unit_id` on write that isn't
+  in the caller's held program units). РОП must pick their programme's unit
+  in the import form — picker auto-selects when they head exactly one, forces
+  a choice when they head several. All-rw callers see all `program` units in
+  the tree with an optional «— не связывать сейчас —» option so IT can bulk
+  import before linking. Intro copy rewritten: no more «программы создаёт
+  администратор организации» — it's honestly framed as an analysis tool with
+  external authorship. The `all-ro` scope enum branch stays for a future
+  viewer-role surface but no active role maps to it.
+
 ### Added
 - **«Руководство → Преподаватель» drill page (Leadership V2 slice 1).** Any
   teacher row on `/leadership` is now clickable and lands on

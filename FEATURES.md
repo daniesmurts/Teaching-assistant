@@ -92,11 +92,15 @@ A teacher in an institution-tier org (via invite or email-domain auto-join):
 
 ## Head of an educational programme (РОП) ✅
 
-A teacher granted `head` on a `program` org_unit sees **«Образовательные программы»** (`/programs`) filtered to their programme(s) only, with full read + edit rights on those. Non-clickable breadcrumb shows the ancestor chain of the linked unit so the РОП sees which институт their programme sits under. IT admin links a programme to its `program` org_unit via a select on the programme's detail page — until that link is set, no РОП can be scoped.
+A teacher granted `head` on a `program` org_unit sees **«Образовательные программы»** (`/programs`) filtered to their programme(s) only, with full read + edit rights. Imports their own ОП via the intake form (описание ОП + учебный план PDF); the picker pre-selects when they head exactly one `program` unit and forces a choice when they head several. Non-clickable breadcrumb on the detail page shows the ancestor chain of the linked unit so the РОП sees which институт their programme sits under. **The tool is analysis-only** — programme content is authored in the university's own system; here we ingest, correct extracted content, and analyse (sequencing, competencies coverage, gaps, redundancy).
 
 ## Oversight roles (начальник УМЦ, проректор) ✅
 
-A teacher granted `head` or `admin` on a `governance` or `admin_office` org_unit sees **all** programmes in the institution, read-only. «Только просмотр» chip on the list and on the detail; edit / analyse / delete affordances hidden; Builder disabled via `<fieldset disabled>`. Default-on by unit type — the IT admin's role grant is the access signal, no extra configuration required.
+A teacher granted `head` or `admin` on a `governance` or `admin_office` org_unit sees **all** programmes in the institution, with **read + write + analyse** rights (collaborates on corrections and analysis alongside РОП). Optional programme-unit picker on import — they can bulk-import without linking and connect programmes to units later via the detail page's «Подразделение в структуре» select. Default-on by unit type — the IT admin's role grant is the access signal, no extra configuration required.
+
+## Intermediate authorities (polygroup / institute heads) ✅
+
+A teacher granted `head` or `admin` on any non-horizontal unit (`cluster` = polygroup, `division` = institute / факультет, `department` = kafedra) with programmes in their subtree sees + edits + imports for **only those programmes** — a single materialised-path walk from every held unit unions all `program` units within. Dual roles (polygroup head who is also directly the РОП of one programme) fall out of the same query. The import picker shows only their subtree's units, so they can't accidentally link a new programme outside their authority.
 
 ## Unit leader (head / sub-unit admin) ✅
 

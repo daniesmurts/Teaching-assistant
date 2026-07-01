@@ -8,7 +8,7 @@ import {
   downloadAnalysisPdf, updateProgram,
 } from '../../api/programs'
 import { getCourses } from '../../api/courses'
-import { getOrgStructure } from '../../api/orgStructure'
+import { getPickableProgramUnits } from '../../api/programs'
 import { useAuthStore } from '../../store/authStore'
 import { EXAMPLE_PROGRAM } from '../../lib/programExample'
 import { useUIStore } from '../../store/uiStore'
@@ -54,15 +54,11 @@ export default function InstitutionProgramDetail() {
   // Only IT admin (all-rw) can link a program to its `program` org_unit — an
   // РОП must not silently reassign their programme to a different tree slot.
   const canLinkOrgUnit = useAuthStore((s) => s.teacher?.program_access) === 'all-rw'
-  const { data: orgUnits = [] } = useQuery({
-    queryKey: ['org-structure'],
-    queryFn:  getOrgStructure,
+  const { data: programUnitOptions = [] } = useQuery({
+    queryKey: ['program-pickable-units'],
+    queryFn:  getPickableProgramUnits,
     enabled:  canLinkOrgUnit,
   })
-  const programUnitOptions = useMemo(
-    () => orgUnits.filter((u) => u.type_code === 'program'),
-    [orgUnits]
-  )
   const linkMut = useMutation({
     mutationFn: (org_unit_id: string | null) => updateProgram(id, { org_unit_id }),
     onSuccess:  () => {

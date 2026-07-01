@@ -312,3 +312,34 @@ export async function getLatestAnalysis(programId: string): Promise<ProgramAnaly
   )
   return rows[0] ? rows[0].result : null
 }
+
+// ── Pickable program units — for the import form and the detail linker ──────
+
+export interface PickableProgramUnit {
+  id:         string
+  name:       string
+  short_name: string | null
+}
+
+export async function listProgramUnitsForInstitution(institutionId: string): Promise<PickableProgramUnit[]> {
+  const { rows } = await pool.query<PickableProgramUnit>(
+    `SELECT id, name, short_name
+       FROM org_units
+      WHERE institution_id = $1 AND type_code = 'program'
+      ORDER BY name`,
+    [institutionId]
+  )
+  return rows
+}
+
+export async function listProgramUnitsByIds(ids: string[]): Promise<PickableProgramUnit[]> {
+  if (ids.length === 0) return []
+  const { rows } = await pool.query<PickableProgramUnit>(
+    `SELECT id, name, short_name
+       FROM org_units
+      WHERE id = ANY($1::uuid[]) AND type_code = 'program'
+      ORDER BY name`,
+    [ids]
+  )
+  return rows
+}
