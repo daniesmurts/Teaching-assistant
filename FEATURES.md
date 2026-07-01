@@ -111,6 +111,7 @@ A teacher granted `Руководитель` or sub-unit `Администрат
 - **Teacher table** — name, primary kafedra, проверок за 30 дней, последняя активность (most-active first).
 - Subtree resolved via the materialised path on org_units; per-request scope re-checked through `canActOnUnit` so a head on кафедра X cannot peek into кафедра Y.
 - V1 is **grades-only and read-only** for the subtree view. Clicking any teacher row opens a **per-teacher drill** at `/leadership/teachers/:id` with 30-day totals (проверок, доля утверждений, средняя правка балла), zero-filled activity sparkline, active subjects, and the last 20 grades — gated per-target by `canActOnUnit`. Presentations / published-assignments overview cards tracked under Feature P tail d in TODO.md.
+- **Programme state** section for polygroup / институт / РОП heads: every `program` org_unit in the picked subtree with a state pill (не импортирована / требуется план / готова к анализу / анализ выполнен + date), ✓ chips for the two PDFs, discipline + competency counts. Auto-hides for subtrees without programmes (e.g. kafedra heads without programmes underneath).
 
 ---
 

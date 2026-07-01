@@ -18,6 +18,21 @@ export interface LeadershipTeacher {
   last_active_at:    string | null
 }
 
+export interface LeadershipProgramUnitState {
+  unit_id:              string
+  unit_name:            string
+  unit_short_name:      string | null
+  program_id:           string | null
+  program_name:         string | null
+  program_code:         string | null
+  program_level:        string | null
+  has_description_doc:  boolean
+  has_plan_doc:         boolean
+  discipline_count:     number
+  competency_count:     number
+  last_analysis_at:     string | null
+}
+
 export interface LeadershipOverview {
   unit: { id: string; name: string; short_name: string | null; type_code: string }
   teachers: LeadershipTeacher[]
@@ -26,6 +41,7 @@ export interface LeadershipOverview {
     total_grades_30d: number
     teacher_count:    number
   }
+  program_units: LeadershipProgramUnitState[]
 }
 
 export async function getLeadershipUnits(): Promise<LeadershipUnit[]> {

@@ -160,6 +160,51 @@ export async function getSubtreeActivity(unitId: string): Promise<LeadershipActi
   }
 }
 
+// ─── Programme-state for a leadership subtree ────────────────────────────────
+
+export interface LeadershipProgramUnitState {
+  unit_id:              string
+  unit_name:            string
+  unit_short_name:      string | null
+  program_id:           string | null
+  program_name:         string | null
+  program_code:         string | null
+  program_level:        string | null
+  has_description_doc:  boolean
+  has_plan_doc:         boolean
+  discipline_count:     number
+  competency_count:     number
+  last_analysis_at:     string | null
+}
+
+/**
+ * Every `program` org_unit in the subtree rooted at `unitPath`, with a LEFT
+ * JOIN onto its linked programme (if any) so unlinked units still surface
+ * with clear "not imported yet" state. Used by the leadership dashboard for
+ * polygroup / institute / РОП heads whose real question is "which programmes
+ * am I responsible for and what state are they in?" — the grading-oriented
+ * teacher list doesn't answer that.
+ */
+export async function listProgramUnitStateForSubtree(unitPath: string): Promise<LeadershipProgramUnitState[]> {
+  const { rows } = await pool.query<LeadershipProgramUnitState>(
+    `SELECT u.id AS unit_id, u.name AS unit_name, u.short_name AS unit_short_name,
+            p.id AS program_id, p.name AS program_name, p.code AS program_code,
+            p.level AS program_level,
+            (p.description_text IS NOT NULL AND length(trim(p.description_text)) > 0) AS has_description_doc,
+            (p.plan_text        IS NOT NULL AND length(trim(p.plan_text)) > 0)        AS has_plan_doc,
+            COALESCE((SELECT COUNT(*)::int FROM program_disciplines  WHERE program_id = p.id), 0) AS discipline_count,
+            COALESCE((SELECT COUNT(*)::int FROM program_competencies WHERE program_id = p.id), 0) AS competency_count,
+            (SELECT MAX(created_at) FROM program_analyses WHERE program_id = p.id)   AS last_analysis_at
+       FROM org_units u
+       LEFT JOIN programs p ON p.org_unit_id = u.id
+      WHERE u.type_code = 'program'
+        AND u.path LIKE $1 || '%'
+      ORDER BY u.name`,
+    [unitPath]
+  )
+  return rows
+}
+
 // ─── Per-teacher drill (Leadership V2) ────────────────────────────────────────
 
 export interface LeadershipTeacherProfile {

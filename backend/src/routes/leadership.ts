@@ -9,6 +9,7 @@ import {
   listSubtreeTeachers, getSubtreeActivity,
   getTeacherLeadershipProfile, getTeacherLeadershipActivity,
   listTeacherActiveSubjects, listTeacherRecentGrades,
+  listProgramUnitStateForSubtree,
 } from '../db/queries/leadership'
 import { getOrgUnitById } from '../db/queries/orgUnits'
 
@@ -49,9 +50,14 @@ router.get('/overview', asyncHandler(async (req, res) => {
     if (!ok) throw new ForbiddenError('Нет доступа к этому подразделению')
   }
 
-  const [activity, teachers] = await Promise.all([
+  const [activity, teachers, program_units] = await Promise.all([
     getSubtreeActivity(unitId),
     listSubtreeTeachers(unit.path),
+    // Programmes in the subtree with linked-programme state — surfaces "what
+    // programmes am I responsible for and what's their state" for polygroup /
+    // institute / РОП heads. Empty for kafedra heads without programs under
+    // them (natural fallback — frontend hides the section).
+    listProgramUnitStateForSubtree(unit.path),
   ])
 
   res.json({
@@ -62,6 +68,7 @@ router.get('/overview', asyncHandler(async (req, res) => {
       total_grades_30d: activity.total_grades_30d,
       teacher_count:    activity.teacher_count,
     },
+    program_units,
   })
 }))
 

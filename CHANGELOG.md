@@ -71,6 +71,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   viewer-role surface but no active role maps to it.
 
 ### Added
+- **«Руководство» surfaces programme state — polygroup / институт / РОП heads
+  land on something useful.** The dashboard was grading-focused (teachers + 30d
+  проверок), which reads as empty for a polygroup or институт head whose real
+  job is programme oversight, not classroom grading. New «Образовательные
+  программы» section between the activity chart and the teacher table lists
+  every `program` org_unit in the picked subtree with a state pill:
+  «Не импортирована» (unit exists in the tree but no linked programme yet — hint
+  points the viewer at РОП / УМЦ to import), «Требуется учебный план» (linked
+  but учебный план PDF missing), «Готова к анализу» (docs uploaded, no analysis
+  yet), «Анализ выполнен · dd mmm yyyy». Each linked programme card also shows
+  ✓ chips for the two PDFs, discipline count, competency count — clickable
+  through to `/programs/:id`. Auto-hides for subtrees with no `program` units
+  (e.g. kafedra heads without programmes under them). Backend:
+  `listProgramUnitStateForSubtree(unitPath)` — LEFT JOIN of `org_units` to
+  `programs` on `org_unit_id` with derived flags + analysis timestamp.
+  `/api/leadership/overview` extended with `program_units[]`.
 - **«Руководство → Преподаватель» drill page (Leadership V2 slice 1).** Any
   teacher row on `/leadership` is now clickable and lands on
   `/leadership/teachers/:id` — a read-only per-teacher panel scoped by the

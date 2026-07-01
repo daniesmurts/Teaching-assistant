@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getLeadershipUnits, getLeadershipOverview } from '../api/leadership'
+import { getLeadershipUnits, getLeadershipOverview, type LeadershipProgramUnitState } from '../api/leadership'
 
 // Mirrors TYPE_LABEL in InstitutionStructure — duplicated to avoid a
 // cross-page import. Keep in sync when adding org-unit types.
@@ -144,6 +144,23 @@ export default function Leadership() {
                   )}
                 </div>
 
+                {/* Programme state — surfaces "what programmes am I */}
+                {/* responsible for and what's their state" for polygroup / */}
+                {/* institute / РОП heads. Auto-hides when the subtree has */}
+                {/* no `program` units (e.g. a kafedra head). */}
+                {overview.program_units.length > 0 && (
+                  <>
+                    <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">
+                      Образовательные программы
+                    </div>
+                    <div className="space-y-2 mb-8">
+                      {overview.program_units.map((pu) => (
+                        <ProgramUnitCard key={pu.unit_id} state={pu} onOpen={(id) => navigate(`/programs/${id}`)} />
+                      ))}
+                    </div>
+                  </>
+                )}
+
                 <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">
                   Преподаватели
                 </div>
@@ -186,5 +203,82 @@ export default function Leadership() {
         )}
       </div>
     </div>
+  )
+}
+
+// Single row of programme-unit state. Shows the unit name + linked programme
+// (if any), with a compact state summary. Clickable when a programme exists;
+// otherwise renders as an inert card with a clear "not imported yet" line and
+// what has to happen for it to become active.
+function ProgramUnitCard({
+  state,
+  onOpen,
+}: {
+  state:  LeadershipProgramUnitState
+  onOpen: (programId: string) => void
+}) {
+  const linked = state.program_id !== null
+  const label  = state.unit_short_name ? `${state.unit_name} (${state.unit_short_name})` : state.unit_name
+
+  // Overall status — colour + line copy chosen from the state markers.
+  const status = !linked
+    ? { tone: 'warning' as const, label: 'Не импортирована', hint: 'РОП или УМЦ импортирует описание ОП и учебный план в разделе «Образовательные программы».' }
+    : !state.has_plan_doc
+      ? { tone: 'warning' as const, label: 'Требуется учебный план', hint: 'Загрузите учебный план (PDF), чтобы извлечь дисциплины.' }
+      : state.last_analysis_at
+        ? { tone: 'success' as const, label: `Анализ выполнен · ${new Date(state.last_analysis_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}`, hint: undefined }
+        : { tone: 'info' as const,    label: 'Готова к анализу', hint: 'Дисциплины и компетенции извлечены — можно запустить анализ.' }
+
+  const toneCls = status.tone === 'success' ? 'bg-success-bg text-success border-success/20'
+                : status.tone === 'warning' ? 'bg-warning-bg text-warning border-warning/20'
+                : 'bg-amber-light text-amber border-amber/20'
+
+  const Container: React.ElementType = linked ? 'button' : 'div'
+  const containerProps = linked
+    ? {
+        onClick: () => onOpen(state.program_id as string),
+        className: 'w-full text-left bg-surface border border-border rounded-lg px-4 py-3 hover:border-border-mid hover:bg-surface-warm transition-colors',
+      }
+    : {
+        className: 'bg-surface border border-border rounded-lg px-4 py-3',
+      }
+
+  return (
+    <Container {...containerProps}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          {linked ? (
+            <>
+              <div className="text-sm font-sans font-medium text-ink">{state.program_name}</div>
+              <div className="text-xs font-sans text-ink-tertiary mt-0.5">
+                {state.program_code && <span>{state.program_code} · </span>}
+                {label}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-sm font-sans font-medium text-ink">{label}</div>
+              <div className="text-xs font-sans text-ink-tertiary mt-0.5">Подразделение в дереве организации</div>
+            </>
+          )}
+
+          {linked && (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[11px] font-sans text-ink-tertiary">
+              <span title="Описание ОП загружено">{state.has_description_doc ? '✓' : '·'} Описание ОП</span>
+              <span title="Учебный план загружен">{state.has_plan_doc ? '✓' : '·'} Учебный план</span>
+              <span>Дисциплины: {state.discipline_count}</span>
+              <span>Компетенции: {state.competency_count}</span>
+            </div>
+          )}
+          {status.hint && (
+            <div className="text-[11px] font-sans text-ink-tertiary mt-1.5 leading-relaxed">{status.hint}</div>
+          )}
+        </div>
+
+        <span className={`text-[10px] font-sans font-semibold uppercase tracking-wider ${toneCls} border rounded-sm px-2 py-1 flex-shrink-0`}>
+          {status.label}
+        </span>
+      </div>
+    </Container>
   )
 }
