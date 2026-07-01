@@ -23,6 +23,10 @@ interface ProgramRow {
   forms_of_study: string | null
   description_text: string | null
   plan_text: string | null
+  // Migration 049 — link into the §7 org tree so RОП (head on the linked
+  // `program` org_unit) can be scoped to their programs. NULL for legacy
+  // programs; IT admin sets the link on the edit form.
+  org_unit_id: string | null
   created_at: Date
   updated_at: Date
 }
@@ -41,6 +45,7 @@ function toProgram(r: ProgramRow): Program {
     education_level: r.education_level,
     profile: r.profile,
     forms_of_study: r.forms_of_study,
+    org_unit_id: r.org_unit_id,
     has_description_doc: Boolean((r.description_text ?? '').trim()),
     has_plan_doc: Boolean((r.plan_text ?? '').trim()),
     created_at: r.created_at.toISOString(),
@@ -58,6 +63,9 @@ export interface ProgramMeta {
   education_level?: string | null
   profile?: string | null
   forms_of_study?: string | null
+  // Migration 049 — link to the `program` org_unit whose head is this
+  // program's РОП. Optional; NULL means no РОП scoping is possible yet.
+  org_unit_id?: string | null
 }
 
 interface DisciplineRow {
@@ -112,6 +120,25 @@ export async function listPrograms(institutionId: string): Promise<Program[]> {
   return rows.map(toProgram)
 }
 
+/** Scoped listing for a РОП: only programs whose `org_unit_id` is in the
+ *  caller's held program-unit set. Programs with a NULL org_unit_id are never
+ *  visible in the scoped list — the IT admin must link them before an РОП can
+ *  see them. */
+export async function listProgramsForUnits(
+  institutionId: string,
+  programUnitIds: string[],
+): Promise<Program[]> {
+  if (programUnitIds.length === 0) return []
+  const { rows } = await pool.query<ProgramRow>(
+    `SELECT * FROM programs
+      WHERE institution_id = $1
+        AND org_unit_id = ANY($2::uuid[])
+      ORDER BY created_at DESC`,
+    [institutionId, programUnitIds]
+  )
+  return rows.map(toProgram)
+}
+
 export async function createProgram(
   institutionId: string,
   createdBy: string,
@@ -120,12 +147,13 @@ export async function createProgram(
   const { rows } = await pool.query<ProgramRow>(
     `INSERT INTO programs
        (institution_id, created_by, name, code, level, duration_semesters, description,
-        specialty_name, education_level, profile, forms_of_study)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        specialty_name, education_level, profile, forms_of_study, org_unit_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING *`,
     [institutionId, createdBy, data.name, data.code ?? null, data.level ?? null,
      data.duration_semesters ?? 8, data.description ?? null,
-     data.specialty_name ?? null, data.education_level ?? null, data.profile ?? null, data.forms_of_study ?? null]
+     data.specialty_name ?? null, data.education_level ?? null, data.profile ?? null, data.forms_of_study ?? null,
+     data.org_unit_id ?? null]
   )
   return toProgram(rows[0])
 }
@@ -169,6 +197,8 @@ export async function updateProgram(
   institutionId: string,
   data: Partial<ProgramMeta>
 ): Promise<Program | null> {
+  // org_unit_id needs explicit CASE handling — COALESCE can't distinguish
+  // "clear the link" from "don't touch" since both would pass NULL.
   const { rows } = await pool.query<ProgramRow>(
     `UPDATE programs SET
        name               = COALESCE($3, name),
@@ -180,12 +210,14 @@ export async function updateProgram(
        education_level    = COALESCE($9, education_level),
        profile            = COALESCE($10, profile),
        forms_of_study     = COALESCE($11, forms_of_study),
+       org_unit_id        = CASE WHEN $12 THEN $13 ELSE org_unit_id END,
        updated_at         = NOW()
      WHERE id = $1 AND institution_id = $2
      RETURNING *`,
     [id, institutionId, data.name ?? null, data.code ?? null, data.level ?? null,
      data.duration_semesters ?? null, data.description ?? null,
-     data.specialty_name ?? null, data.education_level ?? null, data.profile ?? null, data.forms_of_study ?? null]
+     data.specialty_name ?? null, data.education_level ?? null, data.profile ?? null, data.forms_of_study ?? null,
+     data.org_unit_id !== undefined, data.org_unit_id ?? null]
   )
   return rows[0] ? toProgram(rows[0]) : null
 }

@@ -35,6 +35,34 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   and the nodemailer SMTP fallback. Env-overridable: `EMAIL_REPLY_TO`,
   `EMAIL_UNSUBSCRIBE_MAILTO`.
 
+### Added
+- **Role-driven access to «Образовательные программы» (Feature P tail c/1 —
+  РОП + начальник УМЦ + проректор).** Programs surface is no longer locked to
+  institution-root admins. Migration 049 adds `programs.org_unit_id` linking a
+  programme to its `program` org_unit; the IT admin sets this on the detail
+  page via a new «Подразделение в структуре» select (only visible to all-rw).
+  New `services/programAccess.ts::getProgramAccessScope` resolves the caller
+  into one of four buckets: **all-rw** (institution-root admin / platform
+  owner — full read/write across the institution), **all-ro** (head/admin on
+  a `governance` or `admin_office` unit — aggregate oversight, read-only,
+  default-on by unit type per KNITU model), **specific** (head/admin on a
+  `program` unit — the РОП — sees + edits only their own programmes), or
+  **none** (regular teachers, page hidden). New `requireProgramAccess`
+  middleware attaches the scope to `req`; every /api/programs route enforces
+  read/edit gates via `canReadProgram` / `canEditProgram`. Detail response
+  now also returns `can_edit` (server-computed per this caller × this
+  program) and `org_unit_ancestors` (root-first ancestor chain for a
+  non-clickable breadcrumb so an РОП sees which институт their programme
+  sits under). Auth payload gains `program_access: 'none'|'all-rw'|'all-ro'|'specific'`
+  so the new main-nav «Образовательные программы» entry renders without an
+  extra round trip. Read-only viewers see a «Только просмотр» chip and a
+  disabled Builder (via `<fieldset disabled>` — cascades to every input,
+  select and button inside without threading a `disabled` prop through
+  dozens of controls). The InstitutionLayout sub-nav now points at the same
+  top-level `/programs` URL; old `/institution/programs` remains as a
+  backward-compat route. Follows KNITU's model: IT owns tree topology and
+  role grants; features unlock automatically once roles are assigned.
+
 ### Changed
 - **Copy sweep: «ИИ» → «ИСПУМ» in marketing, onboarding and FeatureIntro cards.**
   Replaced the generic «ИИ» placeholder with the product name (or «платформа»)

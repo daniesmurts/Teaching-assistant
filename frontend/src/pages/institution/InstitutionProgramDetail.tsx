@@ -5,9 +5,11 @@ import Button from '../../components/ui/Button'
 import Select from '../../components/ui/Select'
 import {
   getProgram, getAnalysis, saveDisciplines, saveCompetencies, analyzeProgram, deleteProgram,
-  downloadAnalysisPdf,
+  downloadAnalysisPdf, updateProgram,
 } from '../../api/programs'
 import { getCourses } from '../../api/courses'
+import { getOrgStructure } from '../../api/orgStructure'
+import { useAuthStore } from '../../store/authStore'
 import { EXAMPLE_PROGRAM } from '../../lib/programExample'
 import { useUIStore } from '../../store/uiStore'
 import type {
@@ -42,6 +44,33 @@ export default function InstitutionProgramDetail() {
   const { data: program } = useQuery({ queryKey: ['program', id], queryFn: () => getProgram(id) })
   const { data: courses = [] } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
   const { data: cachedAnalysis } = useQuery({ queryKey: ['program-analysis', id], queryFn: () => getAnalysis(id) })
+
+  // Read-only mode when the server says this caller can't edit this program.
+  // Oversight roles (все-ro) and РОПs looking at someone else's programme
+  // fall into this bucket. Legacy default: assume editable for old sessions
+  // where the field is missing.
+  const canEdit = program?.can_edit ?? true
+
+  // Only IT admin (all-rw) can link a program to its `program` org_unit — an
+  // РОП must not silently reassign their programme to a different tree slot.
+  const canLinkOrgUnit = useAuthStore((s) => s.teacher?.program_access) === 'all-rw'
+  const { data: orgUnits = [] } = useQuery({
+    queryKey: ['org-structure'],
+    queryFn:  getOrgStructure,
+    enabled:  canLinkOrgUnit,
+  })
+  const programUnitOptions = useMemo(
+    () => orgUnits.filter((u) => u.type_code === 'program'),
+    [orgUnits]
+  )
+  const linkMut = useMutation({
+    mutationFn: (org_unit_id: string | null) => updateProgram(id, { org_unit_id }),
+    onSuccess:  () => {
+      qc.invalidateQueries({ queryKey: ['program', id] })
+      qc.invalidateQueries({ queryKey: ['programs'] })
+      addToast('Связь с подразделением обновлена', 'success')
+    },
+  })
 
   // Seed local state once the program loads.
   useEffect(() => {
@@ -90,7 +119,7 @@ export default function InstitutionProgramDetail() {
 
   const deleteMut = useMutation({
     mutationFn: () => deleteProgram(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['programs'] }); navigate('/institution/programs') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['programs'] }); navigate('/programs') },
   })
 
   // ── Mutators ──
@@ -129,26 +158,73 @@ export default function InstitutionProgramDetail() {
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-5xl mx-auto px-6 py-6 page-enter print:max-w-none print:p-0">
         {/* Header */}
-        <button onClick={() => navigate('/institution/programs')}
+        <button onClick={() => navigate('/programs')}
                 className="text-xs font-sans text-ink-secondary hover:text-amber mb-3 print:hidden">← Все программы</button>
+
+        {/* Org-tree linker — IT admin only. Chooses which `program` org_unit */}
+        {/* backs this programme; its `head` becomes the РОП. */}
+        {canLinkOrgUnit && (
+          <div className="mb-4 bg-surface-warm border border-border rounded-lg px-4 py-3 flex flex-wrap items-center gap-3 print:hidden">
+            <label className="text-xs font-sans text-ink-secondary">Подразделение в структуре:</label>
+            <select
+              value={program?.org_unit_id ?? ''}
+              onChange={(e) => linkMut.mutate(e.target.value || null)}
+              disabled={linkMut.isPending}
+              className="text-sm font-sans bg-surface border border-border rounded-md px-2.5 py-1.5 outline-none focus:border-border-strong min-w-[240px]"
+            >
+              <option value="">— не связана —</option>
+              {programUnitOptions.map((u) => (
+                <option key={u.id} value={u.id}>{u.name}{u.short_name ? ` (${u.short_name})` : ''}</option>
+              ))}
+            </select>
+            <span className="text-[11px] font-sans text-ink-tertiary">
+              РОП = руководитель этого подразделения в дереве организации.
+            </span>
+          </div>
+        )}
+
+        {/* Breadcrumb — non-clickable. Shows the ancestor chain of the linked */}
+        {/* program unit so an РОП sees which институт their programme sits under. */}
+        {program?.org_unit_ancestors && program.org_unit_ancestors.length > 0 && (
+          <div className="text-xs font-sans text-ink-tertiary mb-3 print:hidden flex flex-wrap items-center gap-1">
+            {program.org_unit_ancestors.map((a, i) => (
+              <span key={a.id} className="inline-flex items-center gap-1">
+                {i > 0 && <span className="text-ink-tertiary">›</span>}
+                <span>{a.short_name || a.name}</span>
+              </span>
+            ))}
+          </div>
+        )}
 
         <div className="flex items-start justify-between gap-4 mb-5 print:hidden">
           <div className="min-w-0">
-            <h1 className="font-display text-2xl font-bold text-ink truncate">{program?.name ?? '…'}</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="font-display text-2xl font-bold text-ink truncate">{program?.name ?? '…'}</h1>
+              {!canEdit && (
+                <span
+                  title="Вы видите эту программу только для чтения. Редактировать может назначенный РОП или администратор организации."
+                  className="text-[10px] font-sans font-semibold uppercase tracking-wider text-ink-tertiary bg-surface-warm border border-border rounded-sm px-2 py-0.5 flex-shrink-0"
+                >
+                  Только просмотр
+                </span>
+              )}
+            </div>
             <p className="text-xs font-sans text-ink-tertiary mt-1">
               {program?.code && <span>{program.code} · </span>}{duration} семестров · {disciplines.length} дисциплин · {competencies.length} компетенций/целей
             </p>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <Button variant="secondary" size="sm" onClick={() => saveMut.mutate()}
-                    loading={saveMut.isPending} disabled={!dirty}>
-              {dirty ? 'Сохранить' : 'Сохранено'}
-            </Button>
-            <Button size="sm" onClick={() => analyzeMut.mutate()} loading={analyzeMut.isPending}
-                    disabled={disciplines.length < 2}>
-              Анализировать
-            </Button>
-          </div>
+          {canEdit && (
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Button variant="secondary" size="sm" onClick={() => saveMut.mutate()}
+                      loading={saveMut.isPending} disabled={!dirty}>
+                {dirty ? 'Сохранить' : 'Сохранено'}
+              </Button>
+              <Button size="sm" onClick={() => analyzeMut.mutate()} loading={analyzeMut.isPending}
+                      disabled={disciplines.length < 2}>
+                Анализировать
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Tabs */}
@@ -160,23 +236,30 @@ export default function InstitutionProgramDetail() {
         </div>
 
         {tab === 'builder' && (
-          <Builder
-            isEmpty={isEmpty}
-            duration={duration}
-            maxSemester={maxSemester}
-            disciplines={disciplines}
-            competencies={competencies}
-            courses={courses}
-            knownCodes={knownCodes}
-            onLoadExample={loadExample}
-            addDiscipline={addDiscipline}
-            updateDiscipline={updateDiscipline}
-            removeDiscipline={removeDiscipline}
-            addCompetency={addCompetency}
-            updateCompetency={updateCompetency}
-            removeCompetency={removeCompetency}
-            onDelete={() => { if (confirm('Удалить эту программу?')) deleteMut.mutate() }}
-          />
+          // fieldset[disabled] cascades to every input, button and select
+          // inside — cleaner than threading a `disabled` prop through the
+          // Builder's dozens of controls. Read-only viewers still SEE the
+          // programme's shape; they can't accidentally destroy anything.
+          <fieldset disabled={!canEdit} className="border-0 p-0 m-0 min-w-0 disabled:opacity-95">
+            <Builder
+              isEmpty={isEmpty}
+              duration={duration}
+              maxSemester={maxSemester}
+              disciplines={disciplines}
+              competencies={competencies}
+              courses={courses}
+              knownCodes={knownCodes}
+              onLoadExample={loadExample}
+              addDiscipline={addDiscipline}
+              updateDiscipline={updateDiscipline}
+              removeDiscipline={removeDiscipline}
+              addCompetency={addCompetency}
+              updateCompetency={updateCompetency}
+              removeCompetency={removeCompetency}
+              onDelete={() => { if (confirm('Удалить эту программу?')) deleteMut.mutate() }}
+              canDelete={canEdit}
+            />
+          </fieldset>
         )}
 
         {tab === 'report' && (
@@ -222,6 +305,7 @@ interface BuilderProps {
   updateCompetency: (k: string, patch: Partial<ProgramCompetency>) => void
   removeCompetency: (k: string) => void
   onDelete: () => void
+  canDelete: boolean
 }
 
 function Builder(p: BuilderProps) {
@@ -303,7 +387,9 @@ function Builder(p: BuilderProps) {
         </div>
       </div>
 
-      <button onClick={p.onDelete} className="text-xs font-sans text-danger hover:underline">Удалить программу</button>
+      {p.canDelete && (
+        <button onClick={p.onDelete} className="text-xs font-sans text-danger hover:underline">Удалить программу</button>
+      )}
     </div>
   )
 }

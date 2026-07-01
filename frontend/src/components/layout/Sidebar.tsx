@@ -119,6 +119,10 @@ export default function Sidebar({ onClose }: Props) {
   // Any head/admin on a unit (or platform/institution admin transitively).
   const isLeader =
     (teacher?.is_leader ?? false) || isInstitutionAdmin
+  // РОП / начальник УМЦ / проректор / IT admin all get the «Образовательные
+  // программы» entry. Server resolves the actual per-row scope.
+  const canSeePrograms =
+    (teacher?.program_access && teacher.program_access !== 'none') || isInstitutionAdmin
 
   function logout() { clearAuth(); navigate('/login') }
 
@@ -180,11 +184,14 @@ export default function Sidebar({ onClose }: Props) {
           )}
         </NavLink>
 
-        {/* Leadership — visible to any head/admin on a unit (or institution/platform admin) */}
-        {(isLeader || isInstitutionAdmin) && (
+        {/* Role-driven entries — leadership dashboard, programs, institution admin */}
+        {(isLeader || canSeePrograms || isInstitutionAdmin) && (
           <div className="mt-3 pt-3 border-t border-white/5 space-y-0.5">
             {isLeader && (
               <NavRow item={{ icon: 'bar-chart', label: 'Руководство', to: '/leadership' }} />
+            )}
+            {canSeePrograms && (
+              <NavRow item={{ icon: 'list-checks', label: 'Образовательные программы', to: '/programs' }} />
             )}
             {isInstitutionAdmin && (
               <NavRow item={{ icon: 'building', label: 'Организация', to: '/institution' }} />

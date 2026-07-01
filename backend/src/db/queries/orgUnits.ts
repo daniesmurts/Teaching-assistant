@@ -105,6 +105,24 @@ export async function getOrgUnitDependents(unitId: string): Promise<{ children: 
   return { children: parseInt(rows[0].children, 10), members: parseInt(rows[0].members, 10) }
 }
 
+/** Ancestor chain of a unit — from the institution root down to (but excluding)
+ *  the unit itself, ordered root-first. Cheap: single query using the
+ *  materialised path prefix. Used by the programs breadcrumb: an РОП needs to
+ *  see which институт contains their programme without navigating anywhere. */
+export async function listAncestorsOfUnit(unitId: string): Promise<OrgUnitRow[]> {
+  const { rows } = await pool.query<OrgUnitRow>(
+    `SELECT a.*
+       FROM org_units target
+       JOIN org_units a ON a.institution_id = target.institution_id
+                       AND target.path LIKE a.path || '%'
+                       AND a.id <> target.id
+      WHERE target.id = $1
+      ORDER BY a.path`,
+    [unitId]
+  )
+  return rows
+}
+
 export async function getRootUnitForInstitution(institutionId: string): Promise<OrgUnitRow | null> {
   const { rows } = await pool.query<OrgUnitRow>(
     `SELECT * FROM org_units

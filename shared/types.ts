@@ -71,6 +71,11 @@ export interface Teacher {
   is_platform_admin?:    boolean
   is_institution_admin?: boolean   // holds `admin` on the institution root unit
   is_leader?:            boolean   // platform admin OR holds head/admin on any unit
+  // Access class for the «Образовательные программы» surface. Computed from
+  // getProgramAccessScope on the server so the sidebar renders without an
+  // extra round trip. Details of *which* programs are visible are resolved
+  // by the routes themselves.
+  program_access?:       'none' | 'all-rw' | 'all-ro' | 'specific'
   institution_id?: string | null
   // Mirror of the teacher's institution's shared_rag_enabled flag — surfaced
   // here so the Courses page can decide whether to show / enable the "поделиться
@@ -912,6 +917,10 @@ export interface Program {
   education_level:    string | null   // Уровень образования (free text)
   profile:            string | null   // Образовательная программа/направленность/профиль, шифр и наименование научной специальности
   forms_of_study:     string | null   // Реализуемые формы обучения
+  // §7 org-tree link — the `program` org_unit whose head is this programme's
+  // РОП. NULL for legacy programs; the IT admin sets the link on the edit
+  // form. RОП scoping requires this to be set.
+  org_unit_id:        string | null
   has_description_doc: boolean         // описание ОП PDF was imported
   has_plan_doc:        boolean         // учебный план PDF was imported
   created_at:         string
@@ -921,6 +930,15 @@ export interface Program {
 export interface ProgramDetail extends Program {
   disciplines:  ProgramDiscipline[]
   competencies: ProgramCompetency[]
+  // Populated when the program is linked into the tree (org_unit_id set).
+  // Root-first, excludes the program unit itself. Used for the non-clickable
+  // breadcrumb on the detail page so an РОП sees which институт contains
+  // their programme.
+  org_unit_ancestors?: { id: string; name: string; short_name: string | null; type_code: string }[]
+  // Server-computed edit gate for THIS caller on THIS program. Frontend uses
+  // it to render read-only mode cleanly (hide/disable Save, Analyze, Delete,
+  // Edit affordances) instead of showing enabled buttons that 403.
+  can_edit?: boolean
 }
 
 // ── Analysis result shapes ──

@@ -171,6 +171,20 @@ function LeadershipRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+// «Образовательные программы» — visible to anyone with program_access !== 'none'
+// (РОП, начальник УМЦ, проректор, институция-админ, платформ-админ). Server
+// resolves the actual scope; this gate is just the visibility signal.
+function ProgramsRoute({ children }: { children: React.ReactNode }) {
+  const teacher = useAuthStore((s) => s.teacher)
+  if (!teacher) return <Navigate to="/login" replace />
+  const canSee =
+    (teacher.program_access && teacher.program_access !== 'none') ||
+    (teacher.is_platform_admin ?? teacher.role === 'platform_admin') ||
+    (teacher.is_institution_admin ?? teacher.role === 'institution_admin')
+  if (!canSee) return <Navigate to="/dashboard" replace />
+  return <>{children}</>
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -220,6 +234,8 @@ export default function App() {
             <Route path="/materials/:kind" element={<MaterialGenerator />} />
             <Route path="/billing"       element={<Billing />} />
             <Route path="/leadership"    element={<LeadershipRoute><Leadership /></LeadershipRoute>} />
+            <Route path="/programs"      element={<ProgramsRoute><InstitutionPrograms /></ProgramsRoute>} />
+            <Route path="/programs/:id"  element={<ProgramsRoute><InstitutionProgramDetail /></ProgramsRoute>} />
             <Route path="/settings"      element={<Settings />} />
             <Route path="/help"          element={<Help />} />
             <Route path="/feedback"      element={<Feedback />} />

@@ -16,6 +16,9 @@ export interface CreateProgramInput {
   level?: string | null
   duration_semesters?: number
   description?: string | null
+  // Link into the §7 org tree. Only settable by IT admin (all-rw scope). Sets
+  // which `program` org_unit's `head` becomes this programme's РОП.
+  org_unit_id?: string | null
 }
 
 export async function createProgram(input: CreateProgramInput): Promise<Program> {

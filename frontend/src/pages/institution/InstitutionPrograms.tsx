@@ -5,6 +5,7 @@ import FeatureIntro from '../../components/ui/FeatureIntro'
 import Button from '../../components/ui/Button'
 import { listPrograms, importProgram } from '../../api/programs'
 import { useUIStore } from '../../store/uiStore'
+import { useAuthStore } from '../../store/authStore'
 import type { ProgramLevel } from '../../types'
 
 const LEVEL_LABEL: Record<ProgramLevel, string> = {
@@ -17,6 +18,11 @@ export default function InstitutionPrograms() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const addToast = useUIStore((s) => s.addToast)
+  const programAccess = useAuthStore((s) => s.teacher?.program_access) ?? 'none'
+  // Only IT admin ('all-rw') can create programs. Oversight roles (all-ro)
+  // and РОП (specific) see the read-only list.
+  const canCreate = programAccess === 'all-rw'
+  const readOnly  = programAccess === 'all-ro'
 
   const [creating, setCreating] = useState(false)
   const [code, setCode] = useState('')
@@ -45,7 +51,7 @@ export default function InstitutionPrograms() {
       qc.invalidateQueries({ queryKey: ['programs'] })
       addToast(`Импортировано: ${imported.disciplines} дисциплин, ${imported.competencies} компетенций`, 'success')
       if (warnings && warnings.length > 0) addToast(warnings[0], 'info')
-      navigate(`/institution/programs/${program.id}`)
+      navigate(`/programs/${program.id}`)
     },
   })
 
@@ -58,11 +64,21 @@ export default function InstitutionPrograms() {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-4xl mx-auto px-6 py-6 page-enter">
-        <div className="mb-6">
-          <h1 className="font-display text-2xl font-bold text-ink">Образовательные программы</h1>
-          <p className="text-sm font-sans text-ink-secondary mt-1">
-            Анализ архитектуры образовательных программ — последовательность, компетенции, пробелы
-          </p>
+        <div className="mb-6 flex items-start justify-between gap-3">
+          <div>
+            <h1 className="font-display text-2xl font-bold text-ink">Образовательные программы</h1>
+            <p className="text-sm font-sans text-ink-secondary mt-1">
+              Анализ архитектуры образовательных программ — последовательность, компетенции, пробелы
+            </p>
+          </div>
+          {readOnly && (
+            <span
+              title="Вы видите все программы организации только для чтения. Редактировать может назначенный РОП или администратор организации."
+              className="text-[10px] font-sans font-semibold uppercase tracking-wider text-ink-tertiary bg-surface-warm border border-border rounded-sm px-2 py-1 flex-shrink-0 mt-1"
+            >
+              Только просмотр
+            </span>
+          )}
         </div>
 
         <FeatureIntro
@@ -76,7 +92,8 @@ export default function InstitutionPrograms() {
           ]}
         />
 
-        {/* Intake */}
+        {/* Intake — only IT admin can create programs */}
+        {canCreate && (
         <div className="bg-surface border border-border rounded-lg overflow-hidden mb-6">
           <button
             onClick={() => setCreating((v) => !v)}
@@ -126,18 +143,21 @@ export default function InstitutionPrograms() {
             </div>
           )}
         </div>
+        )}
 
         {/* List */}
         {programs.length === 0 ? (
           <div className="text-center py-12 text-sm font-sans text-ink-secondary">
-            Пока нет учебных планов. Импортируйте первую программу, чтобы проанализировать её архитектуру.
+            {canCreate
+              ? 'Пока нет учебных планов. Импортируйте первую программу, чтобы проанализировать её архитектуру.'
+              : 'Пока нет программ, доступных вам для просмотра.'}
           </div>
         ) : (
           <div className="space-y-2">
             {programs.map((p) => (
               <button
                 key={p.id}
-                onClick={() => navigate(`/institution/programs/${p.id}`)}
+                onClick={() => navigate(`/programs/${p.id}`)}
                 className="w-full text-left bg-surface border border-border rounded-lg px-4 py-3 hover:border-border-mid hover:bg-surface-warm transition-colors flex items-center gap-3"
               >
                 <div className="flex-1 min-w-0">

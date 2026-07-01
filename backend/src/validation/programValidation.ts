@@ -10,6 +10,7 @@ export const createProgramRules = [
   body('level').optional({ nullable: true }).isIn(['bachelor', 'master', 'specialist']).withMessage('Некорректный уровень'),
   body('duration_semesters').optional().isInt({ min: 1, max: 16 }).withMessage('Семестров: от 1 до 16'),
   body('description').optional({ nullable: true }).isString().isLength({ max: 2000 }),
+  body('org_unit_id').optional({ nullable: true }).isUUID().withMessage('Некорректный идентификатор подразделения'),
 ]
 
 export const updateProgramRules = [
@@ -18,6 +19,7 @@ export const updateProgramRules = [
   body('level').optional({ nullable: true }).isIn(['bachelor', 'master', 'specialist']),
   body('duration_semesters').optional().isInt({ min: 1, max: 16 }),
   body('description').optional({ nullable: true }).isString().isLength({ max: 2000 }),
+  body('org_unit_id').optional({ nullable: true }).isUUID().withMessage('Некорректный идентификатор подразделения'),
 ]
 
 export const replaceDisciplinesRules = [

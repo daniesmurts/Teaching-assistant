@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-06-30 (Руководство V1 shipped)
+**Last updated:** 2026-07-01 (role-driven programme access shipped)
 
 ---
 
@@ -89,6 +89,14 @@ A teacher in an institution-tier org (via invite or email-domain auto-join):
 - Sees **institution-shared criteria** in the grading criteria picker, alongside own + global templates
 
 ---
+
+## Head of an educational programme (РОП) ✅
+
+A teacher granted `head` on a `program` org_unit sees **«Образовательные программы»** (`/programs`) filtered to their programme(s) only, with full read + edit rights on those. Non-clickable breadcrumb shows the ancestor chain of the linked unit so the РОП sees which институт their programme sits under. IT admin links a programme to its `program` org_unit via a select on the programme's detail page — until that link is set, no РОП can be scoped.
+
+## Oversight roles (начальник УМЦ, проректор) ✅
+
+A teacher granted `head` or `admin` on a `governance` or `admin_office` org_unit sees **all** programmes in the institution, read-only. «Только просмотр» chip on the list and on the detail; edit / analyse / delete affordances hidden; Builder disabled via `<fieldset disabled>`. Default-on by unit type — the IT admin's role grant is the access signal, no extra configuration required.
 
 ## Unit leader (head / sub-unit admin) ✅
 
