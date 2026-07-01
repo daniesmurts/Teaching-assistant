@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import FeatureIntro from '../../components/ui/FeatureIntro'
 import Button from '../../components/ui/Button'
 import { listPrograms, importProgram, getPickableProgramUnits } from '../../api/programs'
+import { PROGRAM_PRACTICE_LABEL, PROGRAM_PRACTICE_TYPES, type ProgramPracticeType } from '../../types'
 import { useUIStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
 import type { ProgramLevel } from '../../types'
@@ -39,8 +40,22 @@ export default function InstitutionPrograms() {
   const [orgUnitId, setOrgUnitId] = useState<string>('')
   const [descFile, setDescFile] = useState<File | null>(null)
   const [planFile, setPlanFile] = useState<File | null>(null)
+  const [wpFile, setWpFile]     = useState<File | null>(null)
+  const [practices, setPractices] = useState<{ file: File | null; type: ProgramPracticeType | '' }[]>([])
   const descRef = useRef<HTMLInputElement>(null)
   const planRef = useRef<HTMLInputElement>(null)
+  const wpRef   = useRef<HTMLInputElement>(null)
+
+  function addPractice() {
+    if (practices.length >= 8) return
+    setPractices((prev) => [...prev, { file: null, type: '' }])
+  }
+  function updatePractice(i: number, patch: Partial<{ file: File | null; type: ProgramPracticeType | '' }>) {
+    setPractices((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p)))
+  }
+  function removePractice(i: number) {
+    setPractices((prev) => prev.filter((_, idx) => idx !== i))
+  }
 
   const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: listPrograms })
 
@@ -72,6 +87,12 @@ export default function InstitutionPrograms() {
       description: descFile,
       plan: planFile as File,
       org_unit_id: orgUnitId || null,
+      working_programme: wpFile,
+      // Only pass practices that have BOTH a file and a type set — half-filled
+      // rows are dropped silently. Backend enforces the parallel-length rule.
+      practices: practices
+        .filter((p): p is { file: File; type: ProgramPracticeType } => p.file !== null && p.type !== '')
+        .map((p) => ({ file: p.file, type: p.type })),
     }),
     onSuccess: ({ program, imported, warnings }) => {
       qc.invalidateQueries({ queryKey: ['programs'] })
@@ -89,6 +110,17 @@ export default function InstitutionPrograms() {
     // check gives a clearer error.
     if (isScoped && !orgUnitId) {
       addToast('Выберите образовательную программу в структуре', 'error'); return
+    }
+    // Any practice row that has half-set values (file without type, or type
+    // without file) is user intent to add something — refuse to silently drop it.
+    for (let i = 0; i < practices.length; i++) {
+      const p = practices[i]
+      const hasFile = p.file !== null
+      const hasType = p.type !== ''
+      if (hasFile !== hasType) {
+        addToast(`Практика ${i + 1}: выберите и файл, и тип`, 'error')
+        return
+      }
     }
     importMut.mutate()
   }
@@ -211,6 +243,52 @@ export default function InstitutionPrograms() {
                   onPick={(f) => setPlanFile(f)}
                   required
                 />
+              </div>
+
+              {/* Migration 050 — рабочая программа + практики. Stored as */}
+              {/* originals rather than reduced to extracted text; parse into */}
+              {/* analysis is a future PR. */}
+              <div className="pt-1">
+                <FileField
+                  label="Рабочая программа (PDF)"
+                  file={wpFile} inputRef={wpRef}
+                  onPick={(f) => setWpFile(f)}
+                />
+              </div>
+
+              <div className="pt-2">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-sans font-medium text-ink-secondary">
+                    Практики <span className="text-ink-tertiary">— необязательно, до 4 файлов, каждый со своим типом</span>
+                  </span>
+                  {practices.length < 4 && (
+                    <button type="button" onClick={addPractice}
+                      className="text-xs font-sans text-amber hover:underline">
+                      + Добавить практику
+                    </button>
+                  )}
+                </div>
+                {practices.length === 0 ? (
+                  <div className="bg-surface-warm border border-border rounded-md px-3 py-2 text-xs font-sans text-ink-tertiary">
+                    Нажмите «Добавить практику», чтобы приложить программы практик.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {practices.map((p, i) => (
+                      <PracticeRow
+                        key={i}
+                        row={p}
+                        // Disable already-used types on subsequent rows so
+                        // each of the 4 constants can appear at most once —
+                        // matches how КНИТУ's official set is structured.
+                        excludeTypes={practices.filter((_, idx) => idx !== i && practices[idx].type).map((r) => r.type as ProgramPracticeType)}
+                        onPickFile={(file) => updatePractice(i, { file })}
+                        onPickType={(type) => updatePractice(i, { type })}
+                        onRemove={() => removePractice(i)}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-3 pt-1">
@@ -363,6 +441,69 @@ function FileField({ label, file, onPick, inputRef, required = false }: {
             PDF{required ? ' · обязательно' : ' · необязательно'}
           </span>
         </div>
+      )}
+    </div>
+  )
+}
+
+// One row of the practices multi-file — type dropdown + file picker + remove.
+// `excludeTypes` disables types already used by sibling rows so each of the
+// four PROGRAM_PRACTICE_TYPES can appear at most once in the intake.
+function PracticeRow({
+  row, excludeTypes, onPickType, onPickFile, onRemove,
+}: {
+  row:          { file: File | null; type: ProgramPracticeType | '' }
+  excludeTypes: ProgramPracticeType[]
+  onPickType:   (t: ProgramPracticeType | '') => void
+  onPickFile:   (f: File | null) => void
+  onRemove:     () => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const selectCls =
+    'text-sm font-sans bg-surface border border-border rounded-md px-2.5 py-1.5 outline-none focus:border-border-strong flex-1 min-w-0'
+
+  return (
+    <div className="bg-surface-warm border border-border rounded-md px-3 py-2.5 space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <select
+          value={row.type}
+          onChange={(e) => onPickType(e.target.value as ProgramPracticeType | '')}
+          className={selectCls}
+        >
+          <option value="" disabled>Выберите тип практики</option>
+          {PROGRAM_PRACTICE_TYPES.map((t) => (
+            <option key={t} value={t} disabled={excludeTypes.includes(t) && row.type !== t}>
+              {PROGRAM_PRACTICE_LABEL[t]}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="text-ink-tertiary hover:text-danger transition-colors leading-none w-6 h-6 text-lg flex items-center justify-center flex-shrink-0"
+          aria-label="Убрать практику"
+        >
+          ×
+        </button>
+      </div>
+      <input
+        ref={inputRef} type="file" accept="application/pdf" className="hidden"
+        onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+      />
+      {row.file ? (
+        <div className="flex items-center gap-2 border border-amber/40 bg-amber-light/40 rounded-md px-3 py-1.5">
+          <span className="text-base leading-none">📄</span>
+          <span className="text-sm font-sans text-ink truncate flex-1">{row.file.name}</span>
+          <button type="button" onClick={() => inputRef.current?.click()}
+            className="text-[11px] font-sans text-ink-secondary hover:text-amber transition-colors flex-shrink-0">
+            Заменить
+          </button>
+        </div>
+      ) : (
+        <button type="button" onClick={() => inputRef.current?.click()}
+          className="w-full text-left text-xs font-sans text-ink-secondary hover:text-amber bg-surface border border-dashed border-border rounded-md px-3 py-2 transition-colors">
+          Выберите PDF для этой практики
+        </button>
       )}
     </div>
   )

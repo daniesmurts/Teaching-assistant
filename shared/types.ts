@@ -927,9 +927,48 @@ export interface Program {
   updated_at:         string
 }
 
+// Migration 050 attachments — рабочая программа + практики.
+export type ProgramDocumentKind = 'working_programme' | 'practice'
+
+export type ProgramPracticeType =
+  | 'production_technological'      // Производственная (технологическая /
+                                    //   проектно-технологическая) практика
+  | 'production_pre_diploma'        // Производственная (преддипломная) практика
+  | 'educational_familiarization'   // Учебная (ознакомительная) практика
+  | 'educational_operational'       // Учебная (эксплуатационная) практика
+
+export const PROGRAM_PRACTICE_TYPES: ProgramPracticeType[] = [
+  'production_technological',
+  'production_pre_diploma',
+  'educational_familiarization',
+  'educational_operational',
+]
+
+export const PROGRAM_PRACTICE_LABEL: Record<ProgramPracticeType, string> = {
+  production_technological:    'Производственная (технологическая) практика',
+  production_pre_diploma:      'Производственная (преддипломная) практика',
+  educational_familiarization: 'Учебная (ознакомительная) практика',
+  educational_operational:     'Учебная (эксплуатационная) практика',
+}
+
+export interface ProgramDocument {
+  id:            string
+  program_id:    string
+  kind:          ProgramDocumentKind
+  practice_type: ProgramPracticeType | null
+  file_name:     string
+  file_size:     number
+  mime_type:     string
+  uploaded_at:   string
+}
+
 export interface ProgramDetail extends Program {
   disciplines:  ProgramDiscipline[]
   competencies: ProgramCompetency[]
+  // Migration 050 — рабочая программа + практики as first-class attachments.
+  // Description / plan continue to live inline on the Program row (as
+  // extracted text) for now; this list surfaces the newer document set.
+  documents?:   ProgramDocument[]
   // Populated when the program is linked into the tree (org_unit_id set).
   // Root-first, excludes the program unit itself. Used for the non-clickable
   // breadcrumb on the detail page so an РОП sees which институт contains

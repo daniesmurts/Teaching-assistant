@@ -35,6 +35,28 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   and the nodemailer SMTP fallback. Env-overridable: `EMAIL_REPLY_TO`,
   `EMAIL_UNSUBSCRIBE_MAILTO`.
 
+### Added
+- **Programme document attachments — рабочая программа + практики (Migration 050).**
+  The intake form now accepts КНИТУ's fuller per-направление document set
+  beyond the two documents used for analysis: (a) one **Рабочая программа**
+  PDF; (b) up to four **Практики**, each with a type dropdown constrained to
+  the canonical set (производственная технологическая / преддипломная /
+  учебная ознакомительная / учебная эксплуатационная) — same type can't be
+  used twice on one programme. Files are stored as originals in Yandex
+  Object Storage under `programs/<id>/<doc_id>_<name>`, metadata in the new
+  `program_documents` table. Extended `POST /programs/import` accepts the
+  new multipart fields (multer `working_programme` + `practices` array with
+  parallel `practice_types` body values). New endpoints on the programme:
+  `POST /:id/documents` (attach later, one file at a time), `GET
+  /:id/documents/:docId/download` (JWT-authenticated stream), `DELETE
+  /:id/documents/:docId` (best-effort object cleanup on delete). Programme
+  detail response now includes `documents[]`. Frontend: intake form gains
+  a рабочая программа FileField + dynamic Practices list with per-row type
+  dropdown; detail page gains a **«Документы»** tab that groups by kind,
+  shows filename + size + upload date, and offers download + delete
+  (deletes gated by `can_edit`). Parsing/analysis integration of the new
+  files is a separate follow-up — this PR is storage + retrieval only.
+
 ### Changed
 - **Programme scope now walks the subtree — polygroup heads (and any
   intermediate authority) fit naturally.** Between УМЦ (institution-wide via

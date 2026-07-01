@@ -1,6 +1,7 @@
 import client from './client'
 import type {
   Program, ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramAnalysis,
+  ProgramPracticeType, ProgramDocumentKind, ProgramDocument,
 } from '../types'
 
 // Academic programs (учебные планы) — institution-admin feature.
@@ -38,6 +39,9 @@ export interface ImportProgramInput {
   // Required when the caller is `specific` scope (РОП). Optional for `all-rw`
   // (they may link later via the detail page's structure select).
   org_unit_id?: string | null
+  // Migration 050 attachments — рабочая программа + практики (each with a type).
+  working_programme?: File | null
+  practices?: { file: File; type: ProgramPracticeType }[]
 }
 
 export interface ImportProgramResult {
@@ -72,9 +76,55 @@ export async function importProgram(input: ImportProgramInput): Promise<ImportPr
   if (input.org_unit_id) fd.append('org_unit_id', input.org_unit_id)
   fd.append('plan', input.plan)
 
+  // Migration 050 attachments — рабочая программа + практики.
+  if (input.working_programme) fd.append('working_programme', input.working_programme)
+  if (input.practices) {
+    for (const p of input.practices) {
+      fd.append('practices', p.file)
+      fd.append('practice_types', p.type)
+    }
+  }
+
   // Extraction + two LLM parse passes — can take ~1–2 minutes.
   const res = await client.post<ImportProgramResult>('/api/institution/programs/import', fd, { timeout: 240_000 })
   return res.data
+}
+
+// ─── Attached documents (migration 050) ───────────────────────────────────────
+
+export async function uploadProgramDocument(
+  programId: string,
+  input: { file: File; kind: ProgramDocumentKind; practiceType?: ProgramPracticeType | null }
+): Promise<{ id: string }> {
+  const fd = new FormData()
+  fd.append('file', input.file)
+  fd.append('kind', input.kind)
+  if (input.practiceType) fd.append('practice_type', input.practiceType)
+  const res = await client.post<{ id: string }>(`/api/institution/programs/${programId}/documents`, fd)
+  return res.data
+}
+
+export async function deleteProgramDocument(programId: string, docId: string): Promise<void> {
+  await client.delete(`/api/institution/programs/${programId}/documents/${docId}`)
+}
+
+/** URL for a direct authenticated GET — the axios interceptor adds the JWT. */
+export function programDocumentDownloadUrl(programId: string, docId: string): string {
+  return `/api/institution/programs/${programId}/documents/${docId}/download`
+}
+
+/** Trigger a browser download for a document — hits the download endpoint via
+ *  axios so the JWT is attached, then converts the blob to a save prompt. */
+export async function downloadProgramDocument(programId: string, doc: ProgramDocument): Promise<void> {
+  const res = await client.get<Blob>(programDocumentDownloadUrl(programId, doc.id), { responseType: 'blob' })
+  const url = URL.createObjectURL(res.data)
+  const a   = document.createElement('a')
+  a.href    = url
+  a.download = doc.file_name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
 
 export async function getProgram(id: string): Promise<ProgramDetail> {

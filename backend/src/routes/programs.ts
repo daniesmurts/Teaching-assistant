@@ -21,8 +21,63 @@ import { uploadFields } from '../middleware/fileValidation'
 import { extractText } from '../services/documentExtractor'
 import { parseStudyPlan, parseDescription } from '../services/programImport'
 import { setProgramDocs } from '../db/queries/programs'
+import { uploadObject, downloadObject, deleteObject } from '../services/objectStorage'
+import {
+  insertProgramDocument, listProgramDocuments, findProgramDocument, deleteProgramDocument,
+} from '../db/queries/programDocuments'
 import { logger } from '../lib/logger'
-import type { ProgramDiscipline, ProgramCompetency } from '../../../shared/types'
+import type {
+  ProgramDiscipline, ProgramCompetency,
+  ProgramPracticeType, ProgramDocumentKind,
+} from '../../../shared/types'
+import { PROGRAM_PRACTICE_TYPES } from '../../../shared/types'
+
+// Filename sanitisation for object-storage keys — cognate of the helper in
+// services/documents.ts. Keeps the extension intact.
+function sanitiseName(name: string): string {
+  return name.replace(/[^\w.\-]/g, '_').slice(0, 120)
+}
+
+function documentStoragePath(programId: string, docId: string, fileName: string): string {
+  return `programs/${programId}/${docId}_${sanitiseName(fileName)}`
+}
+
+// Uploads a single file to object storage and inserts a program_documents
+// row. Returns the created row's id. Failures leave nothing behind — we
+// upload first, insert second; a failed insert means an orphaned object,
+// which we log and best-effort clean.
+async function attachProgramDocument(params: {
+  programId:    string
+  kind:         ProgramDocumentKind
+  practiceType: ProgramPracticeType | null
+  file:         Express.Multer.File
+  uploadedBy:   string
+}): Promise<string> {
+  // Pre-generate an id so the storage key can include it before the row exists.
+  // Any UUID works; the DB regenerates its own default anyway.
+  const tempId = (globalThis.crypto as Crypto).randomUUID()
+  const key    = documentStoragePath(params.programId, tempId, params.file.originalname)
+  await uploadObject(params.file.buffer, key, params.file.mimetype)
+
+  try {
+    const row = await insertProgramDocument({
+      programId:    params.programId,
+      kind:         params.kind,
+      practiceType: params.practiceType,
+      fileName:     params.file.originalname,
+      fileSize:     params.file.size,
+      mimeType:     params.file.mimetype,
+      storagePath:  key,
+      uploadedBy:   params.uploadedBy,
+    })
+    return row.id
+  } catch (err) {
+    // DB insert failed after upload — clean up the object so we don't leave
+    // orphaned files sitting in storage.
+    await deleteObject(key)
+    throw err
+  }
+}
 
 // Academic programs (учебные планы). Access is role-driven — see
 // services/programAccess.ts for the resolution rule. Every handler still
@@ -112,7 +167,14 @@ router.post('/', validate(createProgramRules), asyncHandler(async (req, res) => 
 router.post(
   '/import',
   aiLimiter,
-  uploadFields([{ name: 'description', maxCount: 1 }, { name: 'plan', maxCount: 1 }]),
+  uploadFields([
+    { name: 'description',       maxCount: 1 },
+    { name: 'plan',              maxCount: 1 },
+    // Migration 050 — attached documents that stay preserved as originals
+    // rather than being reduced to extracted text.
+    { name: 'working_programme', maxCount: 1 },
+    { name: 'practices',         maxCount: 8 },
+  ]),
   asyncHandler(async (req, res) => {
     // РОП + УМЦ + IT admin can all import. РОП must link on import to a
     // program unit they hold (same rule as POST /).
@@ -201,6 +263,44 @@ router.post(
     if (competencies.length > 0) await replaceCompetencies(program.id, competencies)
     if (disciplines.length > 0)  await replaceDisciplines(program.id, disciplines)
 
+    // Attach рабочая программа + практики as first-class documents. Practices
+    // come as parallel arrays (files + practice_types); we validate lengths
+    // and the type constant before touching storage.
+    const wpFile = files?.working_programme?.[0]
+    if (wpFile) {
+      await attachProgramDocument({
+        programId:    program.id,
+        kind:         'working_programme',
+        practiceType: null,
+        file:         wpFile,
+        uploadedBy:   teacherId,
+      })
+    }
+
+    const practiceFiles = files?.practices ?? []
+    if (practiceFiles.length > 0) {
+      const rawTypes = req.body.practice_types
+      const types    = Array.isArray(rawTypes) ? rawTypes : rawTypes ? [rawTypes] : []
+      if (types.length !== practiceFiles.length) {
+        throw new ValidationError(
+          'Каждой практике нужно указать её тип (полей practice_types должно быть столько же, сколько файлов)'
+        )
+      }
+      for (let i = 0; i < practiceFiles.length; i++) {
+        const type = String(types[i])
+        if (!PROGRAM_PRACTICE_TYPES.includes(type as ProgramPracticeType)) {
+          throw new ValidationError(`Неизвестный тип практики: ${type}`)
+        }
+        await attachProgramDocument({
+          programId:    program.id,
+          kind:         'practice',
+          practiceType: type as ProgramPracticeType,
+          file:         practiceFiles[i],
+          uploadedBy:   teacherId,
+        })
+      }
+    }
+
     res.status(201).json({
       program,
       imported: { disciplines: disciplines.length, competencies: competencies.length },
@@ -220,8 +320,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
     : []
   // Tell the frontend whether *this* caller can edit *this* program, so the
   // UI can render read-only cleanly instead of surfacing 403s on button click.
-  const can_edit = canEditProgram(req.programAccessScope!, detail.org_unit_id)
-  res.json({ ...detail, org_unit_ancestors: ancestors, can_edit })
+  const can_edit  = canEditProgram(req.programAccessScope!, detail.org_unit_id)
+  const documents = await listProgramDocuments(detail.id)
+  res.json({ ...detail, org_unit_ancestors: ancestors, can_edit, documents })
 }))
 
 router.patch('/:id', validate(updateProgramRules), asyncHandler(async (req, res) => {
@@ -313,6 +414,77 @@ router.get('/:id/analysis.pdf', asyncHandler(async (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${fname}"`)
   res.setHeader('Content-Length', pdf.length)
   res.end(pdf)
+}))
+
+// ── Attached documents (рабочая программа + практики) ──────────────────────────
+
+// POST /:id/documents — attach a document to an existing programme. Accepts
+// one file at a time so the client can add рабочая программа or a single
+// практика later without re-uploading the intake set.
+router.post(
+  '/:id/documents',
+  uploadFields([{ name: 'file', maxCount: 1 }]),
+  asyncHandler(async (req, res) => {
+    const detail = await loadReadable(req)
+    assertEdit(req, detail.org_unit_id)
+
+    const files = req.files as Record<string, Express.Multer.File[]> | undefined
+    const file  = files?.file?.[0]
+    if (!file) throw new ValidationError('Файл не загружен')
+
+    const kind         = String(req.body.kind ?? '') as ProgramDocumentKind
+    const practiceType = (req.body.practice_type ? String(req.body.practice_type) : null) as ProgramPracticeType | null
+
+    if (kind !== 'working_programme' && kind !== 'practice') {
+      throw new ValidationError('Неверный тип документа')
+    }
+    if (kind === 'practice') {
+      if (!practiceType || !PROGRAM_PRACTICE_TYPES.includes(practiceType)) {
+        throw new ValidationError('Укажите тип практики')
+      }
+    }
+
+    const id = await attachProgramDocument({
+      programId:    detail.id,
+      kind,
+      practiceType: kind === 'practice' ? practiceType : null,
+      file,
+      uploadedBy:   req.teacher.id,
+    })
+    res.status(201).json({ id })
+  })
+)
+
+// GET /:id/documents/:docId/download — stream the original file to the caller.
+router.get('/:id/documents/:docId/download', asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  const found  = await findProgramDocument(req.params.docId, detail.id)
+  if (!found) throw new NotFoundError('Документ')
+
+  const buf = await downloadObject(found.storagePath)
+  res.setHeader('Content-Type', found.document.mime_type)
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename*=UTF-8''${encodeURIComponent(found.document.file_name)}`
+  )
+  res.setHeader('Content-Length', buf.length)
+  res.end(buf)
+}))
+
+router.delete('/:id/documents/:docId', asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  assertEdit(req, detail.org_unit_id)
+
+  const found = await findProgramDocument(req.params.docId, detail.id)
+  if (!found) throw new NotFoundError('Документ')
+
+  await deleteProgramDocument(found.document.id, detail.id)
+  // Storage cleanup is best-effort — an orphaned object costs a few kB and is
+  // logged; better than failing the delete if S3 hiccups.
+  await deleteObject(found.storagePath).catch((err) =>
+    logger.warn({ message: 'Failed to delete program document object', error: (err as Error).message })
+  )
+  res.status(204).end()
 }))
 
 export default router

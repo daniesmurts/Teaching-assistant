@@ -5,10 +5,15 @@ import Button from '../../components/ui/Button'
 import Select from '../../components/ui/Select'
 import {
   getProgram, getAnalysis, saveDisciplines, saveCompetencies, analyzeProgram, deleteProgram,
-  downloadAnalysisPdf, updateProgram,
+  downloadAnalysisPdf, updateProgram, uploadProgramDocument, deleteProgramDocument,
+  downloadProgramDocument,
 } from '../../api/programs'
 import { getCourses } from '../../api/courses'
 import { getPickableProgramUnits } from '../../api/programs'
+import {
+  PROGRAM_PRACTICE_LABEL, PROGRAM_PRACTICE_TYPES,
+  type ProgramDocument, type ProgramPracticeType,
+} from '../../types'
 import { useAuthStore } from '../../store/authStore'
 import { EXAMPLE_PROGRAM } from '../../lib/programExample'
 import { useUIStore } from '../../store/uiStore'
@@ -27,7 +32,7 @@ const withKeyC = (c: ProgramCompetency): EditCompetency => ({ ...c, _k: nextKey(
 const stripD = ({ _k, ...d }: EditDiscipline): ProgramDiscipline => d
 const stripC = ({ _k, ...c }: EditCompetency): ProgramCompetency => c
 
-type Tab = 'builder' | 'report'
+type Tab = 'builder' | 'report' | 'documents'
 
 export default function InstitutionProgramDetail() {
   const { id = '' } = useParams()
@@ -229,6 +234,9 @@ export default function InstitutionProgramDetail() {
           <TabButton active={tab === 'report'} onClick={() => setTab('report')}>
             Анализ{analysis ? '' : ' —'}
           </TabButton>
+          <TabButton active={tab === 'documents'} onClick={() => setTab('documents')}>
+            Документы{(program?.documents?.length ?? 0) > 0 ? ` · ${program!.documents!.length}` : ''}
+          </TabButton>
         </div>
 
         {tab === 'builder' && (
@@ -266,6 +274,15 @@ export default function InstitutionProgramDetail() {
               : <div className="text-center py-16 text-sm font-sans text-ink-secondary">
                   Анализ ещё не запускался. Нажмите «Анализировать», чтобы оценить архитектуру плана.
                 </div>
+        )}
+
+        {tab === 'documents' && program && (
+          <DocumentsPanel
+            programId={program.id}
+            documents={program.documents ?? []}
+            canEdit={canEdit}
+            onChanged={() => qc.invalidateQueries({ queryKey: ['program', id] })}
+          />
         )}
       </div>
     </div>
@@ -726,4 +743,220 @@ function Stat({ label, value, danger = false }: { label: string; value: number; 
 
 function SectionLabel({ children }: { children: ReactNode }) {
   return <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">{children}</div>
+}
+
+// Documents tab — рабочая программа + практики. Grouped by kind; each row has
+// a download link and (when the caller can edit) a delete affordance. Upload
+// controls at the bottom let editors attach a new document after import.
+function DocumentsPanel({
+  programId, documents, canEdit, onChanged,
+}: {
+  programId: string
+  documents: ProgramDocument[]
+  canEdit:   boolean
+  onChanged: () => void
+}) {
+  const addToast = useUIStore((s) => s.addToast)
+  const [uploading, setUploading] = useState(false)
+
+  const workingProgramme = documents.filter((d) => d.kind === 'working_programme')
+  const practices        = documents.filter((d) => d.kind === 'practice')
+
+  async function attachOne(input: { file: File; kind: 'working_programme' | 'practice'; practiceType?: ProgramPracticeType | null }) {
+    setUploading(true)
+    try {
+      await uploadProgramDocument(programId, input)
+      addToast('Документ добавлен', 'success')
+      onChanged()
+    } catch {
+      // Axios interceptor handles the error toast.
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function removeOne(doc: ProgramDocument) {
+    if (!confirm(`Удалить «${doc.file_name}»?`)) return
+    try {
+      await deleteProgramDocument(programId, doc.id)
+      addToast('Документ удалён', 'success')
+      onChanged()
+    } catch {
+      // handled by interceptor
+    }
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* Working programme */}
+      <div>
+        <SectionLabel>Рабочая программа</SectionLabel>
+        {workingProgramme.length === 0 ? (
+          <p className="text-sm font-sans text-ink-secondary bg-surface border border-border rounded-lg px-4 py-3">
+            Не загружена.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {workingProgramme.map((d) => (
+              <DocumentRow key={d.id} doc={d} programId={programId} canEdit={canEdit} onRemove={() => removeOne(d)} />
+            ))}
+          </div>
+        )}
+        {canEdit && workingProgramme.length === 0 && (
+          <div className="mt-2">
+            <UploadPill
+              label="Добавить рабочую программу"
+              onPick={(file) => attachOne({ file, kind: 'working_programme' })}
+              disabled={uploading}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Practices */}
+      <div>
+        <SectionLabel>Практики</SectionLabel>
+        {practices.length === 0 ? (
+          <p className="text-sm font-sans text-ink-secondary bg-surface border border-border rounded-lg px-4 py-3">
+            Практики не загружены.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {practices.map((d) => (
+              <DocumentRow key={d.id} doc={d} programId={programId} canEdit={canEdit} onRemove={() => removeOne(d)} />
+            ))}
+          </div>
+        )}
+        {canEdit && (
+          <div className="mt-3">
+            <AddPractice
+              disabled={uploading}
+              usedTypes={practices.map((d) => d.practice_type).filter(Boolean) as ProgramPracticeType[]}
+              onSubmit={(input) => attachOne({ file: input.file, kind: 'practice', practiceType: input.type })}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DocumentRow({
+  doc, programId, canEdit, onRemove,
+}: {
+  doc:       ProgramDocument
+  programId: string
+  canEdit:   boolean
+  onRemove:  () => void
+}) {
+  const label = doc.kind === 'practice' && doc.practice_type
+    ? PROGRAM_PRACTICE_LABEL[doc.practice_type]
+    : 'Рабочая программа'
+  const kb = Math.round(doc.file_size / 1024)
+
+  async function download() {
+    try { await downloadProgramDocument(programId, doc) }
+    catch { /* handled by interceptor */ }
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg px-4 py-3 flex items-start gap-3">
+      <div className="text-lg leading-none mt-0.5">📄</div>
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-sans text-ink-tertiary uppercase tracking-wider">{label}</div>
+        <div className="text-sm font-sans text-ink truncate">{doc.file_name}</div>
+        <div className="text-[11px] font-sans text-ink-tertiary mt-0.5">
+          {kb.toLocaleString('ru-RU')} КБ · {new Date(doc.uploaded_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <button onClick={download} className="text-xs font-sans text-amber hover:underline">Скачать</button>
+        {canEdit && (
+          <button onClick={onRemove} className="text-xs font-sans text-ink-tertiary hover:text-danger transition-colors">Удалить</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function UploadPill({
+  label, onPick, disabled,
+}: {
+  label:    string
+  onPick:   (f: File) => void
+  disabled: boolean
+}) {
+  const ref = useMemo(() => ({ current: null as HTMLInputElement | null }), [])
+  return (
+    <>
+      <input
+        ref={(el) => { ref.current = el }}
+        type="file" accept="application/pdf" className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) onPick(f)
+          e.target.value = ''
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => ref.current?.click()}
+        disabled={disabled}
+        className="text-xs font-sans text-amber hover:underline disabled:opacity-60"
+      >
+        + {label}
+      </button>
+    </>
+  )
+}
+
+function AddPractice({
+  disabled, usedTypes, onSubmit,
+}: {
+  disabled:  boolean
+  usedTypes: ProgramPracticeType[]
+  onSubmit:  (input: { file: File; type: ProgramPracticeType }) => void
+}) {
+  const [type, setType] = useState<ProgramPracticeType | ''>('')
+  const ref = useMemo(() => ({ current: null as HTMLInputElement | null }), [])
+
+  function handlePick(f: File) {
+    if (!type) return
+    onSubmit({ file: f, type })
+    setType('')
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select
+        value={type}
+        onChange={(e) => setType(e.target.value as ProgramPracticeType | '')}
+        className="text-sm font-sans bg-surface border border-border rounded-md px-2.5 py-1.5 outline-none focus:border-border-strong"
+      >
+        <option value="" disabled>+ Добавить практику — выберите тип</option>
+        {PROGRAM_PRACTICE_TYPES.map((t) => (
+          <option key={t} value={t} disabled={usedTypes.includes(t)}>
+            {PROGRAM_PRACTICE_LABEL[t]}
+          </option>
+        ))}
+      </select>
+      <input
+        ref={(el) => { ref.current = el }}
+        type="file" accept="application/pdf" className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) handlePick(f)
+          e.target.value = ''
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => ref.current?.click()}
+        disabled={disabled || !type}
+        className="text-xs font-sans text-amber hover:underline disabled:opacity-40"
+      >
+        Выбрать файл
+      </button>
+    </div>
+  )
 }

@@ -85,6 +85,9 @@ export type {
   SyllabusSection,
   Program,
   ProgramDetail,
+  ProgramDocument,
+  ProgramDocumentKind,
+  ProgramPracticeType,
   ProgramDiscipline,
   ProgramCompetency,
   ProgramLevel,
@@ -101,4 +104,7 @@ export type {
   ApiError,
 } from '../../../shared/types'
 
-export { SINGLE_PASS_CHAR_LIMIT, MAX_REVIEW_CHARS } from '../../../shared/types'
+export {
+  SINGLE_PASS_CHAR_LIMIT, MAX_REVIEW_CHARS,
+  PROGRAM_PRACTICE_TYPES, PROGRAM_PRACTICE_LABEL,
+} from '../../../shared/types'
