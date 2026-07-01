@@ -192,7 +192,7 @@ export default function Landing() {
                 <div className="text-xs font-semibold text-ink-tertiary uppercase tracking-wider">Динамика оценок</div>
                 <div className="text-xs text-ink-tertiary">средний балл <span className="font-display font-bold text-ink text-sm">4.3</span></div>
               </div>
-              <div className="flex items-end gap-2 h-28 border-b border-border-mid pb-1">
+              <div className="flex gap-2 h-28 border-b border-border-mid pb-1">
                 {[
                   { h: 50, c: 'bg-warning', g: 'C' },
                   { h: 62, c: 'bg-amber',   g: 'B' },
@@ -200,7 +200,7 @@ export default function Landing() {
                   { h: 80, c: 'bg-success', g: 'A' },
                   { h: 92, c: 'bg-success', g: 'A' },
                 ].map((b, i) => (
-                  <div key={i} className="flex-1 h-full flex flex-col items-center justify-end">
+                  <div key={i} className="flex-1 flex flex-col items-center justify-end">
                     <span className="text-[10px] font-display font-bold text-ink-secondary mb-1">{b.g}</span>
                     <div className={`w-full max-w-[34px] rounded-t-sm ${b.c}`} style={{ height: `${b.h}%`, opacity: 0.85 }}></div>
                   </div>

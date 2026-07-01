@@ -41,9 +41,9 @@ export default function InstitutionOverview() {
           {usage.length === 0 ? (
             <p className="text-sm font-sans text-ink-secondary text-center py-8">Пока нет активности.</p>
           ) : (
-            <div className="flex items-end gap-1 h-32">
+            <div className="flex gap-1 h-32">
               {usage.slice().reverse().map((u) => (
-                <div key={u.date} className="flex-1 h-full flex flex-col items-center justify-end group relative"
+                <div key={u.date} className="flex-1 flex flex-col items-center justify-end group relative"
                      title={`${new Date(u.date).toLocaleDateString('ru-RU')} — ${u.grade_count} проверок`}>
                   <div className="w-full rounded-t-sm bg-amber/80 transition-all"
                        style={{ height: `${Math.max(4, (u.grade_count / maxGrades) * 100)}%` }} />

@@ -44,12 +44,12 @@ function StudentDetail({ student, courseId, onBack }: { student: StudentSummary;
       {assignments.length > 0 && (
         <div className="bg-surface border border-border rounded-lg p-5 mb-6">
           <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-4">Динамика оценок</div>
-          <div className="flex items-end gap-2 h-32 border-b border-border-mid pb-1">
+          <div className="flex gap-2 h-32 border-b border-border-mid pb-1">
             {assignments.map((a) => {
               const score = a.approved_score ?? a.ai_score ?? 0
               const grade = a.approved_grade ?? a.ai_grade
               return (
-                <div key={a.id} className="flex-1 h-full flex flex-col items-center justify-end group relative" title={`${fmt(a.created_at)} — ${grade ?? '?'} (${score})`}>
+                <div key={a.id} className="flex-1 flex flex-col items-center justify-end group relative" title={`${fmt(a.created_at)} — ${grade ?? '?'} (${score})`}>
                   <span className="text-[10px] font-display font-bold mb-1" style={{ color: gradeColor(grade) }}>{grade}</span>
                   <div className="w-full max-w-[40px] rounded-t-sm transition-all" style={{ height: `${Math.max(6, score)}%`, backgroundColor: gradeColor(grade), opacity: 0.85 }} />
                 </div>

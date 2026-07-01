@@ -132,9 +132,9 @@ export default function Leadership() {
                   {overview.activity.total_grades_30d === 0 ? (
                     <p className="text-sm font-sans text-ink-secondary text-center py-6">Пока нет активности.</p>
                   ) : (
-                    <div className="flex items-end gap-1 h-32">
+                    <div className="flex gap-1 h-32">
                       {overview.activity.grades_by_day.map((d) => (
-                        <div key={d.date} className="flex-1 h-full flex flex-col items-center justify-end group relative"
+                        <div key={d.date} className="flex-1 flex flex-col items-center justify-end group relative"
                              title={`${new Date(d.date).toLocaleDateString('ru-RU')} — ${d.count} проверок`}>
                           <div className="w-full rounded-t-sm bg-amber/80 transition-all"
                                style={{ height: `${Math.max(4, (d.count / maxGrades) * 100)}%` }} />
