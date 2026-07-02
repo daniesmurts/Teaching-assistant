@@ -83,7 +83,7 @@ export async function getProgramAccessScope(teacher: TeacherIdentity): Promise<P
        FROM org_units p
        JOIN org_units auth ON auth.institution_id = p.institution_id
                           AND p.path LIKE auth.path || '%'
-      WHERE p.type_code = 'program'
+      WHERE p.type_code IN ('program', 'program_direction')
         AND auth.id = ANY($1::uuid[])`,
     [authorityIds]
   )

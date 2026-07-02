@@ -285,7 +285,19 @@ move J out of the backlog when this deploys:
 > yet promoted here (A4/A5, the competency model, the student tier) live in
 > [docs/KNITU-roadmap.md](docs/KNITU-roadmap.md) — promote to this backlog on readiness.
 
-### K. РПД ↔ competency/goals conformance check (Admin A2) · Effort: M
+### K. РПД ↔ competency/goals conformance check (Admin A2) · Effort: M · 🟡 PARTIALLY SHIPPED
+
+**Status (2026-07-02):** the programme-scoped slice shipped as part of the
+discipline-scoped document library (Migration 051, see CHANGELOG). A discipline's
+uploaded рабочая программа is checked against `program_disciplines.competency_codes`
+via `services/documentReview.ts` (one `chatJSON` call, deliberately not a reuse of
+`services/grading.ts` — see that file's header comment for why), persisted in
+`program_document_reviews`, surfaced in the programme Report tab. This covers the
+*programme-competency-model* case. **Not yet built:** the original standalone
+scope below — uploading an arbitrary syllabus/РПД outside the programme structure,
+with competencies pasted/selected/extracted ad hoc rather than sourced from
+`program_competencies`. Revisit if a teacher/admin wants to check a РПД that isn't
+tied to a programme in the tree yet.
 
 КНИТУ admin request (2026-06). Upload a syllabus/РПД → score how well it covers
 the ОПК/ПК/УК competencies and the goals/outcomes it's meant to fulfil:

@@ -6,9 +6,13 @@ export const ORG_UNIT_TYPES = [
   'institution',
   'governance',
   'admin_office',
-  'cluster',     // displayed as «Полигруппа» — renamed from «Кластер направлений»
+  'cluster',           // displayed as «Полигруппа» — renamed from «Кластер направлений»
   'division',
-  'program',     // «Образовательная программа» — РОП is `head` on this unit
+  'program',           // «Образовательная программа» — the ОП / УГСН grouping (e.g. 15.00.00 Машиностроение)
+  'program_direction', // «Направление подготовки» — a specific direction within an ОП (e.g. 15.03.02).
+                       // Optional sub-slot: broad ОП host multiple направления with different РОПы;
+                       // narrow ОП (already at direction granularity) can stay a leaf without children.
+                       // РОП head grants + `programs.org_unit_id` can attach at either level.
   'department',
 ] as const
 export type OrgUnitType = (typeof ORG_UNIT_TYPES)[number]

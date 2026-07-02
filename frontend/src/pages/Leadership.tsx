@@ -6,13 +6,14 @@ import { getLeadershipUnits, getLeadershipOverview, type LeadershipProgramUnitSt
 // Mirrors TYPE_LABEL in InstitutionStructure — duplicated to avoid a
 // cross-page import. Keep in sync when adding org-unit types.
 const TYPE_LABEL: Record<string, string> = {
-  institution:  'Организация',
-  governance:   'Руководство',
-  admin_office: 'Управление / центр',
-  cluster:      'Полигруппа',
-  division:     'Институт / факультет',
-  program:      'Образовательная программа',
-  department:   'Кафедра',
+  institution:       'Организация',
+  governance:        'Руководство',
+  admin_office:      'Управление / центр',
+  cluster:           'Полигруппа',
+  division:          'Институт / факультет',
+  program:           'Образовательная программа',
+  program_direction: 'Направление подготовки',
+  department:        'Кафедра',
 }
 const ROLE_LABEL: Record<string, string> = {
   head:  'Руководитель',

@@ -1,7 +1,7 @@
 import client from './client'
 import type {
   Program, ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramAnalysis,
-  ProgramPracticeType, ProgramDocumentKind, ProgramDocument,
+  ProgramPracticeType, ProgramDocumentKind, ProgramDocument, ProgramDocumentReview,
 } from '../types'
 
 // Academic programs (учебные планы) — institution-admin feature.
@@ -39,8 +39,9 @@ export interface ImportProgramInput {
   // Required when the caller is `specific` scope (РОП). Optional for `all-rw`
   // (they may link later via the detail page's structure select).
   org_unit_id?: string | null
-  // Migration 050 attachments — рабочая программа + практики (each with a type).
-  working_programme?: File | null
+  // Migration 050 attachment — практики (each with a type). Рабочая программа
+  // is NOT gathered at intake (migration 051) — it's attached later, per
+  // discipline, from the programme's document library.
   practices?: { file: File; type: ProgramPracticeType }[]
 }
 
@@ -57,6 +58,7 @@ export interface PickableProgramUnit {
   id:         string
   name:       string
   short_name: string | null
+  type_code:  'program' | 'program_direction'
 }
 
 export async function getPickableProgramUnits(): Promise<PickableProgramUnit[]> {
@@ -76,8 +78,7 @@ export async function importProgram(input: ImportProgramInput): Promise<ImportPr
   if (input.org_unit_id) fd.append('org_unit_id', input.org_unit_id)
   fd.append('plan', input.plan)
 
-  // Migration 050 attachments — рабочая программа + практики.
-  if (input.working_programme) fd.append('working_programme', input.working_programme)
+  // Migration 050 attachment — практики.
   if (input.practices) {
     for (const p of input.practices) {
       fd.append('practices', p.file)
@@ -94,18 +95,50 @@ export async function importProgram(input: ImportProgramInput): Promise<ImportPr
 
 export async function uploadProgramDocument(
   programId: string,
-  input: { file: File; kind: ProgramDocumentKind; practiceType?: ProgramPracticeType | null }
-): Promise<{ id: string }> {
+  input: {
+    file: File
+    kind: ProgramDocumentKind
+    practiceType?: ProgramPracticeType | null
+    // Required when kind === 'working_programme' (migration 051) — which
+    // discipline this РПД belongs to. A re-upload for the same discipline
+    // replaces the previous file server-side.
+    disciplineId?: string | null
+  }
+): Promise<{ id: string; detected_competency_codes: string[] }> {
   const fd = new FormData()
   fd.append('file', input.file)
   fd.append('kind', input.kind)
   if (input.practiceType) fd.append('practice_type', input.practiceType)
-  const res = await client.post<{ id: string }>(`/api/institution/programs/${programId}/documents`, fd)
-  return res.data
+  if (input.disciplineId) fd.append('discipline_id', input.disciplineId)
+  const res = await client.post<{ id: string; detected_competency_codes?: string[] }>(
+    // The auto-detect LLM pass runs synchronously on the same request — bumps
+    // the client-side timeout from the axios default (30s) so a slow model
+    // reply doesn't cancel the upload before it finishes.
+    `/api/institution/programs/${programId}/documents`, fd, { timeout: 90_000 }
+  )
+  return {
+    id: res.data.id,
+    detected_competency_codes: res.data.detected_competency_codes ?? [],
+  }
 }
 
 export async function deleteProgramDocument(programId: string, docId: string): Promise<void> {
   await client.delete(`/api/institution/programs/${programId}/documents/${docId}`)
+}
+
+// ─── Discipline document review (migration 051 — Feature K scoped to a discipline) ──
+
+export async function reviewDiscipline(programId: string, disciplineId: string): Promise<ProgramDocumentReview> {
+  // One chatJSON call — same timeout budget as the other AI-backed program actions.
+  const res = await client.post<ProgramDocumentReview>(
+    `/api/institution/programs/${programId}/disciplines/${disciplineId}/review`, {}, { timeout: 120_000 }
+  )
+  return res.data
+}
+
+export async function getDisciplineReviews(programId: string): Promise<ProgramDocumentReview[]> {
+  const res = await client.get<ProgramDocumentReview[]>(`/api/institution/programs/${programId}/discipline-reviews`)
+  return res.data
 }
 
 /** URL for a direct authenticated GET — the axios interceptor adds the JWT. */

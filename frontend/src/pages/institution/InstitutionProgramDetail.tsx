@@ -6,13 +6,13 @@ import Select from '../../components/ui/Select'
 import {
   getProgram, getAnalysis, saveDisciplines, saveCompetencies, analyzeProgram, deleteProgram,
   downloadAnalysisPdf, updateProgram, uploadProgramDocument, deleteProgramDocument,
-  downloadProgramDocument,
+  downloadProgramDocument, reviewDiscipline, getDisciplineReviews,
 } from '../../api/programs'
 import { getCourses } from '../../api/courses'
 import { getPickableProgramUnits } from '../../api/programs'
 import {
   PROGRAM_PRACTICE_LABEL, PROGRAM_PRACTICE_TYPES,
-  type ProgramDocument, type ProgramPracticeType,
+  type ProgramDocument, type ProgramPracticeType, type ProgramDocumentReview,
 } from '../../types'
 import { useAuthStore } from '../../store/authStore'
 import { EXAMPLE_PROGRAM } from '../../lib/programExample'
@@ -49,6 +49,11 @@ export default function InstitutionProgramDetail() {
   const { data: program } = useQuery({ queryKey: ['program', id], queryFn: () => getProgram(id) })
   const { data: courses = [] } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
   const { data: cachedAnalysis } = useQuery({ queryKey: ['program-analysis', id], queryFn: () => getAnalysis(id) })
+  const { data: disciplineReviews = [] } = useQuery({
+    queryKey: ['program-discipline-reviews', id],
+    queryFn:  () => getDisciplineReviews(id),
+    enabled:  !!id,
+  })
 
   // Read-only mode when the server says this caller can't edit this program.
   // Oversight roles (все-ro) and РОПs looking at someone else's programme
@@ -175,7 +180,10 @@ export default function InstitutionProgramDetail() {
             >
               <option value="">— не связана —</option>
               {programUnitOptions.map((u) => (
-                <option key={u.id} value={u.id}>{u.name}{u.short_name ? ` (${u.short_name})` : ''}</option>
+                <option key={u.id} value={u.id}>
+                  {u.type_code === 'program_direction' ? 'Направление: ' : 'ОП: '}
+                  {u.name}{u.short_name ? ` (${u.short_name})` : ''}
+                </option>
               ))}
             </select>
             <span className="text-[11px] font-sans text-ink-tertiary">
@@ -270,7 +278,7 @@ export default function InstitutionProgramDetail() {
           analyzeMut.isPending
             ? <div className="text-center py-16 text-sm font-sans text-ink-secondary">Анализируем архитектуру плана…</div>
             : analysis
-              ? <Report analysis={analysis} duration={maxSemester} program={program} />
+              ? <Report analysis={analysis} duration={maxSemester} program={program} reviews={disciplineReviews} />
               : <div className="text-center py-16 text-sm font-sans text-ink-secondary">
                   Анализ ещё не запускался. Нажмите «Анализировать», чтобы оценить архитектуру плана.
                 </div>
@@ -280,8 +288,11 @@ export default function InstitutionProgramDetail() {
           <DocumentsPanel
             programId={program.id}
             documents={program.documents ?? []}
+            disciplines={program.disciplines}
+            reviews={disciplineReviews}
             canEdit={canEdit}
             onChanged={() => qc.invalidateQueries({ queryKey: ['program', id] })}
+            onReviewed={() => qc.invalidateQueries({ queryKey: ['program-discipline-reviews', id] })}
           />
         )}
       </div>
@@ -489,7 +500,7 @@ function scoreColor(s: number): string {
   return 'var(--color-danger)'
 }
 
-function Report({ analysis, duration, program }: { analysis: ProgramAnalysis; duration: number; program?: ProgramDetail }) {
+function Report({ analysis, duration, program, reviews = [] }: { analysis: ProgramAnalysis; duration: number; program?: ProgramDetail; reviews?: ProgramDocumentReview[] }) {
   const { sequencing, progression, orphans, missing, clusters, isolated, load } = analysis
   const maxCredits = Math.max(1, ...load.map((l) => l.credits ?? l.discipline_count))
   const [downloading, setDownloading] = useState(false)
@@ -605,6 +616,11 @@ function Report({ analysis, duration, program }: { analysis: ProgramAnalysis; du
             <GapColumn title="Компетенции без дисциплины (нужно добавить)" items={missing} tone="danger" />
           </div>
         </section>
+      )}
+
+      {/* Discipline РПД coverage (migration 051) */}
+      {program && program.disciplines.length > 0 && (
+        <DisciplineCoverageSection disciplines={program.disciplines} reviews={reviews} />
       )}
 
       {/* Relatedness & load */}
@@ -730,6 +746,76 @@ function GapColumn({ title, items, tone }: {
   )
 }
 
+// Migration 051 — per-discipline РПД conformance table: does the uploaded
+// document actually cover the competencies the discipline claims to develop.
+// Fills in incrementally as more disciplines get their РПД uploaded and
+// checked from the Documents tab — no requirement that every discipline be
+// covered before this renders anything useful.
+const COVERAGE_STATUS_META: Record<'covered' | 'partial' | 'missing', { label: string; color: string }> = {
+  covered: { label: 'раскрыта',   color: 'var(--color-success)' },
+  partial: { label: 'частично',   color: 'var(--color-warning)' },
+  missing: { label: 'не раскрыта', color: 'var(--color-danger)' },
+}
+
+function DisciplineCoverageSection({
+  disciplines, reviews,
+}: {
+  disciplines: ProgramDiscipline[]
+  reviews:     ProgramDocumentReview[]
+}) {
+  const reviewByDiscipline = new Map(reviews.map((r) => [r.discipline_id, r]))
+  const sorted = [...disciplines].sort((a, b) => a.semester - b.semester || a.sort_order - b.sort_order)
+  if (reviews.length === 0) return null   // nothing checked yet — no point rendering an all-empty table
+
+  return (
+    <section>
+      <SectionLabel>Соответствие РПД компетенциям</SectionLabel>
+      <div className="bg-surface border border-border rounded-lg divide-y divide-border">
+        {sorted.map((d) => {
+          const review = d.id ? reviewByDiscipline.get(d.id) : null
+          return (
+            <details key={d.id ?? d.name} className="group">
+              <summary className="px-4 py-2.5 flex items-center justify-between gap-3 cursor-pointer list-none">
+                <span className="text-sm font-sans text-ink truncate">{d.name}</span>
+                {review ? (
+                  <span
+                    className="text-xs font-mono font-medium flex-shrink-0"
+                    style={{ color: scoreColor(review.result.overall_coverage) }}
+                  >
+                    {review.result.overall_coverage}%
+                  </span>
+                ) : (
+                  <span className="text-xs font-sans text-ink-tertiary flex-shrink-0">не проверено</span>
+                )}
+              </summary>
+              {review && (
+                <div className="px-4 pb-3 space-y-2">
+                  {review.result.summary && (
+                    <p className="text-xs font-sans text-ink-secondary leading-relaxed">{review.result.summary}</p>
+                  )}
+                  {review.result.items.map((it, i) => {
+                    const meta = COVERAGE_STATUS_META[it.status]
+                    return (
+                      <div key={i} className="text-xs font-sans border-l-2 pl-2.5" style={{ borderColor: meta.color }}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-ink font-medium">{it.code ? `${it.code} — ${it.title}` : it.title}</span>
+                          <span style={{ color: meta.color }}>{meta.label}</span>
+                        </div>
+                        {it.evidence && <div className="text-ink-tertiary italic mt-0.5">«{it.evidence}»</div>}
+                        {it.note && <div className="text-ink-secondary mt-0.5">{it.note}</div>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </details>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 function Stat({ label, value, danger = false }: { label: string; value: number; danger?: boolean }) {
   return (
     <div className="bg-surface border border-border rounded-lg p-4">
@@ -745,28 +831,49 @@ function SectionLabel({ children }: { children: ReactNode }) {
   return <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">{children}</div>
 }
 
-// Documents tab — рабочая программа + практики. Grouped by kind; each row has
-// a download link and (when the caller can edit) a delete affordance. Upload
-// controls at the bottom let editors attach a new document after import.
+// Documents tab — рабочая программа (per discipline) + практики. РПД is
+// gathered incrementally, one discipline at a time, never all at once — so
+// this renders every discipline in the plan as a row: upload affordance if
+// none uploaded yet, otherwise the file + a "Проверить соответствие" trigger
+// that checks it against the discipline's declared competency_codes.
 function DocumentsPanel({
-  programId, documents, canEdit, onChanged,
+  programId, documents, disciplines, reviews, canEdit, onChanged, onReviewed,
 }: {
-  programId: string
-  documents: ProgramDocument[]
-  canEdit:   boolean
-  onChanged: () => void
+  programId:   string
+  documents:   ProgramDocument[]
+  disciplines: ProgramDiscipline[]
+  reviews:     ProgramDocumentReview[]
+  canEdit:     boolean
+  onChanged:   () => void
+  onReviewed:  () => void
 }) {
   const addToast = useUIStore((s) => s.addToast)
   const [uploading, setUploading] = useState(false)
+  const [reviewingId, setReviewingId] = useState<string | null>(null)
+  // Which discipline rows have their inline coverage breakdown open. On a
+  // freshly completed review we auto-open the row that was just checked (the
+  // user just clicked «Проверить» — the answer should be visible immediately,
+  // not one more click away). Toggled by the user thereafter.
+  const [expandedReviews, setExpandedReviews] = useState<Set<string>>(new Set())
 
-  const workingProgramme = documents.filter((d) => d.kind === 'working_programme')
-  const practices        = documents.filter((d) => d.kind === 'practice')
+  const workingProgrammeByDiscipline = new Map(
+    documents.filter((d) => d.kind === 'working_programme' && d.discipline_id).map((d) => [d.discipline_id as string, d])
+  )
+  const reviewByDiscipline = new Map(reviews.map((r) => [r.discipline_id, r]))
+  const practices = documents.filter((d) => d.kind === 'practice')
 
-  async function attachOne(input: { file: File; kind: 'working_programme' | 'practice'; practiceType?: ProgramPracticeType | null }) {
+  async function attachOne(input: { file: File; kind: 'working_programme' | 'practice'; practiceType?: ProgramPracticeType | null; disciplineId?: string | null }) {
     setUploading(true)
     try {
-      await uploadProgramDocument(programId, input)
-      addToast('Документ добавлен', 'success')
+      const res = await uploadProgramDocument(programId, input)
+      if (res.detected_competency_codes.length > 0) {
+        addToast(
+          `Документ добавлен · автоматически определено компетенций: ${res.detected_competency_codes.length}`,
+          'success',
+        )
+      } else {
+        addToast('Документ добавлен', 'success')
+      }
       onChanged()
     } catch {
       // Axios interceptor handles the error toast.
@@ -786,29 +893,63 @@ function DocumentsPanel({
     }
   }
 
+  async function runReview(discipline: ProgramDiscipline) {
+    if (!discipline.id) return
+    const disciplineId = discipline.id
+    setReviewingId(disciplineId)
+    try {
+      const review = await reviewDiscipline(programId, disciplineId)
+      const counts = countByStatus(review.result.items)
+      addToast(
+        `Раскрыто: ${counts.covered} · Частично: ${counts.partial} · Не раскрыто: ${counts.missing}`,
+        'success',
+      )
+      setExpandedReviews((prev) => new Set(prev).add(disciplineId))
+      onReviewed()
+    } catch {
+      // handled by interceptor
+    } finally {
+      setReviewingId(null)
+    }
+  }
+
+  function toggleExpanded(disciplineId: string) {
+    setExpandedReviews((prev) => {
+      const next = new Set(prev)
+      if (next.has(disciplineId)) next.delete(disciplineId)
+      else next.add(disciplineId)
+      return next
+    })
+  }
+
   return (
     <div className="space-y-8">
-      {/* Working programme */}
+      {/* Working programmes — one per discipline */}
       <div>
-        <SectionLabel>Рабочая программа</SectionLabel>
-        {workingProgramme.length === 0 ? (
+        <SectionLabel>Рабочие программы дисциплин</SectionLabel>
+        {disciplines.length === 0 ? (
           <p className="text-sm font-sans text-ink-secondary bg-surface border border-border rounded-lg px-4 py-3">
-            Не загружена.
+            Сначала добавьте дисциплины в конструкторе плана.
           </p>
         ) : (
           <div className="space-y-2">
-            {workingProgramme.map((d) => (
-              <DocumentRow key={d.id} doc={d} programId={programId} canEdit={canEdit} onRemove={() => removeOne(d)} />
+            {[...disciplines].sort((a, b) => a.semester - b.semester || a.sort_order - b.sort_order).map((d) => (
+              <DisciplineDocumentRow
+                key={d.id}
+                discipline={d}
+                doc={d.id ? workingProgrammeByDiscipline.get(d.id) ?? null : null}
+                review={d.id ? reviewByDiscipline.get(d.id) ?? null : null}
+                expanded={d.id ? expandedReviews.has(d.id) : false}
+                onToggleExpanded={() => d.id && toggleExpanded(d.id)}
+                programId={programId}
+                canEdit={canEdit}
+                uploading={uploading}
+                reviewing={reviewingId === d.id}
+                onUpload={(file) => attachOne({ file, kind: 'working_programme', disciplineId: d.id })}
+                onRemove={(doc) => removeOne(doc)}
+                onReview={() => runReview(d)}
+              />
             ))}
-          </div>
-        )}
-        {canEdit && workingProgramme.length === 0 && (
-          <div className="mt-2">
-            <UploadPill
-              label="Добавить рабочую программу"
-              onPick={(file) => attachOne({ file, kind: 'working_programme' })}
-              disabled={uploading}
-            />
           </div>
         )}
       </div>
@@ -876,6 +1017,143 @@ function DocumentRow({
         )}
       </div>
     </div>
+  )
+}
+
+// One discipline's РПД slot: upload affordance if empty, otherwise the file
+// plus a "Проверить соответствие" trigger that scores it against the
+// discipline's declared competency_codes (disabled with an explanatory
+// tooltip if none are declared — nothing to check against).
+function DisciplineDocumentRow({
+  discipline, doc, review, expanded, onToggleExpanded,
+  programId, canEdit, uploading, reviewing, onUpload, onRemove, onReview,
+}: {
+  discipline:        ProgramDiscipline
+  doc:               ProgramDocument | null
+  review:            ProgramDocumentReview | null
+  expanded:          boolean
+  onToggleExpanded:  () => void
+  programId:         string
+  canEdit:           boolean
+  uploading:         boolean
+  reviewing:         boolean
+  onUpload:          (file: File) => void
+  onRemove:          (doc: ProgramDocument) => void
+  onReview:          () => void
+}) {
+  const hasCodes = discipline.competency_codes.length > 0
+  const kb = doc ? Math.round(doc.file_size / 1024) : 0
+  const counts = review ? countByStatus(review.result.items) : null
+
+  async function download() {
+    if (!doc) return
+    try { await downloadProgramDocument(programId, doc) }
+    catch { /* handled by interceptor */ }
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg px-4 py-3">
+      <div className="flex items-start gap-3">
+        <div className="text-lg leading-none mt-0.5">📄</div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-sans text-ink truncate">
+            {discipline.name} <span className="text-ink-tertiary text-xs">· сем. {discipline.semester}</span>
+          </div>
+          {doc ? (
+            <>
+              <div className="text-xs font-sans text-ink-secondary truncate mt-0.5">{doc.file_name}</div>
+              <div className="text-[11px] font-sans text-ink-tertiary mt-0.5">
+                {kb.toLocaleString('ru-RU')} КБ · {new Date(doc.uploaded_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}
+              </div>
+              {counts && (
+                <div className="flex items-center gap-3 mt-1.5 text-[11px] font-sans">
+                  <CoverageChip label="раскрыто"     value={counts.covered} status="covered" />
+                  <CoverageChip label="частично"     value={counts.partial} status="partial" />
+                  <CoverageChip label="не раскрыто"  value={counts.missing} status="missing" />
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-xs font-sans text-ink-tertiary mt-0.5">Не загружена</div>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {doc && (
+            <button onClick={download} className="text-xs font-sans text-amber hover:underline">Скачать</button>
+          )}
+          {canEdit && doc && (
+            <button onClick={() => onRemove(doc)} className="text-xs font-sans text-ink-tertiary hover:text-danger transition-colors">Удалить</button>
+          )}
+          {canEdit && (
+            <UploadPill
+              label={doc ? 'Заменить' : 'Загрузить'}
+              onPick={onUpload}
+              disabled={uploading}
+            />
+          )}
+        </div>
+      </div>
+      {canEdit && doc && (
+        <div className="mt-2 pl-8 flex items-center gap-3">
+          <button
+            onClick={onReview}
+            disabled={reviewing || !hasCodes}
+            title={hasCodes ? undefined : 'У дисциплины не указаны компетенции — заполните их в конструкторе плана'}
+            className="text-xs font-sans text-amber hover:underline disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed"
+          >
+            {reviewing ? 'Проверяем…' : review ? 'Перепроверить соответствие' : 'Проверить соответствие компетенциям'}
+          </button>
+          {review && (
+            <button
+              onClick={onToggleExpanded}
+              className="text-xs font-sans text-ink-secondary hover:text-ink transition-colors"
+            >
+              {expanded ? 'Скрыть разбор' : 'Показать разбор'}
+            </button>
+          )}
+        </div>
+      )}
+      {review && expanded && (
+        <div className="mt-3 pl-8 pr-1 space-y-2 border-t border-border pt-3">
+          {review.result.summary && (
+            <p className="text-xs font-sans text-ink-secondary leading-relaxed">{review.result.summary}</p>
+          )}
+          {review.result.items.map((it, i) => {
+            const meta = COVERAGE_STATUS_META[it.status]
+            return (
+              <div key={i} className="text-xs font-sans border-l-2 pl-2.5" style={{ borderColor: meta.color }}>
+                <div className="flex items-center gap-2">
+                  <span className="text-ink font-medium">{it.code ? `${it.code} — ${it.title}` : it.title}</span>
+                  <span style={{ color: meta.color }}>{meta.label}</span>
+                </div>
+                {it.evidence && <div className="text-ink-tertiary italic mt-0.5">«{it.evidence}»</div>}
+                {it.note && <div className="text-ink-secondary mt-0.5">{it.note}</div>}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function countByStatus(items: import('../../types').DisciplineCoverageItem[]): { covered: number; partial: number; missing: number } {
+  const counts = { covered: 0, partial: 0, missing: 0 }
+  for (const it of items) counts[it.status]++
+  return counts
+}
+
+function CoverageChip({ label, value, status }: { label: string; value: number; status: 'covered' | 'partial' | 'missing' }) {
+  const meta = COVERAGE_STATUS_META[status]
+  if (value === 0) {
+    return <span className="text-ink-tertiary">0 {label}</span>
+  }
+  return (
+    <span className="inline-flex items-center gap-1" style={{ color: meta.color }}>
+      <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: meta.color }} />
+      <span className="font-medium">{value}</span>
+      <span>{label}</span>
+    </span>
   )
 }
 

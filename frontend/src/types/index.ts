@@ -101,6 +101,9 @@ export type {
   RedundancyItem,
   RelatednessCluster,
   SemesterLoad,
+  DisciplineCoverageItem,
+  DisciplineCoverageResult,
+  ProgramDocumentReview,
   ApiError,
 } from '../../../shared/types'
 

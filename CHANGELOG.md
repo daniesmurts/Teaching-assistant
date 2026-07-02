@@ -15,6 +15,75 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Changed
+- **Coverage check surfaces the full breakdown inline in the Documents tab.**
+  Previously the discipline row only showed a bare "покрытие 75%" summary and
+  the useful part (per-competency covered/partial/missing with evidence quotes
+  + notes) was one tab away in the Report. On a fresh check the row now
+  auto-expands with the full breakdown right there — same content the Report
+  tab has always shown, just next to the file the user just checked — plus a
+  «Скрыть / Показать разбор» toggle. Header stats change from a bare % to
+  colour-coded counts split by status (`X раскрыто · Y частично · Z не
+  раскрыто`), which carries more signal than a weighted overall %.
+- **Auto-detect: broader recall.** The `detectDeclaredCompetencyCodes` prompt
+  used to look only in the «Планируемые результаты обучения» section and
+  dropped codes it saw elsewhere. РПД documents in the wild list codes across
+  multiple places (declared section, competency matrix, content descriptions,
+  assessment rubrics) — the prompt now instructs the model to include a code
+  if it appears anywhere as formed by the discipline. Recall test on a
+  three-code fixture (`УК-1, УК-2, УК-5`): old prompt returned 2 of 3
+  (dropped `УК-2` mentioned only in matrix + content); new prompt returns
+  all three. `maxTokens` bumped from 800 to 1500 so longer programme
+  competency sets don't get truncated.
+
+### Added
+- **Auto-detect declared competency codes on РПД upload.** When a рабочая
+  программа is attached to a discipline and the discipline currently has no
+  `competency_codes`, one cheap `chatJSON` pass extracts which codes the РПД
+  itself declares (from its «Планируемые результаты обучения» / «Компетенции»
+  section), filtered against the programme's own `program_competencies.code`
+  set so OCR noise or off-programme codes are silently dropped. Populates
+  `program_disciplines.competency_codes` in place — never clobbers a manual
+  entry (guarded by a `cardinality = 0` check in `fillDisciplineCompetencyCodesIfEmpty`).
+  Verified in dev: on real text mentioning УК-1, УК-5 as declared and УК-2 as
+  a passing reference ("также затрагивает"), the model correctly picked only
+  УК-1 and УК-5. Response includes `detected_competency_codes` so the client
+  can toast the count; the invalidated `program` query rehydrates the
+  discipline row and the "Проверить соответствие компетенциям" button lights
+  up without any manual step.
+
+- **Programme list groups by направление.** A направление подготовки often
+  hosts several учебных планов — one per профиль/специализация (e.g. `15.03.02
+  Технологические машины и оборудование` in KNITU carries "Оборудование
+  нефтегазопереработки", "Вакуумная и компрессорная техника", etc., each with
+  its own учебный план + set of РПД). The programme list on `/programs` now
+  buckets programmes that share the same `org_unit_id` (falling back to the
+  `code`+`specialty_name` pair for programmes not yet linked into the tree) and
+  renders multi-profile buckets as a small heading + nested card list; single-
+  profile buckets keep the flat compact card the list has always shown. The
+  profile field within each card is what distinguishes rows within a group.
+  No schema change — a programme's profile continues to live in
+  `programs.profile` (the intake form already asks for it); the same
+  Documents + Analysis tabs work per-programme so per-profile document
+  libraries and coverage checks come for free.
+
+- **`program_direction` org-unit type — «Направление подготовки».**
+  The org tree now distinguishes ОП (`program`, e.g. `15.00.00 Машиностроение` —
+  the УГСН grouping) from the specific направление подготовки (`program_direction`,
+  e.g. `15.03.02 Технологические машины и оборудование`) that sits under it. A
+  broad ОП hosts multiple направления with different РОПы; a narrow ОП that
+  already IS at direction granularity (like `16.03.01 Холодильная техника`)
+  stays a leaf without children. `programs.org_unit_id` and РОП `head` grants
+  can attach at either level — programme-access queries widen to
+  `type_code IN ('program', 'program_direction')` so subtree walks pick up both
+  transparently. No DB migration (`type_code` is unconstrained TEXT); enum
+  extension only. Tree-builder dropdown gains the new type as an option; the
+  programme-link picker (intake form + detail page) prefixes each entry with
+  `ОП: ` or `Направление: ` so the level being linked at is unambiguous.
+  Existing 9 units in KNITU's «Инженерно-технологическая» polygroup are
+  unchanged — the 3 direction-level entries can be reclassified via the tree
+  UI when convenient.
+
+### Changed
 - **Email deliverability — Reply-To + List-Unsubscribe + emoji-free admin subjects.**
   Three additive sender-reputation wins after observing invites landing in
   Yandex's Спам folder despite verified SPF/DKIM/DMARC: (a) admin-notification
@@ -56,6 +125,33 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   shows filename + size + upload date, and offers download + delete
   (deletes gated by `can_edit`). Parsing/analysis integration of the new
   files is a separate follow-up — this PR is storage + retrieval only.
+
+- **Discipline-scoped рабочая программа + coverage check (Migration 051).**
+  Migration 050 assumed one aggregate РПД PDF per programme; in reality
+  КНИТУ carries one per **discipline** (dozens per направление), gathered
+  incrementally. `program_documents.kind='working_programme'` now carries a
+  `discipline_id` (FK → `program_disciplines`, replace-on-reupload — one
+  current file per discipline) plus a cached `extracted_text` column so
+  review runs don't re-parse the PDF each time. The intake form no longer
+  gathers рабочая программа at all — it's attached later, per discipline,
+  from the programme's Documents tab, which now lists every discipline with
+  an upload/replace affordance instead of a single slot.
+  New: **`services/documentReview.ts`** — Feature K
+  ([TODO.md](TODO.md), "РПД ↔ competency/goals conformance check") scoped to
+  a programme discipline instead of a standalone syllabus upload. One
+  `chatJSON` call scores the discipline's uploaded РПД against the
+  competencies it declares (`program_disciplines.competency_codes` →
+  `program_competencies`), classifying each as covered/partial/missing with
+  a verbatim evidence citation (same citation-validation contract as
+  grading). Results persist in the new `program_document_reviews` table
+  (one row per run; latest per discipline is read back). New routes: `POST
+  /:id/disciplines/:disciplineId/review`, `GET /:id/discipline-reviews`.
+  Frontend: the Report tab gains a **«Соответствие РПД компетенциям»**
+  section — an expandable per-discipline table that fills in incrementally
+  as more disciplines get checked, with no requirement that every
+  discipline be covered before it's useful. Practices remain
+  programme-scoped (unchanged); the review mechanism is written generically
+  enough to point at them later without a new service.
 
 ### Changed
 - **Programme scope now walks the subtree — polygroup heads (and any

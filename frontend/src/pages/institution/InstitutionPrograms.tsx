@@ -7,7 +7,7 @@ import { listPrograms, importProgram, getPickableProgramUnits } from '../../api/
 import { PROGRAM_PRACTICE_LABEL, PROGRAM_PRACTICE_TYPES, type ProgramPracticeType } from '../../types'
 import { useUIStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
-import type { ProgramLevel } from '../../types'
+import type { Program, ProgramLevel } from '../../types'
 
 const LEVEL_LABEL: Record<ProgramLevel, string> = {
   bachelor: 'Бакалавриат', master: 'Магистратура', specialist: 'Специалитет',
@@ -40,11 +40,9 @@ export default function InstitutionPrograms() {
   const [orgUnitId, setOrgUnitId] = useState<string>('')
   const [descFile, setDescFile] = useState<File | null>(null)
   const [planFile, setPlanFile] = useState<File | null>(null)
-  const [wpFile, setWpFile]     = useState<File | null>(null)
   const [practices, setPractices] = useState<{ file: File | null; type: ProgramPracticeType | '' }[]>([])
   const descRef = useRef<HTMLInputElement>(null)
   const planRef = useRef<HTMLInputElement>(null)
-  const wpRef   = useRef<HTMLInputElement>(null)
 
   function addPractice() {
     if (practices.length >= 8) return
@@ -87,7 +85,6 @@ export default function InstitutionPrograms() {
       description: descFile,
       plan: planFile as File,
       org_unit_id: orgUnitId || null,
-      working_programme: wpFile,
       // Only pass practices that have BOTH a file and a type set — half-filled
       // rows are dropped silently. Backend enforces the parallel-length rule.
       practices: practices
@@ -219,6 +216,7 @@ export default function InstitutionPrograms() {
                     {isScoped && programUnitOptions.length > 1 && <option value="" disabled>Выберите программу</option>}
                     {programUnitOptions.map((u) => (
                       <option key={u.id} value={u.id}>
+                        {u.type_code === 'program_direction' ? 'Направление: ' : 'ОП: '}
                         {u.name}{u.short_name ? ` (${u.short_name})` : ''}
                       </option>
                     ))}
@@ -245,16 +243,9 @@ export default function InstitutionPrograms() {
                 />
               </div>
 
-              {/* Migration 050 — рабочая программа + практики. Stored as */}
-              {/* originals rather than reduced to extracted text; parse into */}
-              {/* analysis is a future PR. */}
-              <div className="pt-1">
-                <FileField
-                  label="Рабочая программа (PDF)"
-                  file={wpFile} inputRef={wpRef}
-                  onPick={(f) => setWpFile(f)}
-                />
-              </div>
+              {/* Migration 051 — рабочая программа is per-discipline, gathered */}
+              {/* incrementally, not at intake. Attach it later from the */}
+              {/* programme's Documents tab once disciplines exist. */}
 
               <div className="pt-2">
                 <div className="flex items-center justify-between mb-2">
@@ -320,30 +311,105 @@ export default function InstitutionPrograms() {
             )}
           </div>
         ) : (
-          <div className="space-y-2">
-            {programs.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => navigate(`/programs/${p.id}`)}
-                className="w-full text-left bg-surface border border-border rounded-lg px-4 py-3 hover:border-border-mid hover:bg-surface-warm transition-colors flex items-center gap-3"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-sans font-medium text-ink truncate">{p.specialty_name || p.name}</div>
-                  <div className="text-xs font-sans text-ink-tertiary mt-0.5">
-                    {p.code && <span>{p.code} · </span>}
-                    {p.education_level
-                      ? <span>{p.education_level} · </span>
-                      : p.level && <span>{LEVEL_LABEL[p.level]} · </span>}
-                    {p.duration_semesters} сем. · обновлён {fmt(p.updated_at)}
-                  </div>
-                </div>
-                <span className="text-ink-tertiary text-sm flex-shrink-0">→</span>
-              </button>
-            ))}
-          </div>
+          <ProgramList programs={programs} onOpen={(id) => navigate(`/programs/${id}`)} />
         )}
       </div>
     </div>
+  )
+}
+
+// Groups programmes by направление (org_unit_id, falling back to code+specialty_name
+// for programmes not yet linked to the tree). A направление with a single profile
+// renders as a compact card; multi-profile направления get a header + nested list
+// so the user can see the whole set at a glance without navigating in and out.
+// The profile field on each programme is what distinguishes rows within a group
+// — see the intake form's «профиль» field which is where this text comes from.
+function ProgramList({
+  programs, onOpen,
+}: {
+  programs: Program[]
+  onOpen: (id: string) => void
+}) {
+  interface Group { key: string; heading: { code: string | null; name: string }; items: Program[] }
+  const groups: Group[] = []
+  const byKey = new Map<string, Group>()
+  for (const p of programs) {
+    const key = p.org_unit_id ?? `unlinked:${(p.code ?? '').trim()}::${(p.specialty_name ?? p.name).trim()}`
+    let g = byKey.get(key)
+    if (!g) {
+      g = { key, heading: { code: p.code ?? null, name: p.specialty_name || p.name }, items: [] }
+      byKey.set(key, g)
+      groups.push(g)
+    }
+    g.items.push(p)
+  }
+  // Sort groups by heading name; sort items within a group by profile then updated_at.
+  groups.sort((a, b) => a.heading.name.localeCompare(b.heading.name, 'ru'))
+  for (const g of groups) {
+    g.items.sort((a, b) =>
+      (a.profile ?? '').localeCompare(b.profile ?? '', 'ru') ||
+      b.updated_at.localeCompare(a.updated_at)
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {groups.map((g) => (
+        g.items.length === 1
+          ? <ProgramCard key={g.key} p={g.items[0]} onOpen={onOpen} showDirection />
+          : (
+            <div key={g.key}>
+              <div className="flex items-baseline gap-2 mb-1.5 px-1">
+                {g.heading.code && (
+                  <span className="text-xs font-mono font-medium text-ink-secondary">{g.heading.code}</span>
+                )}
+                <span className="text-xs font-sans font-semibold text-ink-secondary uppercase tracking-wider">{g.heading.name}</span>
+                <span className="text-[11px] font-sans text-ink-tertiary">· {g.items.length} профил{profileWord(g.items.length)}</span>
+              </div>
+              <div className="space-y-1.5">
+                {g.items.map((p) => (
+                  <ProgramCard key={p.id} p={p} onOpen={onOpen} showDirection={false} />
+                ))}
+              </div>
+            </div>
+          )
+      ))}
+    </div>
+  )
+}
+
+function profileWord(n: number): string {
+  // 1 профиль, 2-4 профиля, 5+ профилей
+  const mod10 = n % 10, mod100 = n % 100
+  if (mod100 >= 11 && mod100 <= 14) return 'ей'
+  if (mod10 === 1) return 'ь'
+  if (mod10 >= 2 && mod10 <= 4) return 'я'
+  return 'ей'
+}
+
+function ProgramCard({ p, onOpen, showDirection }: { p: Program; onOpen: (id: string) => void; showDirection: boolean }) {
+  // Title: the profile when we're inside a grouped направление (siblings share
+  // the heading), otherwise the направление name (single-profile case, keeps
+  // the flat look the list has always had).
+  const title = showDirection ? (p.specialty_name || p.name) : (p.profile || p.name || 'Профиль без названия')
+  return (
+    <button
+      onClick={() => onOpen(p.id)}
+      className="w-full text-left bg-surface border border-border rounded-lg px-4 py-3 hover:border-border-mid hover:bg-surface-warm transition-colors flex items-center gap-3"
+    >
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-sans font-medium text-ink truncate">{title}</div>
+        <div className="text-xs font-sans text-ink-tertiary mt-0.5">
+          {showDirection && p.code && <span>{p.code} · </span>}
+          {showDirection && p.profile && <span>{p.profile} · </span>}
+          {p.education_level
+            ? <span>{p.education_level} · </span>
+            : p.level ? <span>{LEVEL_LABEL[p.level]} · </span> : null}
+          {p.duration_semesters} сем. · обновлён {fmt(p.updated_at)}
+        </div>
+      </div>
+      <span className="text-ink-tertiary text-sm flex-shrink-0">→</span>
+    </button>
   )
 }
 

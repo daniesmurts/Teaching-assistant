@@ -956,10 +956,43 @@ export interface ProgramDocument {
   program_id:    string
   kind:          ProgramDocumentKind
   practice_type: ProgramPracticeType | null
+  // Migration 051 — which discipline this рабочая программа belongs to.
+  // Only set when kind === 'working_programme'; null for 'practice'.
+  discipline_id: string | null
   file_name:     string
   file_size:     number
   mime_type:     string
   uploaded_at:   string
+}
+
+// Migration 051 — result of checking an uploaded РПД against the
+// competencies its discipline (or, for practices, the whole programme)
+// claims to develop. Produced by services/documentReview.ts. Reuses
+// CoverageStatus (defined above for grading bullet coverage) — same
+// covered/partial/missing vocabulary, different subject.
+
+export interface DisciplineCoverageItem {
+  code:     string | null   // 'УК-1' / 'ОПК-2' / 'ПК-3'; null for goals
+  title:    string
+  status:   CoverageStatus
+  evidence: string | null   // verbatim quote from the document, or null
+  note:     string
+}
+
+export interface DisciplineCoverageResult {
+  overall_coverage: number   // 0-100
+  items:            DisciplineCoverageItem[]
+  summary:          string
+}
+
+// One row per review run; the frontend reads the latest per discipline.
+export interface ProgramDocumentReview {
+  id:            string
+  program_id:    string
+  discipline_id: string | null
+  document_id:   string
+  result:        DisciplineCoverageResult
+  created_at:    string
 }
 
 export interface ProgramDetail extends Program {

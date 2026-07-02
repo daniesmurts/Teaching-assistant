@@ -244,6 +244,29 @@ export async function deleteProgram(id: string, institutionId: string): Promise<
   return (rowCount ?? 0) > 0
 }
 
+// ── Targeted discipline updates ─────────────────────────────────────────────────
+
+/**
+ * Sets `competency_codes` on a single discipline — used by the auto-detect
+ * pass that runs after a рабочая программа is uploaded (migration 051). Only
+ * touches the row if it's currently empty, so a manual entry made in the
+ * конструктор is never clobbered by a later re-extract. Returns true iff the
+ * row was updated.
+ */
+export async function fillDisciplineCompetencyCodesIfEmpty(
+  disciplineId: string, codes: string[]
+): Promise<boolean> {
+  if (codes.length === 0) return false
+  const { rowCount } = await pool.query(
+    `UPDATE program_disciplines
+        SET competency_codes = $2
+      WHERE id = $1
+        AND (competency_codes IS NULL OR cardinality(competency_codes) = 0)`,
+    [disciplineId, codes]
+  )
+  return (rowCount ?? 0) > 0
+}
+
 // ── Bulk replaces (delete-then-insert in a transaction) ─────────────────────────
 
 export async function replaceDisciplines(
@@ -319,13 +342,20 @@ export interface PickableProgramUnit {
   id:         string
   name:       string
   short_name: string | null
+  // Lets the frontend distinguish ОП («program») from Направление подготовки
+  // («program_direction») in the picker so the user knows which level they're
+  // linking at.
+  type_code:  'program' | 'program_direction'
 }
 
 export async function listProgramUnitsForInstitution(institutionId: string): Promise<PickableProgramUnit[]> {
-  const { rows } = await pool.query<PickableProgramUnit>(
-    `SELECT id, name, short_name
+  // Both `program` (ОП) and `program_direction` (Направление подготовки) are
+  // valid anchors for a programme — narrow ОП link directly at the ОП level,
+  // broad ОП link at their направление children.
+  const { rows } = await pool.query<PickableProgramUnit & { type_code: string }>(
+    `SELECT id, name, short_name, type_code
        FROM org_units
-      WHERE institution_id = $1 AND type_code = 'program'
+      WHERE institution_id = $1 AND type_code IN ('program', 'program_direction')
       ORDER BY name`,
     [institutionId]
   )
@@ -334,10 +364,10 @@ export async function listProgramUnitsForInstitution(institutionId: string): Pro
 
 export async function listProgramUnitsByIds(ids: string[]): Promise<PickableProgramUnit[]> {
   if (ids.length === 0) return []
-  const { rows } = await pool.query<PickableProgramUnit>(
-    `SELECT id, name, short_name
+  const { rows } = await pool.query<PickableProgramUnit & { type_code: string }>(
+    `SELECT id, name, short_name, type_code
        FROM org_units
-      WHERE id = ANY($1::uuid[]) AND type_code = 'program'
+      WHERE id = ANY($1::uuid[]) AND type_code IN ('program', 'program_direction')
       ORDER BY name`,
     [ids]
   )

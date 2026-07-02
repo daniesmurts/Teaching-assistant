@@ -12,10 +12,12 @@ import {
   listPrograms, listProgramsForUnits, createProgram, findProgram, getProgramDetail, updateProgram, deleteProgram,
   replaceDisciplines, replaceCompetencies, saveAnalysis, getLatestAnalysis,
   listProgramUnitsForInstitution, listProgramUnitsByIds,
+  fillDisciplineCompetencyCodesIfEmpty,
 } from '../db/queries/programs'
 import { canEditProgram, canReadProgram } from '../services/programAccess'
 import { listAncestorsOfUnit } from '../db/queries/orgUnits'
 import { analyzeProgram } from '../services/programAnalysis'
+import { reviewDocumentCoverage, detectDeclaredCompetencyCodes } from '../services/documentReview'
 import { generateProgramReportPdf } from '../services/programReportPdf'
 import { uploadFields } from '../middleware/fileValidation'
 import { extractText } from '../services/documentExtractor'
@@ -24,7 +26,9 @@ import { setProgramDocs } from '../db/queries/programs'
 import { uploadObject, downloadObject, deleteObject } from '../services/objectStorage'
 import {
   insertProgramDocument, listProgramDocuments, findProgramDocument, deleteProgramDocument,
+  findWorkingProgrammeForDiscipline, deleteWorkingProgrammeForDiscipline,
 } from '../db/queries/programDocuments'
+import { insertReview, getLatestReviewByDiscipline } from '../db/queries/programDocumentReviews'
 import { logger } from '../lib/logger'
 import type {
   ProgramDiscipline, ProgramCompetency,
@@ -47,11 +51,13 @@ function documentStoragePath(programId: string, docId: string, fileName: string)
 // upload first, insert second; a failed insert means an orphaned object,
 // which we log and best-effort clean.
 async function attachProgramDocument(params: {
-  programId:    string
-  kind:         ProgramDocumentKind
-  practiceType: ProgramPracticeType | null
-  file:         Express.Multer.File
-  uploadedBy:   string
+  programId:     string
+  kind:          ProgramDocumentKind
+  practiceType:  ProgramPracticeType | null
+  disciplineId?: string | null
+  extractedText?: string | null
+  file:          Express.Multer.File
+  uploadedBy:    string
 }): Promise<string> {
   // Pre-generate an id so the storage key can include it before the row exists.
   // Any UUID works; the DB regenerates its own default anyway.
@@ -61,14 +67,16 @@ async function attachProgramDocument(params: {
 
   try {
     const row = await insertProgramDocument({
-      programId:    params.programId,
-      kind:         params.kind,
-      practiceType: params.practiceType,
-      fileName:     params.file.originalname,
-      fileSize:     params.file.size,
-      mimeType:     params.file.mimetype,
-      storagePath:  key,
-      uploadedBy:   params.uploadedBy,
+      programId:     params.programId,
+      kind:          params.kind,
+      practiceType:  params.practiceType,
+      disciplineId:  params.disciplineId ?? null,
+      fileName:      params.file.originalname,
+      fileSize:      params.file.size,
+      mimeType:      params.file.mimetype,
+      storagePath:   key,
+      extractedText: params.extractedText ?? null,
+      uploadedBy:    params.uploadedBy,
     })
     return row.id
   } catch (err) {
@@ -168,12 +176,13 @@ router.post(
   '/import',
   aiLimiter,
   uploadFields([
-    { name: 'description',       maxCount: 1 },
-    { name: 'plan',              maxCount: 1 },
-    // Migration 050 — attached documents that stay preserved as originals
-    // rather than being reduced to extracted text.
-    { name: 'working_programme', maxCount: 1 },
-    { name: 'practices',         maxCount: 8 },
+    { name: 'description', maxCount: 1 },
+    { name: 'plan',        maxCount: 1 },
+    // Migration 050 — practices stay preserved as originals rather than being
+    // reduced to extracted text. Рабочая программа is NOT gathered at intake
+    // (migration 051) — КНИТУ carries one per discipline, uploaded later from
+    // the programme's document library once each discipline's file is found.
+    { name: 'practices',   maxCount: 8 },
   ]),
   asyncHandler(async (req, res) => {
     // РОП + УМЦ + IT admin can all import. РОП must link on import to a
@@ -263,20 +272,10 @@ router.post(
     if (competencies.length > 0) await replaceCompetencies(program.id, competencies)
     if (disciplines.length > 0)  await replaceDisciplines(program.id, disciplines)
 
-    // Attach рабочая программа + практики as first-class documents. Practices
-    // come as parallel arrays (files + practice_types); we validate lengths
-    // and the type constant before touching storage.
-    const wpFile = files?.working_programme?.[0]
-    if (wpFile) {
-      await attachProgramDocument({
-        programId:    program.id,
-        kind:         'working_programme',
-        practiceType: null,
-        file:         wpFile,
-        uploadedBy:   teacherId,
-      })
-    }
-
+    // Attach практики as first-class documents. They come as parallel arrays
+    // (files + practice_types); we validate lengths and the type constant
+    // before touching storage. Рабочая программа is attached later, per
+    // discipline, via POST /:id/documents (migration 051).
     const practiceFiles = files?.practices ?? []
     if (practiceFiles.length > 0) {
       const rawTypes = req.body.practice_types
@@ -444,16 +443,128 @@ router.post(
       }
     }
 
+    // Migration 051 — рабочая программа belongs to a specific discipline.
+    // One current file per discipline: a re-upload replaces the previous row
+    // (best-effort object cleanup, same convention as DELETE below).
+    let disciplineId: string | null = null
+    if (kind === 'working_programme') {
+      disciplineId = String(req.body.discipline_id ?? '')
+      if (!disciplineId || !detail.disciplines.some((d) => d.id === disciplineId)) {
+        throw new ValidationError('Укажите дисциплину, к которой относится рабочая программа')
+      }
+      const existing = await deleteWorkingProgrammeForDiscipline(detail.id, disciplineId)
+      if (existing) {
+        await deleteObject(existing.storagePath).catch((err) =>
+          logger.warn({ message: 'Failed to delete replaced program document object', error: (err as Error).message })
+        )
+      }
+    }
+
+    // Extraction is best-effort — a failed parse doesn't block the attach,
+    // it just leaves extracted_text null (the review endpoint then reports a
+    // clear error instead of silently checking nothing).
+    let extractedText: string | null = null
+    try {
+      extractedText = (await extractText(file.buffer, file.mimetype)).text
+    } catch (err) {
+      logger.warn({ message: 'Program document text extraction failed', error: (err as Error).message })
+    }
+
     const id = await attachProgramDocument({
       programId:    detail.id,
       kind,
       practiceType: kind === 'practice' ? practiceType : null,
+      disciplineId,
+      extractedText,
       file,
       uploadedBy:   req.teacher.id,
     })
-    res.status(201).json({ id })
+
+    // Auto-detect declared competency codes from the РПД, so the "Проверить
+    // соответствие" trigger works without the user having to fill
+    // `competency_codes` in the конструктор first. Best-effort: silent on
+    // failure, doesn't clobber a manual entry, only runs when we have real
+    // text + a target discipline + a non-empty competency set on the programme.
+    let detectedCodes: string[] = []
+    if (kind === 'working_programme' && disciplineId && extractedText && extractedText.trim().length >= 200) {
+      const discipline = detail.disciplines.find((d) => d.id === disciplineId)
+      const alreadyHasCodes = (discipline?.competency_codes.length ?? 0) > 0
+      const programCodes = detail.competencies.map((c) => c.code).filter((c): c is string => !!c)
+      if (discipline && !alreadyHasCodes && programCodes.length > 0) {
+        try {
+          detectedCodes = await detectDeclaredCompetencyCodes({
+            teacherId:              req.teacher.id,
+            institutionId:          req.teacher.institution_id ?? undefined,
+            documentText:           extractedText,
+            programCompetencyCodes: programCodes,
+            label:                  discipline.name,
+          })
+          if (detectedCodes.length > 0) {
+            await fillDisciplineCompetencyCodesIfEmpty(disciplineId, detectedCodes)
+          }
+        } catch (err) {
+          logger.warn({
+            message: 'Program document: competency-code auto-detect failed',
+            error:   (err as Error).message,
+          })
+        }
+      }
+    }
+
+    res.status(201).json({ id, detected_competency_codes: detectedCodes })
   })
 )
+
+// POST /:id/disciplines/:disciplineId/review — Feature K scoped to a
+// programme discipline: checks the discipline's uploaded рабочая программа
+// against the competencies it declares (program_disciplines.competency_codes).
+router.post('/:id/disciplines/:disciplineId/review', aiLimiter, asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  assertEdit(req, detail.org_unit_id)   // runs an AI call + writes a row — treat as edit
+
+  const discipline = detail.disciplines.find((d) => d.id === req.params.disciplineId)
+  if (!discipline) throw new NotFoundError('Дисциплина')
+  if (discipline.competency_codes.length === 0) {
+    throw new ValidationError(
+      'У дисциплины не указаны компетенции — заполните их в конструкторе плана перед проверкой.'
+    )
+  }
+
+  const found = await findWorkingProgrammeForDiscipline(detail.id, discipline.id!)
+  if (!found) throw new ValidationError('Сначала загрузите рабочую программу для этой дисциплины.')
+  if (!found.extractedText) {
+    throw new ValidationError('Не удалось извлечь текст из загруженного файла — перезагрузите документ.')
+  }
+
+  const competencies = detail.competencies.filter(
+    (c) => c.code != null && discipline.competency_codes.includes(c.code)
+  )
+  if (competencies.length === 0) {
+    throw new ValidationError('Заявленные коды компетенций дисциплины не найдены среди компетенций программы.')
+  }
+
+  const result = await reviewDocumentCoverage({
+    teacherId:     req.teacher.id,
+    institutionId: req.teacher.institution_id ?? undefined,
+    documentText:  found.extractedText,
+    competencies,
+    label:         discipline.name,
+  })
+
+  const review = await insertReview({
+    programId:    detail.id,
+    disciplineId: discipline.id!,
+    documentId:   found.document.id,
+    result,
+  })
+  res.status(201).json(review)
+}))
+
+// GET /:id/discipline-reviews — latest review per discipline, for the Report tab.
+router.get('/:id/discipline-reviews', asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  res.json(await getLatestReviewByDiscipline(detail.id))
+}))
 
 // GET /:id/documents/:docId/download — stream the original file to the caller.
 router.get('/:id/documents/:docId/download', asyncHandler(async (req, res) => {

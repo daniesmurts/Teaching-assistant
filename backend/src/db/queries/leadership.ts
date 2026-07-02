@@ -197,7 +197,7 @@ export async function listProgramUnitStateForSubtree(unitPath: string): Promise<
             (SELECT MAX(created_at) FROM program_analyses WHERE program_id = p.id)   AS last_analysis_at
        FROM org_units u
        LEFT JOIN programs p ON p.org_unit_id = u.id
-      WHERE u.type_code = 'program'
+      WHERE u.type_code IN ('program', 'program_direction')
         AND u.path LIKE $1 || '%'
       ORDER BY u.name`,
     [unitPath]
