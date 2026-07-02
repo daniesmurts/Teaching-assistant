@@ -4437,7 +4437,7 @@ app.get('/api/health', healthHandler)
 
 ### Things to Never Do
 
-- Never use generic SaaS blue (`#2563EB`, `#3B82F6`) for anything — amber is the only accent color
+- Never use generic SaaS blue (`#2563EB`, `#3B82F6`) for anything 
 - Never use pure black (`#000000`) for text — always `var(--color-ink)` which is `#1A1A1A`
 - Never use pure white (`#FFFFFF`) as the page background — always `var(--color-bg)` which is `#F7F5F0`
 - Never use font-display for body text, labels, buttons, or any text under 16px

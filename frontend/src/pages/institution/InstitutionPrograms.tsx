@@ -147,14 +147,29 @@ export default function InstitutionPrograms() {
               Анализ архитектуры образовательных программ — последовательность, компетенции, пробелы
             </p>
           </div>
-          {readOnly && (
-            <span
-              title="Вы видите все программы организации только для чтения. Редактировать может назначенный РОП или администратор организации."
-              className="text-[10px] font-sans font-semibold uppercase tracking-wider text-ink-tertiary bg-surface-warm border border-border rounded-sm px-2 py-1 flex-shrink-0 mt-1"
-            >
-              Только просмотр
-            </span>
-          )}
+          <div className="flex items-center gap-2 flex-shrink-0 mt-1">
+            {readOnly && (
+              <span
+                title="Вы видите все программы организации только для чтения. Редактировать может назначенный РОП или администратор организации."
+                className="text-[10px] font-sans font-semibold uppercase tracking-wider text-ink-tertiary bg-surface-warm border border-border rounded-sm px-2 py-1"
+              >
+                Только просмотр
+              </span>
+            )}
+            {/* Single primary CTA — the import action, clearly distinct from the
+                list below (which is content, not an action). */}
+            {canImport && (
+              <button
+                onClick={() => setCreating((v) => !v)}
+                aria-expanded={creating}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity"
+              >
+                {creating
+                  ? <><CloseGlyph /> Закрыть</>
+                  : <><PlusGlyph /> Импортировать программу</>}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Intro copy — analysis-first framing. Programme content is authored
@@ -184,19 +199,20 @@ export default function InstitutionPrograms() {
           />
         )}
 
-        {/* Intake — РОП, УМЦ, проректор, IT admin can all import */}
-        {canImport && (
-        <div className="bg-surface border border-border rounded-lg overflow-hidden mb-6">
-          <button
-            onClick={() => setCreating((v) => !v)}
-            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-surface-warm transition-colors"
-          >
+        {/* Intake — РОП, УМЦ, проректор, IT admin can all import. Opened via the
+            header CTA; rendered as a distinct amber-tinted panel so it reads as
+            an input zone, never as another list card. */}
+        {canImport && creating && (
+        <div className="bg-surface-warm border border-amber/30 rounded-lg overflow-hidden mb-6 result-appear">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-amber/20 bg-amber-light/40">
             <span className="text-sm font-sans font-medium text-ink">Новая программа — импорт из документов</span>
-            <span className="text-ink-tertiary text-lg leading-none">{creating ? '×' : '+'}</span>
-          </button>
+            <button
+              onClick={() => setCreating(false)} aria-label="Закрыть форму"
+              className="text-ink-tertiary hover:text-ink transition-colors text-lg leading-none"
+            >×</button>
+          </div>
 
-          {creating && (
-            <div className="px-4 pb-4 pt-1 border-t border-border space-y-3">
+            <div className="px-4 pb-4 pt-3 space-y-3">
               {/* Program-unit linker FIRST — picking the unit prefills the ФГОС
                   header below from the metadata the admin recorded on the tree.
                   Required for scoped callers (РОП, polygroup / institute heads:
@@ -336,7 +352,6 @@ export default function InstitutionPrograms() {
                 </span>
               </div>
             </div>
-          )}
         </div>
         )}
 
@@ -358,12 +373,34 @@ export default function InstitutionPrograms() {
             )}
           </div>
         ) : (
-          <ProgramList programs={programs} onOpen={(id) => navigate(`/programs/${id}`)} />
+          <>
+            <div className="flex items-baseline gap-2 mb-3">
+              <h2 className="font-display text-lg font-bold text-ink">
+                {readOnly ? 'Программы организации' : 'Ваши программы'}
+              </h2>
+              <span className="text-sm font-sans text-ink-tertiary">· {programs.length}</span>
+            </div>
+            <ProgramList programs={programs} onOpen={(id) => navigate(`/programs/${id}`)} />
+          </>
         )}
       </div>
     </div>
   )
 }
+
+// Small inline glyphs for the header CTA (SVG, not emoji — design system).
+const PlusGlyph = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 5v14" /><path d="M5 12h14" />
+  </svg>
+)
+const CloseGlyph = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M18 6 6 18" /><path d="M6 6l12 12" />
+  </svg>
+)
 
 // Groups programmes by направление (org_unit_id, falling back to code+specialty_name
 // for programmes not yet linked to the tree). A направление with a single profile

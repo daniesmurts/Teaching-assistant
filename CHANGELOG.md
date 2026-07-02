@@ -14,6 +14,36 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Changed
+- **`/programs` — clear action-vs-list hierarchy (UI/UX).** The import trigger
+  was a white card identical to the programme-list cards, so "which is the
+  button and which is the list?" was genuinely ambiguous. Fixed by giving the
+  page a single **primary CTA** — an amber «＋ Импортировать программу» button in
+  the header (hidden for read-only viewers, who keep the «Только просмотр» chip).
+  The intake form no longer masquerades as a list card: it opens from the CTA as
+  a **distinct amber-tinted panel** with its own titled header + close, clearly
+  an input zone. The programme list now sits under a labelled **«Ваши программы ·
+  N»** section header («Программы организации» for oversight viewers), so content
+  reads as content. No behaviour change to import/analysis.
+- **`/institution/structure` — level accenting + scalable roster (UI/UX).**
+  Two readability problems on the org-structure page. (1) **Tree levels now
+  read at a glance**: every row gets vertical **depth guide rails** (one line
+  per ancestor level, aligned across siblings) and a per-level **colour spine**
+  on its left edge, and the type badge is tonally tiered. Honouring the
+  amber-only accent rule, levels are differentiated by neutral tones (root =
+  darkest/authoritative, management chain mid-neutral, kafedra quietest) and
+  **amber is reserved for the one tier that carries meaning** — programme
+  anchors (`program` / `program_direction`), which hold the ФГОС data and are
+  the РОП's unit. No rainbow, no second accent. (2) **The «Преподаватели и
+  роли» roster scales to hundreds**: a sticky controls bar with name/email
+  **search**, four **quick-filters with live counts** (Все / С ролями / Без
+  ролей / Без кафедры — the last two are the real triage needs), **client-side
+  pagination** (20/page, resets on filter change), a result count with correct
+  Russian pluralisation, and a proper **no-results** state. Pagination over
+  virtualization deliberately — no new dependency, and it's plenty for the
+  scale. Row hover switched to a background highlight so the colour spine
+  survives. Typecheck + production build clean.
+
 ### Added
 - **Programme metadata on org units → prefilled РОП import (migration 055).**
   The РОП import form made every user retype standardised ФГОС header data

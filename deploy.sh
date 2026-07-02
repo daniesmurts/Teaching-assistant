@@ -7,6 +7,10 @@
 #   - `yc` CLI installed & authenticated (https://yandex.cloud/docs/cli/)
 #     OR `s3cmd`/aws CLI configured for the frontend bucket
 #   - The VM already provisioned via vm-setup.sh, with /var/www/gradeassist/.env in place
+#   - (optional, for CDN purge) CDN_RESOURCE_ID set in the shell or .env — the id
+#     of the CDN resource fronting ispum.ru. Find it with: `yc cdn resource list`.
+#     Without it the deploy still works; clients just update on the SW's own
+#     no-cache revalidation instead of an immediate edge purge.
 set -euo pipefail
 
 # ── Config ───────────────────────────────────────────────────────────────────
@@ -15,21 +19,41 @@ APP_DIR="/var/www/gradeassist"
 FRONTEND_BUCKET="gradeassist-frontend"
 # ─────────────────────────────────────────────────────────────────────────────
 
-echo "▶ [1/6] Building frontend…"
+echo "▶ [1/7] Building frontend…"
 npm run build --workspace=frontend
 
-echo "▶ [2/6] Uploading frontend → s3://${FRONTEND_BUCKET}/ …"
+echo "▶ [2/7] Uploading frontend → s3://${FRONTEND_BUCKET}/ …"
 # Uses S3 static keys (no yc/OAuth). Reads YANDEX_STORAGE_* from the local .env.
 node --env-file=.env scripts/upload-frontend.mjs frontend/dist "${FRONTEND_BUCKET}"
 
-echo "▶ [3/6] Syncing backend source → VM…"
+echo "▶ [3/7] Purging CDN cache for the no-cache entrypoints…"
+# index.html / sw.js / registerSW.js / manifest.webmanifest ship with
+# `no-cache, must-revalidate` from Object Storage (upload-frontend.mjs), but the
+# CDN edge can still hold an old copy — which is exactly what leaves PWA clients
+# on a stale service worker after a deploy. Purge just those entrypoints; the
+# hashed /assets/* are immutable (new names every build) and must NOT be purged.
+# Best-effort: a purge hiccup, a missing id, or no `yc` never fails the deploy.
+CDN_RESOURCE_ID="${CDN_RESOURCE_ID:-$(sed -n 's/^CDN_RESOURCE_ID=//p' .env 2>/dev/null | tr -d '"'\''' | head -n1)}"
+if [ -z "${CDN_RESOURCE_ID:-}" ]; then
+  echo "  ⚠ CDN_RESOURCE_ID not set — skipping purge. Find it via 'yc cdn resource list' and add it to .env."
+elif ! command -v yc >/dev/null 2>&1; then
+  echo "  ⚠ yc CLI not found — skipping CDN purge. Purge manually in the console, or install/auth yc."
+elif yc cdn cache purge --resource-id "$CDN_RESOURCE_ID" \
+       --path '/' --path '/index.html' --path '/sw.js' \
+       --path '/registerSW.js' --path '/manifest.webmanifest' >/dev/null 2>&1; then
+  echo "  ✓ CDN cache purged (index.html + sw.js + registerSW.js + manifest)"
+else
+  echo "  ⚠ CDN purge failed (non-fatal) — clients still update within the SW's no-cache revalidation window."
+fi
+
+echo "▶ [4/7] Syncing backend source → VM…"
 rsync -avz --delete \
   --exclude 'node_modules' --exclude '.env' --exclude 'dist' --exclude 'uploads' \
   backend/ "${VM_HOST}:${APP_DIR}/backend/"
 # shared/ types are imported by the backend at build time
 rsync -avz --delete shared/ "${VM_HOST}:${APP_DIR}/shared/"
 
-echo "▶ [4/6] Installing, building, migrating on VM…"
+echo "▶ [5/7] Installing, building, migrating on VM…"
 ssh "$VM_HOST" bash -s <<'REMOTE'
 set -euo pipefail
 cd /var/www/gradeassist/backend
@@ -46,7 +70,7 @@ test -f dist/backend/src/index.js || { echo "❌ Build did not produce dist/back
 node --env-file=../.env scripts/migrate.js
 REMOTE
 
-echo "▶ [5/6] Restarting API…"
+echo "▶ [6/7] Restarting API…"
 ssh "$VM_HOST" bash -s <<'REMOTE'
 set -euo pipefail
 cd /var/www/gradeassist/backend
@@ -56,7 +80,7 @@ pm2 reload gradeassist-api --update-env 2>/dev/null \
 pm2 save
 REMOTE
 
-echo "▶ [6/6] nginx guard…"
+echo "▶ [7/7] nginx guard…"
 # nginx is NOT restarted on deploy — there's no reason to. If you ever change
 # its config, do it by hand:  sudo nginx -t && sudo systemctl reload nginx
 # (reload keeps the old config serving if the new one is broken; restart does

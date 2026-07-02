@@ -28,6 +28,39 @@ const ROLE_LABEL: Record<UnitRole, string> = {
   viewer: 'Наблюдатель',
 }
 
+// Level accenting. The design system allows amber as the ONLY accent colour, so
+// levels are differentiated by neutral tonal tiers — and amber is reserved for
+// the one tier that actually carries meaning for the reader: programme anchors
+// (they hold the ФГОС data and are the РОП's unit). Root reads as the darkest
+// (authoritative), the management chain mid-neutral, kafedras the quietest.
+type UnitTier = 'root' | 'management' | 'grouping' | 'programme' | 'department'
+const TYPE_TIER: Record<OrgUnitType, UnitTier> = {
+  institution:       'root',
+  governance:        'management',
+  admin_office:      'management',
+  cluster:           'grouping',
+  division:          'grouping',
+  program:           'programme',
+  program_direction: 'programme',
+  department:        'department',
+}
+// Badge fill per tier (label chip on each row).
+const TIER_BADGE: Record<UnitTier, string> = {
+  root:       'bg-sidebar text-ink-inverse border-transparent',
+  management: 'bg-ink/5 text-ink-secondary border-border-mid',
+  grouping:   'bg-surface-warm text-ink-secondary border-border-mid',
+  programme:  'bg-amber-light text-amber border-amber/25',
+  department: 'bg-surface text-ink-tertiary border-border',
+}
+// Left spine on the row card — a quiet per-level colour cue you can scan down.
+const TIER_SPINE: Record<UnitTier, string> = {
+  root:       'border-l-ink',
+  management: 'border-l-ink-tertiary',
+  grouping:   'border-l-border-mid',
+  programme:  'border-l-amber',
+  department: 'border-l-border',
+}
+
 // Unit types whose head/admin grant confers institution-WIDE authority
 // (services/programAccess.ts: governance / admin_office → all-rw over every
 // programme). Warn the admin so they don't hand out institution-wide access
@@ -316,6 +349,35 @@ function MembersSection({ units }: { units: OrgUnit[] }) {
   const unitsById = useMemo(() => new Map(units.map((u) => [u.id, u])), [units])
   const departments = useMemo(() => units.filter((u) => u.type_code === 'department'), [units])
 
+  // ── Search / quick-filter / pagination — the roster can run to hundreds ──
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<'all' | 'with_roles' | 'no_roles' | 'no_kafedra'>('all')
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 20
+
+  const counts = useMemo(() => ({
+    all:        members.length,
+    with_roles: members.filter((m) => m.roles.length > 0).length,
+    no_roles:   members.filter((m) => m.roles.length === 0).length,
+    no_kafedra: members.filter((m) => !m.primary_org_unit_id).length,
+  }), [members])
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return members.filter((m) => {
+      if (q && !((m.name ?? '').toLowerCase().includes(q) || m.email.toLowerCase().includes(q))) return false
+      if (filter === 'with_roles' && m.roles.length === 0) return false
+      if (filter === 'no_roles'   && m.roles.length > 0)   return false
+      if (filter === 'no_kafedra' && m.primary_org_unit_id) return false
+      return true
+    })
+  }, [members, search, filter])
+
+  useEffect(() => { setPage(1) }, [search, filter])   // any filter change → back to page 1
+  const pageCount   = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const clampedPage = Math.min(page, pageCount)
+  const pageItems   = filtered.slice((clampedPage - 1) * PAGE_SIZE, clampedPage * PAGE_SIZE)
+
   const invalidate = () => qc.invalidateQueries({ queryKey: ['org-members'] })
   const onError = (err: any) => addToast(err?.response?.data?.error ?? 'Не удалось сохранить', 'error')
 
@@ -344,19 +406,85 @@ function MembersSection({ units }: { units: OrgUnit[] }) {
           В организации пока нет преподавателей.
         </div>
       ) : (
-        <div className="space-y-2">
-          {members.map((m) => (
-            <MemberRow
-              key={m.id} member={m} departments={departments} units={units} unitsById={unitsById}
-              onSetPrimary={(unitId) => primaryMut.mutate({ teacherId: m.id, unitId })}
-              onGrant={(unitId, role) => grantMut.mutate({ teacherId: m.id, unitId, role })}
-              onRevoke={(unitId, role) => revokeMut.mutate({ teacherId: m.id, unitId, role })}
-            />
-          ))}
-        </div>
+        <>
+          {/* Controls stick to the top of the scroll area so search + filters */}
+          {/* stay reachable however far down the roster you scroll. */}
+          <div className="sticky top-0 z-10 bg-bg pt-1 pb-3 mb-1 border-b border-border">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative flex-1 min-w-[200px]">
+                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary pointer-events-none"><SearchIcon /></span>
+                <input
+                  value={search} onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Поиск по имени или почте"
+                  aria-label="Поиск преподавателя"
+                  className="w-full text-sm font-sans bg-surface border border-border rounded-md pl-8 pr-2.5 py-2 outline-none focus:border-border-strong"
+                />
+              </div>
+              <div className="flex items-center gap-1 flex-wrap">
+                {([
+                  ['all', 'Все'], ['with_roles', 'С ролями'],
+                  ['no_roles', 'Без ролей'], ['no_kafedra', 'Без кафедры'],
+                ] as [typeof filter, string][]).map(([key, label]) => (
+                  <button key={key} onClick={() => setFilter(key)}
+                    className={`text-xs font-sans px-2.5 py-1.5 rounded-md border transition-colors ${
+                      filter === key
+                        ? 'bg-amber-light text-amber border-amber/25 font-medium'
+                        : 'bg-surface text-ink-secondary border-border hover:bg-surface-warm'
+                    }`}>
+                    {label} <span className={filter === key ? 'text-amber/70' : 'text-ink-tertiary'}>{counts[key]}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="text-[11px] font-sans text-ink-tertiary mt-2">
+              {filtered.length === members.length
+                ? `${members.length} ${plural(members.length, 'преподаватель', 'преподавателя', 'преподавателей')}`
+                : `Найдено: ${filtered.length} из ${members.length}`}
+            </div>
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="text-center py-10 text-sm font-sans text-ink-secondary">
+              Никого не нашли. Измените запрос или фильтр.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {pageItems.map((m) => (
+                <MemberRow
+                  key={m.id} member={m} departments={departments} units={units} unitsById={unitsById}
+                  onSetPrimary={(unitId) => primaryMut.mutate({ teacherId: m.id, unitId })}
+                  onGrant={(unitId, role) => grantMut.mutate({ teacherId: m.id, unitId, role })}
+                  onRevoke={(unitId, role) => revokeMut.mutate({ teacherId: m.id, unitId, role })}
+                />
+              ))}
+            </div>
+          )}
+
+          {pageCount > 1 && (
+            <div className="flex items-center justify-center gap-3 mt-4">
+              <button disabled={clampedPage <= 1} onClick={() => setPage(clampedPage - 1)}
+                className="text-sm font-sans px-3 py-1.5 rounded-md border border-border-mid text-ink-secondary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-surface-warm transition-colors">
+                ← Назад
+              </button>
+              <span className="text-xs font-sans text-ink-tertiary">Стр. {clampedPage} из {pageCount}</span>
+              <button disabled={clampedPage >= pageCount} onClick={() => setPage(clampedPage + 1)}
+                className="text-sm font-sans px-3 py-1.5 rounded-md border border-border-mid text-ink-secondary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-surface-warm transition-colors">
+                Вперёд →
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
+}
+
+// Russian plural helper (1 преподаватель / 2 преподавателя / 5 преподавателей).
+function plural(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10, m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return one
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few
+  return many
 }
 
 function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGrant, onRevoke }: {
@@ -491,13 +619,24 @@ function UnitRow({
   const [editName, setEditName] = useState(node.name)
   const hasChildren = node.children.length > 0
   const expanded = isExpanded(node)
+  const tier = TYPE_TIER[node.type_code]
 
   return (
     <div>
-      <div
-        className="flex items-center gap-2.5 bg-surface border border-border rounded-lg px-3 py-2.5 hover:border-border-mid transition-colors"
-        style={{ marginLeft: depth * 22 }}
-      >
+      {/* Row = depth guide rails + the card. The rails are vertical lines, one
+          per ancestor level, that line up across sibling rows into a scannable
+          tree. The card carries a per-level colour spine on its left edge. */}
+      <div className="flex items-stretch">
+        {depth > 0 && (
+          <div className="flex flex-shrink-0" aria-hidden="true">
+            {Array.from({ length: depth }).map((_, i) => (
+              <span key={i} className="w-[22px] border-l border-border" />
+            ))}
+          </div>
+        )}
+        <div
+          className={`flex-1 min-w-0 flex items-center gap-2.5 bg-surface border border-border border-l-2 ${TIER_SPINE[tier]} rounded-lg px-3 py-2.5 hover:bg-surface-warm transition-colors`}
+        >
         {/* Chevron — only when there's something to expand. Placeholder keeps */}
         {/* type chips vertically aligned across rows. */}
         {hasChildren ? (
@@ -512,7 +651,7 @@ function UnitRow({
           <span className="w-5 h-5 flex-shrink-0" aria-hidden="true" />
         )}
 
-        <span className="text-[10px] font-sans font-semibold uppercase tracking-wider text-ink-tertiary bg-surface-warm border border-border rounded-sm px-1.5 py-0.5 flex-shrink-0">
+        <span className={`text-[10px] font-sans font-semibold uppercase tracking-wider border rounded-sm px-1.5 py-0.5 flex-shrink-0 ${TIER_BADGE[tier]}`}>
           {TYPE_LABEL[node.type_code]}
         </span>
 
@@ -559,6 +698,7 @@ function UnitRow({
               )}
             </>
           )}
+        </div>
         </div>
       </div>
 
@@ -854,6 +994,12 @@ const CheckIcon  = () => <Svg><path d="M20 6 9 17l-5-5" /></Svg>
 const XIcon      = () => <Svg><path d="M18 6 6 18" /><path d="M6 6l12 12" /></Svg>
 const PencilIcon = () => <Svg><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></Svg>
 const TrashIcon  = () => <Svg><path d="M3 6h18" /><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></Svg>
+const SearchIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" />
+  </svg>
+)
 const GearIcon   = () => <Svg><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" /></Svg>
 const ChevronIcon = ({ open }: { open: boolean }) => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
