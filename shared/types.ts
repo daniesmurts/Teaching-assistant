@@ -951,6 +951,22 @@ export const PROGRAM_PRACTICE_LABEL: Record<ProgramPracticeType, string> = {
   educational_operational:     'Учебная (эксплуатационная) практика',
 }
 
+// National-standard closed sets — used as dropdowns in the programme import
+// form (and when an admin records ФГОС header data on a program org_unit).
+// These are not per-institution, so they never need admin pre-entry — they're
+// just enums that had no business being free text.
+export const EDUCATION_LEVELS: string[] = [
+  'Высшее образование — бакалавриат',
+  'Высшее образование — специалитет',
+  'Высшее образование — магистратура',
+  'Высшее образование — подготовка кадров высшей квалификации (аспирантура)',
+  'Среднее профессиональное образование',
+]
+
+// Реализуемые формы обучения — a programme may offer several; the value stored
+// is these labels joined with ', ' (matches the free-text column shape).
+export const STUDY_FORMS: string[] = ['очная', 'очно-заочная', 'заочная']
+
 export interface ProgramDocument {
   id:            string
   program_id:    string

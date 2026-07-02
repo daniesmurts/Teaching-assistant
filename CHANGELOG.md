@@ -15,6 +15,31 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Added
+- **Programme metadata on org units → prefilled РОП import (migration 055).**
+  The РОП import form made every user retype standardised ФГОС header data
+  (код, наименование направления, уровень, формы обучения) that the
+  institution already knows. Now the IT/УМЦ admin records it once on the
+  `program`/`program_direction` org_unit (new `code` / `specialty_name` /
+  `education_level` / `forms_of_study` columns), and when a РОП picks that unit
+  in the import form the four fields auto-fill. The picker moved to the top of
+  the form so the flow is pick-unit → confirm-prefilled-data → add профиль +
+  PDFs. Two fields that were free text became national-standard controls —
+  уровень образования is a dropdown, формы обучения are checkboxes
+  (`EDUCATION_LEVELS` / `STUDY_FORMS` in shared) — since they're not
+  per-institution and never needed admin pre-entry. Профиль stays the РОП's to
+  fill (it's per-programme: one направление hosts several). Prefill only
+  overwrites fields the unit actually carries, so a unit with no metadata
+  leaves typed input intact. Admin UI: a «Данные программы (ФГОС)» block in the
+  add-unit form and the «Тип и размещение» gear panel, shown only for
+  programme-anchor types. When adding a programme unit the tree **Название
+  auto-composes from код + наименование** (e.g. «09.03.01 Информатика и
+  вычислительная техника») so the admin enters it once — editable for a custom
+  label (touching the field stops the auto-sync); existing units keep name
+  independent (rename via the pencil). Backend threads the metadata through create/update
+  (gated to programme types — a kafedra rename never touches the columns),
+  `pickable-units` returns it, validation caps lengths. Metadata round-trip
+  (create/read/partial-update/clear/type-gating) verified against dev DB; both
+  typechecks clean, 143/143 tests green.
 - **Org units — deliberate re-type and move operations (structure page).**
   Until now a mis-typed or mis-placed unit was stuck: `updateOrgUnit` only
   edited name/short_name/external_code, and delete is (correctly) blocked

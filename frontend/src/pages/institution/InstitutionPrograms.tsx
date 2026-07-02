@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import FeatureIntro from '../../components/ui/FeatureIntro'
 import Button from '../../components/ui/Button'
 import { listPrograms, importProgram, getPickableProgramUnits } from '../../api/programs'
-import { PROGRAM_PRACTICE_LABEL, PROGRAM_PRACTICE_TYPES, type ProgramPracticeType } from '../../types'
+import { PROGRAM_PRACTICE_LABEL, PROGRAM_PRACTICE_TYPES, EDUCATION_LEVELS, STUDY_FORMS, type ProgramPracticeType } from '../../types'
 import { useUIStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
 import type { Program, ProgramLevel } from '../../types'
@@ -74,6 +74,21 @@ export default function InstitutionPrograms() {
       setOrgUnitId(programUnitOptions[0].id)
     }
   }, [programUnitOptions, orgUnitId])
+
+  // Prefill the ФГОС header from the picked unit's metadata (set by the admin
+  // on the org tree) so the РОП doesn't retype it. Only overwrites fields the
+  // unit actually carries — a unit with no metadata leaves anything typed
+  // intact. Профиль is deliberately NOT prefilled: it's per-programme (one
+  // направление hosts several profiles), so it stays the РОП's to fill.
+  useEffect(() => {
+    if (!orgUnitId) return
+    const u = programUnitOptions.find((x) => x.id === orgUnitId)
+    if (!u) return
+    if (u.code)            setCode(u.code)
+    if (u.specialty_name)  setSpecialtyName(u.specialty_name)
+    if (u.education_level) setEducationLevel(u.education_level)
+    if (u.forms_of_study)  setForms(u.forms_of_study)
+  }, [orgUnitId, programUnitOptions])
 
   const importMut = useMutation({
     mutationFn: () => importProgram({
@@ -182,25 +197,10 @@ export default function InstitutionPrograms() {
 
           {creating && (
             <div className="px-4 pb-4 pt-1 border-t border-border space-y-3">
-              <Field label="Код" value={code} onChange={setCode} placeholder="09.03.01" mono />
-              <Field
-                label="Наименование профессии / специальности / направления подготовки / группы научных специальностей"
-                value={specialtyName} onChange={setSpecialtyName}
-                placeholder="Информатика и вычислительная техника"
-              />
-              <Field label="Уровень образования" value={educationLevel} onChange={setEducationLevel}
-                placeholder="Высшее образование — бакалавриат" />
-              <Field
-                label="Образовательная программа / направленность / профиль, шифр и наименование научной специальности"
-                value={profile} onChange={setProfile} placeholder="Профиль «Программная инженерия»"
-              />
-              <Field label="Реализуемые формы обучения" value={forms} onChange={setForms}
-                placeholder="очная, очно-заочная" />
-
-              {/* Program-unit linker — required for scoped callers (РОП,
-                  polygroup / institute heads: picker restricted to their
-                  subtree). Optional for all-rw (all program units in the
-                  tree; can link later via the detail page). */}
+              {/* Program-unit linker FIRST — picking the unit prefills the ФГОС
+                  header below from the metadata the admin recorded on the tree.
+                  Required for scoped callers (РОП, polygroup / institute heads:
+                  picker restricted to their subtree); optional for all-rw. */}
               {programUnitOptions.length > 0 && (
                 <label className="block">
                   <span className="text-xs font-sans text-ink-secondary block mb-1">
@@ -221,13 +221,60 @@ export default function InstitutionPrograms() {
                       </option>
                     ))}
                   </select>
-                  {isScoped && (
-                    <span className="text-[11px] font-sans text-ink-tertiary block mt-1">
-                      Выберите образовательную программу, за которую вы отвечаете (или которая входит в ваше направление / институт).
-                    </span>
-                  )}
+                  <span className="text-[11px] font-sans text-ink-tertiary block mt-1">
+                    {isScoped
+                      ? 'Выберите образовательную программу, за которую вы отвечаете (или которая входит в ваше направление / институт). Данные ниже подставятся автоматически, если администратор их заполнил.'
+                      : 'При выборе подразделения код, наименование, уровень и формы подставятся из структуры, если администратор их заполнил.'}
+                  </span>
                 </label>
               )}
+
+              <Field label="Код" value={code} onChange={setCode} placeholder="09.03.01" mono />
+              <Field
+                label="Наименование профессии / специальности / направления подготовки / группы научных специальностей"
+                value={specialtyName} onChange={setSpecialtyName}
+                placeholder="Информатика и вычислительная техника"
+              />
+              <label className="block">
+                <span className="text-xs font-sans text-ink-secondary block mb-1">Уровень образования</span>
+                <select
+                  value={educationLevel} onChange={(e) => setEducationLevel(e.target.value)}
+                  className="w-full text-sm font-sans bg-surface border border-border rounded-md px-2.5 py-2 outline-none focus:border-border-strong"
+                >
+                  <option value="">— выберите —</option>
+                  {EDUCATION_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+                  {/* Preserve a prefilled value that isn't in the standard list */}
+                  {educationLevel && !EDUCATION_LEVELS.includes(educationLevel) && (
+                    <option value={educationLevel}>{educationLevel}</option>
+                  )}
+                </select>
+              </label>
+              <Field
+                label="Образовательная программа / направленность / профиль, шифр и наименование научной специальности"
+                value={profile} onChange={setProfile} placeholder="Профиль «Программная инженерия»"
+              />
+              <div>
+                <span className="text-xs font-sans text-ink-secondary block mb-1">Реализуемые формы обучения</span>
+                <div className="flex flex-wrap gap-3">
+                  {(() => {
+                    const set = new Set(forms.split(',').map((s) => s.trim()).filter(Boolean))
+                    return STUDY_FORMS.map((f) => (
+                      <label key={f} className="inline-flex items-center gap-1.5 text-sm font-sans text-ink cursor-pointer">
+                        <input
+                          type="checkbox" checked={set.has(f)}
+                          onChange={() => {
+                            const next = new Set(set)
+                            if (next.has(f)) next.delete(f); else next.add(f)
+                            setForms(STUDY_FORMS.filter((x) => next.has(x)).join(', '))
+                          }}
+                          className="accent-amber"
+                        />
+                        {f}
+                      </label>
+                    ))
+                  })()}
+                </div>
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                 <FileField

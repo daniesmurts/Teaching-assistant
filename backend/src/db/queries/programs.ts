@@ -346,14 +346,23 @@ export interface PickableProgramUnit {
   // («program_direction») in the picker so the user knows which level they're
   // linking at.
   type_code:  'program' | 'program_direction'
+  // Programme metadata (migration 055) — prefills the import form when the
+  // admin recorded the ФГОС header on the unit.
+  code:            string | null
+  specialty_name:  string | null
+  education_level: string | null
+  forms_of_study:  string | null
 }
+
+const PICKABLE_COLS =
+  `id, name, short_name, type_code, code, specialty_name, education_level, forms_of_study`
 
 export async function listProgramUnitsForInstitution(institutionId: string): Promise<PickableProgramUnit[]> {
   // Both `program` (ОП) and `program_direction` (Направление подготовки) are
   // valid anchors for a programme — narrow ОП link directly at the ОП level,
   // broad ОП link at their направление children.
   const { rows } = await pool.query<PickableProgramUnit & { type_code: string }>(
-    `SELECT id, name, short_name, type_code
+    `SELECT ${PICKABLE_COLS}
        FROM org_units
       WHERE institution_id = $1 AND type_code IN ('program', 'program_direction')
       ORDER BY name`,
@@ -365,7 +374,7 @@ export async function listProgramUnitsForInstitution(institutionId: string): Pro
 export async function listProgramUnitsByIds(ids: string[]): Promise<PickableProgramUnit[]> {
   if (ids.length === 0) return []
   const { rows } = await pool.query<PickableProgramUnit & { type_code: string }>(
-    `SELECT id, name, short_name, type_code
+    `SELECT ${PICKABLE_COLS}
        FROM org_units
       WHERE id = ANY($1::uuid[]) AND type_code IN ('program', 'program_direction')
       ORDER BY name`,

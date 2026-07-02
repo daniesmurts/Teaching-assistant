@@ -7,8 +7,9 @@ import {
   getOrgStructure, createOrgUnit, bulkCreateOrgUnits, updateOrgUnit, deleteOrgUnit,
   retypeOrgUnit, moveOrgUnit,
   getMembers, setPrimaryUnit, grantRole, revokeRole,
-  type OrgUnit, type OrgUnitType, type InstitutionMember, type UnitRole,
+  type OrgUnit, type OrgUnitType, type OrgUnitMeta, type InstitutionMember, type UnitRole,
 } from '../../api/orgStructure'
+import { EDUCATION_LEVELS, STUDY_FORMS } from '../../types'
 
 const TYPE_LABEL: Record<OrgUnitType, string> = {
   institution:       'Организация',
@@ -59,6 +60,82 @@ const CREATABLE: Exclude<OrgUnitType, 'institution'>[] =
 // stays open so the overall shape of the org is always visible.
 const DEFAULT_COLLAPSED_TYPES = new Set<OrgUnitType>(['division', 'program', 'program_direction', 'department'])
 const EXPANDED_STORAGE_KEY = 'ga_org_expanded_v1'
+
+// Programme-anchor types carry the ФГОС header the РОП import form prefills.
+const PROGRAMME_TYPES = new Set<OrgUnitType>(['program', 'program_direction'])
+
+// Editable shape of the four metadata fields (all strings in the form; empty →
+// null on the wire). formsOfStudy is the STUDY_FORMS labels joined with ', '.
+interface MetaForm { code: string; specialtyName: string; educationLevel: string; formsOfStudy: string }
+
+const emptyMeta: MetaForm = { code: '', specialtyName: '', educationLevel: '', formsOfStudy: '' }
+
+const metaFromUnit = (u: OrgUnit): MetaForm => ({
+  code:           u.code ?? '',
+  specialtyName:  u.specialty_name ?? '',
+  educationLevel: u.education_level ?? '',
+  formsOfStudy:   u.forms_of_study ?? '',
+})
+
+const metaToPayload = (m: MetaForm): OrgUnitMeta => ({
+  code:           m.code.trim() || null,
+  specialtyName:  m.specialtyName.trim() || null,
+  educationLevel: m.educationLevel.trim() || null,
+  formsOfStudy:   m.formsOfStudy.trim() || null,
+})
+
+// Shared editor for the four programme-metadata fields. Уровень образования and
+// формы обучения are national closed sets, so they render as a dropdown /
+// checkboxes rather than free text (that's the whole point — the РОП later
+// picks the unit and these prefill, no retyping).
+function ProgrammeMetaFields({ value, onChange }: { value: MetaForm; onChange: (m: MetaForm) => void }) {
+  const inputCls =
+    'w-full text-sm font-sans bg-surface border border-border rounded-md px-2 py-1.5 outline-none focus:border-border-strong'
+  const selectedForms = new Set(value.formsOfStudy.split(',').map((s) => s.trim()).filter(Boolean))
+  const toggleForm = (f: string) => {
+    const next = new Set(selectedForms)
+    if (next.has(f)) next.delete(f); else next.add(f)
+    onChange({ ...value, formsOfStudy: STUDY_FORMS.filter((x) => next.has(x)).join(', ') })
+  }
+  return (
+    <div className="space-y-2 bg-amber-light/40 border border-amber/15 rounded-md px-3 py-2.5">
+      <div className="text-[11px] font-sans font-semibold text-ink-secondary uppercase tracking-wider">
+        Данные программы (ФГОС) — подставятся в форму импорта у РОП
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <label className="block w-28">
+          <span className="text-[11px] font-sans text-ink-secondary block mb-1">Код</span>
+          <input value={value.code} onChange={(e) => onChange({ ...value, code: e.target.value })}
+            placeholder="09.03.01" className={`${inputCls} font-mono`} />
+        </label>
+        <label className="block flex-1 min-w-[200px]">
+          <span className="text-[11px] font-sans text-ink-secondary block mb-1">Наименование направления / специальности</span>
+          <input value={value.specialtyName} onChange={(e) => onChange({ ...value, specialtyName: e.target.value })}
+            placeholder="Информатика и вычислительная техника" className={inputCls} />
+        </label>
+      </div>
+      <label className="block">
+        <span className="text-[11px] font-sans text-ink-secondary block mb-1">Уровень образования</span>
+        <select value={value.educationLevel} onChange={(e) => onChange({ ...value, educationLevel: e.target.value })}
+          className={inputCls}>
+          <option value="">— не указан —</option>
+          {EDUCATION_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+        </select>
+      </label>
+      <div>
+        <span className="text-[11px] font-sans text-ink-secondary block mb-1">Формы обучения</span>
+        <div className="flex flex-wrap gap-3">
+          {STUDY_FORMS.map((f) => (
+            <label key={f} className="inline-flex items-center gap-1.5 text-sm font-sans text-ink cursor-pointer">
+              <input type="checkbox" checked={selectedForms.has(f)} onChange={() => toggleForm(f)} className="accent-amber" />
+              {f}
+            </label>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 interface TreeNode extends OrgUnit { children: TreeNode[] }
 
@@ -164,6 +241,11 @@ export default function InstitutionStructure() {
     onSuccess: () => { invalidate(); setManaging(null); addToast('Подразделение перемещено', 'success') },
     onError: (err: any) => addToast(err?.response?.data?.error ?? 'Не удалось переместить', 'error'),
   })
+  const metaMut = useMutation({
+    mutationFn: (v: { id: string; meta: OrgUnitMeta }) => updateOrgUnit(v.id, v.meta),
+    onSuccess: () => { invalidate(); addToast('Данные программы сохранены', 'success') },
+    onError: (err: any) => addToast(err?.response?.data?.error ?? 'Не удалось сохранить', 'error'),
+  })
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -211,7 +293,7 @@ export default function InstitutionStructure() {
                   managing={managing} setManaging={setManaging}
                   isExpanded={isExpanded} toggleExpanded={toggleExpanded}
                   createMut={createMut} bulkMut={bulkMut} updateMut={updateMut} deleteMut={deleteMut}
-                  retypeMut={retypeMut} moveMut={moveMut}
+                  retypeMut={retypeMut} moveMut={moveMut} metaMut={metaMut}
                 />
               ))}
             </div>
@@ -389,7 +471,7 @@ function UnitRow({
   node, depth, allUnits, addingUnder, openAddUnder, editing, setEditing,
   managing, setManaging,
   isExpanded, toggleExpanded,
-  createMut, bulkMut, updateMut, deleteMut, retypeMut, moveMut,
+  createMut, bulkMut, updateMut, deleteMut, retypeMut, moveMut, metaMut,
 }: {
   node: TreeNode; depth: number; allUnits: OrgUnit[]
   addingUnder: string | null; openAddUnder: (id: string) => void
@@ -403,6 +485,7 @@ function UnitRow({
   deleteMut: ReturnType<typeof useMutation<any, any, any>>
   retypeMut: ReturnType<typeof useMutation<any, any, any>>
   moveMut:   ReturnType<typeof useMutation<any, any, any>>
+  metaMut:   ReturnType<typeof useMutation<any, any, any>>
 }) {
   const isRoot = !node.parent_id
   const [editName, setEditName] = useState(node.name)
@@ -484,7 +567,8 @@ function UnitRow({
           node={node} depth={depth + 1} allUnits={allUnits}
           onRetype={(typeCode) => retypeMut.mutate({ id: node.id, typeCode })}
           onMove={(newParentId) => moveMut.mutate({ id: node.id, newParentId })}
-          pending={retypeMut.isPending || moveMut.isPending}
+          onSaveMeta={(meta) => metaMut.mutate({ id: node.id, meta })}
+          pending={retypeMut.isPending || moveMut.isPending || metaMut.isPending}
           onClose={() => setManaging(null)}
         />
       )}
@@ -507,7 +591,7 @@ function UnitRow({
           managing={managing} setManaging={setManaging}
           isExpanded={isExpanded} toggleExpanded={toggleExpanded}
           createMut={createMut} bulkMut={bulkMut} updateMut={updateMut} deleteMut={deleteMut}
-          retypeMut={retypeMut} moveMut={moveMut}
+          retypeMut={retypeMut} moveMut={moveMut} metaMut={metaMut}
         />
       ))}
     </div>
@@ -538,7 +622,7 @@ function parseBulkUnits(text: string): { name: string; shortName: string | null 
 function AddChildForm({ parentId, depth, onCancel, onSubmit, onSubmitBulk, pending }: {
   parentId: string; depth: number; pending: boolean
   onCancel:     () => void
-  onSubmit:     (input: { parentId: string; typeCode: Exclude<OrgUnitType, 'institution'>; name: string; shortName: string | null }) => void
+  onSubmit:     (input: { parentId: string; typeCode: Exclude<OrgUnitType, 'institution'>; name: string; shortName: string | null } & OrgUnitMeta) => void
   onSubmitBulk: (input: { parentId: string; typeCode: Exclude<OrgUnitType, 'institution'>; units: { name: string; shortName: string | null }[] }) => void
 }) {
   const [mode, setMode] = useState<'single' | 'bulk'>('single')
@@ -546,13 +630,27 @@ function AddChildForm({ parentId, depth, onCancel, onSubmit, onSubmitBulk, pendi
   const [name, setName] = useState('')
   const [shortName, setShortName] = useState('')
   const [bulkText, setBulkText] = useState('')
+  const [meta, setMeta] = useState<MetaForm>(emptyMeta)
+  // For programme units the tree name is derived from код + наименование, so the
+  // admin types those once. `nameEdited` flips true the moment they touch the
+  // Название field directly, which stops the auto-sync (custom label wins).
+  const [nameEdited, setNameEdited] = useState(false)
 
   const parsed = useMemo(() => parseBulkUnits(bulkText), [bulkText])
+  const isProgramme = PROGRAMME_TYPES.has(typeCode)
+
+  useEffect(() => {
+    if (!isProgramme || nameEdited) return
+    setName([meta.code.trim(), meta.specialtyName.trim()].filter(Boolean).join(' '))
+  }, [isProgramme, nameEdited, meta.code, meta.specialtyName])
 
   function submitSingle() {
     if (name.trim().length < 2) return
-    onSubmit({ parentId, typeCode, name: name.trim(), shortName: shortName.trim() || null })
-    setName(''); setShortName('')
+    onSubmit({
+      parentId, typeCode, name: name.trim(), shortName: shortName.trim() || null,
+      ...(isProgramme ? metaToPayload(meta) : {}),
+    })
+    setName(''); setShortName(''); setMeta(emptyMeta); setNameEdited(false)
   }
   function submitBulk() {
     if (parsed.length === 0) return
@@ -589,11 +687,14 @@ function AddChildForm({ parentId, depth, onCancel, onSubmit, onSubmitBulk, pendi
         {mode === 'single' ? (
           <>
             <label className="block flex-1 min-w-[180px]">
-              <span className="text-[11px] font-sans text-ink-secondary block mb-1">Название</span>
+              <span className="text-[11px] font-sans text-ink-secondary block mb-1">
+                Название{isProgramme && <span className="text-ink-tertiary"> — составляется из кода и наименования</span>}
+              </span>
               <input
-                autoFocus value={name} onChange={(e) => setName(e.target.value)}
+                autoFocus value={name}
+                onChange={(e) => { setName(e.target.value); setNameEdited(true) }}
                 onKeyDown={(e) => { if (e.key === 'Enter') submitSingle() }}
-                placeholder="Кафедра физики"
+                placeholder={isProgramme ? '09.03.01 Информатика и вычислительная техника' : 'Кафедра физики'}
                 className="w-full text-sm font-sans bg-surface border border-border rounded-md px-2 py-1.5 outline-none focus:border-border-strong"
               />
             </label>
@@ -622,6 +723,11 @@ function AddChildForm({ parentId, depth, onCancel, onSubmit, onSubmitBulk, pendi
         )}
       </div>
 
+      {/* ФГОС metadata — only when adding a single programme-anchor unit. */}
+      {mode === 'single' && isProgramme && (
+        <ProgrammeMetaFields value={meta} onChange={setMeta} />
+      )}
+
       <div className="flex items-center gap-2">
         {mode === 'single' ? (
           <Button onClick={submitSingle} loading={pending}>Добавить</Button>
@@ -645,16 +751,18 @@ function AddChildForm({ parentId, depth, onCancel, onSubmit, onSubmitBulk, pendi
 // subtree's paths — both are deliberate, audited operations, kept out of the
 // quick inline rename. Cycle prevention: a unit cannot move under itself or any
 // of its own descendants (path-prefix test; the backend guards this too).
-function ManageUnitPanel({ node, depth, allUnits, onRetype, onMove, pending, onClose }: {
+function ManageUnitPanel({ node, depth, allUnits, onRetype, onMove, onSaveMeta, pending, onClose }: {
   node: OrgUnit; depth: number; allUnits: OrgUnit[]
-  onRetype: (typeCode: Exclude<OrgUnitType, 'institution'>) => void
-  onMove:   (newParentId: string) => void
-  pending:  boolean
-  onClose:  () => void
+  onRetype:   (typeCode: Exclude<OrgUnitType, 'institution'>) => void
+  onMove:     (newParentId: string) => void
+  onSaveMeta: (meta: OrgUnitMeta) => void
+  pending:    boolean
+  onClose:    () => void
 }) {
   const [typeCode, setTypeCode] = useState<Exclude<OrgUnitType, 'institution'>>(
     node.type_code === 'institution' ? 'department' : node.type_code
   )
+  const [meta, setMeta] = useState<MetaForm>(metaFromUnit(node))
   // Valid new parents: any unit that is not this unit and not one of its
   // descendants (would create a cycle), and not the current parent (no-op).
   const parentOptions = useMemo(
@@ -698,6 +806,17 @@ function ManageUnitPanel({ node, depth, allUnits, onRetype, onMove, pending, onC
           Переместить
         </Button>
       </div>
+
+      {/* ФГОС metadata — only for programme-anchor units. Fills the РОП's */}
+      {/* import form when they later pick this unit. */}
+      {PROGRAMME_TYPES.has(node.type_code) && (
+        <div className="pt-2.5 border-t border-border space-y-2">
+          <ProgrammeMetaFields value={meta} onChange={setMeta} />
+          <Button onClick={() => onSaveMeta(metaToPayload(meta))} loading={pending}>
+            Сохранить данные программы
+          </Button>
+        </div>
+      )}
 
       <div>
         <button onClick={onClose} className="text-xs font-sans text-ink-secondary hover:text-ink px-2 py-1">Закрыть</button>

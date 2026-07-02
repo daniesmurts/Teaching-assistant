@@ -21,7 +21,7 @@ export default function AdminLayout() {
   return (
     <div className="flex min-h-screen bg-bg">
       {/* Admin sidebar — distinct from teacher nav */}
-      <aside className="w-[210px] min-h-screen bg-sidebar flex flex-col flex-shrink-0">
+      <aside className="w-[210px] h-screen sticky top-0 self-start bg-sidebar flex flex-col flex-shrink-0">
         <div className="px-4 py-4 border-b border-white/5">
           <span className="font-display text-[19px] font-bold text-ink-inverse tracking-tight">
             ИСПУМ <span className="text-amber-mid">Admin</span>

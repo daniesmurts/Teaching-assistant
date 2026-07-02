@@ -23,6 +23,21 @@ export interface OrgUnit {
   path:           string
   member_count:   number
   created_at:     string
+  // Programme metadata (migration 055) — set by the admin on program /
+  // program_direction units, prefills the РОП import form.
+  code:            string | null
+  specialty_name:  string | null
+  education_level: string | null
+  forms_of_study:  string | null
+}
+
+// Programme-metadata fields an admin can set on a program/program_direction
+// unit. Sent on create + update; the backend ignores them for other types.
+export interface OrgUnitMeta {
+  code?:           string | null
+  specialtyName?:  string | null
+  educationLevel?: string | null
+  formsOfStudy?:   string | null
 }
 
 export async function getOrgStructure(): Promise<OrgUnit[]> {
@@ -35,7 +50,7 @@ export async function createOrgUnit(input: {
   name:          string
   shortName?:    string | null
   externalCode?: string | null
-}): Promise<OrgUnit> {
+} & OrgUnitMeta): Promise<OrgUnit> {
   return (await client.post<OrgUnit>('/api/institution/structure/units', input)).data
 }
 
@@ -50,7 +65,7 @@ export async function bulkCreateOrgUnits(input: {
 
 export async function updateOrgUnit(
   unitId: string,
-  patch: { name?: string; shortName?: string | null; externalCode?: string | null }
+  patch: { name?: string; shortName?: string | null; externalCode?: string | null } & OrgUnitMeta
 ): Promise<OrgUnit> {
   return (await client.patch<OrgUnit>(`/api/institution/structure/units/${unitId}`, patch)).data
 }

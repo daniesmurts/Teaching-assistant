@@ -4,6 +4,23 @@ import { body } from 'express-validator'
 // institution creation, never from the tree-builder.
 const CREATABLE_TYPES = ['governance', 'admin_office', 'cluster', 'division', 'program', 'program_direction', 'department']
 
+// Programme-metadata fields — optional on any unit (the route only persists
+// them for program / program_direction types). Shared by create + update.
+const programmeMetaRules = [
+  body('code')
+    .optional({ nullable: true }).trim()
+    .isLength({ max: 50 }).withMessage('Код не длиннее 50 символов'),
+  body('specialtyName')
+    .optional({ nullable: true }).trim()
+    .isLength({ max: 300 }).withMessage('Наименование не длиннее 300 символов'),
+  body('educationLevel')
+    .optional({ nullable: true }).trim()
+    .isLength({ max: 120 }).withMessage('Уровень образования не длиннее 120 символов'),
+  body('formsOfStudy')
+    .optional({ nullable: true }).trim()
+    .isLength({ max: 120 }).withMessage('Формы обучения не длиннее 120 символов'),
+]
+
 export const createOrgUnitRules = [
   body('parentId')
     .isUUID().withMessage('Некорректный идентификатор родителя'),
@@ -20,6 +37,7 @@ export const createOrgUnitRules = [
     .optional({ nullable: true })
     .trim()
     .isLength({ max: 100 }).withMessage('Внешний код не длиннее 100 символов'),
+  ...programmeMetaRules,
 ]
 
 // Bulk create: one parent + type, many child units in a single transaction.
@@ -81,4 +99,5 @@ export const updateOrgUnitRules = [
     .optional({ nullable: true })
     .trim()
     .isLength({ max: 100 }).withMessage('Внешний код не длиннее 100 символов'),
+  ...programmeMetaRules,
 ]

@@ -59,6 +59,12 @@ export interface PickableProgramUnit {
   name:       string
   short_name: string | null
   type_code:  'program' | 'program_direction'
+  // Programme metadata (migration 055) — prefills the import form when the
+  // admin recorded the ФГОС header on the unit.
+  code:            string | null
+  specialty_name:  string | null
+  education_level: string | null
+  forms_of_study:  string | null
 }
 
 export async function getPickableProgramUnits(): Promise<PickableProgramUnit[]> {

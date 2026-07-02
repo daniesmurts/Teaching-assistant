@@ -44,6 +44,26 @@ async function unitInInstitution(unitId: string, instId: string) {
   return unit
 }
 
+// Programme metadata is only meaningful for the two programme-anchor types.
+const PROGRAMME_TYPES = new Set(['program', 'program_direction'])
+
+// Pull the (optional) programme-metadata fields off a request body into the
+// query layer's shape. A field present in the body (even as '') is treated as
+// an explicit set/clear; absent keys stay undefined so the update leaves the
+// column untouched.
+function extractMeta(body: Record<string, unknown>): {
+  code?: string | null; specialtyName?: string | null
+  educationLevel?: string | null; formsOfStudy?: string | null
+} {
+  const norm = (v: unknown) => (typeof v === 'string' ? (v.trim() || null) : null)
+  const out: Record<string, string | null> = {}
+  if ('code'           in body) out.code           = norm(body.code)
+  if ('specialtyName'  in body) out.specialtyName  = norm(body.specialtyName)
+  if ('educationLevel' in body) out.educationLevel = norm(body.educationLevel)
+  if ('formsOfStudy'   in body) out.formsOfStudy   = norm(body.formsOfStudy)
+  return out
+}
+
 // ─── Tree ─────────────────────────────────────────────────────────────────────
 
 router.get('/', asyncHandler(async (req, res) => {
@@ -66,6 +86,8 @@ router.post('/units', validate(createOrgUnitRules), asyncHandler(async (req, res
     name:          name.trim(),
     shortName:     shortName?.trim() || null,
     externalCode:  externalCode?.trim() || null,
+    // Only programme-anchor units carry ФГОС metadata — ignore it for others.
+    meta:          PROGRAMME_TYPES.has(typeCode) ? extractMeta(req.body) : undefined,
   })
   recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
     action: 'org_unit.created', target: unit.name, metadata: { unitId: unit.id, typeCode: unit.type_code } })
@@ -112,12 +134,15 @@ router.post('/units/bulk', validate(bulkCreateOrgUnitsRules), asyncHandler(async
 
 router.patch('/units/:unitId', validate(updateOrgUnitRules), asyncHandler(async (req, res) => {
   const instId = institutionId(req)
-  await unitInInstitution(req.params.unitId, instId)
+  const existing = await unitInInstitution(req.params.unitId, instId)
 
   const updated = await updateOrgUnit(req.params.unitId, {
     name:         req.body.name?.trim(),
     shortName:    req.body.shortName    !== undefined ? (req.body.shortName?.trim()    || null) : undefined,
     externalCode: req.body.externalCode !== undefined ? (req.body.externalCode?.trim() || null) : undefined,
+    // ФГОС metadata only for programme-anchor units — a rename PATCH on a
+    // kafedra never touches these columns.
+    ...(PROGRAMME_TYPES.has(existing.type_code) ? extractMeta(req.body) : {}),
   })
   if (!updated) throw new NotFoundError('Подразделение')
   recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,

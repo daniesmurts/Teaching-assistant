@@ -32,6 +32,21 @@ export interface OrgUnitRow {
   external_code:  string | null
   path:           string
   created_at:     Date
+  // Programme metadata (migration 055) — meaningful only for program /
+  // program_direction units; NULL elsewhere. Prefills the РОП import form.
+  code:            string | null
+  specialty_name:  string | null
+  education_level: string | null
+  forms_of_study:  string | null
+}
+
+/** The programme-metadata subset an admin can set on a program/program_direction
+ *  unit. All optional; omitted keys are left untouched on update. */
+export interface OrgUnitProgrammeMeta {
+  code?:            string | null
+  specialtyName?:   string | null
+  educationLevel?:  string | null
+  formsOfStudy?:    string | null
 }
 
 export interface UnitRoleRow {
@@ -199,6 +214,7 @@ export async function createOrgUnit(data: {
   name:          string
   shortName?:    string | null
   externalCode?: string | null
+  meta?:         OrgUnitProgrammeMeta
 }): Promise<OrgUnitRow> {
   const client = await pool.connect()
   try {
@@ -214,11 +230,15 @@ export async function createOrgUnit(data: {
     }
 
     const inserted = await client.query<OrgUnitRow>(
-      `INSERT INTO org_units (institution_id, parent_id, type_code, name, short_name, external_code, path)
-       VALUES ($1, $2, $3, $4, $5, $6, '')
+      `INSERT INTO org_units
+         (institution_id, parent_id, type_code, name, short_name, external_code, path,
+          code, specialty_name, education_level, forms_of_study)
+       VALUES ($1, $2, $3, $4, $5, $6, '', $7, $8, $9, $10)
        RETURNING *`,
       [data.institutionId, data.parentId, data.typeCode, data.name,
-       data.shortName ?? null, data.externalCode ?? null]
+       data.shortName ?? null, data.externalCode ?? null,
+       data.meta?.code ?? null, data.meta?.specialtyName ?? null,
+       data.meta?.educationLevel ?? null, data.meta?.formsOfStudy ?? null]
     )
     const row = inserted.rows[0]
 
@@ -292,19 +312,32 @@ export async function bulkCreateOrgUnits(data: {
 
 export async function updateOrgUnit(
   id: string,
-  patch: { name?: string; shortName?: string | null; externalCode?: string | null }
+  patch: {
+    name?: string; shortName?: string | null; externalCode?: string | null
+  } & OrgUnitProgrammeMeta
 ): Promise<OrgUnitRow | null> {
+  // Each nullable field uses a "was this key present?" boolean so an explicit
+  // null clears it while an absent key leaves the column untouched — same
+  // pattern as short_name / external_code.
   const { rows } = await pool.query<OrgUnitRow>(
     `UPDATE org_units
-        SET name          = COALESCE($2, name),
-            short_name    = CASE WHEN $3 THEN $4 ELSE short_name    END,
-            external_code = CASE WHEN $5 THEN $6 ELSE external_code END
+        SET name            = COALESCE($2, name),
+            short_name      = CASE WHEN $3  THEN $4  ELSE short_name      END,
+            external_code   = CASE WHEN $5  THEN $6  ELSE external_code   END,
+            code            = CASE WHEN $7  THEN $8  ELSE code            END,
+            specialty_name  = CASE WHEN $9  THEN $10 ELSE specialty_name  END,
+            education_level = CASE WHEN $11 THEN $12 ELSE education_level END,
+            forms_of_study  = CASE WHEN $13 THEN $14 ELSE forms_of_study  END
       WHERE id = $1
       RETURNING *`,
     [id,
      patch.name ?? null,
-     patch.shortName    !== undefined, patch.shortName    ?? null,
-     patch.externalCode !== undefined, patch.externalCode ?? null]
+     patch.shortName      !== undefined, patch.shortName      ?? null,
+     patch.externalCode   !== undefined, patch.externalCode   ?? null,
+     patch.code           !== undefined, patch.code           ?? null,
+     patch.specialtyName  !== undefined, patch.specialtyName  ?? null,
+     patch.educationLevel !== undefined, patch.educationLevel ?? null,
+     patch.formsOfStudy   !== undefined, patch.formsOfStudy   ?? null]
   )
   return rows[0] ?? null
 }
