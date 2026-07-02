@@ -3,8 +3,13 @@ import { getAuditLog, type AuditEntry } from '../../api/institution'
 
 const fmt = (d: string) => new Date(d).toLocaleString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
+const ROLE_LABEL: Record<string, string> = { admin: 'Администратор', head: 'Руководитель', viewer: 'Наблюдатель' }
+
 function describe(e: AuditEntry): string {
-  const meta = e.metadata as { invited?: number; skipped?: number } | null
+  const meta = e.metadata as {
+    invited?: number; skipped?: number
+    count?: number; role?: string; unitName?: string
+  } | null
   switch (e.action) {
     case 'teacher.invited':         return `Приглашён преподаватель: ${e.target}`
     case 'teacher.bulk_invited':    return `Массовое приглашение: ${meta?.invited ?? 0} отправлено${meta?.skipped ? `, ${meta.skipped} пропущено` : ''}`
@@ -13,6 +18,13 @@ function describe(e: AuditEntry): string {
     case 'teacher.deactivated':     return 'Преподаватель деактивирован'
     case 'criterion.shared_created': return `Создан общий критерий: ${e.target}`
     case 'rubric.shared_created':    return `Создана общая рубрика: ${e.target}`
+    case 'org_unit.created':        return `Создано подразделение: ${e.target}`
+    case 'org_unit.bulk_created':   return `Добавлено подразделений: ${meta?.count ?? 0} (в «${e.target}»)`
+    case 'org_unit.updated':        return `Изменено подразделение: ${e.target}`
+    case 'org_unit.deleted':        return `Удалено подразделение: ${e.target}`
+    case 'org_member.primary_set':  return `Преподаватель ${e.target} привязан к кафедре «${meta?.unitName ?? '—'}»`
+    case 'org_role.granted':        return `Выдана роль «${ROLE_LABEL[meta?.role ?? ''] ?? meta?.role}» на «${meta?.unitName ?? '—'}»: ${e.target}`
+    case 'org_role.revoked':        return `Снята роль «${ROLE_LABEL[meta?.role ?? ''] ?? meta?.role}» на «${meta?.unitName ?? '—'}»: ${e.target}`
     default:                        return `${e.action}${e.target ? ` · ${e.target}` : ''}`
   }
 }
@@ -21,6 +33,9 @@ const ICON: Record<string, string> = {
   'teacher.invited': '✉', 'teacher.bulk_invited': '✉', 'teacher.invite_revoked': '✕',
   'teacher.activated': '✓', 'teacher.deactivated': '⏸',
   'criterion.shared_created': '☰', 'rubric.shared_created': '☰',
+  'org_unit.created': '+', 'org_unit.bulk_created': '+',
+  'org_unit.updated': '✎', 'org_unit.deleted': '✕',
+  'org_member.primary_set': '⌂', 'org_role.granted': '★', 'org_role.revoked': '☆',
 }
 
 export default function InstitutionAudit() {

@@ -34,7 +34,9 @@ export interface LeadershipActivity {
 // ─── Discoverability — which units can this teacher pick? ─────────────────────
 
 /**
- * Units the teacher directly holds head/admin on. Picker order is by type
+ * Units the teacher directly holds head/admin on, scoped to their CURRENT
+ * institution — stale role rows left behind by an institution reassignment
+ * must never surface another org's subtree. Picker order is by type
  * (broader first) then name. Subtree headcount uses the materialised path —
  * the same prefix join the structure page uses, so a head on a division sees
  * the total teachers across all departments under it.
@@ -42,7 +44,11 @@ export interface LeadershipActivity {
  * Platform admin is handled by the caller (it short-circuits and returns all
  * institution roots) — this query answers the tree-membership question only.
  */
-export async function listDirectLeadershipUnits(teacherId: string): Promise<LeadershipUnit[]> {
+export async function listDirectLeadershipUnits(
+  teacherId: string,
+  institutionId: string | null
+): Promise<LeadershipUnit[]> {
+  if (!institutionId) return []
   const { rows } = await pool.query<LeadershipUnit>(
     `SELECT u.id, u.name, u.short_name, u.type_code, our.role,
             (SELECT COUNT(*)::int
@@ -52,9 +58,10 @@ export async function listDirectLeadershipUnits(teacherId: string): Promise<Lead
        FROM org_unit_roles our
        JOIN org_units u ON u.id = our.org_unit_id
       WHERE our.teacher_id = $1
+        AND u.institution_id = $2
         AND our.role IN ('head', 'admin')
       ORDER BY u.type_code, u.name`,
-    [teacherId]
+    [teacherId, institutionId]
   )
   return rows
 }
@@ -211,6 +218,7 @@ export interface LeadershipTeacherProfile {
   id:                    string
   email:                 string
   name:                  string | null
+  institution_id:        string | null
   primary_org_unit_id:   string | null
   primary_unit_name:     string | null
 }
@@ -245,7 +253,7 @@ export interface LeadershipTeacherRecentGrade {
 /** Identity + primary kafedra for a teacher — foundation for the drill page. */
 export async function getTeacherLeadershipProfile(teacherId: string): Promise<LeadershipTeacherProfile | null> {
   const { rows } = await pool.query<LeadershipTeacherProfile>(
-    `SELECT t.id, t.email, t.name, t.primary_org_unit_id,
+    `SELECT t.id, t.email, t.name, t.institution_id, t.primary_org_unit_id,
             pu.name AS primary_unit_name
        FROM teachers t
        LEFT JOIN org_units pu ON pu.id = t.primary_org_unit_id
@@ -347,15 +355,21 @@ export async function listTeacherRecentGrades(teacherId: string, limit = 20): Pr
 
 // ─── is_leader signal for the auth payload ────────────────────────────────────
 
-/** Cheap existence check — does this teacher hold any head/admin role anywhere?
- *  Platform admin is checked separately on the auth payload (orthogonal flag). */
-export async function hasLeadershipRole(teacherId: string): Promise<boolean> {
+/** Cheap existence check — does this teacher hold any head/admin role on a unit
+ *  in their CURRENT institution? Roles left behind in another institution after
+ *  a reassignment don't count. Platform admin is checked separately on the auth
+ *  payload (orthogonal flag). */
+export async function hasLeadershipRole(teacherId: string, institutionId: string | null): Promise<boolean> {
+  if (!institutionId) return false
   const { rows } = await pool.query<{ ok: boolean }>(
     `SELECT EXISTS (
-       SELECT 1 FROM org_unit_roles
-        WHERE teacher_id = $1 AND role IN ('head', 'admin')
+       SELECT 1 FROM org_unit_roles our
+         JOIN org_units u ON u.id = our.org_unit_id
+        WHERE our.teacher_id = $1
+          AND u.institution_id = $2
+          AND our.role IN ('head', 'admin')
      ) AS ok`,
-    [teacherId]
+    [teacherId, institutionId]
   )
   return rows[0]?.ok ?? false
 }

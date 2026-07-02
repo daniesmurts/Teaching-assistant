@@ -15,7 +15,7 @@ import {
   listInstitutionsWithCounts, createInstitution, updateInstitution,
   getSamlConfig, setSamlConfig,
 } from '../db/queries/institutions'
-import { syncRoleToTree } from '../db/queries/orgUnits'
+import { syncRoleToTree, clearOrgTiesOutsideInstitution } from '../db/queries/orgUnits'
 import { metadataUrlForInstitution, acsUrlForInstitution } from '../services/saml'
 import { listFeedback } from '../db/queries/feedback'
 import {
@@ -281,6 +281,15 @@ router.patch('/teachers/:id', asyncHandler(async (req, res) => {
   const hasInstitution = Object.prototype.hasOwnProperty.call(body, 'institution_id')
   const institutionId  = body.institution_id ? body.institution_id : null
 
+  // Previous institution — needed to detect a real move so we can clear the
+  // teacher's org-tree ties (roles + primary unit) in the old institution.
+  const { rows: prevRows } = await pool.query<{ institution_id: string | null }>(
+    'SELECT institution_id FROM teachers WHERE id = $1',
+    [req.params.id]
+  )
+  if (!prevRows[0]) { res.status(404).json({ error: 'Преподаватель не найден' }); return }
+  const prevInstitutionId = prevRows[0].institution_id
+
   const { rows } = await pool.query(
     `UPDATE teachers
      SET role           = COALESCE($2, role),
@@ -292,6 +301,15 @@ router.patch('/teachers/:id', asyncHandler(async (req, res) => {
     [req.params.id, role ?? null, plan_tier ?? null, is_active ?? null, hasInstitution, institutionId]
   )
   if (!rows[0]) { res.status(404).json({ error: 'Преподаватель не найден' }); return }
+
+  // A real institution move (or detach) invalidates every org-tree tie the
+  // teacher held in the old institution: unit roles would otherwise keep
+  // granting leadership/programme visibility there, and the stale primary
+  // department would keep them drillable by the old org's heads. Clear before
+  // syncRoleToTree so a role sync re-grants admin-on-root in the NEW tree only.
+  if (hasInstitution && prevInstitutionId !== rows[0].institution_id) {
+    await clearOrgTiesOutsideInstitution(rows[0].id, rows[0].institution_id)
+  }
 
   // Keep the §7 org tree authoritative: when the role changes, mirror it into
   // is_platform_admin + admin-on-root so the (tree-based) guards stay correct.

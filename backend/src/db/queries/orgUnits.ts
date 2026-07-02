@@ -344,6 +344,53 @@ export async function setPrimaryOrgUnit(teacherId: string, orgUnitId: string | n
   )
 }
 
+/**
+ * Remove every org-tree tie a teacher holds outside `institutionId` — their
+ * unit roles and (if it points into a foreign tree) their primary department.
+ * Called when a platform admin moves a teacher between institutions: without
+ * this, the stale rows keep granting leadership/programme visibility into the
+ * OLD institution and keep the teacher drillable by the old org's heads.
+ * `institutionId = null` (teacher detached from any institution) clears all
+ * ties. Transactional so the two clears can't diverge.
+ */
+export async function clearOrgTiesOutsideInstitution(
+  teacherId: string,
+  institutionId: string | null
+): Promise<void> {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    if (institutionId) {
+      await client.query(
+        `DELETE FROM org_unit_roles our
+          USING org_units u
+          WHERE our.teacher_id = $1
+            AND u.id = our.org_unit_id
+            AND u.institution_id <> $2`,
+        [teacherId, institutionId]
+      )
+      await client.query(
+        `UPDATE teachers t
+            SET primary_org_unit_id = NULL
+           FROM org_units u
+          WHERE t.id = $1
+            AND u.id = t.primary_org_unit_id
+            AND u.institution_id <> $2`,
+        [teacherId, institutionId]
+      )
+    } else {
+      await client.query('DELETE FROM org_unit_roles WHERE teacher_id = $1', [teacherId])
+      await client.query('UPDATE teachers SET primary_org_unit_id = NULL WHERE id = $1', [teacherId])
+    }
+    await client.query('COMMIT')
+  } catch (err) {
+    await client.query('ROLLBACK')
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
 // ─── Members & roles (slice 1b) ───────────────────────────────────────────────
 
 export interface InstitutionMember {

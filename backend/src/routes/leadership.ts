@@ -31,7 +31,7 @@ router.get('/units', asyncHandler(async (req, res) => {
     res.json({ units: await listAllInstitutionRoots() })
     return
   }
-  res.json({ units: await listDirectLeadershipUnits(req.teacher.id) })
+  res.json({ units: await listDirectLeadershipUnits(req.teacher.id, req.teacher.institution_id) })
 }))
 
 // ─── GET /api/leadership/overview?unitId=… ────────────────────────────────────
@@ -46,6 +46,12 @@ router.get('/overview', asyncHandler(async (req, res) => {
   if (!unit) throw new NotFoundError('Подразделение')
 
   if (!req.teacher.is_platform_admin) {
+    // Same-institution guard: a role row left behind by an institution
+    // reassignment must not open another org's subtree. 404 (not 403) so
+    // foreign unit ids never leak.
+    if (unit.institution_id !== req.teacher.institution_id) {
+      throw new NotFoundError('Подразделение')
+    }
     const ok = await canActOnUnit(req.teacher.id, unitId, ['head', 'admin'])
     if (!ok) throw new ForbiddenError('Нет доступа к этому подразделению')
   }
@@ -85,8 +91,13 @@ router.get('/teachers/:id', asyncHandler(async (req, res) => {
 
   if (!req.teacher.is_platform_admin) {
     // Same-institution guard first — never leak a teacher from a foreign org.
-    // (The primary-unit walk implicitly enforces this too, but a teacher with
-    // NULL primary_org_unit_id would otherwise slip through.)
+    // Explicit institution comparison (not just the primary-unit walk): after
+    // an institution reassignment the target's primary_org_unit_id may still
+    // point into the OLD org's tree, which the caller's stale-free role walk
+    // would otherwise match.
+    if (!profile.institution_id || profile.institution_id !== req.teacher.institution_id) {
+      throw new ForbiddenError('Нет доступа к этому преподавателю')
+    }
     if (!profile.primary_org_unit_id) {
       throw new ForbiddenError('Нет доступа к этому преподавателю')
     }

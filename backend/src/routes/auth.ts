@@ -42,7 +42,7 @@ async function adminFlags(row: { id: string; institution_id: string | null; is_p
   const is_platform_admin = row.is_platform_admin ?? false
   const [is_institution_admin, has_role, program_scope] = await Promise.all([
     row.institution_id ? isInstitutionAdmin(row.id, row.institution_id) : Promise.resolve(false),
-    hasLeadershipRole(row.id),
+    hasLeadershipRole(row.id, row.institution_id),
     getProgramAccessScope({ id: row.id, is_platform_admin, institution_id: row.institution_id }),
   ])
   return {

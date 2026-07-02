@@ -15,6 +15,8 @@ import {
   addUnitRole, removeUnitRole, setPrimaryOrgUnit, getRootUnitForInstitution,
   type OrgUnitType, type UnitRole,
 } from '../db/queries/orgUnits'
+import { recordAudit } from '../db/queries/audit'
+import { findTeacherRowById } from '../db/queries/teachers'
 
 // Org-structure tree builder — the IT-admin surface (Research.md §7.4).
 // Mounted under /api/institution/structure. Guarded by requireInstitutionAdmin
@@ -63,6 +65,8 @@ router.post('/units', validate(createOrgUnitRules), asyncHandler(async (req, res
     shortName:     shortName?.trim() || null,
     externalCode:  externalCode?.trim() || null,
   })
+  recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
+    action: 'org_unit.created', target: unit.name, metadata: { unitId: unit.id, typeCode: unit.type_code } })
   res.status(201).json(unit)
 }))
 
@@ -75,7 +79,7 @@ router.post('/units/bulk', validate(bulkCreateOrgUnitsRules), asyncHandler(async
     units: { name: string; shortName?: string | null }[]
   }
 
-  await unitInInstitution(parentId, instId)
+  const parent = await unitInInstitution(parentId, instId)
 
   // Reject batches that contain duplicate names — clearer error than letting the
   // DB UNIQUE fire mid-transaction on the second row.
@@ -96,6 +100,9 @@ router.post('/units/bulk', validate(bulkCreateOrgUnitsRules), asyncHandler(async
     typeCode:      typeCode as OrgUnitType,
     units:         normalized,
   })
+  recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
+    action: 'org_unit.bulk_created', target: parent.name,
+    metadata: { parentId, typeCode, count: created.length } })
   res.status(201).json({ units: created })
 }))
 
@@ -111,6 +118,8 @@ router.patch('/units/:unitId', validate(updateOrgUnitRules), asyncHandler(async 
     externalCode: req.body.externalCode !== undefined ? (req.body.externalCode?.trim() || null) : undefined,
   })
   if (!updated) throw new NotFoundError('Подразделение')
+  recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
+    action: 'org_unit.updated', target: updated.name, metadata: { unitId: updated.id } })
   res.json(updated)
 }))
 
@@ -134,6 +143,8 @@ router.delete('/units/:unitId', asyncHandler(async (req, res) => {
 
   const ok = await deleteOrgUnit(unit.id)
   if (!ok) throw new NotFoundError('Подразделение')
+  recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
+    action: 'org_unit.deleted', target: unit.name, metadata: { unitId: unit.id, typeCode: unit.type_code } })
   res.status(204).end()
 }))
 
@@ -155,6 +166,10 @@ router.put('/members/:teacherId/primary', validate(setPrimaryRules), asyncHandle
     throw new ValidationError('Преподавателя можно привязать только к кафедре')
   }
   await setPrimaryOrgUnit(req.params.teacherId, unit.id)
+  const member = await findTeacherRowById(req.params.teacherId)
+  recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
+    action: 'org_member.primary_set', target: member?.email ?? req.params.teacherId,
+    metadata: { teacherId: req.params.teacherId, unitId: unit.id, unitName: unit.name } })
   res.json({ ok: true })
 }))
 
@@ -163,8 +178,12 @@ router.post('/roles', validate(grantRoleRules), asyncHandler(async (req, res) =>
   const instId = institutionId(req)
   const { teacherId, unitId, role } = req.body
   if (!(await isTeacherInInstitution(teacherId, instId))) throw new NotFoundError('Преподаватель')
-  await unitInInstitution(unitId, instId)
+  const unit = await unitInInstitution(unitId, instId)
   await addUnitRole(teacherId, unitId, role as UnitRole)
+  const member = await findTeacherRowById(teacherId)
+  recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
+    action: 'org_role.granted', target: member?.email ?? teacherId,
+    metadata: { teacherId, role, unitId, unitName: unit.name, unitType: unit.type_code } })
   res.status(201).json({ ok: true })
 }))
 
@@ -174,7 +193,7 @@ router.delete('/roles', validate(grantRoleRules), asyncHandler(async (req, res) 
   const instId = institutionId(req)
   const { teacherId, unitId, role } = req.body
   if (!(await isTeacherInInstitution(teacherId, instId))) throw new NotFoundError('Преподаватель')
-  await unitInInstitution(unitId, instId)
+  const unit = await unitInInstitution(unitId, instId)
 
   if (role === 'admin') {
     const root = await getRootUnitForInstitution(instId)
@@ -184,6 +203,10 @@ router.delete('/roles', validate(grantRoleRules), asyncHandler(async (req, res) 
   }
 
   await removeUnitRole(teacherId, unitId, role as UnitRole)
+  const member = await findTeacherRowById(teacherId)
+  recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
+    action: 'org_role.revoked', target: member?.email ?? teacherId,
+    metadata: { teacherId, role, unitId, unitName: unit.name, unitType: unit.type_code } })
   res.json({ ok: true })
 }))
 

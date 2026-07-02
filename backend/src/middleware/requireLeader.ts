@@ -14,7 +14,7 @@ export async function requireLeader(
 ): Promise<void> {
   try {
     if (req.teacher?.is_platform_admin) return next()
-    if (req.teacher && (await hasLeadershipRole(req.teacher.id))) return next()
+    if (req.teacher && (await hasLeadershipRole(req.teacher.id, req.teacher.institution_id))) return next()
     next(new ForbiddenError('Доступно только руководителям подразделений'))
   } catch (err) {
     next(err)

@@ -14,6 +14,49 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Fixed
+- **Security: cross-institution leakage via stale org ties after a teacher
+  reassignment.** When a platform admin moved a teacher between institutions
+  (PATCH /api/admin/teachers/:id), the teacher's `org_unit_roles` rows and
+  `primary_org_unit_id` in the OLD institution were never cleaned up. Two
+  leaks followed: (a) the moved teacher kept `/leadership` access to the old
+  org's subtree — `hasLeadershipRole` / `listDirectLeadershipUnits` filtered
+  by teacher only, never by institution; (b) the old org's heads could keep
+  drilling into the moved teacher's grades, because the drill gate walks the
+  target's (stale) primary unit. Fixed in four layers: (1) new
+  `clearOrgTiesOutsideInstitution` (transactional) runs on every real
+  institution change in the admin PATCH — deletes foreign-institution role
+  rows and nulls a foreign primary unit, before `syncRoleToTree` so a role
+  sync re-grants in the NEW tree only; (2) `hasLeadershipRole` and
+  `listDirectLeadershipUnits` now take the caller's `institution_id` and
+  filter on it (auth payload's `is_leader`, `requireLeader`, and the unit
+  picker all updated); (3) `/api/leadership/overview` adds an explicit
+  same-institution guard (404, so foreign unit ids don't leak) and the
+  per-teacher drill compares the target's `institution_id` against the
+  caller's before the tree walk; (4) migration 052 heals rows that went
+  stale before the fix (idempotent). Verified end-to-end against dev DB with
+  synthetic two-institution data (move, same-institution survival, detach —
+  zero residue); both typechecks clean, 143/143 tests green.
+
+### Added
+- **Audit logging for org-structure and role operations.** The
+  `/api/institution/structure` surface — the most security-sensitive admin
+  surface in the product (role grants confer leadership/programme access) —
+  wrote no audit records at all. Every operation now records to the existing
+  institution audit log: `org_unit.created` / `bulk_created` / `updated` /
+  `deleted`, `org_member.primary_set` (kafedra assignment), and
+  `org_role.granted` / `org_role.revoked` (with role, unit name and unit
+  type in metadata — enough to answer "who granted this authority and
+  when"). Role/member entries resolve the target teacher's email so the
+  журнал reads like the invite entries do. Frontend «Журнал действий» gains
+  Russian labels + icons for the seven new actions; unknown actions keep the
+  raw-string fallback. Same fire-and-forget `recordAudit` path as the
+  existing invite/activation entries — auditing never blocks the action.
+
+---
+
+## [2026-07-02]
+
 ### Changed
 - **Coverage check surfaces the full breakdown inline in the Documents tab.**
   Previously the discipline row only showed a bare "покрытие 75%" summary and

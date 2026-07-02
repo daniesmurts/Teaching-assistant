@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-07-01 (role-driven programme access shipped)
+**Last updated:** 2026-07-02 (org-structure audit logging + cross-institution stale-ties fix; earlier same day: discipline-scoped РПД library + coverage check + auto-detect + `program_direction` type)
 
 ---
 
@@ -92,7 +92,14 @@ A teacher in an institution-tier org (via invite or email-domain auto-join):
 
 ## Head of an educational programme (РОП) ✅
 
-A teacher granted `head` on a `program` org_unit sees **«Образовательные программы»** (`/programs`) filtered to their programme(s) only, with full read + edit rights. Imports their own ОП via the intake form (описание ОП + учебный план PDF); the picker pre-selects when they head exactly one `program` unit and forces a choice when they head several. Non-clickable breadcrumb on the detail page shows the ancestor chain of the linked unit so the РОП sees which институт their programme sits under. **The tool is analysis-only** — programme content is authored in the university's own system; here we ingest, correct extracted content, and analyse (sequencing, competencies coverage, gaps, redundancy).
+A teacher granted `head` on a `program` or `program_direction` org_unit sees **«Образовательные программы»** (`/programs`) filtered to their programme(s) only, with full read + edit rights. Programmes are grouped by направление in the list — a направление with several профилей collapses into one heading + nested cards. Imports their own ОП via the intake form (описание ОП + учебный план PDF); the picker pre-selects when they head exactly one unit and forces a choice when they head several, prefixing each option with `ОП: ` or `Направление: ` so the linked level is unambiguous. Non-clickable breadcrumb on the detail page shows the ancestor chain of the linked unit so the РОП sees which институт their programme sits under.
+
+Per-programme surfaces on the detail page:
+- **Конструктор** — edit the extracted disciplines and competencies by semester.
+- **Отчёт (analysis)** — sequencing & prerequisites, competency progression map, gaps & redundancy, relatedness clusters + per-semester load. Cached; last analysis exportable as a branded PDF.
+- **Документы** — per-discipline РПД library. Every discipline gets its own upload slot; on upload we extract the text and **auto-detect which competency codes the РПД declares** (filtered against the programme's own competency set), pre-populating `competency_codes` so «Проверить соответствие компетенциям» works without a конструктор detour. The check scores the РПД against those codes and shows a per-competency covered/partial/missing breakdown with evidence quotes inline in the row (also mirrored in the Report tab). Практики stay programme-scoped (fixed 4-type set).
+
+The tool is analysis-only — programme content is authored in the university's own system; here we ingest, correct extracted content, and analyse.
 
 ## Oversight roles (начальник УМЦ, проректор) ✅
 
@@ -119,12 +126,12 @@ A teacher granted `Руководитель` or sub-unit `Администрат
 
 Panel at `/institution` (gated to `institution_admin` / `platform_admin`):
 - **Overview** — teacher / grade / presentation counts, 30-day activity chart
-- **Структура (org-structure tree builder)** 🚧 — build the institution's unit tree (управления/центры → институты/факультеты → полигруппы → образовательные программы → кафедры) at flexible depth: add units under any node (one at a time *or* «Списком» — paste many siblings of one type in a single batch, up to 200), rename, delete (blocked until the unit is emptied of sub-units and teachers). Each unit shows its subtree headcount. Below the tree, **«Преподаватели и роли»**: assign each teacher to a kafedra and grant per-unit roles — Администратор / Руководитель / Наблюдатель — that cascade down the tree (revoking the last root admin is blocked to prevent lockout). §7 org model; remaining step is switching all admin routes onto the unit-scoped authoriser.
+- **Структура (org-structure tree builder)** 🚧 — build the institution's unit tree (управления/центры → институты/факультеты → полигруппы → образовательные программы (ОП / УГСН) → направления подготовки → кафедры) at flexible depth: add units under any node (one at a time *or* «Списком» — paste many siblings of one type in a single batch, up to 200), rename, delete (blocked until the unit is emptied of sub-units and teachers). `program` (broad ОП like 15.00.00) and `program_direction` (a specific 15.03.02) are both valid programme anchors; narrow ОП link directly at the ОП level, broad ОП host направления with different РОПы. Each unit shows its subtree headcount. Below the tree, **«Преподаватели и роли»**: assign each teacher to a kafedra and grant per-unit roles — Администратор / Руководитель / Наблюдатель — that cascade down the tree (revoking the last root admin is blocked to prevent lockout). §7 org model; remaining step is switching all admin routes onto the unit-scoped authoriser.
 - **Usage** — tokens + grade/presentation counts over time, **CSV export** (never shows cost)
 - **Teachers** — list, activate/deactivate (frees a seat), single invite, **bulk invite** (paste list), revoke invites. Pending invites whose email was rejected by the provider show «Письмо не доставлено» with the reason (migration 048).
 - **Criteria** — create institution-shared criteria (appear in every member's grading picker)
 - **Учебные планы (program architecture analysis)** — register an образовательная программа (header reqs + upload **описание ОП** and **учебный план** PDFs → disciplines & ФГОС competencies/goals auto-extracted), or build it manually by semester. Then analyse the whole plan: sequencing & prerequisite inversions, competency progression map (introduce→develop→master across semesters), gaps & redundancy (orphan disciplines / uncovered competencies), relatedness clusters & per-semester load. Persisted; last analysis cached. One-click example track for evaluation. **Export the analysis as a server-rendered branded PDF** (pdfkit, embedded PT Serif/PT Sans, fixed premium layout).
-- **Audit log** — record of admin actions (invites, activations, shared-criterion creation)
+- **Audit log** — record of admin actions (invites, activations, shared-criterion creation, org-structure changes, unit-role grants/revocations, kafedra assignments)
 - Invite flow: branded email (Unisender) → `/register?invite=` → auto-joins institution
 
 ---
