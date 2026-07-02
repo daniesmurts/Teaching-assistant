@@ -27,7 +27,7 @@ import {
 } from '../lib/emailTemplates'
 import { findValidInviteByToken, markInviteAccepted } from '../db/queries/teacherInvites'
 import { getInstitutionById, findInstitutionByEmailDomain, countInstitutionTeachers } from '../db/queries/institutions'
-import { isInstitutionAdmin } from '../db/queries/orgUnits'
+import { isInstitutionAdmin, assignDefaultDepartmentIfUnset } from '../db/queries/orgUnits'
 import { hasLeadershipRole } from '../db/queries/leadership'
 import { getProgramAccessScope } from '../services/programAccess'
 
@@ -98,6 +98,11 @@ router.post(
 
     const passwordHash = await bcrypt.hash(password, 12)
     const teacher = await createTeacher(email, passwordHash, name, university, phone, institutionId)
+
+    // Institution members get the default kafedra as their primary unit so
+    // they're visible in leadership dashboards / structure headcounts from
+    // day one; the admin refines placement on the structure page later.
+    if (institutionId) await assignDefaultDepartmentIfUnset(teacher.id, institutionId)
 
     if (inviteId) await markInviteAccepted(inviteId)
 

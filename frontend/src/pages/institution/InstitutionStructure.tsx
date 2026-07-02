@@ -5,6 +5,7 @@ import Button from '../../components/ui/Button'
 import { useUIStore } from '../../store/uiStore'
 import {
   getOrgStructure, createOrgUnit, bulkCreateOrgUnits, updateOrgUnit, deleteOrgUnit,
+  retypeOrgUnit, moveOrgUnit,
   getMembers, setPrimaryUnit, grantRole, revokeRole,
   type OrgUnit, type OrgUnitType, type InstitutionMember, type UnitRole,
 } from '../../api/orgStructure'
@@ -24,6 +25,25 @@ const ROLE_LABEL: Record<UnitRole, string> = {
   admin:  'Администратор',
   head:   'Руководитель',
   viewer: 'Наблюдатель',
+}
+
+// Unit types whose head/admin grant confers institution-WIDE authority
+// (services/programAccess.ts: governance / admin_office → all-rw over every
+// programme). Warn the admin so they don't hand out institution-wide access
+// thinking it's scoped to a small office.
+const INSTITUTION_WIDE_TYPES = new Set<OrgUnitType>(['governance', 'admin_office'])
+
+// Warn about the authorisation blast radius of a grant before it's applied.
+// Returns null when the grant is ordinary (scoped to the unit's subtree).
+function grantWarning(unit: OrgUnit | undefined, role: UnitRole): string | null {
+  if (!unit) return null
+  if (role === 'admin' && unit.type_code === 'institution') {
+    return 'Даёт полный доступ администратора ко всей организации (равнозначно администратору организации).'
+  }
+  if ((role === 'admin' || role === 'head') && INSTITUTION_WIDE_TYPES.has(unit.type_code)) {
+    return 'Подразделения этого типа дают доступ ко всем образовательным программам организации, а не только к этому подразделению.'
+  }
+  return null
 }
 
 // Short label for a unit in chips / selects — short_name when present.
@@ -62,6 +82,7 @@ export default function InstitutionStructure() {
 
   const [addingUnder, setAddingUnder] = useState<string | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
+  const [managing, setManaging] = useState<string | null>(null)
 
   // Expand/collapse state. Init from localStorage on first units-load; new
   // units (added after init) fall through to the type-default rule via
@@ -133,6 +154,16 @@ export default function InstitutionStructure() {
     onSuccess: () => { invalidate(); addToast('Подразделение удалено', 'success') },
     onError: (err: any) => addToast(err?.response?.data?.error ?? 'Не удалось удалить', 'error'),
   })
+  const retypeMut = useMutation({
+    mutationFn: (v: { id: string; typeCode: Exclude<OrgUnitType, 'institution'> }) => retypeOrgUnit(v.id, v.typeCode),
+    onSuccess: () => { invalidate(); setManaging(null); addToast('Тип изменён', 'success') },
+    onError: (err: any) => addToast(err?.response?.data?.error ?? 'Не удалось изменить тип', 'error'),
+  })
+  const moveMut = useMutation({
+    mutationFn: (v: { id: string; newParentId: string }) => moveOrgUnit(v.id, v.newParentId),
+    onSuccess: () => { invalidate(); setManaging(null); addToast('Подразделение перемещено', 'success') },
+    onError: (err: any) => addToast(err?.response?.data?.error ?? 'Не удалось переместить', 'error'),
+  })
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -174,11 +205,13 @@ export default function InstitutionStructure() {
             <div className="space-y-1">
               {tree.map((node) => (
                 <UnitRow
-                  key={node.id} node={node} depth={0}
+                  key={node.id} node={node} depth={0} allUnits={units}
                   addingUnder={addingUnder} openAddUnder={openAddUnder}
                   editing={editing} setEditing={setEditing}
+                  managing={managing} setManaging={setManaging}
                   isExpanded={isExpanded} toggleExpanded={toggleExpanded}
                   createMut={createMut} bulkMut={bulkMut} updateMut={updateMut} deleteMut={deleteMut}
+                  retypeMut={retypeMut} moveMut={moveMut}
                 />
               ))}
             </div>
@@ -306,51 +339,70 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
       </div>
 
       {/* Grant a role — own full-width line so long unit names have room */}
-      {adding && (
-        <div className="flex flex-wrap items-end gap-2 pt-2.5 border-t border-border">
-          <label className="block flex-1 min-w-[240px]">
-            <span className="text-[11px] font-sans text-ink-secondary block mb-1">Подразделение</span>
-            <select value={roleUnit} onChange={(e) => setRoleUnit(e.target.value)}
-              className={`${selectCls} w-full`}
-              title={unitsById.get(roleUnit)?.name ?? ''}>
-              {units.map((u) => <option key={u.id} value={u.id}>{TYPE_LABEL[u.type_code]}: {u.name}</option>)}
-            </select>
-          </label>
-          <label className="block w-[150px]">
-            <span className="text-[11px] font-sans text-ink-secondary block mb-1">Роль</span>
-            <select value={role} onChange={(e) => setRole(e.target.value as UnitRole)}
-              className={`${selectCls} w-full`}>
-              {(['admin', 'head', 'viewer'] as UnitRole[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-            </select>
-          </label>
-          <button onClick={() => { if (roleUnit) { onGrant(roleUnit, role); setAdding(false) } }}
-            className="px-3 py-1.5 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity">
-            Назначить
-          </button>
-          <button onClick={() => setAdding(false)}
-            className="px-2 py-1.5 text-sm font-sans text-ink-secondary hover:text-ink transition-colors">
-            Отмена
-          </button>
+      {adding && (() => {
+        const warning = grantWarning(unitsById.get(roleUnit), role)
+        return (
+        <div className="pt-2.5 border-t border-border space-y-2">
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="block flex-1 min-w-[240px]">
+              <span className="text-[11px] font-sans text-ink-secondary block mb-1">Подразделение</span>
+              <select value={roleUnit} onChange={(e) => setRoleUnit(e.target.value)}
+                className={`${selectCls} w-full`}
+                title={unitsById.get(roleUnit)?.name ?? ''}>
+                {units.map((u) => <option key={u.id} value={u.id}>{TYPE_LABEL[u.type_code]}: {u.name}</option>)}
+              </select>
+            </label>
+            <label className="block w-[150px]">
+              <span className="text-[11px] font-sans text-ink-secondary block mb-1">Роль</span>
+              <select value={role} onChange={(e) => setRole(e.target.value as UnitRole)}
+                className={`${selectCls} w-full`}>
+                {(['admin', 'head', 'viewer'] as UnitRole[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+              </select>
+            </label>
+            <button onClick={() => { if (roleUnit) { onGrant(roleUnit, role); setAdding(false) } }}
+              className="px-3 py-1.5 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity">
+              Назначить
+            </button>
+            <button onClick={() => setAdding(false)}
+              className="px-2 py-1.5 text-sm font-sans text-ink-secondary hover:text-ink transition-colors">
+              Отмена
+            </button>
+          </div>
+          {role === 'viewer' && (
+            <p className="text-[11px] font-sans text-ink-tertiary">
+              «Наблюдатель» пока не открывает отдельных разделов — роль сохраняется, но доступ не даёт. Используйте «Руководитель» для доступа к дашбордам подразделения.
+            </p>
+          )}
+          {warning && (
+            <p className="text-[11px] font-sans text-warning bg-warning-bg border border-warning/15 rounded-md px-2.5 py-1.5">
+              {warning}
+            </p>
+          )}
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
 
 function UnitRow({
-  node, depth, addingUnder, openAddUnder, editing, setEditing,
+  node, depth, allUnits, addingUnder, openAddUnder, editing, setEditing,
+  managing, setManaging,
   isExpanded, toggleExpanded,
-  createMut, bulkMut, updateMut, deleteMut,
+  createMut, bulkMut, updateMut, deleteMut, retypeMut, moveMut,
 }: {
-  node: TreeNode; depth: number
+  node: TreeNode; depth: number; allUnits: OrgUnit[]
   addingUnder: string | null; openAddUnder: (id: string) => void
   editing: string | null; setEditing: (v: string | null) => void
+  managing: string | null; setManaging: (v: string | null) => void
   isExpanded: (u: OrgUnit) => boolean
   toggleExpanded: (id: string) => void
   createMut: ReturnType<typeof useMutation<any, any, any>>
   bulkMut:   ReturnType<typeof useMutation<any, any, any>>
   updateMut: ReturnType<typeof useMutation<any, any, any>>
   deleteMut: ReturnType<typeof useMutation<any, any, any>>
+  retypeMut: ReturnType<typeof useMutation<any, any, any>>
+  moveMut:   ReturnType<typeof useMutation<any, any, any>>
 }) {
   const isRoot = !node.parent_id
   const [editName, setEditName] = useState(node.name)
@@ -414,6 +466,9 @@ function UnitRow({
               <IconBtn label="Добавить подразделение" onClick={() => openAddUnder(node.id)}><PlusIcon /></IconBtn>
               {!isRoot && <IconBtn label="Переименовать" onClick={() => { setEditing(node.id); setEditName(node.name) }}><PencilIcon /></IconBtn>}
               {!isRoot && (
+                <IconBtn label="Тип и размещение" onClick={() => setManaging(managing === node.id ? null : node.id)}><GearIcon /></IconBtn>
+              )}
+              {!isRoot && (
                 <IconBtn
                   label="Удалить" danger
                   onClick={() => { if (confirm(`Удалить «${node.name}»?`)) deleteMut.mutate(node.id) }}
@@ -423,6 +478,16 @@ function UnitRow({
           )}
         </div>
       </div>
+
+      {managing === node.id && (
+        <ManageUnitPanel
+          node={node} depth={depth + 1} allUnits={allUnits}
+          onRetype={(typeCode) => retypeMut.mutate({ id: node.id, typeCode })}
+          onMove={(newParentId) => moveMut.mutate({ id: node.id, newParentId })}
+          pending={retypeMut.isPending || moveMut.isPending}
+          onClose={() => setManaging(null)}
+        />
+      )}
 
       {addingUnder === node.id && (
         <AddChildForm
@@ -436,11 +501,13 @@ function UnitRow({
 
       {expanded && node.children.map((child) => (
         <UnitRow
-          key={child.id} node={child} depth={depth + 1}
+          key={child.id} node={child} depth={depth + 1} allUnits={allUnits}
           addingUnder={addingUnder} openAddUnder={openAddUnder}
           editing={editing} setEditing={setEditing}
+          managing={managing} setManaging={setManaging}
           isExpanded={isExpanded} toggleExpanded={toggleExpanded}
           createMut={createMut} bulkMut={bulkMut} updateMut={updateMut} deleteMut={deleteMut}
+          retypeMut={retypeMut} moveMut={moveMut}
         />
       ))}
     </div>
@@ -574,6 +641,71 @@ function AddChildForm({ parentId, depth, onCancel, onSubmit, onSubmitBulk, pendi
   )
 }
 
+// Re-type + move panel. Type drives authorisation, and moving rewrites the
+// subtree's paths — both are deliberate, audited operations, kept out of the
+// quick inline rename. Cycle prevention: a unit cannot move under itself or any
+// of its own descendants (path-prefix test; the backend guards this too).
+function ManageUnitPanel({ node, depth, allUnits, onRetype, onMove, pending, onClose }: {
+  node: OrgUnit; depth: number; allUnits: OrgUnit[]
+  onRetype: (typeCode: Exclude<OrgUnitType, 'institution'>) => void
+  onMove:   (newParentId: string) => void
+  pending:  boolean
+  onClose:  () => void
+}) {
+  const [typeCode, setTypeCode] = useState<Exclude<OrgUnitType, 'institution'>>(
+    node.type_code === 'institution' ? 'department' : node.type_code
+  )
+  // Valid new parents: any unit that is not this unit and not one of its
+  // descendants (would create a cycle), and not the current parent (no-op).
+  const parentOptions = useMemo(
+    () => allUnits.filter((u) =>
+      !u.path.startsWith(node.path) && u.id !== node.parent_id
+    ),
+    [allUnits, node.path, node.parent_id]
+  )
+  const [newParentId, setNewParentId] = useState(parentOptions[0]?.id ?? '')
+
+  const selectCls =
+    'text-sm font-sans bg-surface border border-border rounded-md px-2 py-1.5 outline-none focus:border-border-strong'
+
+  return (
+    <div
+      className="bg-surface-warm border border-border rounded-lg px-3 py-3 mt-1 space-y-3"
+      style={{ marginLeft: depth * 22 }}
+    >
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="block">
+          <span className="text-[11px] font-sans text-ink-secondary block mb-1">Тип подразделения</span>
+          <select value={typeCode} onChange={(e) => setTypeCode(e.target.value as any)} className={selectCls}>
+            {CREATABLE.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
+          </select>
+        </label>
+        <Button onClick={() => onRetype(typeCode)} loading={pending} disabled={typeCode === node.type_code}>
+          Изменить тип
+        </Button>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-2 pt-2.5 border-t border-border">
+        <label className="block flex-1 min-w-[240px]">
+          <span className="text-[11px] font-sans text-ink-secondary block mb-1">Переместить под</span>
+          <select value={newParentId} onChange={(e) => setNewParentId(e.target.value)} className={`${selectCls} w-full`}
+            title={allUnits.find((u) => u.id === newParentId)?.name ?? ''}>
+            {parentOptions.length === 0 && <option value="">Нет доступных родителей</option>}
+            {parentOptions.map((u) => <option key={u.id} value={u.id}>{TYPE_LABEL[u.type_code]}: {u.name}</option>)}
+          </select>
+        </label>
+        <Button onClick={() => newParentId && onMove(newParentId)} loading={pending} disabled={!newParentId}>
+          Переместить
+        </Button>
+      </div>
+
+      <div>
+        <button onClick={onClose} className="text-xs font-sans text-ink-secondary hover:text-ink px-2 py-1">Закрыть</button>
+      </div>
+    </div>
+  )
+}
+
 function IconBtn({ children, label, onClick, danger = false }: {
   children: React.ReactNode; label: string; onClick: () => void; danger?: boolean
 }) {
@@ -603,6 +735,7 @@ const CheckIcon  = () => <Svg><path d="M20 6 9 17l-5-5" /></Svg>
 const XIcon      = () => <Svg><path d="M18 6 6 18" /><path d="M6 6l12 12" /></Svg>
 const PencilIcon = () => <Svg><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></Svg>
 const TrashIcon  = () => <Svg><path d="M3 6h18" /><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></Svg>
+const GearIcon   = () => <Svg><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" /></Svg>
 const ChevronIcon = ({ open }: { open: boolean }) => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
        strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"

@@ -59,6 +59,17 @@ export async function deleteOrgUnit(unitId: string): Promise<void> {
   await client.delete(`/api/institution/structure/units/${unitId}`, { skipErrorToast: true })
 }
 
+// Deliberate re-type — type drives authorisation, so it's a separate, audited
+// operation rather than part of the rename PATCH.
+export async function retypeOrgUnit(unitId: string, typeCode: Exclude<OrgUnitType, 'institution'>): Promise<OrgUnit> {
+  return (await client.post<OrgUnit>(`/api/institution/structure/units/${unitId}/retype`, { typeCode }, { skipErrorToast: true })).data
+}
+
+// Move a unit (with its whole subtree) under a new parent.
+export async function moveOrgUnit(unitId: string, newParentId: string): Promise<OrgUnit> {
+  return (await client.post<OrgUnit>(`/api/institution/structure/units/${unitId}/move`, { newParentId }, { skipErrorToast: true })).data
+}
+
 // ─── Members & roles (slice 1b) ───────────────────────────────────────────────
 
 export type UnitRole = 'admin' | 'head' | 'viewer'

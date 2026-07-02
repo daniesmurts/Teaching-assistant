@@ -14,7 +14,81 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Added
+- **Org units — deliberate re-type and move operations (structure page).**
+  Until now a mis-typed or mis-placed unit was stuck: `updateOrgUnit` only
+  edited name/short_name/external_code, and delete is (correctly) blocked
+  while a unit has children/teachers — so an admin who built a subtree under a
+  wrongly-typed node had no fix. (The 2026-07-02 note that KNITU's direction
+  units "can be reclassified via the tree UI" now actually holds.) Two new
+  audited endpoints under `/api/institution/structure`: `POST /units/:id/retype`
+  (change `type_code`) and `POST /units/:id/move` (re-parent). Re-type is kept
+  separate from the rename PATCH because type drives authorisation
+  (governance/admin_office grant institution-wide programme access by type
+  alone); it's guarded — can't re-type the root, can't leave `department` while
+  teachers point at it, can't leave the program/program_direction pair while a
+  programme is linked. Move recomputes the materialised path for the unit AND
+  its whole subtree in one prefix-rewrite UPDATE (transactional), rejects
+  cycles (new parent inside the moved subtree) and cross-institution moves, and
+  maps the sibling-name UNIQUE violation to a clean Russian error. New queries
+  `retypeOrgUnit`, `moveOrgUnit`, `countDirectPrimaryMembers`; validation
+  `retypeOrgUnitRules` / `moveOrgUnitRules`; audit actions `org_unit.retyped` /
+  `org_unit.moved`. Frontend: a «Тип и размещение» (gear) panel per non-root
+  unit on `/institution/structure` with a type select + a parent select that
+  excludes the unit's own subtree (client-side cycle guard mirroring the
+  server). Verified path recompute + cycle rejection end-to-end against dev DB;
+  both typechecks clean, 143/143 tests green.
+- **Grant-role UI — blast-radius warnings + viewer honesty (S4/L8).** The
+  role-grant picker on the structure page now warns before an
+  institution-wide grant: `admin` on the institution root («равнозначно
+  администратору организации») and `head`/`admin` on a governance/admin_office
+  unit («дают доступ ко всем образовательным программам… а не только к этому
+  подразделению») — the type-based programme-access rule was previously
+  invisible at grant time. `viewer` now carries a note that it's recorded but
+  doesn't yet open any surface (nothing consumes the role), pointing the admin
+  at «Руководитель» for actual dashboard access.
+
 ### Fixed
+- **Institution members without a primary unit — silent leadership
+  undercounting (L1).** Migration 045/047 placed teachers who existed at §7
+  rollout into a default kafedra, but everyone who joined SINCE (invite,
+  email-domain auto-join, SAML JIT) landed with `primary_org_unit_id = NULL` —
+  invisible in leadership dashboards / structure headcounts and uncounted by
+  the delete guard. New `assignDefaultDepartmentIfUnset` (prefers the seeded
+  «Кафедра (по умолчанию)», else the institution's oldest department, never
+  overwrites an explicit placement) runs on every attach path: register via
+  invite/auto-join, SAML find-or-create (new and first-time-attached existing),
+  and the admin institution-move. Migration 053 heals the rows that went stale
+  in between (idempotent). Verified assignment + non-overwrite against dev DB.
+- **Lockout guard counted deactivated admins (S5).** `countRoleOnUnit` counted
+  `org_unit_roles` rows without checking `is_active`, so with one active + one
+  deactivated root admin, the last active admin's role could be revoked (count
+  = 2) leaving the org with zero usable admins. It now joins `teachers.is_active`;
+  the revoke route also skips the guard when the *holder* is already
+  deactivated (revoking from them can't worsen lockout). Verified active-vs-
+  deactivated counting against dev DB.
+- **Unit delete silently stranded linked programmes (L2).** The delete guard
+  checked child units + teachers but not `programs.org_unit_id` (ON DELETE SET
+  NULL) — deleting a `program`/`program_direction` unit unlinked the programme,
+  instantly dropping the РОП's access with no warning. `getOrgUnitDependents`
+  now also counts linked programmes and the route refuses the delete with a
+  clear Russian error pointing at the programme's «Подразделение в структуре»
+  detach control.
+- **Practice-type uniqueness now enforced (L4).** FEATURES claimed "same
+  practice type can't be used twice on one programme" since migration 050, but
+  nothing enforced it: the import batch never deduped `practice_types` and the
+  attach endpoint inserted a second file of the same type freely. Now: the
+  attach route replaces-on-reupload (`deletePracticeForType`, mirroring the
+  working_programme convention), the import route rejects duplicate types in the
+  batch, and migration 054 backs it with a partial unique index
+  `(program_id, practice_type) WHERE kind='practice'` (dedupes existing
+  violations, keeping the newest per type, first).
+- **Programme import was non-transactional (L5).** `POST /programs/import`
+  validated the practice file/type set AFTER `createProgram`, so a mismatched
+  count or unknown/duplicate type threw a 400 with the programme + disciplines +
+  competencies already persisted — the client retried into a duplicate. All
+  practice validation is now hoisted ahead of any row creation.
+
 - **Security: cross-institution leakage via stale org ties after a teacher
   reassignment.** When a platform admin moved a teacher between institutions
   (PATCH /api/admin/teachers/:id), the teacher's `org_unit_roles` rows and

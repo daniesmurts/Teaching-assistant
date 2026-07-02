@@ -94,19 +94,30 @@ export async function listOrgUnitsWithCounts(institutionId: string): Promise<Org
   return rows
 }
 
-/** Direct children + subtree member counts — used to block destructive deletes
- *  until the admin has moved everything out of a unit. */
-export async function getOrgUnitDependents(unitId: string): Promise<{ children: number; members: number }> {
-  const { rows } = await pool.query<{ children: string; members: string }>(
+/** Direct children + subtree member counts + linked programmes — used to block
+ *  destructive deletes until the admin has moved everything out of a unit.
+ *  `programs` counts rows linked to THIS unit only (not the subtree): deletion
+ *  already requires zero children, so the unit itself is the only possible
+ *  link carrier at delete time. Without this guard the FK's ON DELETE SET NULL
+ *  would silently unlink the programme and strand its РОП. */
+export async function getOrgUnitDependents(
+  unitId: string
+): Promise<{ children: number; members: number; programs: number }> {
+  const { rows } = await pool.query<{ children: string; members: string; programs: string }>(
     `SELECT
        (SELECT COUNT(*) FROM org_units c WHERE c.parent_id = $1) AS children,
        (SELECT COUNT(*) FROM teachers t
           JOIN org_units pu ON pu.id = t.primary_org_unit_id
           JOIN org_units u  ON u.id = $1
-         WHERE pu.path LIKE u.path || '%') AS members`,
+         WHERE pu.path LIKE u.path || '%') AS members,
+       (SELECT COUNT(*) FROM programs p WHERE p.org_unit_id = $1) AS programs`,
     [unitId]
   )
-  return { children: parseInt(rows[0].children, 10), members: parseInt(rows[0].members, 10) }
+  return {
+    children: parseInt(rows[0].children, 10),
+    members:  parseInt(rows[0].members, 10),
+    programs: parseInt(rows[0].programs, 10),
+  }
 }
 
 /** Ancestor chain of a unit — from the institution root down to (but excluding)
@@ -298,6 +309,89 @@ export async function updateOrgUnit(
   return rows[0] ?? null
 }
 
+/** Change a unit's type. The route layer enforces the semantic constraints
+ *  (not the root; can't leave `department` while teachers point at it; can't
+ *  leave the program/program_direction pair while a programme is linked) —
+ *  this just performs the write on a non-root unit. */
+export async function retypeOrgUnit(id: string, typeCode: OrgUnitType): Promise<OrgUnitRow | null> {
+  const { rows } = await pool.query<OrgUnitRow>(
+    `UPDATE org_units SET type_code = $2 WHERE id = $1 AND parent_id IS NOT NULL RETURNING *`,
+    [id, typeCode]
+  )
+  return rows[0] ?? null
+}
+
+/** Teachers whose primary department is THIS unit (direct, not subtree) —
+ *  used to block re-typing a department away while members point at it. */
+export async function countDirectPrimaryMembers(unitId: string): Promise<number> {
+  const { rows } = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM teachers WHERE primary_org_unit_id = $1`,
+    [unitId]
+  )
+  return parseInt(rows[0].count, 10)
+}
+
+/**
+ * Re-parent a unit (and implicitly its whole subtree) under a new parent in
+ * the same institution. Recomputes the materialised path for the unit and
+ * every descendant in one prefix-rewrite UPDATE. Refuses cycles (new parent
+ * inside the unit's own subtree) and cross-institution moves. Returns the
+ * updated unit, or null if the unit/parent vanished mid-flight.
+ */
+export async function moveOrgUnit(
+  unitId: string,
+  newParentId: string,
+  institutionId: string
+): Promise<OrgUnitRow | null> {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+
+    const unitQ = await client.query<OrgUnitRow>(
+      'SELECT * FROM org_units WHERE id = $1 AND institution_id = $2 FOR UPDATE',
+      [unitId, institutionId]
+    )
+    const unit = unitQ.rows[0]
+    if (!unit || !unit.parent_id) { await client.query('ROLLBACK'); return null }
+
+    const parentQ = await client.query<OrgUnitRow>(
+      'SELECT * FROM org_units WHERE id = $1 AND institution_id = $2 FOR UPDATE',
+      [newParentId, institutionId]
+    )
+    const parent = parentQ.rows[0]
+    if (!parent) { await client.query('ROLLBACK'); return null }
+
+    if (parent.id === unit.id || parent.path.startsWith(unit.path)) {
+      await client.query('ROLLBACK')
+      throw new Error('CYCLE') // route maps to a clean Russian error
+    }
+
+    const oldPath = unit.path
+    const newPath = `${parent.path}${unit.id}/`
+
+    await client.query(
+      'UPDATE org_units SET parent_id = $2 WHERE id = $1',
+      [unit.id, parent.id]
+    )
+    // Rewrite the prefix for the unit and its entire subtree in one pass.
+    await client.query(
+      `UPDATE org_units
+          SET path = $2 || substring(path FROM length($1) + 1)
+        WHERE path LIKE $1 || '%'`,
+      [oldPath, newPath]
+    )
+
+    const updated = await client.query<OrgUnitRow>('SELECT * FROM org_units WHERE id = $1', [unit.id])
+    await client.query('COMMIT')
+    return updated.rows[0]
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
 /** Delete a unit. Children CASCADE; role rows on it CASCADE. Refuses to delete
  *  a root institution unit (callers should delete the institution instead). */
 export async function deleteOrgUnit(id: string): Promise<boolean> {
@@ -341,6 +435,34 @@ export async function setPrimaryOrgUnit(teacherId: string, orgUnitId: string | n
   await pool.query(
     'UPDATE teachers SET primary_org_unit_id = $2 WHERE id = $1',
     [teacherId, orgUnitId]
+  )
+}
+
+/**
+ * Place a teacher into their institution's default department if they have no
+ * primary unit yet. Prefers the seeded «Кафедра (по умолчанию)», falls back to
+ * the institution's oldest department, does nothing if the institution has no
+ * departments at all. Never overwrites an existing assignment — the admin's
+ * explicit placement always wins. Called on every path that attaches a teacher
+ * to an institution (register via invite / auto-join, SAML JIT, admin move) so
+ * new members are visible in leadership dashboards and structure headcounts
+ * instead of silently floating outside the tree.
+ */
+export async function assignDefaultDepartmentIfUnset(
+  teacherId: string,
+  institutionId: string
+): Promise<void> {
+  await pool.query(
+    `UPDATE teachers t
+        SET primary_org_unit_id = d.id
+       FROM (SELECT id
+               FROM org_units
+              WHERE institution_id = $2 AND type_code = 'department'
+              ORDER BY (name = 'Кафедра (по умолчанию)') DESC, created_at ASC
+              LIMIT 1) d
+      WHERE t.id = $1
+        AND t.primary_org_unit_id IS NULL`,
+    [teacherId, institutionId]
   )
 }
 
@@ -431,11 +553,16 @@ export async function isTeacherInInstitution(teacherId: string, institutionId: s
   return rows[0]?.ok ?? false
 }
 
-/** Count holders of a given role directly on a unit — used to prevent removing
- *  the last admin on the institution root (lockout guard). */
+/** Count ACTIVE holders of a given role directly on a unit — used to prevent
+ *  removing the last admin on the institution root (lockout guard). Joins
+ *  teachers.is_active: a deactivated admin can't log in, so counting them
+ *  would let the guard wave through a revocation that locks the org out. */
 export async function countRoleOnUnit(unitId: string, role: UnitRole): Promise<number> {
   const { rows } = await pool.query<{ count: string }>(
-    `SELECT COUNT(*) AS count FROM org_unit_roles WHERE org_unit_id = $1 AND role = $2`,
+    `SELECT COUNT(*) AS count
+       FROM org_unit_roles our
+       JOIN teachers t ON t.id = our.teacher_id
+      WHERE our.org_unit_id = $1 AND our.role = $2 AND t.is_active`,
     [unitId, role]
   )
   return parseInt(rows[0].count, 10)

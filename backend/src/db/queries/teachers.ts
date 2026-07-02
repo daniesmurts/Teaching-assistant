@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import { randomBytes } from 'node:crypto'
 import { pool } from '../connection'
+import { assignDefaultDepartmentIfUnset } from './orgUnits'
 import type { Teacher } from '../../../../shared/types'
 
 // ─── Full DB row (includes fields not in the public Teacher type) ─────────────
@@ -294,6 +295,11 @@ export async function findOrCreateSamlTeacher(params: {
        WHERE id = $1`,
       [existing.id, params.samlSubject, params.institutionId]
     )
+    const row = (await findTeacherRowById(existing.id))!
+    // If this login just attached them to the institution (or they were a
+    // member without a primary unit), place them into the default kafedra so
+    // they surface in leadership dashboards. Never overwrites a placement.
+    if (row.institution_id) await assignDefaultDepartmentIfUnset(row.id, row.institution_id)
     return (await findTeacherRowById(existing.id))!
   }
 
@@ -309,6 +315,10 @@ export async function findOrCreateSamlTeacher(params: {
      RETURNING *`,
     [email, passwordHash, params.name, params.institutionId, params.samlSubject]
   )
+  // New SAML teacher — place into the institution's default kafedra (§7:
+  // every member should sit somewhere in the tree from day one).
+  await assignDefaultDepartmentIfUnset(rows[0].id, params.institutionId)
+
   // findOrCreate must return the full institution-joined row so the JWT can
   // be minted with the right effective tier — re-fetch through the joined query.
   return (await findTeacherRowById(rows[0].id))!

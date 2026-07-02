@@ -26,7 +26,7 @@ import { setProgramDocs } from '../db/queries/programs'
 import { uploadObject, downloadObject, deleteObject } from '../services/objectStorage'
 import {
   insertProgramDocument, listProgramDocuments, findProgramDocument, deleteProgramDocument,
-  findWorkingProgrammeForDiscipline, deleteWorkingProgrammeForDiscipline,
+  findWorkingProgrammeForDiscipline, deleteWorkingProgrammeForDiscipline, deletePracticeForType,
 } from '../db/queries/programDocuments'
 import { insertReview, getLatestReviewByDiscipline } from '../db/queries/programDocumentReviews'
 import { logger } from '../lib/logger'
@@ -205,6 +205,31 @@ router.post(
     const name = String(req.body.name ?? req.body.specialty_name ?? '').trim()
     if (name.length < 2) throw new ValidationError('Укажите наименование программы.')
 
+    // Validate the practice set UP FRONT — the programme row is created below,
+    // and a validation error thrown after creation would leave a half-created
+    // programme behind a 400 (the client then retries into a duplicate).
+    const practiceFiles = files?.practices ?? []
+    const practiceTypes: ProgramPracticeType[] = []
+    if (practiceFiles.length > 0) {
+      const rawTypes = req.body.practice_types
+      const types    = Array.isArray(rawTypes) ? rawTypes : rawTypes ? [rawTypes] : []
+      if (types.length !== practiceFiles.length) {
+        throw new ValidationError(
+          'Каждой практике нужно указать её тип (полей practice_types должно быть столько же, сколько файлов)'
+        )
+      }
+      for (const raw of types) {
+        const type = String(raw)
+        if (!PROGRAM_PRACTICE_TYPES.includes(type as ProgramPracticeType)) {
+          throw new ValidationError(`Неизвестный тип практики: ${type}`)
+        }
+        if (practiceTypes.includes(type as ProgramPracticeType)) {
+          throw new ValidationError(`Тип практики указан дважды: ${type} — на программу допускается один файл каждого типа`)
+        }
+        practiceTypes.push(type as ProgramPracticeType)
+      }
+    }
+
     const teacherId = req.teacher.id
     const institutionIdOpt = req.teacher.institution_id ?? undefined
     const warnings: string[] = []
@@ -272,32 +297,19 @@ router.post(
     if (competencies.length > 0) await replaceCompetencies(program.id, competencies)
     if (disciplines.length > 0)  await replaceDisciplines(program.id, disciplines)
 
-    // Attach практики as first-class documents. They come as parallel arrays
-    // (files + practice_types); we validate lengths and the type constant
-    // before touching storage. Рабочая программа is attached later, per
-    // discipline, via POST /:id/documents (migration 051).
-    const practiceFiles = files?.practices ?? []
-    if (practiceFiles.length > 0) {
-      const rawTypes = req.body.practice_types
-      const types    = Array.isArray(rawTypes) ? rawTypes : rawTypes ? [rawTypes] : []
-      if (types.length !== practiceFiles.length) {
-        throw new ValidationError(
-          'Каждой практике нужно указать её тип (полей practice_types должно быть столько же, сколько файлов)'
-        )
-      }
-      for (let i = 0; i < practiceFiles.length; i++) {
-        const type = String(types[i])
-        if (!PROGRAM_PRACTICE_TYPES.includes(type as ProgramPracticeType)) {
-          throw new ValidationError(`Неизвестный тип практики: ${type}`)
-        }
-        await attachProgramDocument({
-          programId:    program.id,
-          kind:         'practice',
-          practiceType: type as ProgramPracticeType,
-          file:         practiceFiles[i],
-          uploadedBy:   teacherId,
-        })
-      }
+    // Attach практики as first-class documents — the set was fully validated
+    // (lengths, type constants, duplicates) BEFORE the programme was created,
+    // so nothing here can 400 out and strand a half-created programme.
+    // Рабочая программа is attached later, per discipline, via
+    // POST /:id/documents (migration 051).
+    for (let i = 0; i < practiceFiles.length; i++) {
+      await attachProgramDocument({
+        programId:    program.id,
+        kind:         'practice',
+        practiceType: practiceTypes[i],
+        file:         practiceFiles[i],
+        uploadedBy:   teacherId,
+      })
     }
 
     res.status(201).json({
@@ -440,6 +452,16 @@ router.post(
     if (kind === 'practice') {
       if (!practiceType || !PROGRAM_PRACTICE_TYPES.includes(practiceType)) {
         throw new ValidationError('Укажите тип практики')
+      }
+      // One file per practice type per programme (FEATURES invariant, backed
+      // by the partial unique index from migration 054) — a re-upload of the
+      // same type replaces the previous file, same convention as рабочая
+      // программа below.
+      const existing = await deletePracticeForType(detail.id, practiceType)
+      if (existing) {
+        await deleteObject(existing.storagePath).catch((err) =>
+          logger.warn({ message: 'Failed to delete replaced practice document object', error: (err as Error).message })
+        )
       }
     }
 

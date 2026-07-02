@@ -56,6 +56,18 @@ export const setPrimaryRules = [
   body('unitId').isUUID().withMessage('Некорректный идентификатор подразделения'),
 ]
 
+// Deliberate re-type: separate from the rename PATCH because type drives
+// authorisation (governance/admin_office grant institution-wide programme
+// access by type alone) — a type change must be an explicit, audited act.
+export const retypeOrgUnitRules = [
+  body('typeCode')
+    .isIn(CREATABLE_TYPES).withMessage('Недопустимый тип подразделения'),
+]
+
+export const moveOrgUnitRules = [
+  body('newParentId').isUUID().withMessage('Некорректный идентификатор нового родителя'),
+]
+
 export const updateOrgUnitRules = [
   body('name')
     .optional()

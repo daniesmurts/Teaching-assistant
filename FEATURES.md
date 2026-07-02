@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-07-02 (org-structure audit logging + cross-institution stale-ties fix; earlier same day: discipline-scoped РПД library + coverage check + auto-detect + `program_direction` type)
+**Last updated:** 2026-07-02 (org-unit re-type/move + default-department placement + grant-warning UI + delete/lockout/practice-uniqueness hardening; earlier: org-structure audit logging + cross-institution stale-ties fix; discipline-scoped РПД library + coverage check + auto-detect + `program_direction` type)
 
 ---
 
@@ -16,8 +16,10 @@ commit** as any feature change.
 | **Teacher — Free** | default on signup | Limited grading/presentations, no docs/RAG/email |
 | **Teacher — Pro** | paid (T-Bank) | Unlimited, document upload, RAG, email drafts, full history |
 | **Institution member** | invite or email-domain auto-join | Inherits full institution entitlements + shared criteria |
-| **Institution admin** | set by platform admin | Manage own institution (teachers, invites, criteria, usage, audit) |
+| **Institution admin** | platform admin sets the first (`admin` on the institution root); an institution admin can then grant `admin`-on-root to peers via Структура | Manage own institution (teachers, invites, criteria, usage, audit, org tree + roles) |
 | **Platform admin** | set in DB | Full platform: teachers, institutions, templates, billing, feedback, errors |
+
+**Unit-scoped roles** (`admin` / `head` / `viewer`, granted on any org unit, cascade down the tree): `admin` on the institution root = institution admin. `head`/`admin` on a `governance`/`admin_office` unit grants institution-wide programme access by unit type; on any other unit it scopes to that unit's subtree. The grant UI warns before an institution-wide grant. `viewer` is recorded but not yet consumed by any surface (labelled as such in the UI).
 
 Entitlements are computed as the **stronger of** the teacher's own tier and their
 institution's tier (`backend/src/middleware/authenticate.ts`).
@@ -126,7 +128,7 @@ A teacher granted `Руководитель` or sub-unit `Администрат
 
 Panel at `/institution` (gated to `institution_admin` / `platform_admin`):
 - **Overview** — teacher / grade / presentation counts, 30-day activity chart
-- **Структура (org-structure tree builder)** 🚧 — build the institution's unit tree (управления/центры → институты/факультеты → полигруппы → образовательные программы (ОП / УГСН) → направления подготовки → кафедры) at flexible depth: add units under any node (one at a time *or* «Списком» — paste many siblings of one type in a single batch, up to 200), rename, delete (blocked until the unit is emptied of sub-units and teachers). `program` (broad ОП like 15.00.00) and `program_direction` (a specific 15.03.02) are both valid programme anchors; narrow ОП link directly at the ОП level, broad ОП host направления with different РОПы. Each unit shows its subtree headcount. Below the tree, **«Преподаватели и роли»**: assign each teacher to a kafedra and grant per-unit roles — Администратор / Руководитель / Наблюдатель — that cascade down the tree (revoking the last root admin is blocked to prevent lockout). §7 org model; remaining step is switching all admin routes onto the unit-scoped authoriser.
+- **Структура (org-structure tree builder)** 🚧 — build the institution's unit tree (управления/центры → институты/факультеты → полигруппы → образовательные программы (ОП / УГСН) → направления подготовки → кафедры) at flexible depth: add units under any node (one at a time *or* «Списком» — paste many siblings of one type in a single batch, up to 200), rename, **change a unit's type or move it (with its whole subtree) under a new parent** via the «Тип и размещение» panel (re-type guarded against orphaning teachers/programmes; move rejects cycles and rewrites subtree paths in one transaction), delete (blocked until the unit is emptied of sub-units, teachers, **and linked programmes**). `program` (broad ОП like 15.00.00) and `program_direction` (a specific 15.03.02) are both valid programme anchors; narrow ОП link directly at the ОП level, broad ОП host направления with different РОПы. Each unit shows its subtree headcount. Below the tree, **«Преподаватели и роли»**: assign each teacher to a kafedra and grant per-unit roles — Администратор / Руководитель / Наблюдатель — that cascade down the tree (revoking the last *active* root admin is blocked to prevent lockout; the grant picker warns before an institution-wide grant, and «Наблюдатель» is labelled as not-yet-consumed). New institution members auto-land in the default kafedra so they're immediately visible in headcounts/leadership. §7 org model; remaining step is switching all admin routes onto the unit-scoped authoriser.
 - **Usage** — tokens + grade/presentation counts over time, **CSV export** (never shows cost)
 - **Teachers** — list, activate/deactivate (frees a seat), single invite, **bulk invite** (paste list), revoke invites. Pending invites whose email was rejected by the provider show «Письмо не доставлено» with the reason (migration 048).
 - **Criteria** — create institution-shared criteria (appear in every member's grading picker)

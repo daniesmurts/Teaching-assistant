@@ -15,7 +15,7 @@ import {
   listInstitutionsWithCounts, createInstitution, updateInstitution,
   getSamlConfig, setSamlConfig,
 } from '../db/queries/institutions'
-import { syncRoleToTree, clearOrgTiesOutsideInstitution } from '../db/queries/orgUnits'
+import { syncRoleToTree, clearOrgTiesOutsideInstitution, assignDefaultDepartmentIfUnset } from '../db/queries/orgUnits'
 import { metadataUrlForInstitution, acsUrlForInstitution } from '../services/saml'
 import { listFeedback } from '../db/queries/feedback'
 import {
@@ -309,6 +309,11 @@ router.patch('/teachers/:id', asyncHandler(async (req, res) => {
   // syncRoleToTree so a role sync re-grants admin-on-root in the NEW tree only.
   if (hasInstitution && prevInstitutionId !== rows[0].institution_id) {
     await clearOrgTiesOutsideInstitution(rows[0].id, rows[0].institution_id)
+    // Moved into an institution → land in its default kafedra (same rule as
+    // registration) so the teacher is immediately visible in the new tree.
+    if (rows[0].institution_id) {
+      await assignDefaultDepartmentIfUnset(rows[0].id, rows[0].institution_id)
+    }
   }
 
   // Keep the §7 org tree authoritative: when the role changes, mirror it into

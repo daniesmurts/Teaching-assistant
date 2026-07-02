@@ -112,6 +112,26 @@ export async function deleteWorkingProgrammeForDiscipline(
   return rows[0] ? { storagePath: rows[0].storage_path } : null
 }
 
+/**
+ * Deletes the existing practice document of a given type on a programme, if
+ * any, so a re-upload replaces rather than accumulates — the FEATURES.md
+ * invariant is one file per practice type per programme (enforced by the
+ * partial unique index from migration 054; this keeps the happy path a
+ * replace instead of a constraint error). Returns the deleted row's storage
+ * path for best-effort object cleanup, same as the working_programme twin.
+ */
+export async function deletePracticeForType(
+  programId: string, practiceType: ProgramPracticeType
+): Promise<{ storagePath: string } | null> {
+  const { rows } = await pool.query<{ storage_path: string }>(
+    `DELETE FROM program_documents
+      WHERE program_id = $1 AND practice_type = $2 AND kind = 'practice'
+      RETURNING storage_path`,
+    [programId, practiceType]
+  )
+  return rows[0] ? { storagePath: rows[0].storage_path } : null
+}
+
 export async function deleteProgramDocument(id: string, programId: string): Promise<boolean> {
   const { rowCount } = await pool.query(
     `DELETE FROM program_documents WHERE id = $1 AND program_id = $2`,

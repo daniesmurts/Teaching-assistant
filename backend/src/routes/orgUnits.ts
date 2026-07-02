@@ -6,11 +6,13 @@ import { asyncHandler } from '../lib/asyncHandler'
 import { ValidationError, NotFoundError } from '../errors/AppError'
 import {
   createOrgUnitRules, bulkCreateOrgUnitsRules, updateOrgUnitRules,
+  retypeOrgUnitRules, moveOrgUnitRules,
   grantRoleRules, setPrimaryRules,
 } from '../validation/orgUnitValidation'
 import {
   listOrgUnitsWithCounts, getOrgUnitById, getOrgUnitDependents,
   createOrgUnit, bulkCreateOrgUnits, updateOrgUnit, deleteOrgUnit,
+  retypeOrgUnit, moveOrgUnit, countDirectPrimaryMembers,
   listInstitutionMembersWithRoles, isTeacherInInstitution, countRoleOnUnit,
   addUnitRole, removeUnitRole, setPrimaryOrgUnit, getRootUnitForInstitution,
   type OrgUnitType, type UnitRole,
@@ -123,6 +125,81 @@ router.patch('/units/:unitId', validate(updateOrgUnitRules), asyncHandler(async 
   res.json(updated)
 }))
 
+// ─── Re-type a unit (deliberate — type drives authorisation) ─────────────────
+
+const PROGRAM_PAIR = new Set(['program', 'program_direction'])
+
+router.post('/units/:unitId/retype', validate(retypeOrgUnitRules), asyncHandler(async (req, res) => {
+  const instId = institutionId(req)
+  const unit = await unitInInstitution(req.params.unitId, instId)
+  const newType = req.body.typeCode as OrgUnitType
+
+  if (!unit.parent_id) throw new ValidationError('Нельзя изменить тип корневого подразделения')
+  if (newType === unit.type_code) { res.json(unit); return }
+
+  // Teachers are anchored to departments (§7.1) — re-typing a department away
+  // while members point at it would orphan their primary unit.
+  if (unit.type_code === 'department' && newType !== 'department') {
+    const members = await countDirectPrimaryMembers(unit.id)
+    if (members > 0) {
+      throw new ValidationError(
+        `К кафедре привязаны преподаватели (${members}) — сначала переведите их в другую кафедру`
+      )
+    }
+  }
+
+  // program ↔ program_direction reclassification is always allowed (both are
+  // valid programme anchors); leaving the pair while a programme is linked
+  // would break the РОП's scope resolution.
+  if (PROGRAM_PAIR.has(unit.type_code) && !PROGRAM_PAIR.has(newType)) {
+    const { programs } = await getOrgUnitDependents(unit.id)
+    if (programs > 0) {
+      throw new ValidationError(
+        `К подразделению привязаны образовательные программы (${programs}) — сначала отвяжите их`
+      )
+    }
+  }
+
+  const updated = await retypeOrgUnit(unit.id, newType)
+  if (!updated) throw new NotFoundError('Подразделение')
+  recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
+    action: 'org_unit.retyped', target: updated.name,
+    metadata: { unitId: updated.id, fromType: unit.type_code, toType: newType } })
+  res.json(updated)
+}))
+
+// ─── Move a unit (and its subtree) under a new parent ────────────────────────
+
+router.post('/units/:unitId/move', validate(moveOrgUnitRules), asyncHandler(async (req, res) => {
+  const instId = institutionId(req)
+  const unit = await unitInInstitution(req.params.unitId, instId)
+  if (!unit.parent_id) throw new ValidationError('Нельзя переместить корневое подразделение')
+
+  const newParent = await unitInInstitution(req.body.newParentId, instId)
+  if (newParent.id === unit.parent_id) { res.json(unit); return }
+
+  let moved
+  try {
+    moved = await moveOrgUnit(unit.id, newParent.id, instId)
+  } catch (err) {
+    if ((err as Error).message === 'CYCLE') {
+      throw new ValidationError('Нельзя переместить подразделение внутрь его собственной структуры')
+    }
+    // UNIQUE (institution_id, parent_id, name) — a sibling with this name
+    // already exists under the new parent.
+    if ((err as { code?: string }).code === '23505') {
+      throw new ValidationError('У нового родителя уже есть подразделение с таким названием')
+    }
+    throw err
+  }
+  if (!moved) throw new NotFoundError('Подразделение')
+
+  recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
+    action: 'org_unit.moved', target: moved.name,
+    metadata: { unitId: moved.id, toParentId: newParent.id, toParentName: newParent.name } })
+  res.json(moved)
+}))
+
 // ─── Delete a unit ────────────────────────────────────────────────────────────
 
 router.delete('/units/:unitId', asyncHandler(async (req, res) => {
@@ -134,10 +211,18 @@ router.delete('/units/:unitId', asyncHandler(async (req, res) => {
   }
 
   // Refuse to mass-orphan: the admin must move children and teachers out first.
-  const { children, members } = await getOrgUnitDependents(unit.id)
+  const { children, members, programs } = await getOrgUnitDependents(unit.id)
   if (children > 0 || members > 0) {
     throw new ValidationError(
       `Сначала переместите вложенные подразделения (${children}) и преподавателей (${members}) из этого подразделения`
+    )
+  }
+  // Linked programmes would be silently unlinked by the FK's SET NULL — the
+  // РОП instantly loses access and only an IT admin can re-link. Make the
+  // admin detach deliberately (programme detail → «Подразделение в структуре»).
+  if (programs > 0) {
+    throw new ValidationError(
+      `К подразделению привязаны образовательные программы (${programs}) — сначала отвяжите их на странице программы`
     )
   }
 
@@ -194,8 +279,13 @@ router.delete('/roles', validate(grantRoleRules), asyncHandler(async (req, res) 
   const { teacherId, unitId, role } = req.body
   if (!(await isTeacherInInstitution(teacherId, instId))) throw new NotFoundError('Преподаватель')
   const unit = await unitInInstitution(unitId, instId)
+  const member = await findTeacherRowById(teacherId)
 
-  if (role === 'admin') {
+  // Lockout guard: never revoke the last ACTIVE admin on the institution root
+  // (countRoleOnUnit counts active holders only — a deactivated admin can't
+  // log in and mustn't satisfy the guard). Revoking from an already-
+  // deactivated holder can't worsen lockout, so it's always allowed.
+  if (role === 'admin' && member?.is_active) {
     const root = await getRootUnitForInstitution(instId)
     if (root && root.id === unitId && (await countRoleOnUnit(unitId, 'admin')) <= 1) {
       throw new ValidationError('Нельзя снять роль у последнего администратора организации')
@@ -203,7 +293,6 @@ router.delete('/roles', validate(grantRoleRules), asyncHandler(async (req, res) 
   }
 
   await removeUnitRole(teacherId, unitId, role as UnitRole)
-  const member = await findTeacherRowById(teacherId)
   recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
     action: 'org_role.revoked', target: member?.email ?? teacherId,
     metadata: { teacherId, role, unitId, unitName: unit.name, unitType: unit.type_code } })
