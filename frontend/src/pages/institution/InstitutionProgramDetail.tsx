@@ -13,6 +13,7 @@ import { getPickableProgramUnits } from '../../api/programs'
 import {
   PROGRAM_PRACTICE_LABEL, PROGRAM_PRACTICE_TYPES,
   type ProgramDocument, type ProgramPracticeType, type ProgramDocumentReview,
+  type DisciplineCoverageItem, type IndicatorDimension,
 } from '../../types'
 import { useAuthStore } from '../../store/authStore'
 import { EXAMPLE_PROGRAM } from '../../lib/programExample'
@@ -793,19 +794,7 @@ function DisciplineCoverageSection({
                   {review.result.summary && (
                     <p className="text-xs font-sans text-ink-secondary leading-relaxed">{review.result.summary}</p>
                   )}
-                  {review.result.items.map((it, i) => {
-                    const meta = COVERAGE_STATUS_META[it.status]
-                    return (
-                      <div key={i} className="text-xs font-sans border-l-2 pl-2.5" style={{ borderColor: meta.color }}>
-                        <div className="flex items-center gap-2">
-                          <span className="text-ink font-medium">{it.code ? `${it.code} — ${it.title}` : it.title}</span>
-                          <span style={{ color: meta.color }}>{meta.label}</span>
-                        </div>
-                        {it.evidence && <div className="text-ink-tertiary italic mt-0.5">«{it.evidence}»</div>}
-                        {it.note && <div className="text-ink-secondary mt-0.5">{it.note}</div>}
-                      </div>
-                    )
-                  })}
+                  {review.result.items.map((it, i) => <CoverageItemRow key={i} it={it} />)}
                 </div>
               )}
             </details>
@@ -1118,16 +1107,57 @@ function DisciplineDocumentRow({
           {review.result.summary && (
             <p className="text-xs font-sans text-ink-secondary leading-relaxed">{review.result.summary}</p>
           )}
-          {review.result.items.map((it, i) => {
-            const meta = COVERAGE_STATUS_META[it.status]
+          {review.result.items.map((it, i) => <CoverageItemRow key={i} it={it} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function countByStatus(items: DisciplineCoverageItem[]): { covered: number; partial: number; missing: number } {
+  const counts = { covered: 0, partial: 0, missing: 0 }
+  for (const it of items) counts[it.status]++
+  return counts
+}
+
+const DIMENSION_LABEL: Record<IndicatorDimension, string> = {
+  knowledge: 'Знать', skill: 'Уметь', mastery: 'Владеть',
+}
+
+// One competency row in a coverage breakdown, with its индикаторы достижения
+// nested beneath it (ФГОС 3++). The competency's own status is the roll-up of
+// its indicators; each indicator shows its Знать/Уметь/Владеть layer, status,
+// evidence quote and note. Legacy reviews (no indicators) render as before.
+function CoverageItemRow({ it }: { it: DisciplineCoverageItem }) {
+  const meta = COVERAGE_STATUS_META[it.status]
+  return (
+    <div className="text-xs font-sans border-l-2 pl-2.5" style={{ borderColor: meta.color }}>
+      <div className="flex items-center gap-2">
+        <span className="text-ink font-medium">{it.code ? `${it.code} — ${it.title}` : it.title}</span>
+        <span style={{ color: meta.color }}>{meta.label}</span>
+        {it.indicators && it.indicators.length > 0 && (
+          <span className="text-ink-tertiary">· {it.indicators.length} индик.</span>
+        )}
+      </div>
+      {it.evidence && <div className="text-ink-tertiary italic mt-0.5">«{it.evidence}»</div>}
+      {it.note && <div className="text-ink-secondary mt-0.5">{it.note}</div>}
+      {it.indicators && it.indicators.length > 0 && (
+        <div className="mt-1.5 ml-0.5 space-y-1.5 border-l border-border pl-2.5">
+          {it.indicators.map((ind, j) => {
+            const im = COVERAGE_STATUS_META[ind.status]
             return (
-              <div key={i} className="text-xs font-sans border-l-2 pl-2.5" style={{ borderColor: meta.color }}>
-                <div className="flex items-center gap-2">
-                  <span className="text-ink font-medium">{it.code ? `${it.code} — ${it.title}` : it.title}</span>
-                  <span style={{ color: meta.color }}>{meta.label}</span>
+              <div key={j}>
+                <div className="flex items-baseline gap-1.5 flex-wrap">
+                  <span className="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0 translate-y-[-1px]" style={{ background: im.color }} />
+                  {ind.code && <span className="font-mono text-ink-secondary">{ind.code}</span>}
+                  {ind.dimension && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-tertiary">{DIMENSION_LABEL[ind.dimension]}</span>
+                  )}
+                  <span className="text-ink">{ind.title}</span>
+                  <span style={{ color: im.color }}>{im.label}</span>
                 </div>
-                {it.evidence && <div className="text-ink-tertiary italic mt-0.5">«{it.evidence}»</div>}
-                {it.note && <div className="text-ink-secondary mt-0.5">{it.note}</div>}
+                {ind.evidence && <div className="text-ink-tertiary italic ml-3 mt-0.5">«{ind.evidence}»</div>}
+                {ind.note && <div className="text-ink-secondary ml-3 mt-0.5">{ind.note}</div>}
               </div>
             )
           })}
@@ -1135,12 +1165,6 @@ function DisciplineDocumentRow({
       )}
     </div>
   )
-}
-
-function countByStatus(items: import('../../types').DisciplineCoverageItem[]): { covered: number; partial: number; missing: number } {
-  const counts = { covered: 0, partial: 0, missing: 0 }
-  for (const it of items) counts[it.status]++
-  return counts
 }
 
 function CoverageChip({ label, value, status }: { label: string; value: number; status: 'covered' | 'partial' | 'missing' }) {

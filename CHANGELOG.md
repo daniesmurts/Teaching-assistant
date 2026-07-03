@@ -14,7 +14,51 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Fixed
+- **Uploaded РПД silently wiped on save/analyze (data loss).** `replaceDisciplines`
+  did a blanket `DELETE` + re-`INSERT` of every discipline, regenerating their
+  UUIDs. Because `program_documents.discipline_id` and
+  `program_document_reviews.discipline_id` are `ON DELETE CASCADE`, **every
+  uploaded discipline рабочая программа (and its coverage review) was cascade-
+  deleted whenever the plan was saved or analysed** — and both «Сохранить» and
+  «Анализировать» call `saveDisciplines`. The churned ids also broke reupload:
+  the client's now-stale `discipline_id` failed the backend's
+  `disciplines.some(d => d.id === disciplineId)` guard with a 400. Fixed by
+  making `replaceDisciplines` **reconcile instead of wipe** — existing
+  disciplines (which carry their id from the client) are `UPDATE`d in place so
+  their ids stay stable and document/review links survive; only disciplines the
+  user actually removed are deleted (their docs cascade, which is correct); new
+  disciplines insert fresh. No migration (the CASCADE is right; the id churn was
+  the bug). Verified end-to-end against dev DB (doc survives re-save + edits,
+  drops only on real removal, survives adding a new discipline — zero residue);
+  typecheck clean, 149/149 tests green. Also split the РПД-upload guard so a
+  stale/unknown `discipline_id` returns a clear recovery message («Дисциплина не
+  найдена — возможно, учебный план был изменён. Обновите страницу…») instead of
+  the misleading «Укажите дисциплину…» (which they had).
+
 ### Added
+- **РПД coverage check now scores at the индикатор level (Feature K, Option A).**
+  The discipline conformance check («Проверить соответствие компетенциям») used
+  to verdict a whole competency (ОПК-14) as covered/partial/missing — too coarse
+  to act on. It now decomposes each declared competency into its **индикаторы
+  достижения** (ОПК-14.1/.2/.3) with their **Знать/Уметь/Владеть** layer, scores
+  whether the discipline **content** (лекции/практ/лаб/СРС/ФОС) actually delivers
+  each indicator (evidence-validated verbatim quote + note), and **rolls the
+  competency status up from its indicators** (all covered → covered; all missing
+  → missing; else partial). That makes «частично» self-explanatory — you see
+  exactly which indicator/dimension is the gap (e.g. ОПК-14.3 «Владеть» under-
+  covered because content is limited to учебные примеры). `overall_coverage` is
+  computed at the finer indicator granularity when indicators are present.
+  Types: `DisciplineCoverageIndicator` + optional `indicators[]` on
+  `DisciplineCoverageItem` (backward-compatible — legacy reviews and goals lack
+  it and render at competency level as before); persisted in the existing
+  `program_document_reviews` JSONB, **no migration**. Frontend: a shared
+  `CoverageItemRow` renders indicators nested under each competency (code +
+  dimension + status + evidence + note) in both the Documents-tab inline
+  breakdown and the Report tab. Pure `rollUp` unit-tested (6 cases). This is
+  Option A (indicators extracted from the РПД's own section 3); the programme-
+  authoritative competency-indicator library (Option B) remains future work.
+  Both typechecks clean, 149/149 tests green.
 - **Platform-wide activity logging.** `audit_log` (previously written only by the
   admin/org-structure routes) now records *every* successful state-changing
   request from an authenticated user. A global `auditLog` middleware

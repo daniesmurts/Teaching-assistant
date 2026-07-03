@@ -471,8 +471,17 @@ router.post(
     let disciplineId: string | null = null
     if (kind === 'working_programme') {
       disciplineId = String(req.body.discipline_id ?? '')
-      if (!disciplineId || !detail.disciplines.some((d) => d.id === disciplineId)) {
+      if (!disciplineId) {
         throw new ValidationError('Укажите дисциплину, к которой относится рабочая программа')
+      }
+      // A discipline_id that no longer matches any current discipline almost
+      // always means the page is stale — the учебный план was re-saved (which
+      // used to churn ids). Give a clear recovery path instead of the
+      // misleading "specify the discipline" (they did specify one).
+      if (!detail.disciplines.some((d) => d.id === disciplineId)) {
+        throw new ValidationError(
+          'Дисциплина не найдена — возможно, учебный план был изменён. Обновите страницу и загрузите файл заново.'
+        )
       }
       const existing = await deleteWorkingProgrammeForDiscipline(detail.id, disciplineId)
       if (existing) {

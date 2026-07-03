@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-07-03 (platform-wide activity logging: global audit middleware records every member mutation + IP/UA, new platform-admin Журнал действий with filters; earlier: programme-metadata on org units → prefilled РОП import; org-unit re-type/move + default-department placement + grant-warning UI + delete/lockout/practice-uniqueness hardening; earlier: org-structure audit logging + cross-institution stale-ties fix; discipline-scoped РПД library + coverage check + auto-detect + `program_direction` type)
+**Last updated:** 2026-07-03 (indicator-level РПД coverage check — индикаторы достижения + Знать/Уметь/Владеть, rolled up to competency; platform-wide activity logging: global audit middleware records every member mutation + IP/UA, new platform-admin Журнал действий with filters; earlier: programme-metadata on org units → prefilled РОП import; org-unit re-type/move + default-department placement + grant-warning UI + delete/lockout/practice-uniqueness hardening; earlier: org-structure audit logging + cross-institution stale-ties fix; discipline-scoped РПД library + coverage check + auto-detect + `program_direction` type)
 
 ---
 
@@ -99,7 +99,7 @@ A teacher granted `head` on a `program` or `program_direction` org_unit sees **�
 Per-programme surfaces on the detail page:
 - **Конструктор** — edit the extracted disciplines and competencies by semester.
 - **Отчёт (analysis)** — sequencing & prerequisites, competency progression map, gaps & redundancy, relatedness clusters + per-semester load. Cached; last analysis exportable as a branded PDF.
-- **Документы** — per-discipline РПД library. Every discipline gets its own upload slot; on upload we extract the text and **auto-detect which competency codes the РПД declares** (filtered against the programme's own competency set), pre-populating `competency_codes` so «Проверить соответствие компетенциям» works without a конструктор detour. The check scores the РПД against those codes and shows a per-competency covered/partial/missing breakdown with evidence quotes inline in the row (also mirrored in the Report tab). Практики stay programme-scoped (fixed 4-type set).
+- **Документы** — per-discipline РПД library. Every discipline gets its own upload slot; on upload we extract the text and **auto-detect which competency codes the РПД declares** (filtered against the programme's own competency set), pre-populating `competency_codes` so «Проверить соответствие компетенциям» works without a конструктор detour. The check scores the РПД at the **индикатор level** — each competency is decomposed into its индикаторы достижения (ОПК-14.1/.2/.3) with their Знать/Уметь/Владеть layer, each scored against the discipline content (лекции/практ/лаб/СРС/ФОС) with an evidence quote + note; the competency's covered/partial/missing status is the roll-up of its indicators, so «частично» shows exactly which indicator is the gap. Indicators render nested under each competency inline in the row (also mirrored in the Report tab). Практики stay programme-scoped (fixed 4-type set).
 
 The tool is analysis-only — programme content is authored in the university's own system; here we ingest, correct extracted content, and analyse.
 

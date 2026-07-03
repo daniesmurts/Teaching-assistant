@@ -269,22 +269,59 @@ export async function fillDisciplineCompetencyCodesIfEmpty(
 
 // ── Bulk replaces (delete-then-insert in a transaction) ─────────────────────────
 
+/**
+ * Reconcile a programme's disciplines with the incoming list, PRESERVING the
+ * ids of disciplines that already exist. This matters because uploaded РПД
+ * (program_documents.discipline_id) and coverage reviews
+ * (program_document_reviews.discipline_id) are ON DELETE CASCADE — a naïve
+ * DELETE-all + re-INSERT regenerates every UUID and silently wipes every
+ * uploaded document and review on every save/analyze. Reconciling keeps the
+ * ids stable, so those links survive; only disciplines the user actually
+ * removed are deleted (and their documents cascade, which is correct).
+ */
 export async function replaceDisciplines(
   programId: string, disciplines: ProgramDiscipline[]
 ): Promise<void> {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
-    await client.query('DELETE FROM program_disciplines WHERE program_id = $1', [programId])
+
+    // Delete disciplines the user dropped (their docs/reviews cascade — intended).
+    // Incoming rows that carry an id are the ones to keep in place.
+    const keepIds = disciplines.map((d) => d.id).filter((x): x is string => typeof x === 'string' && x.length > 0)
+    if (keepIds.length > 0) {
+      await client.query(
+        `DELETE FROM program_disciplines WHERE program_id = $1 AND id <> ALL($2::uuid[])`,
+        [programId, keepIds]
+      )
+    } else {
+      await client.query('DELETE FROM program_disciplines WHERE program_id = $1', [programId])
+    }
+
+    // Upsert each incoming discipline. An existing id → UPDATE in place (id
+    // preserved → document links survive); a new/absent/stale id → INSERT.
     for (const [i, d] of disciplines.entries()) {
+      const sort = d.sort_order ?? i
+      const vals = [d.course_id ?? null, d.name, d.semester, d.credits ?? null,
+                    d.control_form ?? null, d.competency_codes ?? [], sort]
+      if (d.id) {
+        const upd = await client.query(
+          `UPDATE program_disciplines
+              SET course_id=$3, name=$4, semester=$5, credits=$6, control_form=$7, competency_codes=$8, sort_order=$9
+            WHERE id=$1 AND program_id=$2`,
+          [d.id, programId, ...vals]
+        )
+        if ((upd.rowCount ?? 0) > 0) continue   // updated in place — id (and its docs) preserved
+        // id didn't match this programme (stale/foreign) — fall through to insert fresh.
+      }
       await client.query(
         `INSERT INTO program_disciplines
            (program_id, course_id, name, semester, credits, control_form, competency_codes, sort_order)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [programId, d.course_id ?? null, d.name, d.semester, d.credits ?? null,
-         d.control_form ?? null, d.competency_codes ?? [], d.sort_order ?? i]
+        [programId, ...vals]
       )
     }
+
     await client.query('UPDATE programs SET updated_at = NOW() WHERE id = $1', [programId])
     await client.query('COMMIT')
   } catch (err) {

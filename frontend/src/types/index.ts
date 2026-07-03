@@ -102,6 +102,8 @@ export type {
   RelatednessCluster,
   SemesterLoad,
   DisciplineCoverageItem,
+  DisciplineCoverageIndicator,
+  IndicatorDimension,
   DisciplineCoverageResult,
   ProgramDocumentReview,
   ApiError,

@@ -987,12 +987,31 @@ export interface ProgramDocument {
 // CoverageStatus (defined above for grading bullet coverage) — same
 // covered/partial/missing vocabulary, different subject.
 
+// One индикатор достижения компетенции (e.g. ОПК-14.1) — the granularity a
+// competency is actually assessed at (ФГОС 3++). A competency's coverage is
+// the roll-up of its indicators. `dimension` is the Знать/Уметь/Владеть layer
+// an indicator lives in, when the РПД makes it explicit.
+export type IndicatorDimension = 'knowledge' | 'skill' | 'mastery'   // Знать / Уметь / Владеть
+
+export interface DisciplineCoverageIndicator {
+  code:      string | null       // '14.1' / 'ОПК-14.1'; null if the РПД gave no code
+  title:     string
+  dimension: IndicatorDimension | null
+  status:    CoverageStatus
+  evidence:  string | null       // verbatim quote from the content, or null
+  note:      string
+}
+
 export interface DisciplineCoverageItem {
   code:     string | null   // 'УК-1' / 'ОПК-2' / 'ПК-3'; null for goals
   title:    string
-  status:   CoverageStatus
+  status:   CoverageStatus  // roll-up of `indicators` when present, else the model's own verdict
   evidence: string | null   // verbatim quote from the document, or null
   note:     string
+  // Indicators the РПД declares for this competency, each scored against the
+  // discipline content. Empty/absent on legacy reviews and on goals (which
+  // have no indicators) — the UI falls back to the competency-level verdict.
+  indicators?: DisciplineCoverageIndicator[]
 }
 
 export interface DisciplineCoverageResult {
