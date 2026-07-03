@@ -504,6 +504,34 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
     'text-sm font-sans bg-surface border border-border rounded-md px-2.5 py-1.5 outline-none ' +
     'focus:border-border-strong text-ellipsis cursor-pointer'
 
+  // Blast-radius hint: roles cascade down the tree, so holding a role on a unit
+  // AND on one of its descendants means the ancestor grant already covers the
+  // descendant — the nested grant is redundant, and (the real risk) the
+  // ancestor grant is broader than the admin may realise. Surface the pairs so
+  // an over-wide leftover (e.g. a polygroup grant left on when only one
+  // programme was intended) is obvious. `redundantUnitIds` marks the covered
+  // (descendant) chips; `overlaps` drives the explanatory line.
+  const { overlaps, redundantUnitIds } = useMemo(() => {
+    const seen = new Set<string>()
+    const pairs: { broad: OrgUnit; narrow: OrgUnit }[] = []
+    const redundant = new Set<string>()
+    for (const a of member.roles) {
+      for (const b of member.roles) {
+        if (a.org_unit_id === b.org_unit_id) continue
+        const ua = unitsById.get(a.org_unit_id)
+        const ub = unitsById.get(b.org_unit_id)
+        if (!ua || !ub) continue
+        // ua is a strict ancestor of ub when ua's path is a prefix of ub's.
+        if (ub.path !== ua.path && ub.path.startsWith(ua.path)) {
+          redundant.add(ub.id)
+          const key = `${ua.id}->${ub.id}`
+          if (!seen.has(key)) { seen.add(key); pairs.push({ broad: ua, narrow: ub }) }
+        }
+      }
+    }
+    return { overlaps: pairs, redundantUnitIds: redundant }
+  }, [member.roles, unitsById])
+
   return (
     <div className="bg-surface border border-border rounded-lg px-4 py-3 space-y-2.5">
       {/* Identity · kafedra · roles */}
@@ -528,13 +556,20 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
 
         <div className="flex-1 min-w-[180px] flex flex-wrap items-center gap-1.5 justify-end">
           {member.roles.map((r) => {
-            const full = `${ROLE_LABEL[r.role]} · ${unitsById.get(r.org_unit_id)?.name ?? ''}`
+            const isRedundant = redundantUnitIds.has(r.org_unit_id)
+            const full = isRedundant
+              ? `${ROLE_LABEL[r.role]} · ${unitsById.get(r.org_unit_id)?.name ?? ''} — избыточно: более широкая роль уже покрывает это подразделение`
+              : `${ROLE_LABEL[r.role]} · ${unitsById.get(r.org_unit_id)?.name ?? ''}`
             return (
               <span key={`${r.org_unit_id}-${r.role}`} title={full}
-                className="inline-flex items-center gap-1 max-w-[240px] text-xs font-sans bg-amber-light text-amber border border-amber/20 rounded-sm pl-2 pr-1 py-0.5">
+                className={`inline-flex items-center gap-1 max-w-[240px] text-xs font-sans rounded-sm pl-2 pr-1 py-0.5 border ${
+                  isRedundant
+                    ? 'bg-surface-warm text-ink-tertiary border-border-mid border-dashed'
+                    : 'bg-amber-light text-amber border-amber/20'
+                }`}>
                 <span className="truncate">{ROLE_LABEL[r.role]} · {unitLabel(unitsById.get(r.org_unit_id))}</span>
                 <button onClick={() => onRevoke(r.org_unit_id, r.role)} aria-label="Снять роль"
-                  className="text-amber/60 hover:text-danger transition-colors leading-none flex-shrink-0">×</button>
+                  className={`transition-colors leading-none flex-shrink-0 ${isRedundant ? 'text-ink-tertiary hover:text-danger' : 'text-amber/60 hover:text-danger'}`}>×</button>
               </span>
             )
           })}
@@ -547,6 +582,22 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
           )}
         </div>
       </div>
+
+      {/* Overlapping-grant hint — a role on a unit already covers any role on */}
+      {/* its descendants, so the nested one is redundant (and the ancestor is */}
+      {/* broader than it may look). */}
+      {overlaps.length > 0 && (
+        <div className="flex items-start gap-1.5 text-[11px] font-sans text-warning bg-warning-bg border border-warning/15 rounded-md px-2.5 py-1.5">
+          <span className="flex-shrink-0 mt-px text-warning"><WarnIcon /></span>
+          <span className="leading-relaxed">
+            {overlaps.length === 1 ? (
+              <>Роль на «{unitLabel(overlaps[0].broad)}» уже распространяется на «{unitLabel(overlaps[0].narrow)}» — вложенная роль избыточна. Чтобы ограничить доступ, снимите более широкую роль.</>
+            ) : (
+              <>Роли вложены друг в друга: {overlaps.map((o) => `«${unitLabel(o.broad)}» → «${unitLabel(o.narrow)}»`).join('; ')}. Более широкая роль уже покрывает вложенную — снимите широкие роли, чтобы ограничить доступ.</>
+            )}
+          </span>
+        </div>
+      )}
 
       {/* Grant a role — own full-width line so long unit names have room */}
       {adding && (() => {
@@ -998,6 +1049,13 @@ const SearchIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" />
+  </svg>
+)
+const WarnIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+    <path d="M12 9v4" /><path d="M12 17h.01" />
   </svg>
 )
 const GearIcon   = () => <Svg><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" /></Svg>

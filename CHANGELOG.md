@@ -83,7 +83,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   Russian pluralisation, and a proper **no-results** state. Pagination over
   virtualization deliberately — no new dependency, and it's plenty for the
   scale. Row hover switched to a background highlight so the colour spine
-  survives. Typecheck + production build clean.
+  survives. (3) **Overlapping-grant hint**: when a teacher holds a role on a
+  unit *and* on one of its descendants, the descendant chip is dimmed
+  (dashed/muted — it's redundant, since roles cascade down the tree) and a
+  subtle warning names the pair and advises removing the *broader* role to
+  actually narrow access. Catches the real-world footgun of an over-wide
+  leftover grant (e.g. a polygroup role left on when only one programme was
+  intended); computed client-side from the units' materialised paths, no
+  request. Typecheck + production build clean.
 
 ### Added
 - **Programme metadata on org units → prefilled РОП import (migration 055).**
