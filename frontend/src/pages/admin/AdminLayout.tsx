@@ -10,6 +10,7 @@ const NAV = [
   { to: '/admin/rubric-templates', label: 'Шаблоны рубрик',   end: false },
   { to: '/admin/feedback', label: 'Отзывы',         end: false },
   { to: '/admin/errors',   label: 'Ошибки',         end: false },
+  { to: '/admin/audit',    label: 'Журнал действий', end: false },
   { to: '/admin/evals',    label: 'Эксперименты',   end: false },
 ]
 

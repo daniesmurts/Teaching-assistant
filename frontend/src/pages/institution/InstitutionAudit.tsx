@@ -25,6 +25,11 @@ function describe(e: AuditEntry): string {
     case 'org_member.primary_set':  return `Преподаватель ${e.target} привязан к кафедре «${meta?.unitName ?? '—'}»`
     case 'org_role.granted':        return `Выдана роль «${ROLE_LABEL[meta?.role ?? ''] ?? meta?.role}» на «${meta?.unitName ?? '—'}»: ${e.target}`
     case 'org_role.revoked':        return `Снята роль «${ROLE_LABEL[meta?.role ?? ''] ?? meta?.role}» на «${meta?.unitName ?? '—'}»: ${e.target}`
+    case 'auth.register':           return 'Регистрация в системе'
+    case 'auth.login':              return 'Вход в систему'
+    case 'auth.login_failed':       return 'Неудачная попытка входа'
+    case 'auth.password_reset_requested': return 'Запрошен сброс пароля'
+    case 'auth.password_reset_completed': return 'Пароль изменён (сброс)'
     default:                        return `${e.action}${e.target ? ` · ${e.target}` : ''}`
   }
 }
@@ -36,6 +41,8 @@ const ICON: Record<string, string> = {
   'org_unit.created': '+', 'org_unit.bulk_created': '+',
   'org_unit.updated': '✎', 'org_unit.deleted': '✕',
   'org_member.primary_set': '⌂', 'org_role.granted': '★', 'org_role.revoked': '☆',
+  'auth.register': '☺', 'auth.login': '→', 'auth.login_failed': '⚠',
+  'auth.password_reset_requested': '⌥', 'auth.password_reset_completed': '⟲',
 }
 
 export default function InstitutionAudit() {

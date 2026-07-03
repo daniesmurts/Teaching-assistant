@@ -266,3 +266,37 @@ export async function refundPayment(orderId: string): Promise<{ status: string }
   const res = await client.post<{ status: string }>(`/api/admin/payments/${orderId}/refund`, {})
   return res.data
 }
+
+// ─── Activity log (cross-institution) ────────────────────────────────────────
+
+export interface AuditEntry {
+  id:               string
+  institution_id:   string | null
+  actor_teacher_id: string | null
+  actor_email:      string | null
+  action:           string
+  target:           string | null
+  metadata:         Record<string, unknown> | null
+  ip_address:       string | null
+  user_agent:       string | null
+  created_at:       string
+}
+
+export interface AuditFilters {
+  institutionId?: string
+  actorTeacherId?: string
+  action?:         string
+  from?:           string
+  to?:             string
+  limit?:          number
+  offset?:         number
+}
+
+export async function getAudit(
+  filters: AuditFilters = {}
+): Promise<{ rows: AuditEntry[]; total: number }> {
+  const res = await client.get<{ rows: AuditEntry[]; total: number }>('/api/admin/audit', {
+    params: filters,
+  })
+  return res.data
+}

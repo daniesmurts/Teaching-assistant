@@ -6,6 +6,7 @@ import { config, validateConfig } from './lib/config'
 import { pool } from './db/connection'
 import { errorHandler } from './middleware/errorHandler'
 import { generalLimiter } from './middleware/rateLimits'
+import { auditLog } from './middleware/auditLog'
 import authRouter from './routes/auth'
 import ssoRouter from './routes/sso'
 import coursesRouter from './routes/courses'
@@ -94,6 +95,11 @@ app.use(express.json({ limit: '1mb' }))
 // base64-encoded assertion can be ~50kb on its own.
 app.use(express.urlencoded({ extended: false, limit: '1mb' }))
 app.use(generalLimiter)
+
+// Records every successful mutation from an authenticated user. Runs before the
+// routers so its finish-listener fires after req.teacher is populated; routes
+// that audit themselves set res.locals.selfAudited to opt out (see auditLog).
+app.use(auditLog)
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 

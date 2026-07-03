@@ -18,6 +18,7 @@ import {
 import { syncRoleToTree, clearOrgTiesOutsideInstitution, assignDefaultDepartmentIfUnset } from '../db/queries/orgUnits'
 import { metadataUrlForInstitution, acsUrlForInstitution } from '../services/saml'
 import { listFeedback } from '../db/queries/feedback'
+import { listAudit } from '../db/queries/audit'
 import {
   findPaymentsByTeacher, findPaymentByOrderId, markPaymentRefunded,
 } from '../db/queries/payments'
@@ -94,6 +95,24 @@ router.get('/usage/by-feature', asyncHandler(async (req, res) => {
 router.get('/errors', asyncHandler(async (req, res) => {
   const days = parseInt((req.query.days as string) ?? '7', 10)
   res.json(await getRecentErrors(Math.min(days, 90)))
+}))
+
+// ─── Cross-institution activity log ───────────────────────────────────────────
+// Platform-admin view over every recorded user action. Optional filters:
+// institutionId, actorTeacherId, action, from/to (ISO), plus limit/offset.
+// Returns { rows, total } for pagination.
+
+router.get('/audit', asyncHandler(async (req, res) => {
+  const q = req.query as Record<string, string | undefined>
+  res.json(await listAudit({
+    institutionId:  q.institutionId  || undefined,
+    actorTeacherId: q.actorTeacherId || undefined,
+    action:         q.action         || undefined,
+    from:           q.from           || undefined,
+    to:             q.to             || undefined,
+    limit:  q.limit  ? parseInt(q.limit, 10)  : 100,
+    offset: q.offset ? parseInt(q.offset, 10) : 0,
+  }))
 }))
 
 // ─── Edit-distance / AI quality signal ────────────────────────────────────────

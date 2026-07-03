@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router, type Request } from 'express'
 import bcrypt from 'bcryptjs'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
@@ -30,6 +30,17 @@ import { getInstitutionById, findInstitutionByEmailDomain, countInstitutionTeach
 import { isInstitutionAdmin, assignDefaultDepartmentIfUnset } from '../db/queries/orgUnits'
 import { hasLeadershipRole } from '../db/queries/leadership'
 import { getProgramAccessScope } from '../services/programAccess'
+import { recordAudit } from '../db/queries/audit'
+
+// Client metadata for auth audit rows. Auth routes are unauthenticated, so the
+// catch-all auditLog middleware skips them (no req.teacher) — these events are
+// recorded explicitly. UA capped to keep a hostile client from bloating the row.
+function reqMeta(req: Request): { ipAddress: string | null; userAgent: string | null } {
+  return {
+    ipAddress: req.ip ?? null,
+    userAgent: (req.get('user-agent') ?? '').slice(0, 400) || null,
+  }
+}
 
 // Tree-derived admin signals exposed on the auth payload so the frontend route
 // gates read authoritative org-tree state, not the legacy `teachers.role` enum.
@@ -119,6 +130,15 @@ router.post(
       sendEmail({ ...adminSignupEmail({ name, email, university, viaInvite: !!institutionId }), to: adminTo })
     }
 
+    recordAudit({
+      institutionId:  institutionId ?? null,
+      actorTeacherId: teacher.id,
+      actorEmail:     teacher.email,
+      action:         'auth.register',
+      metadata:       { viaInvite: !!inviteId, autoJoined: !!institutionId && !inviteId },
+      ...reqMeta(req),
+    })
+
     const plan = await buildPlanData(teacher.id, 'free', null)
     res.status(201).json({ token, teacher, plan })
   })
@@ -147,10 +167,22 @@ router.post(
     const { email, password } = req.body as { email: string; password: string }
 
     const row = await findTeacherByEmail(email)
-    if (!row) throw new ValidationError('Неверный адрес эл. почты или пароль')
+    if (!row) {
+      recordAudit({ actorEmail: email, action: 'auth.login_failed',
+        metadata: { reason: 'unknown_email' }, ...reqMeta(req) })
+      throw new ValidationError('Неверный адрес эл. почты или пароль')
+    }
 
     const valid = await bcrypt.compare(password, row.password_hash)
-    if (!valid) throw new ValidationError('Неверный адрес эл. почты или пароль')
+    if (!valid) {
+      recordAudit({ institutionId: row.institution_id ?? null, actorTeacherId: row.id,
+        actorEmail: row.email, action: 'auth.login_failed',
+        metadata: { reason: 'bad_password' }, ...reqMeta(req) })
+      throw new ValidationError('Неверный адрес эл. почты или пароль')
+    }
+
+    recordAudit({ institutionId: row.institution_id ?? null, actorTeacherId: row.id,
+      actorEmail: row.email, action: 'auth.login', ...reqMeta(req) })
 
     const token = signToken({ id: row.id, email: row.email })
 
@@ -226,6 +258,9 @@ router.post(
         ...passwordResetEmail(row.name ?? row.email, resetUrl),
         to: row.email,
       })
+
+      recordAudit({ institutionId: row.institution_id ?? null, actorTeacherId: row.id,
+        actorEmail: row.email, action: 'auth.password_reset_requested', ...reqMeta(req) })
     }
 
     // Always the same response — never say "email not found"
@@ -267,6 +302,9 @@ router.post(
         to: teacher.email,
       })
     }
+
+    recordAudit({ institutionId: teacher?.institution_id ?? null, actorTeacherId: record.teacher_id,
+      actorEmail: teacher?.email ?? null, action: 'auth.password_reset_completed', ...reqMeta(req) })
 
     res.json({ message: 'Пароль успешно изменён. Теперь вы можете войти.' })
   })

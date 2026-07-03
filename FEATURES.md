@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-07-02 (programme-metadata on org units → prefilled РОП import; org-unit re-type/move + default-department placement + grant-warning UI + delete/lockout/practice-uniqueness hardening; earlier: org-structure audit logging + cross-institution stale-ties fix; discipline-scoped РПД library + coverage check + auto-detect + `program_direction` type)
+**Last updated:** 2026-07-03 (platform-wide activity logging: global audit middleware records every member mutation + IP/UA, new platform-admin Журнал действий with filters; earlier: programme-metadata on org units → prefilled РОП import; org-unit re-type/move + default-department placement + grant-warning UI + delete/lockout/practice-uniqueness hardening; earlier: org-structure audit logging + cross-institution stale-ties fix; discipline-scoped РПД library + coverage check + auto-detect + `program_direction` type)
 
 ---
 
@@ -133,7 +133,7 @@ Panel at `/institution` (gated to `institution_admin` / `platform_admin`):
 - **Teachers** — list, activate/deactivate (frees a seat), single invite, **bulk invite** (paste list), revoke invites. Pending invites whose email was rejected by the provider show «Письмо не доставлено» with the reason (migration 048).
 - **Criteria** — create institution-shared criteria (appear in every member's grading picker)
 - **Учебные планы (program architecture analysis)** — register an образовательная программа (header reqs + upload **описание ОП** and **учебный план** PDFs → disciplines & ФГОС competencies/goals auto-extracted), or build it manually by semester. Then analyse the whole plan: sequencing & prerequisite inversions, competency progression map (introduce→develop→master across semesters), gaps & redundancy (orphan disciplines / uncovered competencies), relatedness clusters & per-semester load. Persisted; last analysis cached. One-click example track for evaluation. **Export the analysis as a server-rendered branded PDF** (pdfkit, embedded PT Serif/PT Sans, fixed premium layout).
-- **Audit log** — record of admin actions (invites, activations, shared-criterion creation, org-structure changes, unit-role grants/revocations, kafedra assignments)
+- **Audit log** — record of member activity in the institution: admin actions (invites, activations, shared-criterion creation, org-structure changes, unit-role grants/revocations, kafedra assignments) **plus every state-changing action any member takes** (grading, courses, rubrics, presentations, documents…), captured automatically by the global audit middleware
 - Invite flow: branded email (Unisender) → `/register?invite=` → auto-joins institution
 
 ---
@@ -148,6 +148,7 @@ Panel at `/admin` (direct URL only, `platform_admin`):
 - **Criterion templates** — global templates teachers start from (incl. STEM)
 - **Feedback** — browse in-app user feedback (category filter, reply link)
 - **Errors** — recent AI/service errors
+- **Журнал действий** — cross-institution activity log (every recorded user action; filter by action/date, paginated; shows actor + IP)
 - **Subscription management** — grant/extend Pro, cancel, refund (T-Bank)
 
 ---

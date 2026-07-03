@@ -29,6 +29,10 @@ import { findTeacherRowById } from '../db/queries/teachers'
 const router = Router()
 router.use(authenticate)
 router.use(requireInstitutionAdmin)
+// This router records its own rich audit rows (recordAudit calls below) — opt
+// out of the catch-all auditLog middleware. Any new mutation here MUST call
+// recordAudit or it will go unlogged.
+router.use((_req, res, next) => { res.locals.selfAudited = true; next() })
 
 function institutionId(req: { teacher: { institution_id: string | null } }): string {
   const id = req.teacher.institution_id

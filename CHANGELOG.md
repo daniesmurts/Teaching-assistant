@@ -14,6 +14,32 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Added
+- **Platform-wide activity logging.** `audit_log` (previously written only by the
+  admin/org-structure routes) now records *every* successful state-changing
+  request from an authenticated user. A global `auditLog` middleware
+  (`backend/src/middleware/auditLog.ts`) attaches a `finish` listener before the
+  routers and, on any 2xx `POST/PUT/PATCH/DELETE`, writes a row with a derived
+  `resource.action` name (`deriveAction`), the primary target id, the actor, and
+  now the client **IP + user-agent** (migration 056 adds those columns +
+  created_at/action/actor indexes). Routes that already record rich audit rows
+  (`institution.ts`, `orgUnits.ts`) opt out via `res.locals.selfAudited` to avoid
+  double-logging — any new mutation there must keep calling `recordAudit`. GET
+  reads are deliberately not logged. New platform-admin surface: `GET
+  /api/admin/audit` (filterable by institution/actor/action/date, paginated) →
+  `listAudit`, and an **AdminAudit** page (`/admin/audit`) with filters +
+  pagination. Institution admins keep their existing scoped view (teacher actions
+  now flow into it too, since the middleware stamps `institution_id`).
+- **Auth-event logging.** The auth routes (unauthenticated, so the catch-all
+  middleware can't see them) record explicit audit rows with IP + user-agent:
+  `auth.register`, `auth.login`, `auth.login_failed` (with `reason`:
+  unknown_email / bad_password), `auth.password_reset_requested`,
+  `auth.password_reset_completed`. Failed logins for a known email carry that
+  member's `institution_id` so institution admins see attempts against their
+  members; unknown-email attempts are platform-view only. Reset-requests are only
+  logged when the email actually exists (preserves the no-enumeration contract).
+  Both review pages render friendly Russian labels for these.
+
 ### Changed
 - **`/programs` — clear action-vs-list hierarchy (UI/UX).** The import trigger
   was a white card identical to the programme-list cards, so "which is the

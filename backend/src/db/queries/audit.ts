@@ -9,6 +9,8 @@ export interface AuditRow {
   action:           string
   target:           string | null
   metadata:         Record<string, unknown> | null
+  ip_address:       string | null
+  user_agent:       string | null
   created_at:       string
 }
 
@@ -20,10 +22,13 @@ export function recordAudit(entry: {
   action: string
   target?: string | null
   metadata?: Record<string, unknown>
+  ipAddress?: string | null
+  userAgent?: string | null
 }): void {
   pool.query(
-    `INSERT INTO audit_log (institution_id, actor_teacher_id, actor_email, action, target, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
+    `INSERT INTO audit_log
+       (institution_id, actor_teacher_id, actor_email, action, target, metadata, ip_address, user_agent)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
       entry.institutionId ?? null,
       entry.actorTeacherId ?? null,
@@ -31,6 +36,8 @@ export function recordAudit(entry: {
       entry.action,
       entry.target ?? null,
       entry.metadata ? JSON.stringify(entry.metadata) : null,
+      entry.ipAddress ?? null,
+      entry.userAgent ?? null,
     ]
   ).catch((e) => logger.warn({ message: 'Audit write failed', action: entry.action, error: e.message }))
 }
@@ -41,4 +48,57 @@ export async function listAuditByInstitution(institutionId: string, limit = 100)
     [institutionId, Math.min(limit, 500)]
   )
   return rows
+}
+
+// ─── Platform-admin cross-institution view ──────────────────────────────────────
+
+export interface AuditFilters {
+  institutionId?: string   // optional — omit for all institutions
+  actorTeacherId?: string
+  action?: string          // exact match on the action string
+  from?: string            // ISO date — inclusive lower bound on created_at
+  to?: string              // ISO date — inclusive upper bound on created_at
+  limit?: number
+  offset?: number
+}
+
+/**
+ * Filterable, paginated listing across every institution. Backs the platform
+ * admin activity view. Returns the page of rows plus the total match count so
+ * the UI can paginate. All filters are optional and combine with AND.
+ */
+export async function listAudit(filters: AuditFilters): Promise<{ rows: AuditRow[]; total: number }> {
+  const clauses: string[] = []
+  const params: unknown[] = []
+
+  const add = (sql: string, value: unknown) => {
+    params.push(value)
+    clauses.push(sql.replace('$?', `$${params.length}`))
+  }
+
+  if (filters.institutionId)  add('institution_id = $?',   filters.institutionId)
+  if (filters.actorTeacherId) add('actor_teacher_id = $?', filters.actorTeacherId)
+  if (filters.action)         add('action = $?',           filters.action)
+  if (filters.from)           add('created_at >= $?',      filters.from)
+  if (filters.to)             add('created_at <= $?',      filters.to)
+
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+
+  const limit  = Math.min(Math.max(filters.limit ?? 100, 1), 500)
+  const offset = Math.max(filters.offset ?? 0, 0)
+
+  const { rows: countRows } = await pool.query<{ count: string }>(
+    `SELECT COUNT(*)::int AS count FROM audit_log ${where}`,
+    params
+  )
+  const total = Number(countRows[0]?.count ?? 0)
+
+  const { rows } = await pool.query<AuditRow>(
+    `SELECT * FROM audit_log ${where}
+     ORDER BY created_at DESC
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, limit, offset]
+  )
+
+  return { rows, total }
 }

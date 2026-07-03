@@ -45,6 +45,7 @@ import AdminRubricTemplates from './pages/admin/AdminRubricTemplates'
 import AdminInstitutions from './pages/admin/AdminInstitutions'
 import AdminFeedback from './pages/admin/AdminFeedback'
 import AdminErrors from './pages/admin/AdminErrors'
+import AdminAudit from './pages/admin/AdminAudit'
 import AdminEvals from './pages/admin/AdminEvals'
 import InstitutionLayout from './pages/institution/InstitutionLayout'
 import InstitutionOverview from './pages/institution/InstitutionOverview'
@@ -252,6 +253,7 @@ export default function App() {
             <Route path="rubric-templates" element={<AdminRubricTemplates />} />
             <Route path="feedback"  element={<AdminFeedback />} />
             <Route path="errors"    element={<AdminErrors />} />
+            <Route path="audit"     element={<AdminAudit />} />
             <Route path="evals"     element={<AdminEvals />} />
           </Route>
 
