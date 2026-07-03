@@ -3,39 +3,67 @@
 @tailwind utilities;
 
 :root {
+  /* Colour tokens are stored as space-separated RGB channels (`--color-*-rgb`)
+     so Tailwind can inject an alpha value for opacity modifiers
+     (bg-amber/80, border-success/15, …). The semantic `--color-*` values are
+     derived from the channels via rgb() for direct var(--color-*) use in inline
+     styles and keyframes. Edit the channel line; the derived value follows. */
+
   /* Surfaces */
-  --color-bg:           #F7F5F0;
-  --color-surface:      #FFFFFF;
-  --color-surface-warm: #FAF8F4;
+  --color-bg-rgb:            247 245 240;
+  --color-bg:                rgb(var(--color-bg-rgb));
+  --color-surface-rgb:       255 255 255;
+  --color-surface:           rgb(var(--color-surface-rgb));
+  --color-surface-warm-rgb:  250 248 244;
+  --color-surface-warm:      rgb(var(--color-surface-warm-rgb));
 
   /* Sidebar */
-  --color-sidebar:       #1C1C1E;
-  --color-sidebar-hover: #2C2C2E;
-  --color-sidebar-active:#3A3A3C;
+  --color-sidebar-rgb:        28 28 30;
+  --color-sidebar:            rgb(var(--color-sidebar-rgb));
+  --color-sidebar-hover-rgb:  44 44 46;
+  --color-sidebar-hover:      rgb(var(--color-sidebar-hover-rgb));
+  --color-sidebar-active-rgb: 58 58 60;
+  --color-sidebar-active:     rgb(var(--color-sidebar-active-rgb));
 
   /* Text */
-  --color-ink:          #1A1A1A;
-  --color-ink-secondary:#6B6560;
-  --color-ink-tertiary: #A09890;
-  --color-ink-inverse:  #F7F5F0;
-  --color-ink-inv-muted:#9A9490;
+  --color-ink-rgb:           26 26 26;
+  --color-ink:               rgb(var(--color-ink-rgb));
+  --color-ink-secondary-rgb: 107 101 96;
+  --color-ink-secondary:     rgb(var(--color-ink-secondary-rgb));
+  --color-ink-tertiary-rgb:  160 152 144;
+  --color-ink-tertiary:      rgb(var(--color-ink-tertiary-rgb));
+  --color-ink-inverse-rgb:   247 245 240;
+  --color-ink-inverse:       rgb(var(--color-ink-inverse-rgb));
+  --color-ink-inv-muted-rgb: 154 148 144;
+  --color-ink-inv-muted:     rgb(var(--color-ink-inv-muted-rgb));
 
   /* Accent */
-  --color-amber:       #C8860A;
-  --color-amber-light: #FDF3DC;
-  --color-amber-mid:   #F4C55A;
+  --color-amber-rgb:         200 134 10;
+  --color-amber:             rgb(var(--color-amber-rgb));
+  --color-amber-light-rgb:   253 243 220;
+  --color-amber-light:       rgb(var(--color-amber-light-rgb));
+  --color-amber-mid-rgb:     244 197 90;
+  --color-amber-mid:         rgb(var(--color-amber-mid-rgb));
 
   /* Semantic */
-  --color-success:    #2D7D46;
-  --color-success-bg: #EBF7EF;
-  --color-warning:    #9A6800;
-  --color-warning-bg: #FEF6E0;
-  --color-danger:     #C0392B;
-  --color-danger-bg:  #FDF0EE;
-  --color-info:       #4F46E5;
-  --color-info-bg:    #EEF2FF;
+  --color-success-rgb:    45 125 70;
+  --color-success:        rgb(var(--color-success-rgb));
+  --color-success-bg-rgb: 235 247 239;
+  --color-success-bg:     rgb(var(--color-success-bg-rgb));
+  --color-warning-rgb:    154 104 0;
+  --color-warning:        rgb(var(--color-warning-rgb));
+  --color-warning-bg-rgb: 254 246 224;
+  --color-warning-bg:     rgb(var(--color-warning-bg-rgb));
+  --color-danger-rgb:     192 57 43;
+  --color-danger:         rgb(var(--color-danger-rgb));
+  --color-danger-bg-rgb:  253 240 238;
+  --color-danger-bg:      rgb(var(--color-danger-bg-rgb));
+  --color-info-rgb:       79 70 229;
+  --color-info:           rgb(var(--color-info-rgb));
+  --color-info-bg-rgb:    238 242 255;
+  --color-info-bg:        rgb(var(--color-info-bg-rgb));
 
-  /* Borders */
+  /* Borders — translucent black; used as-is (no alpha modifiers applied) */
   --color-border:        rgba(0,0,0,0.08);
   --color-border-mid:    rgba(0,0,0,0.12);
   --color-border-strong: rgba(0,0,0,0.18);
@@ -71,6 +99,19 @@ body {
 
 .page-enter    { animation: fadeIn       250ms ease forwards; }
 .result-appear { animation: resultAppear 350ms ease forwards; }
+
+/* Attention ring — an expanding amber halo to draw the eye to a primary CTA
+   (e.g. the first-import button on an empty programmes page). Amber-only, no
+   resting shadow, so it reads as a pulse of the accent rather than depth. */
+@keyframes ctaPulse {
+  0%   { box-shadow: 0 0 0 0   rgb(var(--color-amber-rgb) / 0.45); }
+  70%  { box-shadow: 0 0 0 8px rgb(var(--color-amber-rgb) / 0);    }
+  100% { box-shadow: 0 0 0 0   rgb(var(--color-amber-rgb) / 0);    }
+}
+.cta-pulse { animation: ctaPulse 2s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .cta-pulse { animation: none; }
+}
 
 /* ── Print: PDF export of the program-analysis report ──────────────────────────
    The "Экспорт в PDF" button calls window.print(). App chrome is tagged

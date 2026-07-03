@@ -204,7 +204,7 @@ export default function Sidebar({ onClose }: Props) {
         {(isLeader || canSeePrograms || isInstitutionAdmin) && (
           <div className="mt-3 pt-3 border-t border-white/5 space-y-0.5">
             {isLeader && (
-              <NavRow item={{ icon: 'bar-chart', label: 'Руководство', to: '/leadership' }} />
+              <NavRow item={{ icon: 'bar-chart', label: 'Сводка', to: '/leadership' }} />
             )}
             {canSeePrograms && (
               <NavRow item={{ icon: 'list-checks', label: 'Образовательные программы', to: '/programs' }} />

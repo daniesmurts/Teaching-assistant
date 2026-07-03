@@ -40,6 +40,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   logged when the email actually exists (preserves the no-enumeration contract).
   Both review pages render friendly Russian labels for these.
 
+### Fixed
+- **Colour opacity modifiers were silently dead app-wide.** The Tailwind colour
+  tokens were defined as bare `var(--color-*)` values, so Tailwind 3.4 could not
+  inject an alpha channel — every `bg-amber/80`, `border-success/15`, etc.
+  (~187 uses across 54 files) generated **no CSS at all** and rendered as
+  nothing: invisible translucent borders, and fully invisible fills like the
+  Сводка (leadership) 30-day grade chart bars. Fixed at the token level: colours
+  are now stored as space-separated RGB channel vars (`--color-*-rgb`) with the
+  semantic `--color-*` values derived via `rgb()` (so direct `var(--color-*)`
+  inline-style use is unchanged), and `tailwind.config.ts` references
+  `rgb(var(--color-*-rgb) / <alpha-value>)`. All opacity modifiers now resolve;
+  solid classes (`bg-amber`) still work. The chart bar was also switched off the
+  dead `bg-amber/80` (now renders regardless). Verified against the compiled
+  production CSS bundle.
+
 ### Changed
 - **`/programs` — clear action-vs-list hierarchy (UI/UX).** The import trigger
   was a white card identical to the programme-list cards, so "which is the

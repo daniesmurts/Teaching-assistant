@@ -74,7 +74,7 @@ export default function Leadership() {
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-4xl mx-auto px-6 py-6 page-enter">
         <div className="mb-6">
-          <h1 className="font-display text-2xl font-bold text-ink">Руководство</h1>
+          <h1 className="font-display text-2xl font-bold text-ink">Сводка</h1>
           <p className="text-sm font-sans text-ink-secondary mt-1">
             Сводка по подразделениям, которыми вы руководите — преподаватели и активность за 30 дней.
           </p>
@@ -137,7 +137,7 @@ export default function Leadership() {
                       {overview.activity.grades_by_day.map((d) => (
                         <div key={d.date} className="flex-1 flex flex-col items-center justify-end group relative"
                              title={`${new Date(d.date).toLocaleDateString('ru-RU')} — ${d.count} проверок`}>
-                          <div className="w-full rounded-t-sm bg-amber/80 transition-all"
+                          <div className="w-full rounded-t-sm bg-amber transition-all"
                                style={{ height: `${Math.max(4, (d.count / maxGrades) * 100)}%` }} />
                         </div>
                       ))}

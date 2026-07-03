@@ -162,7 +162,9 @@ export default function InstitutionPrograms() {
               <button
                 onClick={() => setCreating((v) => !v)}
                 aria-expanded={creating}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity"
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity ${
+                  programs.length === 0 && !creating ? 'cta-pulse' : ''
+                }`}
               >
                 {creating
                   ? <><CloseGlyph /> Закрыть</>
