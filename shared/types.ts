@@ -1062,11 +1062,34 @@ export interface PrerequisiteEdge {
   recommendation: string    // RU fix (e.g. «перенести … на 3 семестр»)
 }
 
+// Holistic, whole-plan view derived from the prerequisite edges (no extra LLM
+// cost). Turns the flat pairwise list into the year-1→final structure.
+export interface SequencingLayerNode {
+  name:     string
+  semester: number
+}
+export interface SequencingLayer {
+  depth:       number                // 0 = foundational entry points (no prerequisites)
+  disciplines: SequencingLayerNode[] // disciplines at this dependency depth
+}
+export interface SequencingChain {
+  names:  string[]   // ordered prerequisite → … → final discipline
+  length: number     // = names.length
+}
+export interface SequencingStructure {
+  layers:        SequencingLayer[]      // dependency depth across the whole plan
+  longest_chains: SequencingChain[]     // the critical prerequisite spines (top few)
+  isolated:      SequencingLayerNode[]  // disciplines outside the dependency graph (often general-ed)
+}
+
 export interface SequencingResult {
   verdict:        string             // 2–3 sentence overall flow assessment
   flow_score:     number             // 0–100 logical-sequencing score
   edges:          PrerequisiteEdge[] // all detected prerequisite links
   inversions:     PrerequisiteEdge[] // subset where inverted === true (convenience)
+  // Whole-plan structure derived from `edges`. Optional — legacy cached
+  // analyses (run before this shipped) won't have it; the UI guards for it.
+  structure?:     SequencingStructure
 }
 
 export type CoverageLevel = 'introduce' | 'develop' | 'master'
@@ -1103,6 +1126,43 @@ export interface SemesterLoad {
   credits:          number | null   // null when no credits entered
 }
 
+// Outcome-delivery synthesis — the headline answer to "does the whole plan
+// deliver the graduate profile?". A pure roll-up of the competency progression
+// statuses (no extra LLM call).
+export interface OutcomeDelivery {
+  total:      number   // requirements assessed (competencies + goals)
+  fully:      number   // status 'ok' — built introduce→develop→master
+  thin:       number   // 'thin' — built in only one discipline
+  late:       number   // 'late' — introduced too late
+  uncovered:  number   // 'uncovered' — no discipline forms it
+  score:      number   // 0–100 delivery score
+  verdict:    'delivered' | 'partial' | 'gaps'
+  headline:   string   // 1–2 RU sentences
+}
+
+// How trustworthy the competency→discipline mapping is. The progression/gaps
+// analysis maps competencies to disciplines from each discipline's declared
+// `competency_codes` (authoritative) and, when those are empty, from the
+// discipline NAME (inferred). When many disciplines carry no codes, an
+// «uncovered» verdict may be a missing-data artefact, not a real gap — this
+// tells the UI to say so.
+export interface MappingConfidence {
+  disciplines_total:      number
+  disciplines_with_codes: number
+  low:                    boolean   // < half of disciplines declare codes → treat gaps cautiously
+}
+
+// Sanity check on the credit load — the chart just sums whatever was extracted
+// from the учебный план PDF, so a bad parse shows wrong numbers with no signal.
+// ФГОС ВО: one academic year = 60 з.е. This flags the parse artefacts (missing
+// tail, null ЗЕТ, semesters dumped together) so they aren't taken as real.
+export interface LoadCheck {
+  total_credits:               number
+  expected_total:              number   // 60 × academic years
+  disciplines_without_credits: number
+  issues:                      string[] // RU one-liners; empty when the load looks sound
+}
+
 export interface ProgramAnalysis {
   generated_at:  string
   overall_score: number              // 0–100 headline score
@@ -1114,6 +1174,13 @@ export interface ProgramAnalysis {
   clusters:      RelatednessCluster[]
   isolated:      string[]            // discipline names weakly related to everything else
   load:          SemesterLoad[]
+  // Whole-plan outcome-delivery synthesis. Optional — legacy cached analyses
+  // (run before this shipped) won't have it; the UI guards for it.
+  outcome_delivery?: OutcomeDelivery
+  // Trust signal for the competency→discipline mapping. Optional (legacy).
+  mapping_confidence?: MappingConfidence
+  // Sanity check on the credit load vs the ФГОС 60-з.е./year rule. Optional.
+  load_check?: LoadCheck
 }
 
 // ─── API error shape ──────────────────────────────────────────────────────────

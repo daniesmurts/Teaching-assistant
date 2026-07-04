@@ -7,7 +7,10 @@ import type { ProgramDiscipline, ProgramCompetency } from '../../../shared/types
 //   • описание ОП   → competencies (УК/ОПК/ПК) + goals (reuses extractDeclared)
 // Extraction (PDF → text) happens upstream in the route via documentExtractor.
 
-const MAX_PLAN_CHARS = 16000
+// A full 4-year учебный план with a ЗЕТ table runs well past the old 16k slice,
+// so the tail (later semesters) was silently truncated → year-4 credits went
+// missing and the load chart under-counted. V4 handles the larger context.
+const MAX_PLAN_CHARS = 48000
 
 // ── Учебный план → disciplines ──────────────────────────────────────────────────
 
@@ -31,9 +34,12 @@ export async function parseStudyPlan(params: {
     `- "semester": НОМЕР СЕМЕСТРА (сквозной, 1..N по всей программе). Если план указывает курс и ` +
     `семестр внутри курса, пересчитайте: семестр = (курс − 1) × 2 + семестр_в_курсе. Если дисциплина ` +
     `идёт несколько семестров — укажите семестр её начала;\n` +
-    `- "credits": зачётные единицы (ЗЕТ), число, либо null;\n` +
+    `- "credits": зачётные единицы (ЗЕТ), число, либо null. Извлекайте ЗЕТ точно из ` +
+    `соответствующей строки таблицы — не путайте с часами и не берите значение соседней дисциплины;\n` +
     `- "control_form": форма контроля (например «экзамен», «зачёт», «диф. зачёт», «курсовая»), либо null.\n` +
-    `Не включайте строки-заголовки разделов, итоги, практики без названия и блоки без дисциплин.\n\n` +
+    `Извлеките ВСЕ дисциплины по ВСЕМ семестрам до последнего — включая практики, курсовые работы/проекты ` +
+    `и государственную итоговую аттестацию (ВКР), если у них указаны ЗЕТ. Не останавливайтесь на середине ` +
+    `плана. Не включайте строки-заголовки разделов, строки «Итого/Всего» и блоки без дисциплин.\n\n` +
     `## Формат\nВерните JSON: {"disciplines":[{"name":"...","semester":1,"credits":4,"control_form":"экзамен"}]}. Только JSON.`
 
   const result = await chatJSON<{
@@ -41,16 +47,24 @@ export async function parseStudyPlan(params: {
   }>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'разбор учебного плана',
-    { context: { teacherId: params.teacherId, institutionId: params.institutionId, feature: 'grading' }, maxTokens: 3500 },
+    { context: { teacherId: params.teacherId, institutionId: params.institutionId, feature: 'grading' }, maxTokens: 8000 },
   )
 
   const perSemester = new Map<number, number>()
+  let lastSemester = 1   // учебные планы идут по семестрам подряд — пропущенный
+                         // семестр почти всегда совпадает с предыдущей строкой,
+                         // а не относится к 1-му (иначе сем.1 раздувается)
   return (result.disciplines ?? [])
     .map((d) => {
       const name = String(d.name ?? '').trim()
-      let semester = Number(d.semester)
-      if (!Number.isFinite(semester) || semester < 1) semester = 1
-      semester = Math.min(Math.round(semester), 16)
+      const raw = Number(d.semester)
+      let semester: number
+      if (Number.isFinite(raw) && raw >= 1) {
+        semester = Math.min(Math.round(raw), 16)
+        lastSemester = semester
+      } else {
+        semester = lastSemester   // carry forward rather than dumping into сем.1
+      }
       const credits = typeof d.credits === 'number' && isFinite(d.credits) ? d.credits : null
       const control_form = d.control_form ? String(d.control_form).trim() : null
       const sort = perSemester.get(semester) ?? 0
@@ -58,7 +72,7 @@ export async function parseStudyPlan(params: {
       return { name, semester, credits, control_form, sort_order: sort }
     })
     .filter((d) => d.name.length > 1)
-    .slice(0, 80)
+    .slice(0, 150)
     .map((d): ProgramDiscipline => ({
       course_id: null,
       name: d.name,

@@ -13,7 +13,8 @@ import { getPickableProgramUnits } from '../../api/programs'
 import {
   PROGRAM_PRACTICE_LABEL, PROGRAM_PRACTICE_TYPES,
   type ProgramDocument, type ProgramPracticeType, type ProgramDocumentReview,
-  type DisciplineCoverageItem, type IndicatorDimension,
+  type DisciplineCoverageItem, type IndicatorDimension, type SequencingStructure,
+  type OutcomeDelivery,
 } from '../../types'
 import { useAuthStore } from '../../store/authStore'
 import { EXAMPLE_PROGRAM } from '../../lib/programExample'
@@ -502,7 +503,7 @@ function scoreColor(s: number): string {
 }
 
 function Report({ analysis, duration, program, reviews = [] }: { analysis: ProgramAnalysis; duration: number; program?: ProgramDetail; reviews?: ProgramDocumentReview[] }) {
-  const { sequencing, progression, orphans, missing, clusters, isolated, load } = analysis
+  const { sequencing, progression, orphans, missing, clusters, isolated, load, outcome_delivery } = analysis
   const maxCredits = Math.max(1, ...load.map((l) => l.credits ?? l.discipline_count))
   const [downloading, setDownloading] = useState(false)
 
@@ -536,6 +537,10 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
         <p className="text-sm font-sans text-ink leading-relaxed">{analysis.summary}</p>
       </div>
 
+      {/* Outcome delivery — does the whole plan deliver the graduate profile? */}
+      {/* Guarded for legacy analyses run before it shipped. */}
+      {outcome_delivery && <OutcomeDeliveryCard d={outcome_delivery} />}
+
       {/* Stat strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat label="Нарушений порядка" value={sequencing.inversions.length} danger={sequencing.inversions.length > 0} />
@@ -557,6 +562,11 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
             </div>
             <p className="text-sm font-sans text-ink leading-relaxed">{sequencing.verdict}</p>
           </div>
+        )}
+        {/* Holistic, whole-plan view — the year-1→final structure, derived from */}
+        {/* the same edges. Guarded for legacy analyses run before it shipped. */}
+        {sequencing.structure && sequencing.structure.layers.length > 0 && (
+          <PathwayView structure={sequencing.structure} />
         )}
         {sequencing.inversions.length > 0 && (
           <div className="space-y-2 mb-3">
@@ -612,6 +622,18 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
       {(orphans.length > 0 || missing.length > 0) && (
         <section>
           <SectionLabel>Пробелы и избыточность</SectionLabel>
+          {/* When few disciplines declare their competencies, «не покрыто» is */}
+          {/* inferred from names and may be a mapping gap, not a real absence. */}
+          {analysis.mapping_confidence?.low && missing.length > 0 && (
+            <div className="flex items-start gap-1.5 text-xs font-sans text-warning bg-warning-bg border border-warning/15 rounded-md px-3 py-2 mb-3 leading-relaxed">
+              <span className="flex-shrink-0 mt-px">⚠</span>
+              <span>
+                Заявленные компетенции указаны лишь у {analysis.mapping_confidence.disciplines_with_codes} из {analysis.mapping_confidence.disciplines_total} дисциплин.
+                Часть пунктов «не покрыто» может быть следствием отсутствия сопоставления, а не реальным пробелом — дисциплина может существовать, но её название не совпадает с формулировкой компетенции.
+                Укажите компетенции дисциплин в Конструкторе или загрузите их РПД, затем перезапустите анализ.
+              </span>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <GapColumn title="Нет вклада в компетенции (кандидаты на исключение)" items={orphans} tone="warning" />
             <GapColumn title="Компетенции без дисциплины (нужно добавить)" items={missing} tone="danger" />
@@ -663,6 +685,25 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
                 </div>
               ))}
             </div>
+            {/* Sanity check — the chart just sums extracted ЗЕТ, so flag when the */}
+            {/* numbers contradict the ФГОС 60-з.е./year rule (likely a parse error). */}
+            {analysis.load_check && analysis.load_check.issues.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-border">
+                <div className="text-[10px] font-sans font-semibold uppercase tracking-wide text-warning mb-1.5">
+                  Проверка нагрузки
+                </div>
+                <ul className="space-y-1">
+                  {analysis.load_check.issues.map((it, i) => (
+                    <li key={i} className="flex items-start gap-1.5 text-[11px] font-sans text-ink-secondary leading-relaxed">
+                      <span className="text-warning flex-shrink-0">⚠</span><span>{it}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-[10px] font-sans text-ink-tertiary mt-1.5 leading-relaxed">
+                  График суммирует ЗЕТ, распознанные из PDF. Проверьте семестры и ЗЕТ дисциплин в Конструкторе и перезапустите анализ.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -701,6 +742,131 @@ function ProgressionRow({ row, duration }: { row: CompetencyProgressionRow; dura
         <span className={`text-[10px] font-sans font-medium px-2 py-0.5 rounded-sm ${meta.badge}`}>{meta.label}</span>
       </td>
     </tr>
+  )
+}
+
+// Outcome-delivery headline — does the whole plan build up the graduate
+// profile? Rolls up the per-competency progression into one verdict + a
+// covered/thin/late/uncovered breakdown. Server-derived; this is presentation.
+const DELIVERY_META: Record<OutcomeDelivery['verdict'], { label: string; fg: string; bg: string; border: string }> = {
+  delivered: { label: 'Результаты обеспечены',        fg: 'text-success', bg: 'bg-success-bg', border: 'border-success/20' },
+  partial:   { label: 'Обеспечены частично',          fg: 'text-warning', bg: 'bg-warning-bg', border: 'border-warning/20' },
+  gaps:      { label: 'Есть необеспеченные результаты', fg: 'text-danger',  bg: 'bg-danger-bg',  border: 'border-danger/20' },
+}
+
+function OutcomeDeliveryCard({ d }: { d: OutcomeDelivery }) {
+  const meta = DELIVERY_META[d.verdict]
+  const chip = (label: string, value: number, color: string) => (
+    <span className="inline-flex items-center gap-1.5 text-xs font-sans">
+      <span className="w-2 h-2 rounded-full inline-block" style={{ background: color }} />
+      <span className="font-medium text-ink">{value}</span>
+      <span className="text-ink-secondary">{label}</span>
+    </span>
+  )
+  return (
+    <div className={`rounded-lg border p-4 ${meta.bg} ${meta.border}`}>
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="text-[10px] font-sans font-semibold uppercase tracking-wider text-ink-tertiary">
+          Достижение результатов программы
+        </div>
+        <span className={`text-[10px] font-sans font-semibold uppercase tracking-wide ${meta.fg}`}>{meta.label}</span>
+      </div>
+      <div className="flex items-center gap-4">
+        <div className="text-center flex-shrink-0">
+          <div className="font-display text-3xl font-bold leading-none" style={{ color: scoreColor(d.score) }}>{d.score}</div>
+          <div className="text-[10px] font-sans text-ink-tertiary uppercase tracking-wider mt-0.5">из 100</div>
+        </div>
+        <p className="text-sm font-sans text-ink leading-relaxed">{d.headline}</p>
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3 pt-3 border-t border-border">
+        {chip('полностью сформированы', d.fully, 'var(--color-success)')}
+        {d.thin > 0      && chip('поверхностно', d.thin, 'var(--color-warning)')}
+        {d.late > 0      && chip('поздно',       d.late, 'var(--color-warning)')}
+        {d.uncovered > 0 && chip('не обеспечены', d.uncovered, 'var(--color-danger)')}
+        <span className="text-xs font-sans text-ink-tertiary ml-auto self-center">всего {d.total}</span>
+      </div>
+    </div>
+  )
+}
+
+// Whole-plan structure: dependency layers (foundational → professional), the
+// critical prerequisite chains, and disciplines outside the graph. Derived
+// server-side from the same edges — this is just the presentation.
+function PathwayView({ structure }: { structure: SequencingStructure }) {
+  const { layers, longest_chains, isolated } = structure
+  const maxDepth = layers.length ? layers[layers.length - 1].depth : 0
+
+  const layerLabel = (depth: number): string =>
+    depth === 0 ? 'Фундамент · без предпосылок'
+    : depth === maxDepth ? 'Профильные · вершина'
+    : `Уровень ${depth + 1}`
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-4 mb-3 space-y-4">
+      <div className="text-[10px] font-sans font-semibold uppercase tracking-wider text-ink-tertiary">
+        Дерево зависимостей — от фундаментальных к профильным
+      </div>
+
+      {/* Layers: foundational at the top, each subsequent layer builds on it. */}
+      <div className="space-y-2.5">
+        {layers.map((layer) => (
+          <div key={layer.depth} className="flex items-start gap-3">
+            <div className="w-28 flex-shrink-0 pt-1.5">
+              <div className="text-[11px] font-sans font-medium text-ink-secondary leading-tight">{layerLabel(layer.depth)}</div>
+            </div>
+            <div className="flex-1 flex flex-wrap gap-1.5">
+              {layer.disciplines.map((d, i) => (
+                <span key={i}
+                  className={`inline-flex items-center gap-1.5 text-xs font-sans rounded-md px-2 py-1 border ${
+                    layer.depth === 0 ? 'bg-amber-light text-amber border-amber/20' : 'bg-surface-warm text-ink border-border'
+                  }`}>
+                  <span>{d.name}</span>
+                  <span className="text-ink-tertiary">сем. {d.semester}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Critical chains — the spines where a misplacement cascades. */}
+      {longest_chains.length > 0 && (
+        <div className="pt-3 border-t border-border">
+          <div className="text-[10px] font-sans font-semibold uppercase tracking-wider text-ink-tertiary mb-2">
+            Ключевые цепочки предпосылок
+          </div>
+          <div className="space-y-1.5">
+            {longest_chains.map((chain, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-1 text-xs font-sans">
+                {chain.names.map((n, j) => (
+                  <span key={j} className="inline-flex items-center gap-1">
+                    <span className="text-ink">{n}</span>
+                    {j < chain.names.length - 1 && <span className="text-ink-tertiary">→</span>}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Isolated — outside the dependency graph (often general-ed). */}
+      {isolated.length > 0 && (
+        <details className="pt-3 border-t border-border">
+          <summary className="text-[11px] font-sans text-ink-secondary cursor-pointer">
+            Вне графа зависимостей ({isolated.length}) — обычно общеобразовательные
+          </summary>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {isolated.map((d, i) => (
+              <span key={i} className="inline-flex items-center gap-1.5 text-xs font-sans bg-surface-warm text-ink-secondary rounded-md px-2 py-1 border border-border">
+                <span>{d.name}</span>
+                <span className="text-ink-tertiary">сем. {d.semester}</span>
+              </span>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
   )
 }
 

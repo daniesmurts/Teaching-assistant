@@ -18,7 +18,14 @@ import type {
 // lighter chatJSON-direct pattern already used by programAnalysis.ts's
 // analyzeSequencing/analyzeProgression.
 
-const MAX_DOC_CHARS = 24000   // a single discipline РПД is assignment-scale, not the 80-page aggregate — no chunking needed
+// A discipline РПД runs 30–60 pages. The content sections the indicator scorer
+// actually judges (лекции / практические / лабораторные / СРС / оценочные
+// средства) sit in the middle-to-end of the document, so a blind head-slice
+// missed the evidence entirely and pushed indicators to «missing». We now
+// select the sections we need explicitly; the char cap is bigger so the
+// selection has room even after picking. Falls back to head+tail if no known
+// headings are found.
+const MAX_DOC_CHARS = 40000
 const MAX_COMPETENCIES = 24   // keeps the response within token budget
 
 const VALID_STATUS: CoverageStatus[] = ['covered', 'partial', 'missing']
@@ -46,7 +53,7 @@ export async function reviewDocumentCoverage(params: {
     return { overall_coverage: 0, items: [], summary: 'Нет заявленных компетенций для проверки.' }
   }
 
-  const text = params.documentText.slice(0, MAX_DOC_CHARS)
+  const text = selectRelevantSections(params.documentText, MAX_DOC_CHARS)
   const haystack = text.toLowerCase().replace(/\s+/g, ' ').trim()
 
   const refs = competencies.map((c, i) => ({ ref: `R${i}`, c }))
@@ -169,7 +176,10 @@ export async function detectDeclaredCompetencyCodes(params: {
   label:          string
 }): Promise<string[]> {
   if (params.programCompetencyCodes.length === 0) return []
-  const text = params.documentText.slice(0, MAX_DOC_CHARS)
+  // Same section-aware slice as reviewDocumentCoverage — the competency codes
+  // routinely sit in the matrix section deep in the doc, and the old
+  // head-slice missed them.
+  const text = selectRelevantSections(params.documentText, MAX_DOC_CHARS)
   if (text.trim().length < 200) return []   // nothing meaningful to extract
 
   const validSet = new Set(params.programCompetencyCodes.map((c) => c.trim().toUpperCase()))
@@ -211,6 +221,80 @@ export async function detectDeclaredCompetencyCodes(params: {
     if (original) out.push(original)
   }
   return out
+}
+
+// Pick the parts of the РПД the coverage scorer actually judges — the content
+// sections (§5–§8) plus the ФОС and the competency-declaration section — and
+// keep them within `budget` chars. If we find nothing recognisable (weirdly
+// formatted PDF), fall back to a head-plus-tail slice so the tail sections
+// aren't silently lost the way a blind head-slice did before.
+//
+// Anchors match the canonical ФГОС headings and their common variants. Order
+// in `PRIORITY` is the order we consume the budget: content and assessment
+// sections first (that's what the indicator scorer needs verbatim quotes from),
+// then indicators/results, then competency declaration.
+export function selectRelevantSections(fullText: string, budget: number): string {
+  const text = fullText ?? ''
+  if (text.length <= budget) return text
+
+  // Section-heading regex → each captures its own start position. We match on
+  // line-starts to avoid false hits inside prose. `sm` flags let ^ match per
+  // line and `.` cross lines.
+  const HEADINGS: { key: string; re: RegExp }[] = [
+    { key: 'lectures',    re: /^[\s\d.]*(?:содержание\s+(?:разделов|дисциплины)|тематический\s+план|лекц|разделы\s+дисциплины)/im },
+    { key: 'practicals',  re: /^[\s\d.]*(?:практич|семинарск)/im },
+    { key: 'labs',        re: /^[\s\d.]*лабораторн/im },
+    { key: 'srs',         re: /^[\s\d.]*(?:самостоятельн(?:ая|ой)\s+работ|срс)/im },
+    { key: 'assessment',  re: /^[\s\d.]*(?:фонд\s+оценочных\s+средств|фос|оценочные\s+материалы|формы\s+(?:и\s+)?методы\s+контроля|текущ\w*\s+контроль|промежуточн\w*\s+аттестац)/im },
+    { key: 'results',     re: /^[\s\d.]*(?:планируем\w+\s+результат|результаты\s+обучения)/im },
+    { key: 'competencies', re: /^[\s\d.]*(?:компетенции|индикаторы\s+достижени)/im },
+  ]
+  // Priority = order sections are packed into the budget.
+  const PRIORITY = ['lectures', 'practicals', 'labs', 'srs', 'assessment', 'results', 'competencies']
+
+  // Locate each heading; skip those not present. Section end = start of the
+  // NEXT heading (any category, further in the text).
+  interface Section { key: string; start: number; end: number }
+  const anchors: { key: string; start: number }[] = []
+  for (const h of HEADINGS) {
+    const m = h.re.exec(text)
+    if (m) anchors.push({ key: h.key, start: m.index })
+  }
+  if (anchors.length === 0) {
+    // No headings recognised — head + tail so we cover both intro and ФОС/results
+    // instead of losing the whole tail as before.
+    const half = Math.floor(budget / 2)
+    return `${text.slice(0, half)}\n\n[...]\n\n${text.slice(-half)}`
+  }
+  anchors.sort((a, b) => a.start - b.start)
+  const sections: Section[] = anchors.map((a, i) => ({
+    key:   a.key,
+    start: a.start,
+    end:   i + 1 < anchors.length ? anchors[i + 1].start : text.length,
+  }))
+  const byKey = new Map<string, Section>()
+  for (const s of sections) if (!byKey.has(s.key)) byKey.set(s.key, s)
+
+  // Pack sections in priority order until we hit the budget.
+  let used = 0
+  const picked: Section[] = []
+  for (const key of PRIORITY) {
+    const s = byKey.get(key)
+    if (!s) continue
+    picked.push(s); used += (s.end - s.start)
+    if (used >= budget) break
+  }
+  picked.sort((a, b) => a.start - b.start)
+
+  // Trim proportionally so long sections don't crowd out short ones.
+  const totalPicked = picked.reduce((n, s) => n + (s.end - s.start), 0)
+  if (totalPicked <= budget) {
+    return picked.map((s) => text.slice(s.start, s.end)).join('\n\n[...]\n\n')
+  }
+  const scale = budget / totalPicked
+  return picked
+    .map((s) => text.slice(s.start, s.start + Math.max(500, Math.floor((s.end - s.start) * scale))))
+    .join('\n\n[...]\n\n')
 }
 
 /** A quote survives only if it appears verbatim (case/whitespace-insensitive) in the document — same contract as grading.ts's citation validation. */

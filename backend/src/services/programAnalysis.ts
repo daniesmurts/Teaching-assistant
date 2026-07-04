@@ -6,8 +6,9 @@ import { ValidationError } from '../errors/AppError'
 import { logger } from '../lib/logger'
 import type {
   ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramAnalysis,
-  PrerequisiteEdge, SequencingResult, CompetencyProgressionRow, CompetencyTimelineCell,
-  CoverageLevel, RedundancyItem, RelatednessCluster, SemesterLoad,
+  PrerequisiteEdge, SequencingResult, SequencingStructure, SequencingLayerNode,
+  CompetencyProgressionRow, CompetencyTimelineCell, OutcomeDelivery, MappingConfidence,
+  CoverageLevel, RedundancyItem, RelatednessCluster, SemesterLoad, LoadCheck,
 } from '../../../shared/types'
 
 // Program-level architecture analysis (учебные планы). Given an ordered,
@@ -89,7 +90,108 @@ export async function analyzeProgram(params: {
     clusters,
     isolated,
     load,
+    outcome_delivery:   deriveOutcomeDelivery(progression),
+    mapping_confidence: program.competencies.length > 0 ? deriveMappingConfidence(disciplines) : undefined,
+    load_check:         deriveLoadCheck(load, disciplines, program.duration_semesters),
   }
+}
+
+// Sanity-check the credit load against ФГОС ВО (60 з.е./academic year). The
+// chart just sums extracted ЗЕТ, so a truncated/mis-parsed plan shows wrong
+// totals silently — this surfaces the tells: disciplines with no ЗЕТ (dropped
+// from the sum), a total short of 60×years (missing tail), and years far from
+// 60 з.е. (semesters dumped together). Pure — no I/O.
+const YEAR_TARGET = 60
+const YEAR_TOLERANCE = 5   // accept 55–65 з.е./year; outside → likely a parse error
+
+export function deriveLoadCheck(
+  load: SemesterLoad[], disciplines: ProgramDiscipline[], duration: number
+): LoadCheck {
+  const total_credits = round1(load.reduce((sum, l) => sum + (l.credits ?? 0), 0))
+  const years = Math.max(1, Math.round((duration || load.length) / 2))
+  const expected_total = years * YEAR_TARGET
+  const without = disciplines.filter((d) => d.credits == null).length
+
+  const issues: string[] = []
+
+  if (without > 0) {
+    issues.push(`${without} ${plural(without, 'дисциплина', 'дисциплины', 'дисциплин')} без ЗЕТ — не учтены в нагрузке.`)
+  }
+  if (total_credits > 0 && Math.abs(total_credits - expected_total) > YEAR_TOLERANCE) {
+    issues.push(
+      `Всего ${total_credits} з.е. вместо ожидаемых ${expected_total} (60 з.е. × ${years} ` +
+      `${plural(years, 'год', 'года', 'лет')}) — учебный план, вероятно, распознан не полностью.`
+    )
+  }
+  // Per-year deviations — the ФГОС invariant is 60 з.е./year. Only flag years
+  // whose both semesters carry credit data (else it's a null-ЗЕТ issue above).
+  for (let y = 1; y <= years; y++) {
+    const a = load.find((l) => l.semester === 2 * y - 1)
+    const b = load.find((l) => l.semester === 2 * y)
+    if (!a || !b || a.credits == null || b.credits == null) continue
+    const yearCredits = round1((a.credits ?? 0) + (b.credits ?? 0))
+    if (Math.abs(yearCredits - YEAR_TARGET) > YEAR_TOLERANCE) {
+      issues.push(`Год ${y} (сем. ${2 * y - 1}–${2 * y}): ${yearCredits} з.е. вместо 60.`)
+    }
+  }
+
+  return { total_credits, expected_total, disciplines_without_credits: without, issues }
+}
+
+// How much of the competency→discipline mapping rests on authoritative declared
+// codes vs. name inference. When under half the disciplines declare any codes,
+// «uncovered» gaps are likely name-inference artefacts, not real absences — the
+// UI uses `low` to caveat the gaps section.
+export function deriveMappingConfidence(disciplines: ProgramDiscipline[]): MappingConfidence {
+  const total = disciplines.length
+  const withCodes = disciplines.filter((d) => d.competency_codes.length > 0).length
+  return {
+    disciplines_total:      total,
+    disciplines_with_codes: withCodes,
+    low:                    total > 0 && withCodes / total < 0.5,
+  }
+}
+
+// ── Outcome-delivery synthesis ──────────────────────────────────────────────
+//
+// The headline the РОП actually wants: does the WHOLE plan build up the
+// graduate profile? Pure roll-up of the per-competency progression statuses
+// (no extra LLM call). `ok` = fully built (introduce→develop→master); `thin` =
+// built once (no development); `late` = introduced too late; `uncovered` = no
+// discipline forms it at all. Verdict:
+//   delivered — every requirement fully built (nothing thin/late/uncovered)
+//   gaps      — ≥1 requirement uncovered (the plan literally doesn't deliver it)
+//   partial   — all covered, but some thin/late (delivered weakly, not absent)
+// Returns undefined when there's no competency data to synthesise.
+
+export function deriveOutcomeDelivery(
+  progression: CompetencyProgressionRow[]
+): OutcomeDelivery | undefined {
+  const total = progression.length
+  if (total === 0) return undefined
+
+  const fully     = progression.filter((r) => r.status === 'ok').length
+  const thin      = progression.filter((r) => r.status === 'thin').length
+  const late      = progression.filter((r) => r.status === 'late').length
+  const uncovered = progression.filter((r) => r.status === 'uncovered').length
+
+  // Delivery score: fully built = 1, thin/late = 0.6 (built, but weakly/late),
+  // uncovered = 0. Mean × 100.
+  const score = Math.round(((fully * 1 + (thin + late) * 0.6) / total) * 100)
+
+  const verdict: OutcomeDelivery['verdict'] =
+    uncovered > 0 ? 'gaps'
+    : (thin + late) > 0 ? 'partial'
+    : 'delivered'
+
+  const headline =
+    verdict === 'delivered'
+      ? `Программа формирует все ${total} заявленных результатов: каждый развивается последовательно от введения к владению.`
+      : verdict === 'gaps'
+        ? `${uncovered} из ${total} результатов не формируются ни одной дисциплиной — профиль выпускника обеспечен не полностью. Полностью сформированы: ${fully}.`
+        : `Все ${total} результатов формируются, но ${thin + late} — поверхностно или поздно (нет последовательного развития). Полностью сформированы: ${fully}.`
+
+  return { total, fully, thin, late, uncovered, score, verdict, headline }
 }
 
 // ── 1) Embedding + relatedness ──────────────────────────────────────────────────
@@ -259,7 +361,111 @@ async function analyzeSequencing(
     flow_score: clampScore(result.flow_score),
     edges,
     inversions,
+    structure:  deriveStructure(edges, disciplines),
   }
+}
+
+// ── Holistic structure derived from the prerequisite edges ──────────────────
+//
+// Turns the flat pairwise list into the whole-plan shape the reader actually
+// wants: which disciplines are foundational, what builds on what, the critical
+// prerequisite spines, and what sits outside the dependency graph. Pure graph
+// derivation over `edges` — no extra LLM call. An edge from A→B means B depends
+// on A (A is the prerequisite), so depth(B) = 1 + max(depth of B's
+// prerequisites). Cycle-safe: a node revisited on the current DFS stack
+// contributes depth 0 (breaks the loop) rather than recursing forever — real
+// plans are acyclic, but a stray model edge shouldn't hang the analysis.
+
+export function deriveStructure(
+  edges: PrerequisiteEdge[], disciplines: ProgramDiscipline[]
+): SequencingStructure {
+  const semesterOf = new Map(disciplines.map((d) => [norm(d.name), d.semester]))
+  const displayName = new Map(disciplines.map((d) => [norm(d.name), d.name]))
+
+  // Adjacency by normalised name. prereqsOf[x] = disciplines x depends on.
+  const prereqsOf = new Map<string, string[]>()   // dependent → its prerequisites
+  const dependentsOf = new Map<string, string[]>() // prerequisite → what depends on it
+  const inGraph = new Set<string>()
+  for (const e of edges) {
+    const from = norm(e.from_name), to = norm(e.to_name)
+    if (from === to) continue
+    inGraph.add(from); inGraph.add(to)
+    displayName.set(from, e.from_name); displayName.set(to, e.to_name)
+    if (!semesterOf.has(from)) semesterOf.set(from, e.from_semester)
+    if (!semesterOf.has(to))   semesterOf.set(to,   e.to_semester)
+    ;(prereqsOf.get(to)     ?? prereqsOf.set(to, []).get(to)!).push(from)
+    ;(dependentsOf.get(from) ?? dependentsOf.set(from, []).get(from)!).push(to)
+  }
+
+  const node = (n: string): SequencingLayerNode => ({ name: displayName.get(n) ?? n, semester: semesterOf.get(n) ?? 0 })
+
+  // Longest-prerequisite depth per node (cycle-safe memoised DFS).
+  const depthCache = new Map<string, number>()
+  const depthOf = (n: string, stack: Set<string>): number => {
+    const cached = depthCache.get(n)
+    if (cached != null) return cached
+    if (stack.has(n)) return 0                       // cycle — break
+    stack.add(n)
+    const prereqs = prereqsOf.get(n) ?? []
+    const d = prereqs.length === 0 ? 0 : 1 + Math.max(...prereqs.map((p) => depthOf(p, stack)))
+    stack.delete(n)
+    depthCache.set(n, d)
+    return d
+  }
+
+  // Group connected nodes into dependency layers.
+  const byDepth = new Map<number, SequencingLayerNode[]>()
+  for (const n of inGraph) {
+    const d = depthOf(n, new Set())
+    ;(byDepth.get(d) ?? byDepth.set(d, []).get(d)!).push(node(n))
+  }
+  const layers: SequencingStructure['layers'] = [...byDepth.keys()].sort((a, b) => a - b).map((depth) => ({
+    depth,
+    disciplines: byDepth.get(depth)!.sort((a, b) => a.semester - b.semester || a.name.localeCompare(b.name, 'ru')),
+  }))
+
+  // Longest prerequisite chains — the spines where a misplacement cascades.
+  // Longest path ending at each node, reconstructed via best predecessor.
+  const bestPrev = new Map<string, string | null>()
+  const pathLen = new Map<string, number>()
+  const lenOf = (n: string, stack: Set<string>): number => {
+    const cached = pathLen.get(n)
+    if (cached != null) return cached
+    if (stack.has(n)) return 1
+    stack.add(n)
+    let best = 1, prev: string | null = null
+    for (const p of prereqsOf.get(n) ?? []) {
+      const l = 1 + lenOf(p, stack)
+      if (l > best) { best = l; prev = p }
+    }
+    stack.delete(n)
+    pathLen.set(n, best); bestPrev.set(n, prev)
+    return best
+  }
+  for (const n of inGraph) lenOf(n, new Set())
+
+  // Take the longest chains (by end node), dedup overlapping shorter ones.
+  const ends = [...inGraph].sort((a, b) => (pathLen.get(b) ?? 0) - (pathLen.get(a) ?? 0))
+  const longest_chains: SequencingStructure['longest_chains'] = []
+  const usedTails = new Set<string>()
+  for (const end of ends) {
+    if ((pathLen.get(end) ?? 0) < 3) break            // a chain needs ≥3 to be worth showing
+    if (usedTails.has(end)) continue
+    const seq: string[] = []
+    let cur: string | null = end
+    const guard = new Set<string>()
+    while (cur && !guard.has(cur)) { guard.add(cur); seq.unshift(displayName.get(cur) ?? cur); usedTails.add(cur); cur = bestPrev.get(cur) ?? null }
+    longest_chains.push({ names: seq, length: seq.length })
+    if (longest_chains.length >= 3) break
+  }
+
+  // Isolated — disciplines that appear in no edge at all (often general-ed).
+  const isolated: SequencingLayerNode[] = disciplines
+    .filter((d) => !inGraph.has(norm(d.name)))
+    .map((d) => ({ name: d.name, semester: d.semester }))
+    .sort((a, b) => a.semester - b.semester || a.name.localeCompare(b.name, 'ru'))
+
+  return { layers, longest_chains, isolated }
 }
 
 // ── 3) Competency progression ────────────────────────────────────────────────────
@@ -271,9 +477,44 @@ async function analyzeProgression(
   const layout = buildLayout(disciplines, true)
   const semesterOf = new Map(disciplines.map((d) => [norm(d.name), d.semester]))
 
-  // Stable refs so the round-trip survives reordering/renaming by the model.
-  // Cap the set fed to the model so the response stays within token budget.
-  const refs = competencies.slice(0, 28).map((c, i) => ({ ref: `R${i}`, c }))
+  // Chunk competencies so ALL of them are analysed (was capped at 28, dropping
+  // the tail silently — a plan with 31 competencies showed the last 3 as never
+  // examined and skewed the outcome-delivery headline). Each batch is small
+  // enough for the response to fit in the token budget.
+  const BATCH_SIZE = 20
+  const batches: ProgramCompetency[][] = []
+  for (let i = 0; i < competencies.length; i += BATCH_SIZE) {
+    batches.push(competencies.slice(i, i + BATCH_SIZE))
+  }
+
+  const results = await Promise.all(
+    batches.map((batch, batchIdx) =>
+      analyzeProgressionBatch({
+        teacherId, institutionId, layout, semesterOf,
+        // Global ref index so refs remain unique across batches (defensive:
+        // batches are separate LLM calls but the debug/logging is cleaner).
+        batchOffset: batchIdx * BATCH_SIZE,
+        competencies: batch,
+      })
+    )
+  )
+  return results.flat()
+}
+
+async function analyzeProgressionBatch(params: {
+  teacherId:     string
+  institutionId: string | undefined
+  layout:        string
+  semesterOf:    Map<string, number>
+  batchOffset:   number
+  competencies:  ProgramCompetency[]
+}): Promise<CompetencyProgressionRow[]> {
+  const { teacherId, institutionId, layout, semesterOf, batchOffset, competencies } = params
+
+  // Stable refs (batch-local so the model doesn't have to see huge numbers) —
+  // used only for round-trip identity, mapped back to the source competency
+  // via the `refs` array below.
+  const refs = competencies.map((c, i) => ({ ref: `R${i}`, c, globalIdx: batchOffset + i }))
   const reqBlock = refs.map(({ ref, c }) =>
     `${ref}. ${c.kind === 'goal' ? '[ЦЕЛЬ]' : `[${sanitiseForPrompt(c.code ?? '')}]`} ${sanitiseForPrompt(c.title)}`
   ).join('\n')
@@ -302,10 +543,13 @@ async function analyzeProgression(
     cells?: { discipline?: string; semester?: number; level?: string }[]
   }
 
+  // Bigger token budget — 20 refs × timeline cells + notes over ~50 disciplines
+  // routinely overran the old 6000 cap, cutting off the tail of the JSON and
+  // triggering the retry/failure that made progression sections randomly empty.
   const result = await chatJSON<{ items?: RawRow[] }>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'анализ формирования компетенций',
-    { context: { teacherId, institutionId, feature: 'grading' }, maxTokens: 6000 },
+    { context: { teacherId, institutionId, feature: 'grading' }, maxTokens: 8000 },
   )
 
   const byRef = new Map<string, RawRow>()
@@ -453,5 +697,13 @@ function clampScore(score: number | undefined): number {
 }
 
 function round1(n: number): number { return Math.round(n * 10) / 10 }
+
+// Russian plural (1 год / 2 года / 5 лет).
+function plural(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10, m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return one
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few
+  return many
+}
 function norm(s: string): string { return s.trim().toLowerCase().replace(/\s+/g, ' ') }
 function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)) }
