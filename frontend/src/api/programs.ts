@@ -110,13 +110,13 @@ export async function uploadProgramDocument(
     // replaces the previous file server-side.
     disciplineId?: string | null
   }
-): Promise<{ id: string; detected_competency_codes: string[] }> {
+): Promise<{ id: string; detected_competency_codes: string[]; replaced_review: boolean }> {
   const fd = new FormData()
   fd.append('file', input.file)
   fd.append('kind', input.kind)
   if (input.practiceType) fd.append('practice_type', input.practiceType)
   if (input.disciplineId) fd.append('discipline_id', input.disciplineId)
-  const res = await client.post<{ id: string; detected_competency_codes?: string[] }>(
+  const res = await client.post<{ id: string; detected_competency_codes?: string[]; replaced_review?: boolean }>(
     // The auto-detect LLM pass runs synchronously on the same request — bumps
     // the client-side timeout from the axios default (30s) so a slow model
     // reply doesn't cancel the upload before it finishes.
@@ -125,6 +125,10 @@ export async function uploadProgramDocument(
   return {
     id: res.data.id,
     detected_competency_codes: res.data.detected_competency_codes ?? [],
+    // Server signals when a previous coverage review for this discipline was
+    // dropped (cascade off the replaced document row). The UI toasts a hint
+    // so the user knows to re-run «Проверить соответствие».
+    replaced_review: res.data.replaced_review ?? false,
   }
 }
 

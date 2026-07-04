@@ -91,6 +91,26 @@ export default function InstitutionProgramDetail() {
 
   useEffect(() => { if (cachedAnalysis) setAnalysis(cachedAnalysis) }, [cachedAnalysis])
 
+  // Is the cached analysis stale relative to the programme's data? «Анализировать»
+  // saves a point-in-time snapshot (sequencing, clusters, content_confidence,
+  // etc.) — uploading a discipline's РПД or running a coverage check afterwards
+  // does NOT recompute it. That's by design (analysis is an expensive, explicit
+  // action), but it's confusing without a signal: a user uploads a РПД, sees the
+  // live per-discipline coverage table update immediately, then wonders why
+  // «Тематические кластеры» / content_confidence still says "0 РПД загружено".
+  // Compare the analysis timestamp against the latest of: plan/competency edits
+  // (program.updated_at), any document upload, any coverage-check run.
+  const analysisIsStale = useMemo(() => {
+    if (!analysis || !program) return false
+    const generatedAt = new Date(analysis.generated_at).getTime()
+    const timestamps = [
+      new Date(program.updated_at).getTime(),
+      ...(program.documents ?? []).map((d) => new Date(d.uploaded_at).getTime()),
+      ...disciplineReviews.map((r) => new Date(r.created_at).getTime()),
+    ]
+    return timestamps.some((t) => t > generatedAt)
+  }, [analysis, program, disciplineReviews])
+
   const duration = program?.duration_semesters ?? 8
   const maxSemester = Math.max(duration, ...disciplines.map((d) => d.semester), 1)
   const knownCodes = useMemo(
@@ -121,6 +141,11 @@ export default function InstitutionProgramDetail() {
     onSuccess: (result) => {
       setAnalysis(result)
       qc.invalidateQueries({ queryKey: ['program-analysis', id] })
+      // Analyse persists disciplines/competencies (saveDisciplines/saveCompetencies
+      // above) before running — refetch 'program' so the Documents tab's discipline
+      // list (and any auto-populated competency_codes) reflects the saved state
+      // without requiring a manual page reload.
+      qc.invalidateQueries({ queryKey: ['program', id] })
       setTab('report')
     },
   })
@@ -280,10 +305,45 @@ export default function InstitutionProgramDetail() {
           analyzeMut.isPending
             ? <div className="text-center py-16 text-sm font-sans text-ink-secondary">Анализируем архитектуру плана…</div>
             : analysis
-              ? <Report analysis={analysis} duration={maxSemester} program={program} reviews={disciplineReviews} />
-              : <div className="text-center py-16 text-sm font-sans text-ink-secondary">
-                  Анализ ещё не запускался. Нажмите «Анализировать», чтобы оценить архитектуру плана.
-                </div>
+              ? (
+                <>
+                  {/* Данные программы менялись (новая РПД, правки плана) после
+                      последнего запуска анализа — сам анализ (кластеры,
+                      последовательность, компетенции) не пересчитывается
+                      автоматически при загрузке документов, только по кнопке
+                      «Анализировать». Без этого сигнала непонятно, почему
+                      таблица покрытия РПД обновляется сразу, а показатели
+                      ниже — нет. */}
+                  {analysisIsStale && (
+                    <div className="flex items-start gap-2 text-sm font-sans text-warning bg-warning-bg border border-warning/15 rounded-lg px-4 py-3 mb-4">
+                      <span className="flex-shrink-0 mt-0.5">⚠</span>
+                      <span className="text-ink-secondary">
+                        <span className="text-ink font-medium">Данные программы изменились</span> после последнего анализа (сформирован {new Date(analysis.generated_at).toLocaleString('ru-RU')}) — например, загружена новая РПД или отредактирован план. Показатели ниже (последовательность, компетенции, кластеры) не обновляются автоматически. Нажмите «Анализировать», чтобы пересчитать их с учётом новых данных.
+                      </span>
+                    </div>
+                  )}
+                  <Report analysis={analysis} duration={maxSemester} program={program} reviews={disciplineReviews} />
+                </>
+              )
+              : (
+                <>
+                  <div className="text-center py-16 text-sm font-sans text-ink-secondary">
+                    Анализ ещё не запускался. Нажмите «Анализировать», чтобы оценить архитектуру плана.
+                  </div>
+                  {/* РПД↔competency coverage is driven by per-discipline checks
+                      run from the Documents tab (program-discipline-reviews),
+                      independent of the plan-level «Анализировать» run above —
+                      so it's still worth showing here even before the plan
+                      analysis has ever been run. When a plan analysis DOES
+                      exist, this renders inside <Report> instead, at its usual
+                      spot after «Пробелы и избыточность» (previously this
+                      whole section vanished whenever `analysis` was empty —
+                      that coupling was the bug, not its position). */}
+                  {program && program.disciplines.length > 0 && (
+                    <DisciplineCoverageSection disciplines={program.disciplines} reviews={disciplineReviews} />
+                  )}
+                </>
+              )
         )}
 
         {tab === 'documents' && program && (
@@ -537,6 +597,24 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
         <p className="text-sm font-sans text-ink leading-relaxed">{analysis.summary}</p>
       </div>
 
+      {/* Non-fatal warnings from the analysis run — a section that failed */}
+      {/* comes back empty, and without this the user would take the empty */}
+      {/* state as truth. Rendered above outcome-delivery so it can't be missed. */}
+      {analysis.warnings && analysis.warnings.length > 0 && (
+        <div className="bg-warning-bg border border-warning/15 rounded-lg p-3">
+          <div className="text-[10px] font-sans font-semibold uppercase tracking-wide text-warning mb-1.5">
+            Часть анализа не завершилась
+          </div>
+          <ul className="space-y-1">
+            {analysis.warnings.map((w, i) => (
+              <li key={i} className="flex items-start gap-1.5 text-xs font-sans text-ink-secondary leading-relaxed">
+                <span className="text-warning flex-shrink-0">⚠</span><span>{w}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Outcome delivery — does the whole plan deliver the graduate profile? */}
       {/* Guarded for legacy analyses run before it shipped. */}
       {outcome_delivery && <OutcomeDeliveryCard d={outcome_delivery} />}
@@ -589,31 +667,77 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
       {progression.length > 0 && (
         <section>
           <SectionLabel>Формирование компетенций по семестрам</SectionLabel>
-          <div className="bg-surface border border-border rounded-lg overflow-x-auto">
-            <table className="w-full text-xs font-sans border-collapse">
-              <thead>
-                <tr>
-                  <th className="text-left px-3 py-2 font-medium text-ink-secondary sticky left-0 bg-surface">Компетенция</th>
-                  {Array.from({ length: duration }, (_, i) => i + 1).map((s) => (
-                    <th key={s} className="px-1 py-2 font-medium text-ink-tertiary text-center w-7">{s}</th>
-                  ))}
-                  <th className="px-3 py-2 font-medium text-ink-secondary text-right">Статус</th>
-                </tr>
-              </thead>
-              <tbody>
-                {progression.map((row, ri) => (
-                  <ProgressionRow key={ri} row={row} duration={duration} />
+          <div className="flex flex-col lg:flex-row gap-4 items-start">
+            <div className="flex-1 min-w-0 w-full">
+              <div className="bg-surface border border-border rounded-lg overflow-x-auto">
+                <table className="w-full text-xs font-sans border-collapse">
+                  <thead>
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-ink-secondary sticky left-0 bg-surface" rowSpan={2}>Компетенция</th>
+                      <th className="px-1 pt-2 pb-0.5 font-medium text-ink-tertiary text-center text-[10px] uppercase tracking-wide" colSpan={duration}>
+                        Семестр
+                      </th>
+                      <th className="px-3 py-2 font-medium text-ink-secondary text-right" rowSpan={2}>Статус</th>
+                    </tr>
+                    <tr>
+                      {Array.from({ length: duration }, (_, i) => i + 1).map((s) => (
+                        <th key={s} className="px-1 pb-2 font-medium text-ink-tertiary text-center w-7" title={`Семестр ${s}`}>{s}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {progression.map((row, ri) => (
+                      <ProgressionRow key={ri} row={row} duration={duration} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center gap-4 mt-2 px-1">
+                {(['introduce', 'develop', 'master'] as CoverageLevel[]).map((lv) => (
+                  <span key={lv} className="flex items-center gap-1.5 text-[10px] font-sans text-ink-tertiary">
+                    <span className="w-3 h-3 rounded-sm inline-block" style={{ background: LEVEL_META[lv].bg }} />
+                    {LEVEL_META[lv].label}
+                  </span>
                 ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="flex items-center gap-4 mt-2 px-1">
-            {(['introduce', 'develop', 'master'] as CoverageLevel[]).map((lv) => (
-              <span key={lv} className="flex items-center gap-1.5 text-[10px] font-sans text-ink-tertiary">
-                <span className="w-3 h-3 rounded-sm inline-block" style={{ background: LEVEL_META[lv].bg }} />
-                {LEVEL_META[lv].label}
-              </span>
-            ))}
+              </div>
+            </div>
+
+            {/* Explanation — the dots are a maturity scale per semester, not a
+                status; kept visible next to the table rather than tucked away,
+                since "почему тут пробел" / "что значит цвет" are the two
+                questions this table reliably raises. */}
+            <aside className="w-full lg:w-72 flex-shrink-0 bg-amber-light/30 border border-amber/15 rounded-lg p-4 space-y-3">
+              <div className="text-[11px] font-sans font-semibold uppercase tracking-wide text-ink-secondary">
+                Как читать таблицу
+              </div>
+
+              <div className="space-y-1.5">
+                <p className="text-xs font-sans text-ink-secondary leading-relaxed">
+                  Цвет точки — это <span className="text-ink font-medium">не оценка</span>, а глубина освоения компетенции в этом семестре:
+                </p>
+                <ul className="space-y-1">
+                  {(['introduce', 'develop', 'master'] as CoverageLevel[]).map((lv) => (
+                    <li key={lv} className="flex items-start gap-1.5 text-xs font-sans text-ink-secondary leading-relaxed">
+                      <span className="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0 mt-0.5" style={{ background: LEVEL_META[lv].bg }} />
+                      <span>
+                        <span className="text-ink font-medium">{LEVEL_META[lv].label}</span>
+                        {lv === 'introduce' && ' — компетенция впервые появляется, базовое знакомство.'}
+                        {lv === 'develop'   && ' — углубляется, отрабатывается на практике.'}
+                        {lv === 'master'    && ' — ожидается уверенное владение.'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <p className="text-xs font-sans text-ink-secondary leading-relaxed">
+                Точки в строке показывают, в каких семестрах компетенция проходит путь <span className="text-ink font-medium">введение → развитие → владение</span>. Бледная точка рано, янтарная позже, зелёная ещё позже — значит план выстраивает компетенцию постепенно, а не даёт всё в одной дисциплине. Это и есть статус «{STATUS_META.ok.label}».
+              </p>
+
+              <p className="text-xs font-sans text-ink-secondary leading-relaxed">
+                Пропуски между точками — это нормально: значит, в промежуточных семестрах ни одна дисциплина эту компетенцию не затрагивает. «{STATUS_META.ok.label}» означает, что верна сама <span className="text-ink font-medium">последовательность уровней</span>, а не то, что точка должна стоять в каждом семестре.
+              </p>
+            </aside>
           </div>
         </section>
       )}
@@ -641,7 +765,9 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
         </section>
       )}
 
-      {/* Discipline РПД coverage (migration 051) */}
+      {/* Discipline РПД coverage — per-discipline checks (Documents tab),
+          independent of this plan-level analysis; shown here so it sits with
+          the rest of the report once one exists. */}
       {program && program.disciplines.length > 0 && (
         <DisciplineCoverageSection disciplines={program.disciplines} reviews={reviews} />
       )}
@@ -649,7 +775,10 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
       {/* Relatedness & load */}
       <section>
         <SectionLabel>Связность и нагрузка</SectionLabel>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {/* items-start — without it CSS Grid's default row-stretch forces the
+            (often much shorter) clusters card to match the height of the load
+            card, leaving a large blank area under a short "не выявлено" text. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
           <div className="bg-surface border border-border rounded-lg p-4">
             <div className="text-xs font-sans font-medium text-ink mb-3">Тематические кластеры</div>
             {clusters.length === 0
@@ -665,6 +794,16 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
               <div className="mt-3 pt-3 border-t border-border">
                 <div className="text-[10px] font-sans font-semibold text-warning uppercase tracking-wide mb-1">Слабо связаны с планом</div>
                 <div className="text-xs font-sans text-ink-secondary">{isolated.join(', ')}</div>
+              </div>
+            )}
+            {/* Comparison rests on uploaded РПД content; a discipline with no */}
+            {/* uploaded file falls back to name-only, coarser comparison. */}
+            {analysis.content_confidence?.low && clusters.length === 0 && isolated.length === 0 && (
+              <div className="mt-3 pt-3 border-t border-border flex items-start gap-1.5 text-[11px] font-sans text-warning leading-relaxed">
+                <span className="flex-shrink-0">⚠</span>
+                <span>
+                  РПД загружены лишь у {analysis.content_confidence.disciplines_with_content} из {analysis.content_confidence.disciplines_total} дисциплин — сравнение пока опирается только на названия, поэтому «нет кластеров» может означать «пока мало данных», а не «нет тематической структуры». Загрузите РПД на вкладке «Документы» и перезапустите анализ.
+                </span>
               </div>
             )}
           </div>
@@ -705,6 +844,27 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
               </div>
             )}
           </div>
+        </div>
+
+        {/* Explanation — kept visible (not hidden behind a click) since
+            "what is this" / "почему пусто" are the two questions this
+            section reliably raises. */}
+        <div className="bg-amber-light/30 border border-amber/15 rounded-lg p-4 mt-3 space-y-2.5">
+          <div className="text-[11px] font-sans font-semibold uppercase tracking-wide text-ink-secondary">
+            Что означают эти карточки
+          </div>
+          <p className="text-xs font-sans text-ink-secondary leading-relaxed">
+            <span className="text-ink font-medium">«Тематические кластеры»</span> — дисциплины, чьё содержание (по загруженной РПД, при её отсутствии — по названию) семантически близко друг другу, например «Физика», «Теоретическая механика» и «Электротехника». Это не про порядок изучения — только про то, о чём дисциплины содержательно перекликаются.
+          </p>
+          <p className="text-xs font-sans text-ink-secondary leading-relaxed">
+            <span className="text-ink font-medium">«Слабо связаны с планом»</span> — дисциплины, у которых нет ни одной близкой по содержанию соседки; они не обязательно лишние, но стоит убедиться, что их место в программе обосновано.
+          </p>
+          <p className="text-xs font-sans text-ink-secondary leading-relaxed">
+            <span className="text-ink font-medium">«Явных кластеров не выявлено»</span> — не всегда повод для беспокойства: план может просто не иметь тесно перекликающихся групп. Но если РПД загружены лишь у части дисциплин (см. предупреждение выше, если оно есть), сравнение идёт только по названиям и менее надёжно — загрузите РПД для точности.
+          </p>
+          <p className="text-xs font-sans text-ink-secondary leading-relaxed">
+            <span className="text-ink font-medium">«Нагрузка по семестрам»</span> — сумма зачётных единиц (ЗЕТ) дисциплин каждого семестра, извлечённая из учебного плана. По ФГОС ожидается около 60 з.е. на учебный год (два семестра); заметные отклонения проверяются автоматически (см. «Проверка нагрузки» выше, если она сработала).
+          </p>
         </div>
       </section>
 
@@ -934,38 +1094,68 @@ function DisciplineCoverageSection({
   const sorted = [...disciplines].sort((a, b) => a.semester - b.semester || a.sort_order - b.sort_order)
   if (reviews.length === 0) return null   // nothing checked yet — no point rendering an all-empty table
 
+  const checkedCount = reviews.length
+  const totalCount = disciplines.length
+
   return (
     <section>
       <SectionLabel>Соответствие РПД компетенциям</SectionLabel>
-      <div className="bg-surface border border-border rounded-lg divide-y divide-border">
-        {sorted.map((d) => {
-          const review = d.id ? reviewByDiscipline.get(d.id) : null
-          return (
-            <details key={d.id ?? d.name} className="group">
-              <summary className="px-4 py-2.5 flex items-center justify-between gap-3 cursor-pointer list-none">
-                <span className="text-sm font-sans text-ink truncate">{d.name}</span>
-                {review ? (
-                  <span
-                    className="text-xs font-mono font-medium flex-shrink-0"
-                    style={{ color: scoreColor(review.result.overall_coverage) }}
-                  >
-                    {review.result.overall_coverage}%
-                  </span>
-                ) : (
-                  <span className="text-xs font-sans text-ink-tertiary flex-shrink-0">не проверено</span>
-                )}
-              </summary>
-              {review && (
-                <div className="px-4 pb-3 space-y-2">
-                  {review.result.summary && (
-                    <p className="text-xs font-sans text-ink-secondary leading-relaxed">{review.result.summary}</p>
+      <div className="flex flex-col lg:flex-row gap-4 items-start">
+        <div className="flex-1 min-w-0 w-full bg-surface border border-border rounded-lg divide-y divide-border">
+          {sorted.map((d) => {
+            const review = d.id ? reviewByDiscipline.get(d.id) : null
+            return (
+              <details key={d.id ?? d.name} className="group">
+                <summary className="px-4 py-2.5 flex items-center justify-between gap-3 cursor-pointer list-none">
+                  <span className="text-sm font-sans text-ink truncate">{d.name}</span>
+                  {review ? (
+                    <span
+                      className="text-xs font-mono font-medium flex-shrink-0"
+                      style={{ color: scoreColor(review.result.overall_coverage) }}
+                    >
+                      {review.result.overall_coverage}%
+                    </span>
+                  ) : (
+                    <span className="text-xs font-sans text-ink-tertiary flex-shrink-0">не проверено</span>
                   )}
-                  {review.result.items.map((it, i) => <CoverageItemRow key={i} it={it} />)}
-                </div>
-              )}
-            </details>
-          )
-        })}
+                </summary>
+                {review && (
+                  <div className="px-4 pb-3 space-y-2">
+                    {review.result.summary && (
+                      <p className="text-xs font-sans text-ink-secondary leading-relaxed">{review.result.summary}</p>
+                    )}
+                    {review.result.items.map((it, i) => <CoverageItemRow key={i} it={it} />)}
+                  </div>
+                )}
+              </details>
+            )
+          })}
+        </div>
+
+        {/* Explanation — this table is per-discipline (independent of the
+            whole-plan «Анализировать» run above/below it), so it's easy to
+            mistake an empty "не проверено" row for a bug. Kept visible next
+            to the table since "what does % mean" / "why isn't my discipline
+            checked" are the two questions this list reliably raises. */}
+        <aside className="w-full lg:w-72 flex-shrink-0 bg-amber-light/30 border border-amber/15 rounded-lg p-4 space-y-3">
+          <div className="text-[11px] font-sans font-semibold uppercase tracking-wide text-ink-secondary">
+            Что это и как этим пользоваться
+          </div>
+          <p className="text-xs font-sans text-ink-secondary leading-relaxed">
+            Здесь — результат проверки, действительно ли <span className="text-ink font-medium">содержание загруженной РПД</span> раскрывает компетенции, заявленные за дисциплиной. Это отдельная, более точная проверка на уровне одной дисциплины — она не связана с общим анализом плана выше.
+          </p>
+          <p className="text-xs font-sans text-ink-secondary leading-relaxed">
+            <span className="text-ink font-medium">«не проверено»</span> значит, что для этой дисциплины ещё не загружена РПД или проверка ещё не запускалась — это не ошибка. Загрузите файл и запустите проверку на вкладке <span className="text-ink font-medium">«Документы»</span> кнопкой «Проверить соответствие компетенциям».
+          </p>
+          <p className="text-xs font-sans text-ink-secondary leading-relaxed">
+            Процент — это доля покрытия компетенций дисциплины (полностью / частично / не раскрыты, посчитано по индикаторам). <span className="text-ink font-medium">Нажмите на строку</span>, чтобы развернуть её и увидеть разбор по каждой компетенции с цитатами из текста.
+          </p>
+          {totalCount > 0 && (
+            <p className="text-xs font-sans text-ink-tertiary leading-relaxed pt-1 border-t border-amber/15">
+              Проверено {checkedCount} из {totalCount} дисциплин.
+            </p>
+          )}
+        </aside>
       </div>
     </section>
   )
@@ -1028,6 +1218,15 @@ function DocumentsPanel({
         )
       } else {
         addToast('Документ добавлен', 'success')
+      }
+      // A re-upload replaces the previous file, which cascade-drops the coverage
+      // review — tell the user so they don't miss that the check now shows
+      // stale/empty results until re-run.
+      if (res.replaced_review) {
+        addToast(
+          'Предыдущая проверка соответствия сброшена — запустите её повторно, чтобы обновить результат.',
+          'info',
+        )
       }
       onChanged()
     } catch {

@@ -923,6 +923,12 @@ export interface Program {
   org_unit_id:        string | null
   has_description_doc: boolean         // описание ОП PDF was imported
   has_plan_doc:        boolean         // учебный план PDF was imported
+  // Per-semester ЗЕТ totals as printed in the plan's own «Итого/Всего»
+  // rows (migration 057). Optional — legacy programmes / imports without an
+  // Итого section have none. Used by deriveLoadCheck to reconcile the sum of
+  // extracted disciplines against what the plan itself asserts, catching
+  // truncated / mis-parsed extractions.
+  reported_semester_totals?: Record<number, number>
   created_at:         string
   updated_at:         string
 }
@@ -1152,6 +1158,22 @@ export interface MappingConfidence {
   low:                    boolean   // < half of disciplines declare codes → treat gaps cautiously
 }
 
+// Trust signal for the relatedness/clustering pass. Clustering compares each
+// discipline's EMBEDDED content — the uploaded РПД text when present, else the
+// bare discipline name (short, generic, e.g. "Физика"). With few РПД uploaded,
+// most disciplines embed on name alone, which routinely either (a) collapses
+// into one giant "everything is similar" blob that the clustering algorithm
+// deliberately suppresses as uninformative, or (b) sits in a similarity band
+// that's neither a real cluster nor a real outlier. Either way the section
+// reads as "Явных кластеров не выявлено" — true of the OUTPUT, misleading
+// about the CAUSE (looks like "no thematic structure" when it's really "not
+// enough real content to compare yet"). This tells the UI to say so.
+export interface ContentConfidence {
+  disciplines_total:        number
+  disciplines_with_content: number   // had an uploaded РПД (or linked course syllabus) to embed on
+  low:                      boolean  // < half of disciplines have real content → treat "no clusters" cautiously
+}
+
 // Sanity check on the credit load — the chart just sums whatever was extracted
 // from the учебный план PDF, so a bad parse shows wrong numbers with no signal.
 // ФГОС ВО: one academic year = 60 з.е. This flags the parse artefacts (missing
@@ -1179,8 +1201,15 @@ export interface ProgramAnalysis {
   outcome_delivery?: OutcomeDelivery
   // Trust signal for the competency→discipline mapping. Optional (legacy).
   mapping_confidence?: MappingConfidence
+  // Trust signal for the relatedness/clustering pass. Optional (legacy).
+  content_confidence?: ContentConfidence
   // Sanity check on the credit load vs the ФГОС 60-з.е./year rule. Optional.
   load_check?: LoadCheck
+  // Non-fatal issues from the analysis run — an LLM pass that timed out, an
+  // embed batch that failed. Empty when the run was clean. The UI surfaces
+  // these so a section that came back empty is understood as a transient
+  // failure, not a real "no data".
+  warnings?: string[]
 }
 
 // ─── API error shape ──────────────────────────────────────────────────────────

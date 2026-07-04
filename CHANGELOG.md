@@ -14,6 +14,166 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Added
+- **Stale-analysis banner on the Анализ tab.** Reported as: uploading a
+  discipline's РПД after running «Анализировать» updates the live coverage
+  table immediately, but «Тематические кластеры» / `content_confidence` still
+  reflect the state from before the upload. Root cause (not a bug):
+  «Анализировать» saves a point-in-time snapshot — sequencing, clusters,
+  content_confidence, gaps, everything in `ProgramAnalysis` — and nothing
+  about uploading a document or running a per-discipline coverage check
+  recomputes it; only clicking «Анализировать» again does. The per-discipline
+  coverage table looks live because it's a genuinely separate, always-fresh
+  query. New client-side check (`analysisIsStale`, no backend change — all the
+  needed timestamps were already on the page: `program.updated_at`, each
+  document's `uploaded_at`, each review's `created_at`) compares those against
+  `analysis.generated_at`; when anything is newer, a banner appears above the
+  report: «Данные программы изменились после последнего анализа… Нажмите
+  «Анализировать», чтобы пересчитать их». Both typechecks clean, 180/180
+  backend tests green (no logic change on that side).
+
+### Fixed / Added
+- **«Связность и нагрузка» — grid-stretch visual bug + content-confidence
+  guard.** Reported as "what is this huge blank card supposed to be, is it
+  working correctly". Two distinct issues: **(visual bug)** the two-card
+  `grid-cols-2` row used CSS Grid's default row-stretch, so the (often much
+  shorter) «Тематические кластеры» card was stretched to match the height of
+  its sibling «Нагрузка по семестрам» card, leaving a large blank area under a
+  one-line "не выявлено" message — fixed with `items-start` on the grid.
+  **(signal gap)** `clusterByRelatedness` deliberately suppresses a cluster
+  covering >60% of disciplines as an "uninformative blob" — but with most
+  disciplines lacking an uploaded РПД, their embeddings fall back to the bare
+  discipline name (short, generic text), which often collapses into exactly
+  that kind of blob. Those disciplines are then too similar to everything to
+  qualify as "isolated" either, so they silently vanish from both lists and
+  the page reads as "no thematic structure" when the honest state is "not
+  enough real content yet to compare". New `content_confidence` on
+  `ProgramAnalysis` (`deriveContentConfidence`, mirrors `mapping_confidence`'s
+  pattern; 4 unit tests) — flags `low` when under half the disciplines have a
+  real uploaded РПД (≥80 chars). Frontend shows a caveat under the clusters
+  card when `low` and neither clusters nor isolated were found, plus a
+  permanent explanation panel (Russian) covering what clusters / isolated /
+  load bars mean and how to read "не выявлено" honestly. No migration. Both
+  typechecks clean, 180/180 tests green.
+- **«Соответствие РПД компетенциям» appeared inconsistently on the Анализ tab.**
+  Reported as "sometimes shows up, other times it doesn't". Root cause: the
+  section was nested inside the whole-plan `Report` component, which only
+  renders once a plan-level «Анализировать» run exists and is cached — but
+  this table is driven by an entirely separate, per-discipline dataset
+  (`program-discipline-reviews`, populated by «Проверить соответствие» on the
+  Documents tab) that has nothing to do with whether the plan analysis has
+  been run. Two unrelated gates stacked on top of each other. Decoupled the
+  section from `analysis`'s presence: when a plan analysis exists it renders
+  inside `Report` at its original position (after «Пробелы и избыточность»,
+  before «Связность и нагрузка»); when no plan analysis has been run yet it
+  now still shows (below the "не запускался" placeholder) instead of
+  vanishing — previously it disappeared outright in that case. Also added a
+  permanent explanation panel beside the table (Russian,
+  matching the heatmap's "как читать" panel): what the check is, why
+  «не проверено» isn't an error, where to run it, and how to interact
+  (click a row to expand the per-competency indicator breakdown) — plus a
+  "Проверено N из M" counter. Both typechecks clean, production build clean.
+- **The discipline-id-preservation fix (below, "replaceDisciplines must
+  preserve discipline ids") never actually took effect — the route dropped
+  `id` before it got there.** Reported symptom: after «Анализировать» (or
+  «Сохранить»), without reloading the page, uploading a discipline's РПД
+  failed with «Дисциплина не найдена». Root cause: `PUT /:id/disciplines`
+  rebuilds each discipline into a fresh object for `replaceDisciplines` —
+  and that mapping never copied `d.id` through, even though the frontend
+  sends it on every save. So `replaceDisciplines` always received id-less
+  rows, took the "no ids provided" branch, deleted every discipline, and
+  reinserted them all with brand-new UUIDs — on **every single save or
+  analyze**, cascading away every uploaded discipline РПД
+  (`program_documents.discipline_id` is `ON DELETE CASCADE`). The query-layer
+  fix (id-preserving upsert) was correct in isolation but dead code in
+  practice. Fixed the route mapping to forward `id` when present; added the
+  matching validation rule (`disciplines.*.id` optional UUID). Frontend
+  defensively invalidates the `program` query after analyze too (analyze
+  saves disciplines/competencies before running — the Documents tab's cached
+  discipline list should reflect that without a manual reload). Verified with
+  a script that reproduces the exact route-level payload shape (JSON
+  round-tripped, ids as plain strings) end-to-end against dev DB: the fixed
+  mapping preserves ids and the uploaded doc survives a full save cycle; a
+  sanity check confirmed the *old* mapping does reproduce the cascade-delete,
+  proving the test actually caught the regression. Both typechecks clean,
+  176/176 tests green.
+
+### Fixed / Added
+- **/programs pipeline — round 2 (five audit items).** Follow-up to the first
+  audit round. **(#6) РПД re-upload silently dropped its coverage review** —
+  the review row CASCADEd off the doc row, and the user got no signal.
+  `POST /:id/documents` now checks for an existing review before replacing the
+  doc and returns `replaced_review: true`; the UI toasts «Предыдущая проверка
+  сброшена — запустите её повторно». **(#1.1) Итого-row reconciliation.**
+  `parseStudyPlan` now also extracts the plan's own per-semester «Итого/Всего»
+  rows and persists them to `programs.reported_semester_totals` (migration
+  057). `deriveLoadCheck` compares the sum of extracted disciplines against
+  the plan-asserted totals per semester (±2 з.е. tolerance) and flags
+  mismatches («Сем. 1: сумма извлечённых ЗЕТ 47, в плане указано 30 — часть
+  дисциплин распознана неверно»). Direct signal for a mis-parsed semester
+  rather than a vague 60-per-year rule. 4 new unit tests. **(#1.2) Yandex
+  Vision paging for multi-page scanned PDFs.** Vision v1 `batchAnalyze`
+  silently caps a PDF at ~8 pages per call — a 20-page scanned учебный план
+  lost everything after page 8. `yandexVisionOCR` now splits PDFs > 8 pages
+  into chunks (pdf-lib, dynamic import) and OCRs each sequentially, joining
+  with the same `\f` page-break convention. **Requires `npm install pdf-lib`
+  in backend/** — until then it degrades gracefully to the old single-call
+  behavior (no regression, a warning in the logs). **(#2.4) Competency matrix
+  ingestion at import.** `parseCompetencyMatrix` extracts the discipline ×
+  competency matrix from описание ОП (up to 60k chars), filters against the
+  programme's declared codes, and populates each discipline's
+  `competency_codes` authoritatively via `fillDisciplineCompetencyCodesIfEmpty`
+  (name-normalised match). Structural fix behind the mapping-confidence guard:
+  УК/ОПК false «не покрыто» disappears when the matrix is present.
+  Best-effort — a failed pass leaves per-РПД auto-detect to fill codes later.
+  **(#7) PDF export includes all new sections.** `programReportPdf` now renders
+  the warnings caveat, the outcome-delivery card (verdict + score + breakdown
+  chips), the sequencing «Дерево зависимостей» (layers + chains), the
+  mapping-confidence caveat on gaps, and the load-check issues under the load
+  bars — so an exported PDF matches what's on screen. Both typechecks clean,
+  176/176 tests green.
+
+### Fixed
+- **/programs pipeline audit — five ingestion/analysis fixes.** Follow-up on the
+  end-to-end audit; the feature "upload docs → get complete analysis" was
+  bleeding data at multiple stages. Fixes: **(1) 28-competency silent drop** in
+  `analyzeProgression` (a plan with 31 competencies had the last 3 never
+  examined, skewing the outcome-delivery headline). Competencies are now
+  **batched (20 per LLM call, parallel)** so ALL of them land in progression /
+  gaps / outcome-delivery; per-batch `maxTokens` lifted 6000→8000 so the JSON
+  no longer gets truncated at ~50 disciplines. **(2) Coverage check truncated
+  РПД to the first ~10 pages** (blind 24k-char head slice) — but the content
+  sections the indicator scorer judges (лекции / практ / лаб / СРС / ФОС) sit
+  in the middle-to-end of a 30–60-page РПД, so evidence was cut off and
+  indicators wrongly scored «missing». New `selectRelevantSections` explicitly
+  anchors on ФГОС headings and packs the content/assessment sections into the
+  budget first (falls back to head+tail when no headings match); budget raised
+  24k→40k; applied to `reviewDocumentCoverage` AND `detectDeclaredCompetencyCodes`
+  so upload-time auto-detect sees the matrix that often sits deep in the doc.
+  4 unit tests. **(3) Silent-failure design** — sequencing/progression `try/catch`
+  swallowed errors into empty sections with no signal, so users saw
+  randomly-different reports run-to-run. New `warnings[]` on
+  `ProgramAnalysis`: populated whenever a pass fails, surfaced as a caveat
+  card at the top of the Анализ tab («Не удалось построить карту компетенций —
+  повторите анализ»). Additionally the **embedding pass is now guarded** (was
+  the only pass that could 500 the whole request — unlike the LLM passes it
+  had no try/catch); a persistent embed failure now degrades to an empty
+  clusters section with a warning instead of killing the analysis. **(4)
+  Uploaded РПД were invisible to the plan analysis.** `resolveContent` only
+  read `course_id`-linked teacher courses, but importer-created disciplines
+  always have `course_id=null` and their РПД sits in `program_documents` —
+  so sequencing / clusters / relatedness all ran on **discipline names alone**
+  even after the РОП uploaded rich content. New
+  `listWorkingProgrammesByDiscipline` bulk-loads every uploaded РПД's
+  extracted text in one round trip; `resolveContent` now uses it first,
+  falling through to the course path. Uploaded РПД actually inform the
+  embedding + relatedness map now. **(5) nginx timeout mismatch documented.**
+  nginx's default `proxy_read_timeout 120s` < the frontend's 180s API timeout
+  → users saw a 504 while the backend finished and saved — classic phantom
+  failure. Documented the required one-time VM config change
+  (`proxy_read_timeout 240s` on the `/api/institution/programs/` location) in
+  `deploy.sh`. Both typechecks clean, 173/173 tests green.
+
 ### Changed
 - **CLAUDE.md rewritten from 4,447 lines (30k tokens) → 158 lines (8k tokens).**
   Old version was stale (referenced "GradeAssist", listed 2 features, missing 15+),

@@ -86,6 +86,18 @@ echo "▶ [7/7] nginx guard…"
 # (reload keeps the old config serving if the new one is broken; restart does
 # not — a bad restart took the site down for a day on 2026-06-11).
 # This guard only ensures nginx is actually up, and revives it if not.
+#
+# NGINX TIMEOUT NOTE (2026-07-04) — the /programs analyse endpoint runs an
+# embedding pass over every discipline (50+) + two LLM passes, which for a
+# large plan can exceed nginx's default `proxy_read_timeout 120s`. When that
+# fires, the browser sees a 504 while the backend finishes and saves the
+# result — classic "it errored but then the analysis appeared". The API
+# client already waits 180s (frontend/src/api/programs.ts). On the VM, add
+# to the /api/institution/programs/ location block:
+#     proxy_read_timeout 240s;
+#     proxy_send_timeout 240s;
+# then `sudo nginx -t && sudo systemctl reload nginx`. This is a one-time
+# manual change — deploy does not touch nginx config.
 ssh "$VM_HOST" bash -s <<'REMOTE'
 set -euo pipefail
 if ! systemctl is-active --quiet nginx; then

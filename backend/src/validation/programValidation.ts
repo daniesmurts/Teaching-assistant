@@ -24,6 +24,10 @@ export const updateProgramRules = [
 
 export const replaceDisciplinesRules = [
   body('disciplines').isArray({ max: 80 }).withMessage('Слишком много дисциплин'),
+  // Present for existing disciplines (the client round-trips it) — required so
+  // replaceDisciplines can UPDATE in place instead of delete+reinsert, which
+  // would regenerate the id and cascade-delete any uploaded РПД for it.
+  body('disciplines.*.id').optional({ nullable: true }).isUUID(),
   body('disciplines.*.name').isString().trim().isLength({ min: 1, max: 300 }),
   body('disciplines.*.semester').isInt({ min: 1, max: 16 }),
   body('disciplines.*.course_id').optional({ nullable: true }).isUUID(),

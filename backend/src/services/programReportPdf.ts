@@ -159,6 +159,54 @@ export async function generateProgramReportPdf(
       .text(analysis.summary, M + 92, y + 16, { width: CW - 92 - 16, lineGap: 1.5 })
     y += scoreBoxH
 
+    // ── WARNINGS (non-fatal issues from the analysis run) ────────────────────
+    if (analysis.warnings && analysis.warnings.length > 0) {
+      gap(10)
+      ensure(20)
+      doc.font('sansB').fontSize(8).fillColor(C.warning)
+        .text('Часть анализа не завершилась', M, y)
+      y += 12
+      for (const w of analysis.warnings) {
+        text(`⚠  ${w}`, 'sans', 9, C.ink2, { gap: 1 })
+        gap(2)
+      }
+    }
+
+    // ── OUTCOME DELIVERY (does the plan deliver the graduate profile?) ───────
+    if (analysis.outcome_delivery) {
+      const od = analysis.outcome_delivery
+      const odColor = od.verdict === 'delivered' ? C.success : od.verdict === 'gaps' ? C.danger : C.warning
+      const odLabel = od.verdict === 'delivered' ? 'Результаты обеспечены'
+                    : od.verdict === 'gaps'      ? 'Есть необеспеченные результаты'
+                    :                              'Обеспечены частично'
+      gap(14)
+      const boxH = 66
+      ensure(boxH)
+      doc.roundedRect(M, y, CW, boxH, 8).lineWidth(1).strokeColor(C.border).stroke()
+      // score disc
+      const odDiscX = M + 40, odDiscY = y + boxH / 2
+      doc.circle(odDiscX, odDiscY, 22).lineWidth(1.5).strokeColor(odColor).stroke()
+      doc.font('serif').fontSize(18).fillColor(odColor)
+        .text(String(od.score), odDiscX - 22, odDiscY - 9, { width: 44, align: 'center' })
+      doc.font('sansB').fontSize(8).fillColor(odColor).text(odLabel, M + 76, y + 12)
+      doc.font('sans').fontSize(9).fillColor(C.ink2)
+        .text(od.headline, M + 76, y + 26, { width: CW - 76 - 10, lineGap: 1 })
+      // breakdown chips
+      const chipY = y + boxH - 14
+      let cx = M + 76
+      const chip = (label: string, value: number, color: string) => {
+        if (value === 0) return
+        const s = `${value} ${label}`
+        doc.font('sans').fontSize(7.5).fillColor(color).text(s, cx, chipY, { lineBreak: false })
+        cx += doc.widthOfString(s) + 14
+      }
+      chip('полностью',    od.fully,     C.success)
+      chip('поверхностно', od.thin,      C.warning)
+      chip('поздно',       od.late,      C.warning)
+      chip('не обеспечены', od.uncovered, C.danger)
+      y += boxH
+    }
+
     // ── STAT ROW ──────────────────────────────────────────────────────────────
     gap(14)
     const stats: { label: string; value: number; danger: boolean }[] = [
@@ -185,6 +233,32 @@ export async function generateProgramReportPdf(
     const seq = analysis.sequencing
     sectionHeading('Последовательность и предпосылки')
     if (seq.verdict) text(seq.verdict, 'sans', 10.5, C.ink, { gap: 1.5 })
+
+    // Whole-plan structure derived from the edges — foundational → профильные,
+    // key prerequisite chains, and isolated disciplines. Compact list view.
+    if (seq.structure && seq.structure.layers.length > 0) {
+      gap(10)
+      text('Дерево зависимостей — от фундаментальных к профильным', 'sansB', 9, C.ink2)
+      gap(4)
+      const s = seq.structure
+      const maxDepth = s.layers.length ? s.layers[s.layers.length - 1].depth : 0
+      const layerLabel = (d: number): string =>
+        d === 0 ? 'Фундамент' : d === maxDepth ? 'Профильные' : `Уровень ${d + 1}`
+      for (const layer of s.layers) {
+        const names = layer.disciplines.map((d) => `${d.name} (сем. ${d.semester})`).join(', ')
+        const line = `${layerLabel(layer.depth)}: ${names}`
+        text(line, 'sans', 9, layer.depth === 0 ? C.amber : C.ink2, { gap: 1.5 })
+        gap(2)
+      }
+      if (s.longest_chains.length > 0) {
+        gap(4)
+        text('Ключевые цепочки предпосылок', 'sansB', 8.5, C.ink2)
+        gap(3)
+        for (const ch of s.longest_chains) {
+          text('·  ' + ch.names.join('  →  '), 'sans', 9, C.ink2, { gap: 1 })
+        }
+      }
+    }
     if (seq.inversions.length > 0) {
       gap(8)
       text('Нарушения порядка', 'sansB', 9, C.danger)
@@ -301,6 +375,14 @@ export async function generateProgramReportPdf(
     // ── GAPS & REDUNDANCY ─────────────────────────────────────────────────────────
     if (analysis.missing.length > 0 || analysis.orphans.length > 0) {
       sectionHeading('Пробелы и избыточность')
+      // When few disciplines declare their competencies, «не покрыто» is
+      // inferred from names and may be a mapping gap rather than a real one.
+      if (analysis.mapping_confidence?.low && analysis.missing.length > 0) {
+        const mc = analysis.mapping_confidence
+        const line = `Заявленные компетенции указаны лишь у ${mc.disciplines_with_codes} из ${mc.disciplines_total} дисциплин. Часть пунктов «не покрыто» может отражать неполное сопоставление, а не реальный пробел.`
+        text(line, 'sans', 8.5, C.warning, { gap: 2 })
+        gap(6)
+      }
       gapColumns(
         doc, M, y, CW,
         { title: 'Компетенции без дисциплины', tone: C.danger, items: analysis.missing.slice(0, 10) },
@@ -337,6 +419,19 @@ export async function generateProgramReportPdf(
       const vlabel = l.credits != null ? `${l.credits} з.е.` : `${l.discipline_count} дисц.`
       doc.font('sans').fontSize(8).fillColor(C.ink2).text(vlabel, M + barLabelW + barTrackW + 8, y + 1, { width: barValW - 8, align: 'right' })
       y += 14
+    }
+    // Load-check caveats — the chart just sums extracted ЗЕТ, so flag when the
+    // numbers contradict the ФГОС 60-з.е./year rule or the plan's own Итого.
+    if (analysis.load_check && analysis.load_check.issues.length > 0) {
+      gap(8)
+      text('Проверка нагрузки', 'sansB', 9, C.warning); gap(4)
+      for (const it of analysis.load_check.issues) {
+        text(`⚠  ${it}`, 'sans', 8.5, C.ink2, { gap: 1 })
+        gap(2)
+      }
+      gap(2)
+      text('График суммирует ЗЕТ, распознанные из PDF. Проверьте семестры и ЗЕТ дисциплин в Конструкторе и перезапустите анализ.',
+        'sans', 8, C.ink3, { gap: 1 })
     }
 
     // ── FOOTERS (buffered) ────────────────────────────────────────────────────────

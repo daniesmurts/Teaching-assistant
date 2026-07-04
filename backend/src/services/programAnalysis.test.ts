@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { deriveStructure, deriveOutcomeDelivery, deriveMappingConfidence, deriveLoadCheck } from './programAnalysis'
+import { deriveStructure, deriveOutcomeDelivery, deriveMappingConfidence, deriveLoadCheck, deriveContentConfidence } from './programAnalysis'
 import type { PrerequisiteEdge, ProgramDiscipline, CompetencyProgressionRow, SemesterLoad } from '../../../shared/types'
 
 const sem = (semester: number, credits: number | null): SemesterLoad => ({ semester, discipline_count: 1, credits })
@@ -113,6 +113,31 @@ describe('deriveMappingConfidence', () => {
   })
 })
 
+describe('deriveContentConfidence', () => {
+  const withId = (id: string): ProgramDiscipline => ({ ...disc('x', 1), id })
+
+  it('low when under half the disciplines have real uploaded content', () => {
+    const docs = new Map([['a', 'x'.repeat(200)]])   // only discipline "a" has real content
+    const c = deriveContentConfidence([withId('a'), withId('b'), withId('c')], docs)
+    expect(c.low).toBe(true)
+    expect(c.disciplines_with_content).toBe(1)
+    expect(c.disciplines_total).toBe(3)
+  })
+  it('not low when at least half have real content', () => {
+    const docs = new Map([['a', 'x'.repeat(200)], ['b', 'y'.repeat(200)]])
+    expect(deriveContentConfidence([withId('a'), withId('b')], docs).low).toBe(false)
+  })
+  it('a doc under the 80-char threshold does not count as real content', () => {
+    const docs = new Map([['a', 'short']])
+    const c = deriveContentConfidence([withId('a'), withId('b')], docs)
+    expect(c.disciplines_with_content).toBe(0)
+    expect(c.low).toBe(true)
+  })
+  it('empty plan is not flagged low', () => {
+    expect(deriveContentConfidence([], new Map()).low).toBe(false)
+  })
+})
+
 describe('deriveLoadCheck', () => {
   // A clean 2-year plan: 30+30 / 30+30 = 120, expected 60×2.
   const clean = [sem(1, 30), sem(2, 30), sem(3, 30), sem(4, 30)]
@@ -149,5 +174,29 @@ describe('deriveLoadCheck', () => {
     const partial = [sem(1, 30), sem(2, null), sem(3, 30), sem(4, 30)]
     const c = deriveLoadCheck(partial, [], 4)
     expect(c.issues.some((i) => i.startsWith('Год 1'))).toBe(false)   // year 1 skipped (null sem)
+  })
+
+  it('reconciles per-semester extracted sums against Итого rows and flags mismatches', () => {
+    const load = [sem(1, 47), sem(2, 19), sem(3, 30), sem(4, 30)]
+    // Plan itself says sem 1 was 30 and sem 2 was 30 (i.e. the extraction dumped sem 2 into sem 1).
+    const totals = { 1: 30, 2: 30, 3: 30, 4: 30 }
+    const c = deriveLoadCheck(load, [], 4, totals)
+    expect(c.issues.some((i) => i.startsWith('Сем. 1') && i.includes('47') && i.includes('30'))).toBe(true)
+    expect(c.issues.some((i) => i.startsWith('Сем. 2') && i.includes('19') && i.includes('30'))).toBe(true)
+    // Sems 3 and 4 match, so no issue for them.
+    expect(c.issues.some((i) => i.startsWith('Сем. 3'))).toBe(false)
+  })
+
+  it('does not flag a semester within the Итого tolerance', () => {
+    const load = [sem(1, 30), sem(2, 30.5)]                // 0.5 з.е. rounding
+    const c = deriveLoadCheck(load, [], 2, { 1: 30, 2: 30 })
+    expect(c.issues.some((i) => i.startsWith('Сем.'))).toBe(false)
+  })
+
+  it('ignores Итого reconciliation when no totals were extracted (legacy import)', () => {
+    // Same skewed load as above; without totals, only per-year flags fire.
+    const load = [sem(1, 47), sem(2, 19), sem(3, 30), sem(4, 30)]
+    const c = deriveLoadCheck(load, [], 4)
+    expect(c.issues.some((i) => i.startsWith('Сем.'))).toBe(false)   // no Итого issues
   })
 })

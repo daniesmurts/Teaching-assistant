@@ -78,6 +78,30 @@ export async function findProgramDocument(id: string, programId: string): Promis
 }
 
 /**
+ * All working_programme documents for a programme, keyed by discipline_id
+ * with their extracted text. Bulk equivalent of
+ * findWorkingProgrammeForDiscipline — one round trip covers all disciplines.
+ * Used by the plan analysis to enrich each discipline's embed input with the
+ * uploaded РПД content instead of embedding on the name alone.
+ */
+export async function listWorkingProgrammesByDiscipline(
+  programId: string
+): Promise<Map<string, string>> {
+  const { rows } = await pool.query<{ discipline_id: string; extracted_text: string | null }>(
+    `SELECT discipline_id, extracted_text
+       FROM program_documents
+      WHERE program_id = $1
+        AND kind = 'working_programme'
+        AND discipline_id IS NOT NULL
+        AND extracted_text IS NOT NULL`,
+    [programId]
+  )
+  const out = new Map<string, string>()
+  for (const r of rows) if (r.discipline_id && r.extracted_text) out.set(r.discipline_id, r.extracted_text)
+  return out
+}
+
+/**
  * The current working_programme document for a discipline (if any), with its
  * extracted text — the input for services/documentReview.ts. Migration 051.
  */

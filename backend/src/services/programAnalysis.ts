@@ -2,12 +2,13 @@ import { chatJSON, embed } from './deepseek'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { findCourseById } from '../db/queries/courses'
 import { getLatestKnowledgeText } from '../db/queries/documents'
+import { listWorkingProgrammesByDiscipline } from '../db/queries/programDocuments'
 import { ValidationError } from '../errors/AppError'
 import { logger } from '../lib/logger'
 import type {
   ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramAnalysis,
   PrerequisiteEdge, SequencingResult, SequencingStructure, SequencingLayerNode,
-  CompetencyProgressionRow, CompetencyTimelineCell, OutcomeDelivery, MappingConfidence,
+  CompetencyProgressionRow, CompetencyTimelineCell, OutcomeDelivery, MappingConfidence, ContentConfidence,
   CoverageLevel, RedundancyItem, RelatednessCluster, SemesterLoad, LoadCheck,
 } from '../../../shared/types'
 
@@ -51,9 +52,39 @@ export async function analyzeProgram(params: {
     throw new ValidationError('Добавьте минимум две дисциплины в учебный план для анализа.')
   }
 
+  // Non-fatal issues from any pass. When a pass fails silently (an LLM timeout,
+  // an embed batch that dropped) sections came back empty and the whole report
+  // looked randomly different between runs. Collecting them here means the UI
+  // can say «повторите анализ» instead of showing an empty section as truth.
+  const warnings: string[] = []
+
+  // Pull all uploaded РПД text for this programme up-front — one round trip
+  // instead of per-discipline lookups inside the embed loop. Feeds
+  // resolveContent so the embedding/analysis reflects the actual content the
+  // РОП uploaded, not just the discipline name.
+  let docTextByDiscipline: Map<string, string> = new Map()
+  try {
+    docTextByDiscipline = await listWorkingProgrammesByDiscipline(program.id)
+  } catch (err) {
+    logger.warn({ message: 'Failed to load РПД texts for analysis', error: (err as Error).message })
+    // Non-fatal — analysis falls back to name-only embeddings, same as before.
+  }
+
   // 1) Relatedness & load — embed each discipline, cross-compare, tally load.
-  const prepared = await prepareAndEmbed(teacherId, disciplines)
-  const { clusters, isolated } = clusterByRelatedness(prepared)
+  // Guarded: a persistent embed failure used to 500 the whole request (unlike
+  // the LLM passes). Now degrades gracefully — the report renders without
+  // clusters and the user learns why.
+  let clusters: RelatednessCluster[] = []
+  let isolated: string[] = []
+  try {
+    const prepared = await prepareAndEmbed(teacherId, disciplines, docTextByDiscipline)
+    const r = clusterByRelatedness(prepared)
+    clusters = r.clusters
+    isolated = r.isolated
+  } catch (err) {
+    logger.warn({ message: 'Program embedding pass failed', error: (err as Error).message })
+    warnings.push('Не удалось построить карту связанности дисциплин — сервис эмбеддингов временно недоступен, повторите анализ.')
+  }
   const load = computeLoad(disciplines, program.duration_semesters)
 
   // 2) Sequencing & prerequisites (best-effort — never blocks the report).
@@ -62,6 +93,7 @@ export async function analyzeProgram(params: {
     sequencing = await analyzeSequencing(teacherId, institutionId, disciplines)
   } catch (err) {
     logger.warn({ message: 'Program sequencing analysis failed', error: (err as Error).message })
+    warnings.push('Анализ последовательности дисциплин не завершился — повторите анализ.')
   }
 
   // 3) Competency progression (best-effort).
@@ -71,6 +103,7 @@ export async function analyzeProgram(params: {
       progression = await analyzeProgression(teacherId, institutionId, disciplines, program.competencies)
     } catch (err) {
       logger.warn({ message: 'Program progression analysis failed', error: (err as Error).message })
+      warnings.push('Не удалось построить карту формирования компетенций — повторите анализ.')
     }
   }
 
@@ -92,7 +125,31 @@ export async function analyzeProgram(params: {
     load,
     outcome_delivery:   deriveOutcomeDelivery(progression),
     mapping_confidence: program.competencies.length > 0 ? deriveMappingConfidence(disciplines) : undefined,
-    load_check:         deriveLoadCheck(load, disciplines, program.duration_semesters),
+    content_confidence: deriveContentConfidence(disciplines, docTextByDiscipline),
+    load_check:         deriveLoadCheck(load, disciplines, program.duration_semesters, program.reported_semester_totals),
+    warnings:           warnings.length > 0 ? warnings : undefined,
+  }
+}
+
+// How much of the clustering pass rests on real uploaded content vs. bare
+// discipline names. A discipline embeds on its uploaded РПД text when present
+// (see resolveContent); with few uploads, most disciplines embed on name
+// alone — short, generic text that either collapses into one "everything is
+// similar" blob (silently suppressed by clusterByRelatedness as uninformative)
+// or sits in a similarity band that's neither cluster nor outlier. Either way
+// "Явных кластеров не выявлено" looks like "no thematic structure" when it's
+// really "not enough real content yet" — `low` tells the UI to say so.
+export function deriveContentConfidence(
+  disciplines: ProgramDiscipline[], docTextByDiscipline: Map<string, string>
+): ContentConfidence {
+  const total = disciplines.length
+  const withContent = disciplines.filter(
+    (d) => d.id != null && (docTextByDiscipline.get(d.id)?.trim().length ?? 0) >= 80
+  ).length
+  return {
+    disciplines_total:        total,
+    disciplines_with_content: withContent,
+    low:                      total > 0 && withContent / total < 0.5,
   }
 }
 
@@ -105,7 +162,8 @@ const YEAR_TARGET = 60
 const YEAR_TOLERANCE = 5   // accept 55–65 з.е./year; outside → likely a parse error
 
 export function deriveLoadCheck(
-  load: SemesterLoad[], disciplines: ProgramDiscipline[], duration: number
+  load: SemesterLoad[], disciplines: ProgramDiscipline[], duration: number,
+  reportedSemesterTotals?: Record<number, number>,
 ): LoadCheck {
   const total_credits = round1(load.reduce((sum, l) => sum + (l.credits ?? 0), 0))
   const years = Math.max(1, Math.round((duration || load.length) / 2))
@@ -122,6 +180,24 @@ export function deriveLoadCheck(
       `Всего ${total_credits} з.е. вместо ожидаемых ${expected_total} (60 з.е. × ${years} ` +
       `${plural(years, 'год', 'года', 'лет')}) — учебный план, вероятно, распознан не полностью.`
     )
+  }
+  // Per-semester reconciliation against the plan's own «Итого» rows — the
+  // strongest signal of a mis-parsed semester because it compares against
+  // the plan's own asserted total rather than a ФГОС rule of thumb. A ±2 з.е.
+  // tolerance absorbs rounding of parts of ЗЕТ.
+  const RECONCILE_TOLERANCE = 2
+  if (reportedSemesterTotals) {
+    for (const [semStr, reported] of Object.entries(reportedSemesterTotals)) {
+      const sem = Number(semStr)
+      const l = load.find((x) => x.semester === sem)
+      if (!l || l.credits == null) continue
+      if (Math.abs(l.credits - reported) > RECONCILE_TOLERANCE) {
+        issues.push(
+          `Сем. ${sem}: сумма извлечённых ЗЕТ ${l.credits}, ` +
+          `в плане указано ${reported} — часть дисциплин распознана неверно.`
+        )
+      }
+    }
   }
   // Per-year deviations — the ФГОС invariant is 60 з.е./year. Only flag years
   // whose both semesters carry credit data (else it's a null-ЗЕТ issue above).
@@ -197,11 +273,12 @@ export function deriveOutcomeDelivery(
 // ── 1) Embedding + relatedness ──────────────────────────────────────────────────
 
 async function prepareAndEmbed(
-  teacherId: string, disciplines: ProgramDiscipline[]
+  teacherId: string, disciplines: ProgramDiscipline[],
+  docTextByDiscipline: Map<string, string>,
 ): Promise<PreparedDiscipline[]> {
   const out: PreparedDiscipline[] = []
   for (const d of disciplines) {
-    const content = await resolveContent(d, teacherId)
+    const content = await resolveContent(d, teacherId, docTextByDiscipline)
     const embedText = content ? `${d.name}. ${content}` : d.name
     const embedding = await embedWithBackoff(embedText.slice(0, MAX_CONTENT_CHARS + 200), teacherId)
     out.push({ d, embedText, embedding })
@@ -210,7 +287,21 @@ async function prepareAndEmbed(
   return out
 }
 
-async function resolveContent(d: ProgramDiscipline, teacherId: string): Promise<string> {
+// Resolve the descriptive text for a discipline used to enrich its embedding.
+// Priority: uploaded РПД (program_documents.extracted_text) → linked course
+// syllabus/knowledge. Importer-created disciplines carry no course_id, so
+// before this fix they always embedded on name alone — the plan analysis
+// literally ignored every uploaded document. Reading the РПД makes clusters
+// and «disciplines outside the graph» reflect actual content.
+async function resolveContent(
+  d: ProgramDiscipline, teacherId: string,
+  docTextByDiscipline: Map<string, string>,
+): Promise<string> {
+  // Prefer uploaded РПД — this is what РОПы actually upload for a plan.
+  if (d.id) {
+    const uploaded = docTextByDiscipline.get(d.id)
+    if (uploaded && uploaded.trim().length >= 80) return uploaded.slice(0, MAX_CONTENT_CHARS)
+  }
   if (!d.course_id) return ''
   try {
     const course = await findCourseById(d.course_id, teacherId)

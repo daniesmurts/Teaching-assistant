@@ -27,11 +27,20 @@ interface ProgramRow {
   // `program` org_unit) can be scoped to their programs. NULL for legacy
   // programs; IT admin sets the link on the edit form.
   org_unit_id: string | null
+  // Migration 057 — semester → credits map, as printed in the plan's own
+  // Итого rows. Nullable; JSONB.
+  reported_semester_totals: Record<string, number> | null
   created_at: Date
   updated_at: Date
 }
 
 function toProgram(r: ProgramRow): Program {
+  // JSONB keys come back as strings; normalise to numeric semester keys so
+  // callers can index by `Number` without surprises.
+  const rst = r.reported_semester_totals
+  const totals: Record<number, number> | undefined = rst
+    ? Object.fromEntries(Object.entries(rst).map(([k, v]) => [Number(k), Number(v)]).filter(([k, v]) => Number.isFinite(k) && Number.isFinite(v)))
+    : undefined
   return {
     id: r.id,
     institution_id: r.institution_id,
@@ -48,6 +57,7 @@ function toProgram(r: ProgramRow): Program {
     org_unit_id: r.org_unit_id,
     has_description_doc: Boolean((r.description_text ?? '').trim()),
     has_plan_doc: Boolean((r.plan_text ?? '').trim()),
+    reported_semester_totals: totals,
     created_at: r.created_at.toISOString(),
     updated_at: r.updated_at.toISOString(),
   }
@@ -233,6 +243,17 @@ export async function setProgramDocs(
        updated_at       = NOW()
      WHERE id = $1`,
     [id, docs.description_text ?? null, docs.plan_text ?? null]
+  )
+}
+
+/** Persist the per-semester totals extracted from the plan's Итого rows so
+ *  deriveLoadCheck can reconcile against them later. */
+export async function setReportedSemesterTotals(
+  id: string, totals: Record<number, number> | null
+): Promise<void> {
+  await pool.query(
+    `UPDATE programs SET reported_semester_totals = $2::jsonb, updated_at = NOW() WHERE id = $1`,
+    [id, totals ? JSON.stringify(totals) : null]
   )
 }
 

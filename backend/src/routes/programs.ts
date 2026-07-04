@@ -21,14 +21,14 @@ import { reviewDocumentCoverage, detectDeclaredCompetencyCodes } from '../servic
 import { generateProgramReportPdf } from '../services/programReportPdf'
 import { uploadFields } from '../middleware/fileValidation'
 import { extractText } from '../services/documentExtractor'
-import { parseStudyPlan, parseDescription } from '../services/programImport'
-import { setProgramDocs } from '../db/queries/programs'
+import { parseStudyPlan, parseDescription, parseCompetencyMatrix } from '../services/programImport'
+import { setProgramDocs, setReportedSemesterTotals } from '../db/queries/programs'
 import { uploadObject, downloadObject, deleteObject } from '../services/objectStorage'
 import {
   insertProgramDocument, listProgramDocuments, findProgramDocument, deleteProgramDocument,
   findWorkingProgrammeForDiscipline, deleteWorkingProgrammeForDiscipline, deletePracticeForType,
 } from '../db/queries/programDocuments'
-import { insertReview, getLatestReviewByDiscipline } from '../db/queries/programDocumentReviews'
+import { insertReview, getLatestReviewByDiscipline, getLatestReviewForDiscipline } from '../db/queries/programDocumentReviews'
 import { logger } from '../lib/logger'
 import type {
   ProgramDiscipline, ProgramCompetency,
@@ -255,9 +255,12 @@ router.post(
 
     // 2) Parse — each pass degrades independently.
     let disciplines: ProgramDiscipline[] = []
+    let reportedSemesterTotals: Record<number, number> | undefined = undefined
     if (planText) {
       try {
-        disciplines = await parseStudyPlan({ teacherId, institutionId: institutionIdOpt, planText })
+        const parsed = await parseStudyPlan({ teacherId, institutionId: institutionIdOpt, planText })
+        disciplines = parsed.disciplines
+        reportedSemesterTotals = parsed.reported_semester_totals
       } catch (err) {
         logger.warn({ message: 'Program import: plan parse failed', error: (err as Error).message })
         warnings.push('Не удалось разобрать учебный план автоматически.')
@@ -294,8 +297,43 @@ router.post(
     })
 
     await setProgramDocs(program.id, { description_text: descText, plan_text: planText })
+    if (reportedSemesterTotals) await setReportedSemesterTotals(program.id, reportedSemesterTotals)
     if (competencies.length > 0) await replaceCompetencies(program.id, competencies)
     if (disciplines.length > 0)  await replaceDisciplines(program.id, disciplines)
+
+    // Extract the discipline × competency matrix from описание ОП and populate
+    // each discipline's competency_codes authoritatively. This is the fix
+    // behind the mapping-confidence guard: without this, УК/ОПК routinely show
+    // as «не покрыто» because gen-ed courses (История России, ОРГ) can't be
+    // name-inferred to a specific УК. Best-effort — a failed pass leaves
+    // codes to per-РПД auto-detect (fillDisciplineCompetencyCodesIfEmpty).
+    if (descText && competencies.length > 0 && disciplines.length > 0) {
+      try {
+        const validCodes = competencies.map((c) => c.code).filter((c): c is string => !!c)
+        const matrix = await parseCompetencyMatrix({
+          teacherId, institutionId: institutionIdOpt,
+          descriptionText: descText, validCodes,
+        })
+        if (matrix.size > 0) {
+          const fresh = await getProgramDetail(program.id, inst)
+          if (fresh) {
+            const norm = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, ' ')
+            const byNorm = new Map<string, string[]>()
+            for (const [name, codes] of matrix.entries()) byNorm.set(norm(name), codes)
+            let filled = 0
+            for (const d of fresh.disciplines) {
+              const codes = byNorm.get(norm(d.name))
+              if (codes && codes.length > 0 && d.id) {
+                if (await fillDisciplineCompetencyCodesIfEmpty(d.id, codes)) filled++
+              }
+            }
+            if (filled === 0) warnings.push('Матрица компетенций найдена, но названия дисциплин не совпали — проверьте вручную.')
+          }
+        }
+      } catch (err) {
+        logger.warn({ message: 'Program import: competency matrix extraction failed', error: (err as Error).message })
+      }
+    }
 
     // Attach практики as first-class documents — the set was fully validated
     // (lengths, type constants, duplicates) BEFORE the programme was created,
@@ -366,6 +404,13 @@ router.put('/:id/disciplines', validate(replaceDisciplinesRules), asyncHandler(a
   assertEdit(req, program.org_unit_id)
 
   const disciplines: ProgramDiscipline[] = (req.body.disciplines as ProgramDiscipline[]).map((d, i) => ({
+    // MUST forward id — replaceDisciplines uses it to UPDATE in place instead
+    // of delete+reinsert. Dropping it here (as this mapping used to) silently
+    // regenerated every discipline's UUID on every save/analyze, cascading
+    // away every uploaded discipline РПД (program_documents.discipline_id is
+    // ON DELETE CASCADE) even though replaceDisciplines itself already knows
+    // how to preserve ids when given them.
+    id:               typeof d.id === 'string' && d.id.length > 0 ? d.id : undefined,
     course_id:        d.course_id ?? null,
     name:             d.name,
     semester:         d.semester,
@@ -469,6 +514,10 @@ router.post(
     // One current file per discipline: a re-upload replaces the previous row
     // (best-effort object cleanup, same convention as DELETE below).
     let disciplineId: string | null = null
+    // Was there a coverage review for this discipline before the replace? The
+    // review CASCADEs off the document row, so a re-upload silently drops it —
+    // the caller needs to know so they can re-run «Проверить соответствие».
+    let replacedReview = false
     if (kind === 'working_programme') {
       disciplineId = String(req.body.discipline_id ?? '')
       if (!disciplineId) {
@@ -483,6 +532,10 @@ router.post(
           'Дисциплина не найдена — возможно, учебный план был изменён. Обновите страницу и загрузите файл заново.'
         )
       }
+      // Check for an existing review BEFORE removing the doc (the CASCADE would
+      // erase the row and we'd never know one existed).
+      const priorReview = await getLatestReviewForDiscipline(disciplineId)
+      replacedReview = !!priorReview
       const existing = await deleteWorkingProgrammeForDiscipline(detail.id, disciplineId)
       if (existing) {
         await deleteObject(existing.storagePath).catch((err) =>
@@ -542,7 +595,7 @@ router.post(
       }
     }
 
-    res.status(201).json({ id, detected_competency_codes: detectedCodes })
+    res.status(201).json({ id, detected_competency_codes: detectedCodes, replaced_review: replacedReview })
   })
 )
 
