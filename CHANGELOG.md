@@ -14,6 +14,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Changed
+- **CLAUDE.md rewritten from 4,447 lines (30k tokens) → 158 lines (8k tokens).**
+  Old version was stale (referenced "GradeAssist", listed 2 features, missing 15+),
+  bloated with reference docs (full DDL, design tokens, env config), and had
+  inaccurate architecture descriptions (no LLM registry, no org tree authz, no
+  attestation). New version is a lean system prompt: project identity → navigation
+  guide → 10 non-negotiable rules → architecture invariants → workflow. Design
+  system, full schema, API endpoints, and runbook are no longer inlined — they were
+  reference documentation, not prompt instructions.
+
 ### Fixed
 - **Uploaded РПД silently wiped on save/analyze (data loss).** `replaceDisciplines`
   did a blanket `DELETE` + re-`INSERT` of every discipline, regenerating their
@@ -36,7 +46,75 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
   найдена — возможно, учебный план был изменён. Обновите страницу…») instead of
   the misleading «Укажите дисциплину…» (which they had).
 
+### Fixed / Added
+- **Учебный план ingestion — stop dropping the tail; load sanity-check.** The
+  «Нагрузка по семестрам» chart just sums the ЗЕТ extracted from the PDF, so a
+  bad parse showed wrong totals (e.g. сем. 1 = 47 з.е., year totals ≠ 60, grand
+  total 212 vs 240) with no signal. Two fixes: **(ingestion)** `parseStudyPlan`
+  raised `MAX_PLAN_CHARS` 16k→48k and `maxTokens` 3500→8000 (a full 4-year plan
+  overran both, silently truncating later semesters), lifted the cap 80→150,
+  and — instead of defaulting an unreadable semester to **1** (which inflated
+  сем. 1) — it now **carries forward the previous semester** (plans list
+  disciplines in semester order), plus a sharper prompt to extract every
+  discipline incl. практики/ГИА through the last semester and read ЗЕТ from the
+  correct table row. **(guard)** new `load_check` on `ProgramAnalysis`
+  (`deriveLoadCheck`, 5 unit tests) flags disciplines with no ЗЕТ (silently
+  excluded from the sum), a total short of 60 з.е.×years, and any year off the
+  ФГОС 60-з.е. rule (55–65 accepted); shown as caveats under the load chart so
+  parse errors are visible and point the user at the Конструктор. No migration;
+  both typechecks clean, 169/169 tests green.
+
 ### Added
+- **Programme analysis — low-mapping-confidence guard on gaps.** The
+  progression/gaps analysis maps competencies to disciplines from each
+  discipline's declared `competency_codes` (authoritative) and, when those are
+  empty, from the discipline **name** (inferred). Universal competencies (УК)
+  are formed by broadly-named gen-ed courses (Основы российской
+  государственности, Философия, БЖД) whose names don't signal a specific УК — so
+  when disciplines lack codes, real coverage gets flagged **«не покрыто»**
+  wrongly (the tell: the AI recommends adding a competency to a course that
+  already exists). New `mapping_confidence` on `ProgramAnalysis` (total /
+  with-codes / `low` when <½ of disciplines declare codes,
+  `deriveMappingConfidence`, 3 unit tests); when `low` and there are missing
+  competencies, the «Пробелы» section now shows a caveat («заявленные
+  компетенции указаны лишь у N из M дисциплин… дисциплина может существовать, но
+  её название не совпадает с формулировкой компетенции — укажите компетенции в
+  Конструкторе или загрузите РПД»). No behaviour change to the mapping itself —
+  it stops «не покрыто» being mistaken for a real gap. (Discipline codes already
+  auto-backfill from an uploaded РПД via `fillDisciplineCompetencyCodesIfEmpty`;
+  the authoritative fix — ingesting the competency matrix at import — is future
+  work.) No migration; both typechecks clean, 164/164 tests green.
+- **Programme analysis — outcome-delivery synthesis (does the plan deliver the
+  graduate profile?).** A headline card at the top of the Анализ tab that rolls
+  the per-competency progression up into one verdict: **Результаты обеспечены**
+  (every requirement built introduce→develop→master), **Обеспечены частично**
+  (all covered but some thin/late), or **Есть необеспеченные результаты** (≥1
+  competency no discipline forms). Shows a 0–100 delivery score (fully=1,
+  thin/late=0.6, uncovered=0), a Russian headline, and a
+  covered/поверхностно/поздно/не-обеспечены breakdown. Pure roll-up
+  (`deriveOutcomeDelivery`) — no extra LLM call, 6 unit tests. New optional
+  `outcome_delivery` on `ProgramAnalysis` (backward-compatible; legacy cached
+  analyses lack it and the card hides); no migration. Answers the РОП's real
+  question — «вносит ли вся структура вклад в итоговый результат выпускника» —
+  as the report's headline. Both typechecks clean, 161/161 tests green.
+- **Programme analysis — holistic sequencing view (whole-plan structure).** The
+  «Последовательность и предпосылки» section used to be a flat list of pairwise
+  prerequisite links, which read as "two subjects at a time" and hid the
+  year-1→final shape. New **«Дерево зависимостей»** block derived purely from
+  the same edges (no extra LLM call): (1) **dependency layers** — disciplines
+  grouped by prerequisite depth, foundational (no prerequisites) → профильные
+  (top), each with its semester; (2) **key prerequisite chains** — the longest
+  spines (≥3 deep, e.g. Математика → Механика → Сопромат …) where a
+  misplacement cascades; (3) **isolated disciplines** — those outside the
+  dependency graph (usually общеобразовательные), listed separately so they
+  don't read as a problem. Pure graph derivation (`deriveStructure`) —
+  cycle-safe (a stray back-edge can't hang it), longest-path memoised, 6 unit
+  tests. New optional `structure` on `SequencingResult` (backward-compatible —
+  legacy cached analyses lack it and the pairwise view still renders); no
+  migration. Renders above the inversion/edge list so the whole-plan story is
+  the headline. Both typechecks clean, 155/155 tests green. (Option B — a single
+  "does the whole plan deliver the graduate outcomes" synthesis — is the next
+  slice.)
 - **РПД coverage check now scores at the индикатор level (Feature K, Option A).**
   The discipline conformance check («Проверить соответствие компетенциям») used
   to verdict a whole competency (ОПК-14) as covered/partial/missing — too coarse
