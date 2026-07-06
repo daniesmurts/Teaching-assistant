@@ -58,6 +58,9 @@ export default function OnboardingChecklist() {
           <div className="text-sm font-sans font-medium text-ink">С чего начать</div>
           <div className="text-xs font-sans text-ink-secondary">Пройдите 3 шага, чтобы освоить ИСПУМ</div>
         </div>
+        <Link to="/help?video=first-steps" className="text-xs font-sans font-medium text-amber hover:underline flex-shrink-0">
+          Смотреть видео
+        </Link>
         <div className="text-xs font-sans font-medium text-ink-secondary">{doneCount} из {steps.length}</div>
         {canDismiss && (
           <button onClick={dismiss} title="Скрыть" className="text-ink-tertiary hover:text-ink transition-colors text-lg leading-none ml-1">×</button>

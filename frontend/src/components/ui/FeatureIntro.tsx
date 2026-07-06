@@ -1,10 +1,13 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import Icon from './Icon'
 
 interface Props {
   id:           string          // stable key — remembers collapsed state per page
   title:        string
   description:  string
   steps?:       string[]
+  videoSlug?:   string          // matches a HelpVideo slug — links to its how-to video
 }
 
 /**
@@ -13,7 +16,7 @@ interface Props {
  * that user (persisted) but can always be reopened — never nags, never hides
  * the explanation for good.
  */
-export default function FeatureIntro({ id, title, description, steps }: Props) {
+export default function FeatureIntro({ id, title, description, steps, videoSlug }: Props) {
   const storageKey = `feat_intro_${id}`
   const [open, setOpen] = useState<boolean>(() => {
     try { return localStorage.getItem(storageKey) !== 'collapsed' } catch { return true }
@@ -55,6 +58,15 @@ export default function FeatureIntro({ id, title, description, steps }: Props) {
                 </li>
               ))}
             </ol>
+          )}
+          {videoSlug && (
+            <Link
+              to={`/help?video=${videoSlug}`}
+              className="mt-3 inline-flex items-center gap-1.5 text-[13px] font-sans font-medium text-amber hover:underline"
+            >
+              <Icon name="play-circle" size={14} />
+              Смотреть видео
+            </Link>
           )}
         </div>
       )}

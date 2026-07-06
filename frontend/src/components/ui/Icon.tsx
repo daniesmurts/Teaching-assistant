@@ -24,6 +24,7 @@ export type IconName =
   | 'grid'            // materials hub
   | 'log-out'
   | 'bar-chart'       // leadership dashboard
+  | 'play-circle'     // video tutorials
 
 const PATHS: Record<IconName, JSX.Element> = {
   home: (
@@ -167,6 +168,13 @@ const PATHS: Record<IconName, JSX.Element> = {
       <path d="M7 17V11" />
       <path d="M12 17V6" />
       <path d="M17 17v-8" />
+    </>
+  ),
+
+  'play-circle': (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M10 8.5l5.5 3.5-5.5 3.5v-7z" />
     </>
   ),
 }

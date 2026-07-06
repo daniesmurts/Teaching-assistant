@@ -121,6 +121,7 @@ export default function Presentations() {
           {!result && !openHistory && (
             <FeatureIntro
               id="presentations"
+              videoSlug="presentations"
               title="Генератор презентаций — структура лекции за минуту"
               description="Опишите параметры лекции (тема, длительность, цели, уровень аудитории), и ИСПУМ построит её послайдово: заголовки, тезисы и заметки для выступления. Это готовый текст — скопируйте его в PowerPoint, Google Slides или Canva."
               steps={[

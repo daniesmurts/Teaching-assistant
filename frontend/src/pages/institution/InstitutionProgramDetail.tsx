@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Button from '../../components/ui/Button'
 import Select from '../../components/ui/Select'
+import LoadingSpinner from '../../components/ui/LoadingSpinner'
 import {
   getProgram, getAnalysis, saveDisciplines, saveCompetencies, analyzeProgram, deleteProgram,
   downloadAnalysisPdf, updateProgram, uploadProgramDocument, deleteProgramDocument,
@@ -562,6 +563,14 @@ function scoreColor(s: number): string {
   return 'var(--color-danger)'
 }
 
+const DownloadIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <path d="M7 10l5 5 5-5" /><path d="M12 15V3" />
+  </svg>
+)
+
 function Report({ analysis, duration, program, reviews = [] }: { analysis: ProgramAnalysis; duration: number; program?: ProgramDetail; reviews?: ProgramDocumentReview[] }) {
   const { sequencing, progression, orphans, missing, clusters, isolated, load, outcome_delivery } = analysis
   const maxCredits = Math.max(1, ...load.map((l) => l.credits ?? l.discipline_count))
@@ -579,11 +588,21 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
 
   return (
     <div id="program-report" className="result-appear space-y-8">
-      {/* Export */}
+      {/* Export — hand-styled rather than the shared secondary Button variant,
+          which is a near-transparent ghost pill that read as barely visible
+          floating alone on the cream page background. A solid surface +
+          border + icon reads as an obvious, clickable action instead. */}
       <div className="flex justify-end -mb-2">
-        <Button variant="secondary" size="sm" onClick={exportPdf} loading={downloading} disabled={!program}>
-          Экспорт в PDF
-        </Button>
+        <button
+          onClick={exportPdf}
+          disabled={!program || downloading}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-surface border border-border-mid text-ink-secondary text-sm font-sans font-medium shadow-sm hover:text-ink hover:border-border-strong hover:bg-surface-warm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {downloading
+            ? <LoadingSpinner size={14} />
+            : <DownloadIcon />}
+          {downloading ? 'Экспортируем…' : 'Экспорт в PDF'}
+        </button>
       </div>
 
       {/* Headline */}

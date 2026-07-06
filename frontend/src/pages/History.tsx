@@ -84,6 +84,7 @@ export default function History() {
         <div className="max-w-4xl mx-auto px-4 md:px-6 py-6">
           <FeatureIntro
             id="history"
+            videoSlug="history"
             title="Журнал — все проверенные работы в одном месте"
             description="Здесь хранятся все проверки и рецензии. Найдите нужную работу по имени студента, группе или предмету и откройте её, чтобы снова увидеть оценку, отзыв и полный разбор."
             steps={[

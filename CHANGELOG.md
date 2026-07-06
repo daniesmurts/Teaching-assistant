@@ -14,7 +14,30 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Changed
+- **«Экспорт в PDF» button — more visible.** The report's export trigger used
+  the shared `secondary` Button variant — a near-transparent ghost pill on the
+  same cream page background — floating alone with nothing else nearby, easy
+  to miss entirely. Replaced with a hand-styled button (solid surface + border
+  + subtle shadow, hover state, download icon, "Экспортируем…" label while in
+  flight) — same pattern already used for other header actions in this area of
+  the app. No behavior change. Both typechecks clean, production build clean.
+
 ### Added
+- **How-to video hub in Помощь (`/help`), wired to feature pages.** `HELP_VIDEOS`
+  (`frontend/src/data/helpVideos.ts`) holds the 14-video how-to series (vkvideo.ru
+  links, `null` until recorded) grouped into the same categories as the video
+  recording plan. Help.tsx now renders articles and videos side by side, supports
+  `?video=slug` / `?article=slug` deep links, and cross-links an article to its
+  matching video (and back) via an optional `articleSlug` field. Added a
+  `VkVideoEmbed` component (`components/help/VkVideoEmbed.tsx`, parses vkvideo.ru
+  URLs via `utils/vkVideo.ts`) that falls back to a "видео скоро появится" state
+  for unrecorded slugs. `FeatureIntro` gained an optional `videoSlug` prop that
+  renders a "Смотреть видео" link to the matching hub entry — wired into Grading,
+  Criteria, Presentations, Students, and History; the Dashboard onboarding
+  checklist links to the "first steps" video directly. New `play-circle` icon
+  in `Icon.tsx`. Adding a video going forward is just filling in `vkVideoUrl` in
+  the data file — no DB, no admin UI, same pattern as `helpArticles.ts`.
 - **Public Research page (`/research`).** Showcase for the research programme
   pitched to universities: goal statement (evidence base, not access sales),
   4-step collaboration format, 4 research directions (grading calibration,
