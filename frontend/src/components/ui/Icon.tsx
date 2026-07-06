@@ -25,6 +25,10 @@ export type IconName =
   | 'log-out'
   | 'bar-chart'       // leadership dashboard
   | 'play-circle'     // video tutorials
+  | 'check'           // inline confirmation / benefit bullets
+  | 'scale'           // calibration / consistency
+  | 'file-check'      // programme conformance
+  | 'shield'          // security / compliance / trust
 
 const PATHS: Record<IconName, JSX.Element> = {
   home: (
@@ -176,6 +180,31 @@ const PATHS: Record<IconName, JSX.Element> = {
       <circle cx="12" cy="12" r="9" />
       <path d="M10 8.5l5.5 3.5-5.5 3.5v-7z" />
     </>
+  ),
+
+  check: (
+    <path d="M5 12.5l4.5 4.5L19 7" />
+  ),
+
+  scale: (
+    <>
+      <path d="M12 3v18" />
+      <path d="M5 8h14" />
+      <path d="M5 8l-3 6a3.2 3.2 0 0 0 6 0l-3-6z" />
+      <path d="M19 8l-3 6a3.2 3.2 0 0 0 6 0l-3-6z" />
+    </>
+  ),
+
+  'file-check': (
+    <>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" />
+      <path d="M14 2v6h6" />
+      <path d="M9 14.5l2 2 4-4.5" />
+    </>
+  ),
+
+  shield: (
+    <path d="M12 2.5l7.5 3v5.2c0 4.7-3.2 8.9-7.5 10.3-4.3-1.4-7.5-5.6-7.5-10.3V5.5l7.5-3z" />
   ),
 }
 

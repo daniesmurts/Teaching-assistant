@@ -1,3 +1,5 @@
+import Icon from '../ui/Icon'
+
 // Data-driven partner registry for the /research page. Add a new university or
 // publication by appending to PARTNERS — no layout changes needed. A partner
 // with `confirmed: false` is kept out of the public list until its agreement
@@ -52,6 +54,9 @@ export default function ResearchPartners() {
           </div>
         ) : (
           <div className="bg-surface border border-dashed border-border-mid rounded-xl p-8 text-center max-w-[560px] mx-auto">
+            <div className="w-10 h-10 rounded-full bg-amber-light flex items-center justify-center text-amber mx-auto mb-4">
+              <Icon name="building" size={18} />
+            </div>
             <div className="text-xs font-bold text-amber uppercase tracking-wider mb-3">Программа открыта</div>
             <p className="text-ink-secondary leading-relaxed">
               Список партнёров пока пуст — мы в переговорах с несколькими университетами. Если ваша кафедра готова стать
@@ -66,7 +71,7 @@ export default function ResearchPartners() {
 
 function PartnerCard({ partner }: { partner: ResearchPartner }) {
   return (
-    <div className="bg-surface border border-border rounded-xl p-6">
+    <div className="bg-surface border border-border rounded-xl p-6 transition-shadow hover:shadow-md">
       <div className="text-xs font-bold text-amber uppercase tracking-wider mb-2">{partner.role}</div>
       <h3 className="font-display text-xl font-bold mb-1">{partner.name}</h3>
       <div className="text-sm text-ink-tertiary mb-4">{partner.fullName}</div>

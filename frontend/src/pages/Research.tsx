@@ -2,6 +2,8 @@ import { useState } from 'react'
 import PublicHeader from '../components/layout/PublicHeader'
 import PublicFooter from '../components/layout/PublicFooter'
 import ResearchPartners from '../components/research/ResearchPartners'
+import Icon, { type IconName } from '../components/ui/Icon'
+import SuccessMark from '../components/ui/SuccessMark'
 import { submitContactMessage } from '../api/contact'
 
 const NAVY = '#101B33'
@@ -14,8 +16,25 @@ export default function Research() {
       <main className="flex-1">
 
         {/* Hero — dark navy, title-slide feel matching the 14-slide deck */}
-        <section className="px-6 py-24" style={{ backgroundColor: NAVY }}>
-          <div className="max-w-[780px] mx-auto text-center">
+        <section
+          className="relative px-6 py-24 overflow-hidden"
+          style={{
+            backgroundColor: NAVY,
+            backgroundImage:
+              'radial-gradient(ellipse 900px 500px at 50% -10%, rgba(200,134,10,0.20), transparent 65%)',
+          }}
+        >
+          <div
+            className="absolute inset-0 pointer-events-none opacity-[0.07]"
+            style={{
+              backgroundImage:
+                'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
+              backgroundSize: '48px 48px',
+              maskImage: 'linear-gradient(to bottom, black, transparent)',
+            }}
+            aria-hidden="true"
+          />
+          <div className="relative max-w-[780px] mx-auto text-center">
             <div className="text-sm font-bold text-amber uppercase tracking-wider mb-4">Исследовательская программа ИСПУМ</div>
             <h1 className="font-display text-4xl sm:text-5xl font-bold leading-[1.1] tracking-tight mb-8 text-white">
               Мы не продаём доступ. Мы собираем доказательную базу.
@@ -44,7 +63,11 @@ export default function Research() {
               Без внедрения «на всю кафедру» и без обязательств по закупке. Пилот устроен так, чтобы вуз мог оценить
               результат прежде, чем принимать решение о масштабировании.
             </p>
-            <div className="grid md:grid-cols-4 gap-6">
+            <div className="relative grid md:grid-cols-4 gap-6">
+              <div
+                className="hidden md:block absolute top-[27px] left-[12.5%] right-[12.5%] h-px bg-border-mid"
+                aria-hidden="true"
+              />
               <FormatStep n="1" title="Пилотная группа">
                 Кафедра выделяет 5–10 преподавателей и один-два потока студентов на семестр. Доступ к тарифу Институт —
                 на условиях исследовательского партнёрства, без коммерческих обязательств.
@@ -74,20 +97,20 @@ export default function Research() {
               только собирается вручную и от случая к случаю.
             </p>
             <div className="grid md:grid-cols-2 gap-6">
-              <DirectionCard title="Калибровка оценивания">
+              <DirectionCard icon="scale" title="Калибровка оценивания">
                 Насколько согласованно преподаватели одной кафедры оценивают сопоставимые работы — и меняется ли
                 строгость оценки преподавателя от начала к концу семестра. Сегодня это почти нигде не измеряется;
                 мы делаем это через сравнение эмбеддингов схожих работ.
               </DirectionCard>
-              <DirectionCard title="Обратная связь и результаты">
+              <DirectionCard icon="mail" title="Обратная связь и результаты">
                 Как качество и глубина обратной связи студенту связаны с последующей динамикой его оценок. Цель —
                 показать не «студентам нравится отзыв», а «отзыв определённого типа даёт измеримый результат».
               </DirectionCard>
-              <DirectionCard title="Согласованность программ">
+              <DirectionCard icon="file-check" title="Согласованность программ">
                 Совпадает ли то, что заявлено в РПД и компетенциях, с тем, что реально преподаётся и проверяется —
                 по разделам, по дисциплинам, по всей образовательной программе. Основа для аккредитационной отчётности.
               </DirectionCard>
-              <DirectionCard title="Время преподавателя">
+              <DirectionCard icon="clock" title="Время преподавателя">
                 Сколько часов в неделю реально уходит на проверку работ и подготовку материалов — и что происходит с
                 этим временем при внедрении ассистента. Не оценка «сколько мы обещаем сэкономить», а измерение факта.
               </DirectionCard>
@@ -97,9 +120,9 @@ export default function Research() {
 
         {/* Что получает университет */}
         <section className="py-24 border-b border-border">
-          <div className="max-w-[820px] mx-auto px-6">
+          <div className="max-w-[900px] mx-auto px-6">
             <h2 className="font-display text-3xl font-bold text-center mb-14" style={{ color: NAVY }}>Что получает университет</h2>
-            <ul className="space-y-5">
+            <ul className="grid sm:grid-cols-2 gap-x-10 gap-y-6">
               <BenefitItem>
                 Доступ к тарифу <b>Институт</b> на весь период пилота — без оплаты, на условиях исследовательского партнёрства.
               </BenefitItem>
@@ -136,17 +159,20 @@ export default function Research() {
 
 function FormatStep({ n, title, children }: { n: string; title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-surface border border-border rounded-xl p-6">
-      <div className="w-9 h-9 rounded-full bg-amber-light flex items-center justify-center text-amber font-bold text-base mb-5">{n}</div>
+    <div className="relative z-10 bg-surface border border-border rounded-xl p-6 transition-shadow hover:shadow-md">
+      <div className="w-9 h-9 rounded-full bg-amber-light flex items-center justify-center text-amber font-bold text-base mb-5 ring-4 ring-bg">{n}</div>
       <h3 className="font-bold text-base mb-3 leading-snug">{title}</h3>
       <p className="text-sm text-ink-secondary leading-relaxed">{children}</p>
     </div>
   )
 }
 
-function DirectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+function DirectionCard({ icon, title, children }: { icon: IconName; title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-surface border border-border rounded-xl p-6">
+    <div className="bg-surface border border-border rounded-xl p-6 transition-shadow hover:shadow-md">
+      <div className="w-10 h-10 rounded-full bg-amber-light flex items-center justify-center text-amber mb-4">
+        <Icon name={icon} size={18} />
+      </div>
       <h3 className="font-display text-xl font-bold mb-3" style={{ color: NAVY }}>{title}</h3>
       <p className="text-sm text-ink-secondary leading-relaxed">{children}</p>
     </div>
@@ -156,7 +182,9 @@ function DirectionCard({ title, children }: { title: string; children: React.Rea
 function BenefitItem({ children }: { children: React.ReactNode }) {
   return (
     <li className="flex gap-4 items-start">
-      <span className="w-7 h-7 rounded-full bg-amber-light text-amber flex items-center justify-center font-bold text-sm flex-shrink-0 mt-0.5">✓</span>
+      <span className="w-7 h-7 rounded-full bg-amber-light text-amber flex items-center justify-center flex-shrink-0 mt-0.5">
+        <Icon name="check" size={14} />
+      </span>
       <span className="text-ink-secondary leading-relaxed pt-0.5">{children}</span>
     </li>
   )
@@ -198,7 +226,7 @@ function ContactSection() {
 
         {isSubmitted ? (
           <div className="bg-success-bg border border-success p-8 rounded-xl text-center max-w-[500px] mx-auto">
-            <div className="w-12 h-12 bg-success text-white rounded-full flex items-center justify-center text-xl font-bold mx-auto mb-4">✓</div>
+            <SuccessMark tone="success" size="md" />
             <h3 className="font-bold text-lg mb-2 text-success">Заявка отправлена!</h3>
             <p className="text-sm text-success/80">Мы получили вашу заявку и свяжемся с вами в ближайшее время.</p>
             <button onClick={() => setIsSubmitted(false)} className="mt-6 text-sm font-medium text-success hover:underline">
