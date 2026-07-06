@@ -7,6 +7,8 @@ import {
   getPublishedAssignment, updatePublishedAssignment, addInvite, deleteInvite, writeUrl,
   type PublishedStatus, type InviteStatus,
 } from '../api/publishedAssignments'
+import CohortSynthesisPanel from '../components/publishedAssignments/CohortSynthesisPanel'
+import { usePlan } from '../hooks/usePlan'
 
 const INVITE_LABEL: Record<InviteStatus, string> = {
   invited: 'Приглашён', writing: 'Пишет', submitted: 'Сдано',
@@ -22,6 +24,7 @@ export default function PublishedAssignmentDetail() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const addToast = useUIStore((s) => s.addToast)
+  const plan = usePlan()
 
   const { data, isLoading } = useQuery({
     queryKey: ['published-assignment', id],
@@ -107,6 +110,15 @@ export default function PublishedAssignmentDetail() {
             </button>
           )}
         </div>
+
+        {plan.can('cohortSynthesis') && (
+          <div className="mb-6">
+            <CohortSynthesisPanel
+              publishedAssignmentId={id}
+              submittedCount={invites.filter((i) => i.status === 'submitted').length}
+            />
+          </div>
+        )}
 
         {/* Roster */}
         <h2 className="font-display text-lg font-bold text-ink mb-1">Студенты</h2>

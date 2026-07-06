@@ -17,7 +17,7 @@ export interface EvalRunListItem {
 }
 
 export interface ConditionSummary {
-  k: number; n: number; meanExamples: number
+  k: number; variant: string; n: number; meanExamples: number
   qwk: number | null; mae: number | null; rho: number | null
 }
 
@@ -66,7 +66,7 @@ export async function getConfidenceConfig(): Promise<ConfidenceConfig | null> {
 }
 
 export async function startFlywheelRun(data: {
-  teacher_id: string; course_id?: string; k?: number[]; limit?: number; notes?: string
+  teacher_id: string; course_id?: string; k?: number[]; variants?: string[]; limit?: number; notes?: string
 }): Promise<EvalRunListItem> {
   return (await client.post<EvalRunListItem>('/api/admin/evals', data)).data
 }

@@ -315,6 +315,10 @@ export interface SimilarAssignment {
   approved_feedback: string
   similarity:       number
   source:           'own' | 'institution'
+  // Set when this example was fetched by findContrastingAssignment (not the
+  // plain top-K similarity search) — lets the prompt label it distinctly so
+  // the model treats it as a boundary marker, not another same-tier example.
+  contrastive?:     boolean
 }
 
 export interface InstitutionPoolContext {
@@ -465,6 +469,66 @@ export async function findSimilarAssignments(
     .slice(0, limit)
 
   return combined
+}
+
+/**
+ * Find the single nearest approved assignment whose grade is NOT in
+ * `excludeGrades` — used to inject a grade-contrasting example when the
+ * plain top-K similarity search comes back grade-homogeneous. Scoped to the
+ * teacher's own course only (no institution-pool union — the contrast
+ * signal matters most against the same grading history that produced the
+ * homogeneous set).
+ */
+export async function findContrastingAssignment(
+  courseId: string,
+  embedding: number[],
+  excludeIds: string[],
+  excludeGrades: string[],
+): Promise<SimilarAssignment | null> {
+  const vec = `[${embedding.join(',')}]`
+  const { rows } = await pool.query<Omit<SimilarAssignment, 'source' | 'contrastive'>>(
+    `SELECT id, submission_text, approved_score, approved_grade, approved_feedback,
+            (embedding <=> $2) AS similarity
+       FROM assignments
+      WHERE course_id = $1
+        AND status = 'approved'
+        AND embedding IS NOT NULL
+        AND approved_grade <> ALL($3::text[])
+        AND id <> ALL($4::uuid[])
+      ORDER BY embedding <=> $2
+      LIMIT 1`,
+    [courseId, vec, excludeGrades, excludeIds]
+  )
+  return rows[0] ? { ...rows[0], source: 'own', contrastive: true } : null
+}
+
+/**
+ * Time-respecting twin of findContrastingAssignment, for the eval harness —
+ * only assignments approved before the target's creation are eligible.
+ */
+export async function findContrastingAssignmentBefore(
+  courseId: string,
+  embedding: number[],
+  beforeCreatedAt: Date,
+  excludeIds: string[],
+  excludeGrades: string[],
+): Promise<SimilarAssignment | null> {
+  const vec = `[${embedding.join(',')}]`
+  const { rows } = await pool.query<Omit<SimilarAssignment, 'source' | 'contrastive'>>(
+    `SELECT id, submission_text, approved_score, approved_grade, approved_feedback,
+            (embedding <=> $2) AS similarity
+       FROM assignments
+      WHERE course_id = $1
+        AND status = 'approved'
+        AND embedding IS NOT NULL
+        AND created_at < $3
+        AND approved_grade <> ALL($4::text[])
+        AND id <> ALL($5::uuid[])
+      ORDER BY embedding <=> $2
+      LIMIT 1`,
+    [courseId, vec, beforeCreatedAt, excludeGrades, excludeIds]
+  )
+  return rows[0] ? { ...rows[0], source: 'own', contrastive: true } : null
 }
 
 /**

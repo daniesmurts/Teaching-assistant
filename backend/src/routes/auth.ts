@@ -354,6 +354,8 @@ async function buildPlanData(
       verificationQuestions: canUseFeature(tier, 'verificationQuestions'),
       handout:               canUseFeature(tier, 'handout'),
       publishedAssignments:  canUseFeature(tier, 'publishedAssignments'),
+      feedbackCritic:        canUseFeature(tier, 'feedbackCritic'),
+      cohortSynthesis:       canUseFeature(tier, 'cohortSynthesis'),
     },
   }
 }

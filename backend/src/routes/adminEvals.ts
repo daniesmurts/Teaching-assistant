@@ -30,14 +30,20 @@ router.get('/config', asyncHandler(async (_req, res) => {
   res.json(await getConfidenceConfig())
 }))
 
+const VALID_VARIANTS = ['baseline', 'contrastive', 'policyMemo', 'both'] as const
+
 // POST /api/admin/evals — start a flywheel replay (background)
 router.post('/', asyncHandler(async (req, res) => {
-  const { teacher_id, course_id, k, limit, notes, provider } = req.body as {
-    teacher_id?: string; course_id?: string; k?: number[]; limit?: number; notes?: string
+  const { teacher_id, course_id, k, variants, limit, notes, provider } = req.body as {
+    teacher_id?: string; course_id?: string; k?: number[]; variants?: string[]
+    limit?: number; notes?: string
     provider?: 'deepseek' | 'yandex' | 'gigachat'
   }
   if (!teacher_id) throw new ValidationError('Укажите преподавателя')
   const conditions = Array.isArray(k) && k.length ? k.map(Number).filter((n) => Number.isInteger(n) && n >= 0) : [0, 3, 5]
+  const replayVariants = Array.isArray(variants) && variants.length
+    ? variants.filter((v): v is typeof VALID_VARIANTS[number] => (VALID_VARIANTS as readonly string[]).includes(v))
+    : ['baseline'] as const
   const providerOverride = provider && ['deepseek', 'yandex', 'gigachat'].includes(provider) ? provider : undefined
 
   // Pre-check: reject with a clear message before creating a phantom run row.
@@ -61,7 +67,10 @@ router.post('/', asyncHandler(async (req, res) => {
     conditions, notes: taggedNotes, kind: 'flywheel',
   })
   // Fire-and-forget — resume into the row we just created.
-  runReplay({ teacherId: teacher_id, courseId: course_id, conditions, limit, resumeRunId: run.id, providerOverride })
+  runReplay({
+    teacherId: teacher_id, courseId: course_id, conditions,
+    variants: [...replayVariants], limit, resumeRunId: run.id, providerOverride,
+  })
     .catch((err) => logger.error({ message: '[admin-eval] flywheel run failed', runId: run.id, error: err.message }))
 
   res.status(201).json(run)

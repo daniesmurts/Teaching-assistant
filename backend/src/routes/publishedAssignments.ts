@@ -12,6 +12,8 @@ import {
   updatePublishedAssignment, addInvite, listInvites, deleteInvite,
   getSubmissionForTeacher, attachSubmissionToGrade, type SubmittedInvite,
 } from '../db/queries/publishedAssignments'
+import { getCohortSynthesis } from '../db/queries/cohortSyntheses'
+import { synthesizeCohort } from '../services/cohortSynthesis'
 import { tiptapToText } from '../lib/tiptapText'
 import { computeProvenance } from '../services/provenance'
 import { grade } from '../services/grading'
@@ -157,6 +159,19 @@ router.post('/:id/submissions/:inviteId/grade', aiLimiter, asyncHandler(async (r
     ai_improvements: result.ai_improvements,
     status:          'pending',
   })
+}))
+
+// ─── Cohort synthesis (class-wide insight, §5.1) ───────────────────────────────
+
+router.get('/:id/synthesis', checkFeatureAccess('cohortSynthesis'), asyncHandler(async (req, res) => {
+  await ownedAssignment(req.params.id, req.teacher.id)
+  res.json(await getCohortSynthesis(req.params.id))
+}))
+
+router.post('/:id/synthesize', checkFeatureAccess('cohortSynthesis'), aiLimiter, asyncHandler(async (req, res) => {
+  await ownedAssignment(req.params.id, req.teacher.id)
+  const result = await synthesizeCohort(req.params.id, req.teacher.id)
+  res.json(result)
 }))
 
 export default router

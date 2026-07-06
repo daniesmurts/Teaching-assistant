@@ -11,6 +11,8 @@ import { uploadAndWait } from '../api/documents'
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import ShareRagToggle from '../components/courses/ShareRagToggle'
+import PolicyMemoPanel from '../components/courses/PolicyMemoPanel'
+import { usePlan } from '../hooks/usePlan'
 import type { Course } from '../types'
 
 const LEVELS = [
@@ -30,6 +32,7 @@ export default function Courses() {
   const qc = useQueryClient()
   const addToast = useUIStore((s) => s.addToast)
   const teacher = useAuthStore((s) => s.teacher)
+  const plan = usePlan()
   // The per-course share toggle is meaningful only when the institution master
   // toggle is also on. Hide the column entirely otherwise — it's confusing
   // to show a toggle that does nothing.
@@ -40,6 +43,7 @@ export default function Courses() {
   const [form, setForm]         = useState<FormState>(emptyForm)
   const [syllabusFile, setSyllabusFile] = useState<File | null>(null)
   const [submitting, setSubmitting]     = useState(false)
+  const [expandedMemo, setExpandedMemo] = useState<string | null>(null)
 
   const { data: courses = [], isLoading } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
 
@@ -204,37 +208,50 @@ export default function Courses() {
         ) : (
           <div className="bg-surface border border-border rounded-lg overflow-hidden">
             {courses.map((course, i) => (
-              <div
-                key={course.id}
-                className={`flex items-center gap-4 px-4 py-3.5 ${i < courses.length - 1 ? 'border-b border-border' : ''}`}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-sans text-sm font-medium text-ink">{course.name}</span>
-                    {course.code && (
-                      <span className="text-xs font-sans text-ink-tertiary bg-surface-warm px-1.5 py-0.5 rounded-sm">
-                        {course.code}
-                      </span>
+              <div key={course.id} className={i < courses.length - 1 ? 'border-b border-border' : ''}>
+                <div className="flex items-center gap-4 px-4 py-3.5">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-sans text-sm font-medium text-ink">{course.name}</span>
+                      {course.code && (
+                        <span className="text-xs font-sans text-ink-tertiary bg-surface-warm px-1.5 py-0.5 rounded-sm">
+                          {course.code}
+                        </span>
+                      )}
+                    </div>
+                    {course.level && (
+                      <div className="text-xs font-sans text-ink-tertiary mt-0.5">
+                        {LEVELS.find((l) => l.value === course.level)?.label ?? course.level}
+                      </div>
                     )}
                   </div>
-                  {course.level && (
-                    <div className="text-xs font-sans text-ink-tertiary mt-0.5">
-                      {LEVELS.find((l) => l.value === course.level)?.label ?? course.level}
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {sharingAllowed && <ShareRagToggle course={course} />}
+                    {plan.can('ragFlywheel') && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setExpandedMemo((id) => id === course.id ? null : course.id)}
+                      >
+                        {expandedMemo === course.id ? 'Скрыть профиль' : 'Профиль оценивания'}
+                      </Button>
+                    )}
+                    <Button size="sm" variant="secondary" onClick={() => openEdit(course)}>Изменить</Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      loading={deleteMut.isPending}
+                      onClick={() => { if (confirm(`Удалить предмет «${course.name}»?`)) deleteMut.mutate(course.id) }}
+                    >
+                      Удалить
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  {sharingAllowed && <ShareRagToggle course={course} />}
-                  <Button size="sm" variant="secondary" onClick={() => openEdit(course)}>Изменить</Button>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    loading={deleteMut.isPending}
-                    onClick={() => { if (confirm(`Удалить предмет «${course.name}»?`)) deleteMut.mutate(course.id) }}
-                  >
-                    Удалить
-                  </Button>
-                </div>
+                {expandedMemo === course.id && (
+                  <div className="px-4 pb-3.5">
+                    <PolicyMemoPanel courseId={course.id} />
+                  </div>
+                )}
               </div>
             ))}
           </div>

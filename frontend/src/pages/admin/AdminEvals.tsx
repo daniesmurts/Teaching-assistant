@@ -105,9 +105,14 @@ function NewRunForm({ onDone }: { onDone: () => void }) {
   const [kind, setKind]       = useState<'flywheel' | 'confidence'>('flywheel')
   const [teacherId, setTeacher] = useState(me?.id ?? '')
   const [k, setK]             = useState('0,3,5')
+  const [variants, setVariants] = useState<string[]>(['baseline'])
   const [samples, setSamples] = useState(3)
   const [limit, setLimit]     = useState('')
   const [notes, setNotes]     = useState('')
+
+  function toggleVariant(v: string) {
+    setVariants((cur) => cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v])
+  }
 
   const { data: teacherData } = useQuery({
     queryKey: ['admin-teachers-lite'],
@@ -119,7 +124,11 @@ function NewRunForm({ onDone }: { onDone: () => void }) {
     mutationFn: () => {
       const common = { teacher_id: teacherId, limit: limit ? Number(limit) : undefined, notes: notes || undefined }
       if (kind === 'flywheel') {
-        return startFlywheelRun({ ...common, k: k.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isInteger(n) && n >= 0) })
+        return startFlywheelRun({
+          ...common,
+          k: k.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isInteger(n) && n >= 0),
+          variants: variants.length ? variants : ['baseline'],
+        })
       }
       return startConfidenceRun({ ...common, k: parseInt(k.split(',')[0]?.trim() || '5', 10), samples })
     },
@@ -156,6 +165,25 @@ function NewRunForm({ onDone }: { onDone: () => void }) {
           <input className={`${inputClass} w-full`} value={k} onChange={(e) => setK(e.target.value)} placeholder={kind === 'flywheel' ? '0,3,5' : '5'} />
         </div>
       </div>
+
+      {kind === 'flywheel' && (
+        <div>
+          <label className="block text-[11px] font-sans text-ink-secondary mb-1">Варианты для сравнения</label>
+          <div className="flex gap-2">
+            {(['baseline', 'contrastive', 'policyMemo', 'both'] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => toggleVariant(v)}
+                className={`text-xs font-sans px-2.5 py-1 rounded-md border transition-colors ${
+                  variants.includes(v) ? 'border-amber text-amber bg-amber-light' : 'border-border text-ink-secondary hover:bg-surface-warm'}`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-3">
         {kind === 'confidence' && (
@@ -219,25 +247,36 @@ function RunDetail({ runId }: { runId: string }) {
   )
 }
 
+const VARIANT_LABEL: Record<string, string> = {
+  baseline:    'baseline',
+  contrastive: 'контраст',
+  policyMemo:  'профиль',
+  both:        'контраст+профиль',
+}
+
 function FlywheelTable({ conditions, csvUrl }: { conditions: Extract<RunSummary, { kind: 'flywheel' }>['conditions']; csvUrl: string }) {
   if (conditions.length === 0) return <p className="text-xs font-sans text-ink-tertiary">Нет результатов.</p>
+  const hasVariants = conditions.some((c) => c.variant !== 'baseline')
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">Согласие с преподавателем по K</span>
+        <span className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">Согласие с преподавателем по K{hasVariants ? ' × варианту' : ''}</span>
         <a href={csvUrl} className="text-xs font-sans text-amber hover:underline">Скачать CSV</a>
       </div>
       <table className="w-full text-xs font-sans">
         <thead>
           <tr className="text-ink-tertiary text-left">
-            <th className="py-1 pr-3">K</th><th className="pr-3">n</th><th className="pr-3">примеров</th>
+            <th className="py-1 pr-3">K</th>
+            {hasVariants && <th className="pr-3">вариант</th>}
+            <th className="pr-3">n</th><th className="pr-3">примеров</th>
             <th className="pr-3">QWK</th><th className="pr-3">MAE</th><th>Spearman</th>
           </tr>
         </thead>
         <tbody>
           {conditions.map((c) => (
-            <tr key={c.k} className="border-t border-border text-ink">
+            <tr key={`${c.k}:${c.variant}`} className="border-t border-border text-ink">
               <td className="py-1 pr-3 font-medium">{c.k}</td>
+              {hasVariants && <td className="pr-3">{VARIANT_LABEL[c.variant] ?? c.variant}</td>}
               <td className="pr-3">{c.n}</td>
               <td className="pr-3">{c.meanExamples.toFixed(1)}</td>
               <td className="pr-3">{c.qwk ?? '—'}</td>
@@ -247,7 +286,7 @@ function FlywheelTable({ conditions, csvUrl }: { conditions: Extract<RunSummary,
           ))}
         </tbody>
       </table>
-      <p className="text-[11px] font-sans text-ink-tertiary mt-2">QWK — согласие по 5-балльной шкале; рост с K = маховик работает.</p>
+      <p className="text-[11px] font-sans text-ink-tertiary mt-2">QWK — согласие по 5-балльной шкале; рост с K = маховик работает. Ниже MAE / выше QWK у варианта = он лучше баллайна.</p>
     </div>
   )
 }

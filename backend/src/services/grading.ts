@@ -7,6 +7,7 @@ import {
   approveAssignment,
   findAssignmentById,
   findSimilarAssignments,
+  findContrastingAssignment,
   resolveInstitutionPoolContext,
   type SimilarAssignment,
 } from '../db/queries/assignments'
@@ -15,6 +16,8 @@ import { sanitiseForCrossTeacherRetrieval } from '../lib/crossTeacherSanitiser'
 import { generateAndStoreEmbedding } from './embeddings'
 import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
+import { getPolicyMemo } from '../db/queries/policyMemos'
+import { maybeRegeneratePolicyMemo } from './policyMemo'
 import { canUseFeature } from '../config/planLimits'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import { logger } from '../lib/logger'
@@ -143,11 +146,27 @@ async function retrieveExamples(
 
     // Sanitise PII on institution-pool hits only — own hits are the teacher's
     // own work and were never anonymised before either.
-    return hits.map((h) =>
+    const sanitised = hits.map((h) =>
       h.source === 'institution'
         ? { ...h, submission_text: sanitiseForCrossTeacherRetrieval(h.submission_text) }
         : h
     )
+
+    // Contrastive retrieval: if the top hits are all the same grade, the
+    // model only ever sees one side of the boundary. Inject one nearest
+    // neighbour with a different grade so it sees where the line sits.
+    const uniqueGrades = new Set(sanitised.map((h) => h.approved_grade))
+    if (sanitised.length > 0 && uniqueGrades.size === 1) {
+      const contrast = await findContrastingAssignment(
+        courseId,
+        vector,
+        sanitised.map((h) => h.id),
+        [...uniqueGrades],
+      )
+      if (contrast) sanitised.push(contrast)
+    }
+
+    return sanitised
   } catch (err) {
     logger.warn({ message: '[RAG] Could not retrieve similar examples', error: (err as Error).message })
     return []
@@ -178,6 +197,7 @@ export interface GradeOnceParams {
   submissionText: string
   criteria:       CriteriaSnapshotItem[]   // empty → holistic grading
   examples:       SimilarAssignment[]      // RAG few-shot examples (may be [])
+  policyMemo?:    string | null            // distilled teacher-correction patterns for this course
   assignmentType?: 'essay' | 'calculation'
   referenceSolution?: string
   parent?:        Assignment | null        // revision context, if re-grading a resubmission
@@ -187,6 +207,10 @@ export interface GradeOnceParams {
   // Eval harness only — force routing to a specific provider, ignoring the
   // institution preference. Untouched in production.
   providerOverride?: 'deepseek' | 'yandex' | 'gigachat'
+  // Run the critic pass over strengths/improvements (grounded + actionable
+  // check). Decided by the caller (grade() gates it on the 'feedbackCritic'
+  // plan flag; the eval harness can toggle it per replay variant).
+  critic?: boolean
 }
 
 export interface GradeOnceResult {
@@ -217,6 +241,7 @@ export function buildGradingMessages(params: {
   submissionText: string
   criteria:       CriteriaSnapshotItem[]
   examples:       SimilarAssignment[]
+  policyMemo?:    string | null
   assignmentType?: 'essay' | 'calculation'
   referenceSolution?: string
   parent?:        Assignment | null
@@ -255,8 +280,8 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
   const { text: annotated, pageCount } = annotateWithPageMarkers(params.submissionText)
 
   const user = revisionBlock + reference + (params.criteria.length > 0
-    ? buildCriteriaPrompt(annotated, params.criteria, params.examples, isCalc, isRevision, pageCount, hasHandoutQuestions)
-    : buildHolisticPrompt(annotated, params.examples, isCalc, isRevision, pageCount, hasHandoutQuestions))
+    ? buildCriteriaPrompt(annotated, params.criteria, params.examples, params.policyMemo, isCalc, isRevision, pageCount, hasHandoutQuestions)
+    : buildHolisticPrompt(annotated, params.examples, params.policyMemo, isCalc, isRevision, pageCount, hasHandoutQuestions))
 
   return { system, user, pageCount }
 }
@@ -281,19 +306,109 @@ export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResul
   )
 
   const grade = normaliseGrade(result.grade)
+  let strengths    = normaliseBullets(result.strengths ?? [], params.submissionText, pageCount, params.criteria)
+  let improvements = normaliseBullets(result.improvements ?? [], params.submissionText, pageCount, params.criteria)
+
+  if (params.critic) {
+    try {
+      const critiqued = await critiqueFeedback(strengths, improvements, params.submissionText, params.context, params.providerOverride)
+      strengths    = critiqued.strengths
+      improvements = critiqued.improvements
+    } catch (err) {
+      // Never let the critic pass block grading — fall back to the raw bullets.
+      logger.warn({ message: '[Critic] Feedback critique failed, using raw bullets', error: (err as Error).message })
+    }
+  }
+
   return {
     score:          clampScore(result.score),
     grade,
     gradeLabel:     result.grade_label ?? gradeToLabel(grade),
     feedback:       result.feedback ?? '',
     criteriaScores:        normaliseCriteriaScores(result.criteria_scores ?? [], params.submissionText, pageCount),
-    strengths:             normaliseBullets(result.strengths ?? [], params.submissionText, pageCount, params.criteria),
-    improvements:          normaliseBullets(result.improvements ?? [], params.submissionText, pageCount, params.criteria),
+    strengths,
+    improvements,
     verificationQuestions: normaliseVerificationQuestions(result.verification_questions ?? [], params.submissionText, pageCount),
     revisionCheck:         params.parent != null ? normaliseRevisionCheck(result.revision_check) : null,
     questionResponses:     (params.parent?.ai_handout?.questions.length ?? 0) > 0
                             ? normaliseQuestionResponses(result.question_responses)
                             : null,
+  }
+}
+
+// ─── Critic / verification pass ──────────────────────────────────────────────
+//
+// A second, cheap LLM call over the already-normalised bullets. Vague or
+// ungrounded feedback ("слабая аргументация") is the #1 complaint about AI
+// grading — this pass forces every bullet to either be concrete and tied to
+// the submission, or get dropped. Runs after citation validation, so quotes
+// are already verified; the critic only judges the prose claim itself.
+
+export interface CritiqueVerdict {
+  kind:            'strength' | 'improvement'
+  index:           number
+  verdict:         'keep' | 'rewrite' | 'drop'
+  rewritten_text?: string
+}
+
+/** Pure — applies critique verdicts to a bullet list. Unit-testable without an LLM call. */
+export function applyCritiqueVerdicts(
+  bullets: BulletItem[],
+  verdicts: CritiqueVerdict[],
+  kind: 'strength' | 'improvement',
+): BulletItem[] {
+  const byIndex = new Map(verdicts.filter((v) => v.kind === kind).map((v) => [v.index, v]))
+  const result: BulletItem[] = []
+  bullets.forEach((bullet, i) => {
+    const v = byIndex.get(i)
+    if (!v || v.verdict === 'keep') {
+      result.push(bullet)
+      return
+    }
+    if (v.verdict === 'drop') return
+    // 'rewrite' — only apply if the model actually supplied usable replacement text.
+    const rewritten = typeof v.rewritten_text === 'string' ? v.rewritten_text.trim() : ''
+    result.push(rewritten.length >= 8 ? { ...bullet, text: rewritten.slice(0, 300) } : bullet)
+  })
+  return result
+}
+
+async function critiqueFeedback(
+  strengths: BulletItem[],
+  improvements: BulletItem[],
+  submissionText: string,
+  context: CallContext,
+  providerOverride?: 'deepseek' | 'yandex' | 'gigachat',
+): Promise<{ strengths: BulletItem[]; improvements: BulletItem[] }> {
+  if (strengths.length === 0 && improvements.length === 0) return { strengths, improvements }
+
+  const listBlock = (kind: 'strength' | 'improvement', items: BulletItem[]) =>
+    items.map((b, i) => `[${kind} ${i}] ${b.text}`).join('\n')
+
+  const system = `Вы — строгий редактор обратной связи по студенческим работам. Ваша задача — проверить каждый пункт отзыва на два критерия: ` +
+    `(1) ОБОСНОВАННОСТЬ — утверждение действительно подтверждается текстом работы, а не общими словами; ` +
+    `(2) КОНКРЕТНОСТЬ — пункт говорит, что именно сделано хорошо/плохо и (для improvements) что конкретно изменить, а не общая фраза вроде «слабая аргументация». ` +
+    `Для каждого пункта верните вердикт: "keep" (уже хорош), "rewrite" (перепишите короче и конкретнее, сохраняя суть) или "drop" (пункт не по существу, ничем не обоснован). ` +
+    `Отвечайте только валидным JSON.`
+
+  const user = `## Работа студента (фрагмент)\n${sanitiseForPrompt(submissionText).slice(0, 4000)}\n\n` +
+    `## Пункты отзыва для проверки\n${listBlock('strength', strengths)}\n${listBlock('improvement', improvements)}\n\n` +
+    `Верните JSON: {"verdicts": [{"kind": "strength"|"improvement", "index": число, "verdict": "keep"|"rewrite"|"drop", "rewritten_text": строка (только если verdict="rewrite")}]}. ` +
+    `Включите вердикт для КАЖДОГО пункта из списка выше.`
+
+  const result = await chatJSON<{ verdicts: CritiqueVerdict[] }>(
+    [
+      { role: 'system', content: system },
+      { role: 'user',   content: user },
+    ],
+    'критика отзыва',
+    { context, providerOverride },
+  )
+
+  const verdicts = Array.isArray(result.verdicts) ? result.verdicts : []
+  return {
+    strengths:    applyCritiqueVerdicts(strengths, verdicts, 'strength'),
+    improvements: applyCritiqueVerdicts(improvements, verdicts, 'improvement'),
   }
 }
 
@@ -368,7 +483,7 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
   const ids     = params.criterionIds ?? []
   const weights = params.weights ?? []
 
-  const [snapshot, examples, parent] = await Promise.all([
+  const [snapshot, examples, parent, policyMemo] = await Promise.all([
     resolveCriteriaSnapshot(params.teacherId, params.institutionId ?? null, ids, weights),
     ragEnabled && params.courseId
       ? retrieveExamples(params.submissionText, params.courseId, params.teacherId)
@@ -376,12 +491,16 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     params.parentAssignmentId
       ? findAssignmentById(params.parentAssignmentId, params.teacherId)
       : Promise.resolve(null),
+    ragEnabled && params.courseId
+      ? getPolicyMemo(params.courseId)
+      : Promise.resolve(null),
   ])
 
   const gradeParams = {
     submissionText:    params.submissionText,
     criteria:          snapshot,
     examples,
+    policyMemo:        policyMemo?.memo_text ?? null,
     assignmentType:    params.assignmentType,
     referenceSolution: params.referenceSolution,
     parent,
@@ -390,6 +509,7 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
       institutionId: params.institutionId ?? undefined,
       feature:       'grading' as const,
     },
+    critic: canUseFeature(params.planTier, 'feedbackCritic'),
   }
 
   // "Thorough" mode runs the confidence ensemble: the primary call still
@@ -788,6 +908,9 @@ export async function approve(
   if (!assignment) throw new NotFoundError('Работа')
 
   generateAndStoreEmbedding(id, assignment.submission_text).catch(() => null)
+  if (assignment.course_id) {
+    maybeRegeneratePolicyMemo(assignment.course_id, teacherId).catch(() => null)
+  }
 
   return assignment
 }
@@ -799,7 +922,7 @@ function buildExamplesBlock(examples: SimilarAssignment[]): string {
 
   const items = examples
     .map(
-      (ex, i) => `### Пример ${i + 1}
+      (ex, i) => `### Пример ${i + 1}${ex.contrastive ? ' (пример с другой оценкой — для контраста, чтобы прочувствовать границу между уровнями)' : ''}
 Работа студента (фрагмент):
 ${ex.submission_text.slice(0, 600)}${ex.submission_text.length > 600 ? '…' : ''}
 
@@ -812,6 +935,18 @@ ${ex.submission_text.slice(0, 600)}${ex.submission_text.length > 600 ? '…' : '
 Используйте их как ориентир для калибровки своей оценки.
 
 ${items}
+
+`
+}
+
+/**
+ * Renders the distilled per-course policy memo (patterns in how this teacher
+ * corrects the AI draft) as a calibration note ahead of the submission.
+ */
+function buildPolicyMemoBlock(memo: string | null | undefined): string {
+  if (!memo) return ''
+  return `## Особенности оценивания этого преподавателя
+${sanitiseForPrompt(memo)}
 
 `
 }
@@ -851,6 +986,7 @@ function buildCriteriaPrompt(
   text: string,
   snapshot: CriteriaSnapshotItem[],
   examples: SimilarAssignment[],
+  policyMemo?: string | null,
   isCalc = false,
   isRevision = false,
   pageCount = 0,
@@ -877,7 +1013,7 @@ function buildCriteriaPrompt(
     ? ` Маркеры [стр. N] в цитату НЕ ВКЛЮЧАЙТЕ.`
     : ''
 
-  return `${buildExamplesBlock(examples)}## Критерии оценки
+  return `${buildPolicyMemoBlock(policyMemo)}${buildExamplesBlock(examples)}## Критерии оценки
 
 ${criteriaBlock}
 
@@ -917,6 +1053,7 @@ ${verificationFieldInstruction(pageInstruction)}
 function buildHolisticPrompt(
   text: string,
   examples: SimilarAssignment[],
+  policyMemo?: string | null,
   isCalc = false,
   isRevision = false,
   pageCount = 0,
@@ -929,7 +1066,7 @@ function buildHolisticPrompt(
     ? ` Маркеры [стр. N] в цитату НЕ ВКЛЮЧАЙТЕ.`
     : ''
 
-  return `${buildExamplesBlock(examples)}## Работа студента${pageCount > 1 ? ` (страницы помечены маркерами [стр. N])` : ''}
+  return `${buildPolicyMemoBlock(policyMemo)}${buildExamplesBlock(examples)}## Работа студента${pageCount > 1 ? ` (страницы помечены маркерами [стр. N])` : ''}
 <student_submission>
 ${sanitiseForPrompt(text)}
 </student_submission>

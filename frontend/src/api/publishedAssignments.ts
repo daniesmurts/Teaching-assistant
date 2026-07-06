@@ -97,3 +97,25 @@ export async function gradeSubmission(id: string, inviteId: string): Promise<Gra
 export function writeUrl(token: string): string {
   return `${window.location.origin}/write/${token}`
 }
+
+export interface CohortGap {
+  issue: string
+  count: number
+}
+
+export interface CohortSynthesis {
+  common_gaps:        CohortGap[]
+  score_distribution: { grade: string; count: number }[]
+  standout_strengths: string[]
+  recommended_topics: string[]
+  based_on_count:     number
+  generated_at:       string
+}
+
+export async function getCohortSynthesis(id: string): Promise<CohortSynthesis | null> {
+  return (await client.get<CohortSynthesis | null>(`/api/published-assignments/${id}/synthesis`)).data
+}
+
+export async function synthesizeCohort(id: string): Promise<CohortSynthesis> {
+  return (await client.post<CohortSynthesis>(`/api/published-assignments/${id}/synthesize`)).data
+}

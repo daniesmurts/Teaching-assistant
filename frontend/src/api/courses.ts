@@ -38,3 +38,21 @@ export async function updateCourse(
 export async function deleteCourse(id: string): Promise<void> {
   await client.delete(`/api/courses/${id}`)
 }
+
+export interface PolicyMemo {
+  course_id:      string
+  memo_text:      string
+  based_on_count: number
+  generated_at:   string
+  model_used:     string | null
+}
+
+export async function getPolicyMemo(courseId: string): Promise<PolicyMemo | null> {
+  const res = await client.get<PolicyMemo | null>(`/api/courses/${courseId}/policy-memo`)
+  return res.data
+}
+
+export async function regeneratePolicyMemo(courseId: string): Promise<PolicyMemo | null> {
+  const res = await client.post<PolicyMemo | null>(`/api/courses/${courseId}/policy-memo/regenerate`)
+  return res.data
+}

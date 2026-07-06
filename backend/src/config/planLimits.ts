@@ -21,6 +21,8 @@ export const PLAN_LIMITS = {
     historyDays:           30,
     presentationHistory:   false,
     watermark:             true,
+    feedbackCritic:        false,
+    cohortSynthesis:       false,
   },
   pro: {
     gradesPerMonth:        Infinity,
@@ -41,6 +43,8 @@ export const PLAN_LIMITS = {
     historyDays:           Infinity,
     presentationHistory:   true,
     watermark:             false,
+    feedbackCritic:        true,
+    cohortSynthesis:       true,
   },
   institution: {
     gradesPerMonth:        Infinity,
@@ -61,6 +65,8 @@ export const PLAN_LIMITS = {
     historyDays:           Infinity,
     presentationHistory:   true,
     watermark:             false,
+    feedbackCritic:        true,
+    cohortSynthesis:       true,
   },
 } as const
 

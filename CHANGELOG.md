@@ -14,6 +14,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Added
+- **Smarter RAG flywheel — five additions on top of the existing top-5 few-shot retrieval.**
+  1. **Feedback critic pass** (`feedbackCritic` plan flag, Pro+): after normal grading, a second cheap LLM call (`critiqueFeedback` in `services/grading.ts`) checks every strengths/improvements bullet for groundedness + concreteness, and rewrites or drops it. Pure merge logic (`applyCritiqueVerdicts`) is unit-tested independent of the LLM call; falls back to the raw bullets on failure — never blocks grading.
+  2. **Contrastive retrieval**: when the top-5 similarity hits from `retrieveExamples` are all the same approved grade, `findContrastingAssignment` (and its time-respecting twin for the eval harness) fetches one nearest neighbour with a *different* grade, so the model sees the boundary instead of only one side of it. Labelled distinctly in the prompt (`SimilarAssignment.contrastive`).
+  3. **Per-course grading-policy memo** (migration `059_policy_memos.sql`, `course_policy_memos` table): `services/policyMemo.ts` distills recurring ai_*/approved_* corrections from the last ~30 `approved_revisions` into a short natural-language memo ("this teacher grades formatting more strictly than the AI draft"), injected into every grading prompt for the course (`buildPolicyMemoBlock`). Auto-regenerates every ~10 new approvals (`maybeRegeneratePolicyMemo`, fire-and-forget after `approve()`) or on demand via new `GET/POST /api/courses/:id/policy-memo(/regenerate)` — surfaced as a "Профиль оценивания" panel on Предметы.
+  4. **Eval-harness variant A/B** (migration `060_eval_variants.sql`, `eval_results.variant` column): `runReplay` can now replay the same assignments under `baseline` / `contrastive` / `policyMemo` / `both` in addition to the existing K sweep, so the flywheel study can measure whether contrastive retrieval and policy memos actually move agreement with teacher grades before rolling them out further. `summariseRun` groups by (k, variant); admin Эксперименты UI shows the comparison and lets you pick variants when starting a run.
+  5. **Cohort synthesis for published assignments** (migration `061_cohort_synthesis.sql`, `cohort_syntheses` table, `cohortSynthesis` plan flag Pro+): `services/cohortSynthesis.ts` aggregates approved feedback across all submissions of one published assignment (map-reduce for cohorts >20) into class-wide insight — recurring gaps with frequency, grade distribution, standout strengths, suggested lecture topics. New `GET/POST /api/published-assignments/:id/synth(esis|esize)`; "Аналитика по группе" panel on the published-assignment detail page, gated at ≥5 approved submissions server-side.
+
+  Shared-type additions: `PlanState.features.feedbackCritic` / `.cohortSynthesis`, `CohortSynthesis`/`CohortGap` in `shared/types.ts`. All new LLM inputs pass through `sanitiseForPrompt`; all new SQL is parameterised.
+
 ### Changed
 - **«Экспорт в PDF» button — more visible.** The report's export trigger used
   the shared `secondary` Button variant — a near-transparent ghost pill on the

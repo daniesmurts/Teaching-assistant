@@ -45,21 +45,13 @@ you can't answer.
   Postgres trigger on UPDATE of `assignments.approved_*` columns. Optional
   admin-panel view to browse the log.
 
-### 3. Switch embeddings to a Russian-tuned model · Effort: M
+### ~~3. Switch embeddings to a Russian-tuned model~~ — already done
 
-DeepSeek embeddings work but aren't state-of-the-art for Russian. The RAG
-flywheel quality directly limits grading consistency *and* presentation /
-quiz citations.
-
-- **Why:** Quality jump applies to every RAG path simultaneously. Russian
-  benchmarks favour `intfloat/multilingual-e5-large` or YandexGPT embeddings
-  over DeepSeek's by a meaningful margin.
-- **Touches:** [services/deepseek.ts](backend/src/services/deepseek.ts)
-  `embed()`, [services/embeddings.ts](backend/src/services/embeddings.ts),
-  re-embed all `assignments.embedding` + `document_chunks.embedding` rows
-  once. Background job, idempotent.
-- **Consider:** YandexGPT keeps the call inside Russia (latency + 152-ФЗ
-  posture); self-hosted e5-large is free but burns VM memory.
+Already shipped: migration `024_yandex_embeddings.sql` moved every embedding
+call to Yandex `text-search-doc` (discovered DeepSeek had no `/embeddings`
+endpoint at all — every call had been 404ing silently). `llm/registry.ts:embed()`
+now routes through Yandex unconditionally, regardless of institution LLM
+preference (CLAUDE.md rule #9). No further action needed here.
 
 ### 4. localStorage hardening for the grading persistence layer · Effort: S
 
@@ -125,6 +117,27 @@ the account entirely.
   `monthlyTokenCap`, [services/deepseek.ts](backend/src/services/deepseek.ts)
   read teacher's cap from cache before each call.
 
+### 9. Criterion-level RAG retrieval · Effort: M
+
+Current RAG retrieves whole approved assignments as few-shot examples.
+Criteria are the platform's stated moat — retrieving past approved feedback
+*per criterion* (not per assignment) would reinforce that directly: grading
+"аргументация" pulls past approved comments specifically on that criterion,
+not a whole unrelated essay that happens to be similar overall.
+
+- **Why:** Sharper signal than whole-assignment similarity, and it's the
+  natural next step after the contrastive-retrieval + policy-memo work
+  already shipped (see [CHANGELOG.md](CHANGELOG.md) [Unreleased]).
+- **Touches:** new embedding granularity — chunk/embed `approved_criteria_scores[].feedback`
+  per criterion, new query alongside
+  [db/queries/assignments.ts](backend/src/db/queries/assignments.ts)
+  `findSimilarAssignments`, `buildCriteriaPrompt` in
+  [services/grading.ts](backend/src/services/grading.ts) to inject per-criterion
+  examples instead of (or alongside) whole-assignment ones.
+- **Consider:** meaningfully larger scope than the assignment-level RAG —
+  needs its own embedding column/table and a chunking decision (one row per
+  criterion-score) before the retrieval query can exist.
+
 ---
 
 ## Features
@@ -168,7 +181,11 @@ slipping.
   to department heads ("see your whole faculty's grade distributions").
 - **Touches:** [pages/Students.tsx](frontend/src/pages/Students.tsx) gets a
   cohort tab. New aggregation queries. Optional CSV export.
-- **Note:** no AI calls — pure aggregation.
+- **Note:** no AI calls — pure aggregation. Distinct from the AI-driven
+  cohort synthesis shipped for published assignments
+  ([services/cohortSynthesis.ts](backend/src/services/cohortSynthesis.ts)) —
+  that one is scoped to a single published assignment's submissions and
+  produces qualitative gaps/topics via LLM, not a roster-wide histogram.
 
 ### D. Real PPTX export · Effort: M
 

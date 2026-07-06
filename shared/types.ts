@@ -56,6 +56,8 @@ export interface PlanState {
     verificationQuestions: boolean
     handout:               boolean
     publishedAssignments:  boolean
+    feedbackCritic:        boolean
+    cohortSynthesis:       boolean
   }
 }
 
@@ -765,6 +767,25 @@ export interface CurriculumAnalysis {
   pairs:        OverlapPair[]            // sorted by similarity desc
   pair_summary: DisciplinePairSummary[]  // per discipline-pair rollup, strongest first
   generated_at: string
+}
+
+// ─── Cohort synthesis (class-wide insight for a published assignment) ──────────
+// Aggregates approved feedback across all graded submissions of one published
+// assignment into insight a single per-student grade can't show: recurring
+// gaps, the grade spread, standouts, and what to revisit in the next lecture.
+
+export interface CohortGap {
+  issue: string   // e.g. "путают корреляцию и причинность"
+  count: number   // how many submissions showed this pattern
+}
+
+export interface CohortSynthesis {
+  common_gaps:        CohortGap[]
+  score_distribution: { grade: GradeLetter; count: number }[]
+  standout_strengths: string[]
+  recommended_topics:  string[]
+  based_on_count:      number
+  generated_at:        string
 }
 
 // ─── Syllabus conformance review (РПД ↔ компетенции/цели) ───────────────────────

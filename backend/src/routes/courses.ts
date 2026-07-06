@@ -3,11 +3,13 @@ import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { asyncHandler } from '../lib/asyncHandler'
 import { NotFoundError } from '../errors/AppError'
-import { checkResourceLimit } from '../middleware/checkPlan'
+import { checkResourceLimit, checkFeatureAccess } from '../middleware/checkPlan'
 import { createCourseRules, updateCourseRules } from '../validation/courseValidation'
 import {
   findCoursesByTeacher, findCourseById, createCourse, updateCourse, deleteCourse,
 } from '../db/queries/courses'
+import { getPolicyMemo } from '../db/queries/policyMemos'
+import { generatePolicyMemo } from '../services/policyMemo'
 
 const router = Router()
 router.use(authenticate)
@@ -51,6 +53,19 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   const deleted = await deleteCourse(req.params.id, req.teacher.id)
   if (!deleted) throw new NotFoundError('Предмет')
   res.status(204).send()
+}))
+
+router.get('/:id/policy-memo', checkFeatureAccess('ragFlywheel'), asyncHandler(async (req, res) => {
+  const course = await findCourseById(req.params.id, req.teacher.id)
+  if (!course) throw new NotFoundError('Предмет')
+  res.json(await getPolicyMemo(req.params.id))
+}))
+
+router.post('/:id/policy-memo/regenerate', checkFeatureAccess('ragFlywheel'), asyncHandler(async (req, res) => {
+  const course = await findCourseById(req.params.id, req.teacher.id)
+  if (!course) throw new NotFoundError('Предмет')
+  await generatePolicyMemo(req.params.id, req.teacher.id)
+  res.json(await getPolicyMemo(req.params.id))
 }))
 
 export default router

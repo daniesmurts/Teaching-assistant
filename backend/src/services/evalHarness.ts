@@ -16,9 +16,11 @@ import { embed } from './deepseek'
 import {
   findReplayTargets,
   findSimilarAssignmentsBefore,
+  findContrastingAssignmentBefore,
   type ReplayTarget,
   type SimilarAssignment,
 } from '../db/queries/assignments'
+import { getPolicyMemo } from '../db/queries/policyMemos'
 import {
   createEvalRun, getEvalRun, completeEvalRun,
   findCompletedConditions, insertEvalResult, findEvalResults,
@@ -37,10 +39,19 @@ import type { CriteriaSnapshotItem } from '../../../shared/types'
 const DEFAULT_CONDITIONS = [0, 3, 5]
 const CONCURRENCY = 2          // parallel grading calls — gentle on rate limits
 
+// Which retrieval/prompt refinements to A/B against the baseline top-K
+// examples. 'contrastive' adds a grade-contrasting neighbour when the K
+// examples are grade-homogeneous; 'policyMemo' injects the course's
+// distilled correction memo; 'both' does both. Only meaningful for k > 0
+// (k=0 has no examples to contrast, but policyMemo still applies).
+export type ReplayVariant = 'baseline' | 'contrastive' | 'policyMemo' | 'both'
+const DEFAULT_VARIANTS: ReplayVariant[] = ['baseline']
+
 export interface ReplayConfig {
   teacherId:   string
   courseId?:   string
   conditions?: number[]
+  variants?:   ReplayVariant[]
   limit?:      number          // cap on assignments (newest dropped), for cheap pilots
   resumeRunId?: string
   notes?:      string
@@ -73,6 +84,7 @@ export async function runReplay(
   onProgress?: (p: ReplayProgress) => void
 ): Promise<ReplayProgress> {
   const conditions = cfg.conditions ?? DEFAULT_CONDITIONS
+  const variants    = cfg.variants ?? DEFAULT_VARIANTS
 
   // Create or resume the run
   let runId: string
@@ -111,23 +123,35 @@ export async function runReplay(
 
   const progress: ReplayProgress = {
     runId,
-    total:   targets.length * conditions.length,
+    total:   targets.length * conditions.length * variants.length,
     done:    0,
     skipped: 0,
     failed:  0,
   }
 
-  // Work queue of (target, K) pairs, processed with bounded concurrency.
-  const queue: Array<{ target: ReplayTarget; k: number }> = []
+  // Work queue of (target, K, variant) triples, processed with bounded concurrency.
+  const queue: Array<{ target: ReplayTarget; k: number; variant: ReplayVariant }> = []
   for (const target of targets) {
     for (const k of conditions) {
-      if (alreadyDone.has(`${target.id}:${k}`)) {
-        progress.skipped += 1
-        progress.done    += 1
-      } else {
-        queue.push({ target, k })
+      for (const variant of variants) {
+        if (alreadyDone.has(`${target.id}:${k}:${variant}`)) {
+          progress.skipped += 1
+          progress.done    += 1
+        } else {
+          queue.push({ target, k, variant })
+        }
       }
     }
+  }
+
+  // Policy memos are per-course, not per-target — cache lookups across the queue.
+  const memoCache = new Map<string, string | null>()
+  async function courseMemo(courseId: string): Promise<string | null> {
+    if (memoCache.has(courseId)) return memoCache.get(courseId)!
+    const memo = await getPolicyMemo(courseId)
+    const text = memo?.memo_text ?? null
+    memoCache.set(courseId, text)
+    return text
   }
 
   // Per-target embedding cache (each target appears once per condition).
@@ -146,8 +170,8 @@ export async function runReplay(
     return vector
   }
 
-  async function processOne(item: { target: ReplayTarget; k: number }): Promise<void> {
-    const { target, k } = item
+  async function processOne(item: { target: ReplayTarget; k: number; variant: ReplayVariant }): Promise<void> {
+    const { target, k, variant } = item
     const started = Date.now()
     try {
       let examples: SimilarAssignment[] = []
@@ -156,12 +180,28 @@ export async function runReplay(
         examples = await findSimilarAssignmentsBefore(
           target.course_id, vector, target.created_at, target.id, k,
         )
+
+        if (variant === 'contrastive' || variant === 'both') {
+          const uniqueGrades = new Set(examples.map((e) => e.approved_grade))
+          if (examples.length > 0 && uniqueGrades.size === 1) {
+            const contrast = await findContrastingAssignmentBefore(
+              target.course_id, vector, target.created_at,
+              examples.map((e) => e.id), [...uniqueGrades],
+            )
+            if (contrast) examples = [...examples, contrast]
+          }
+        }
       }
+
+      const policyMemo = (variant === 'policyMemo' || variant === 'both')
+        ? await courseMemo(target.course_id)
+        : null
 
       const result = await gradeOnce({
         submissionText:   target.submission_text,
         criteria:         cleanSnapshotForReplay(target.criteria_snapshot),
         examples,
+        policyMemo,
         context:          { teacherId: cfg.teacherId, feature: 'grading' },
         providerOverride: cfg.providerOverride,
       })
@@ -170,6 +210,7 @@ export async function runReplay(
         runId,
         assignmentId:   target.id,
         k,
+        variant,
         examplesUsed:   examples.length,
         replayScore:    result.score,
         replayGrade:    result.grade,
@@ -184,6 +225,7 @@ export async function runReplay(
         runId,
         assignmentId:   target.id,
         k,
+        variant,
         examplesUsed:   0,
         replayScore:    null,
         replayGrade:    null,
@@ -193,7 +235,7 @@ export async function runReplay(
         durationMs:     Date.now() - started,
         error:          (err as Error).message.slice(0, 500),
       }).catch(() => null)
-      logger.warn({ message: '[eval] condition failed', assignment: target.id, k, error: (err as Error).message })
+      logger.warn({ message: '[eval] condition failed', assignment: target.id, k, variant, error: (err as Error).message })
     } finally {
       progress.done += 1
       onProgress?.(progress)
@@ -218,6 +260,7 @@ export async function runReplay(
 
 export interface ConditionSummary {
   k:             number
+  variant:       string
   n:             number          // usable result pairs
   meanExamples:  number          // actual examples injected (may be < k on thin data)
   qwk:           number | null   // on 5-point grade
@@ -227,22 +270,24 @@ export interface ConditionSummary {
 
 export async function summariseRun(runId: string): Promise<ConditionSummary[]> {
   const rows = await findEvalResults(runId)
-  const byK = new Map<number, typeof rows>()
+  const byKV = new Map<string, typeof rows>()
   for (const r of rows) {
     if (r.error || r.replay_score == null || r.replay_grade == null) continue
-    if (!byK.has(r.k)) byK.set(r.k, [])
-    byK.get(r.k)!.push(r)
+    const key = `${r.k}:${r.variant}`
+    if (!byKV.has(key)) byKV.set(key, [])
+    byKV.get(key)!.push(r)
   }
 
   const out: ConditionSummary[] = []
-  for (const [k, group] of Array.from(byK.entries()).sort((a, b) => a[0] - b[0])) {
+  for (const group of Array.from(byKV.values()).sort((a, b) => a[0].k - b[0].k || a[0].variant.localeCompare(b[0].variant))) {
     const replayScores  = group.map((r) => r.replay_score!)
     const teacherScores = group.map((r) => r.teacher_score)
     const replayGrades  = group.map((r) => parseInt(r.replay_grade!, 10))
     const teacherGrades = group.map((r) => parseInt(r.teacher_grade, 10))
 
     out.push({
-      k,
+      k:            group[0].k,
+      variant:      group[0].variant,
       n:            group.length,
       meanExamples: group.reduce((s, r) => s + r.examples_used, 0) / group.length,
       qwk:          group.length >= 2 ? round3(quadraticWeightedKappa(teacherGrades, replayGrades)) : null,
@@ -256,9 +301,9 @@ export async function summariseRun(runId: string): Promise<ConditionSummary[]> {
 /** Raw per-condition rows as CSV — the dataset behind the paper's chart. */
 export async function exportRunCsv(runId: string): Promise<string> {
   const rows = await findEvalResults(runId)
-  const header = 'assignment_id,k,examples_used,replay_score,replay_grade,teacher_score,teacher_grade,error'
+  const header = 'assignment_id,k,variant,examples_used,replay_score,replay_grade,teacher_score,teacher_grade,error'
   const body = rows.map((r) => [
-    r.assignment_id, r.k, r.examples_used,
+    r.assignment_id, r.k, r.variant, r.examples_used,
     r.replay_score ?? '', r.replay_grade ?? '',
     r.teacher_score, r.teacher_grade,
     r.error ? `"${r.error.replace(/"/g, '""')}"` : '',

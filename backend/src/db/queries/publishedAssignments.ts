@@ -308,3 +308,28 @@ export async function attachSubmissionToGrade(
     client.release()
   }
 }
+
+// ─── Cohort synthesis source rows ──────────────────────────────────────────────
+
+export interface CohortSubmissionRow {
+  approved_score:       number
+  approved_grade:       string
+  approved_improvements: unknown | null   // BulletItem[] — kept loosely typed here, parsed by the service
+}
+
+/** Approved submissions for one published assignment — the raw material for cohort synthesis. */
+export async function findApprovedCohortSubmissions(
+  publishedAssignmentId: string,
+  teacherId: string,
+): Promise<CohortSubmissionRow[]> {
+  const { rows } = await pool.query<CohortSubmissionRow>(
+    `SELECT a.approved_score, a.approved_grade, a.approved_improvements
+       FROM assignments a
+       JOIN published_assignments pa ON pa.id = a.published_assignment_id
+      WHERE a.published_assignment_id = $1
+        AND pa.teacher_id = $2
+        AND a.status = 'approved'`,
+    [publishedAssignmentId, teacherId]
+  )
+  return rows
+}

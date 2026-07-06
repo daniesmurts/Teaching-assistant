@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { annotateWithPageMarkers, normaliseCriteriaScores, buildGradingMessages, normaliseBullets } from './grading'
-import type { Assignment, CriterionScore, CriteriaSnapshotItem } from '../../../shared/types'
+import { annotateWithPageMarkers, normaliseCriteriaScores, buildGradingMessages, normaliseBullets, applyCritiqueVerdicts, type CritiqueVerdict } from './grading'
+import type { Assignment, BulletItem, CriterionScore, CriteriaSnapshotItem } from '../../../shared/types'
 import type { SimilarAssignment } from '../db/queries/assignments'
 
 describe('annotateWithPageMarkers', () => {
@@ -315,5 +315,55 @@ describe('normaliseBullets — Tier 3 fields', () => {
     expect(out[0].severity).toBeUndefined()      // string branch returns no field
     expect(out[0].action).toBeUndefined()
     expect(out[0].correction).toBeUndefined()
+  })
+})
+
+describe('applyCritiqueVerdicts', () => {
+  const bullets: BulletItem[] = [
+    { text: 'Слабая аргументация', quote: null, page: null },
+    { text: 'Чёткая структура введения', quote: null, page: null },
+    { text: 'Нет выводов по главе 2', quote: null, page: null },
+  ]
+
+  it('keeps a bullet when verdict is keep', () => {
+    const verdicts: CritiqueVerdict[] = [{ kind: 'improvement', index: 1, verdict: 'keep' }]
+    const out = applyCritiqueVerdicts(bullets, verdicts, 'improvement')
+    expect(out).toHaveLength(3)
+    expect(out[1].text).toBe('Чёткая структура введения')
+  })
+
+  it('drops a bullet when verdict is drop', () => {
+    const verdicts: CritiqueVerdict[] = [{ kind: 'improvement', index: 0, verdict: 'drop' }]
+    const out = applyCritiqueVerdicts(bullets, verdicts, 'improvement')
+    expect(out).toHaveLength(2)
+    expect(out.some((b) => b.text === 'Слабая аргументация')).toBe(false)
+  })
+
+  it('replaces text on rewrite when rewritten_text is usable', () => {
+    const verdicts: CritiqueVerdict[] = [{
+      kind: 'improvement', index: 2, verdict: 'rewrite',
+      rewritten_text: 'Добавьте итоговый вывод в конце главы 2, обобщающий результаты анализа',
+    }]
+    const out = applyCritiqueVerdicts(bullets, verdicts, 'improvement')
+    expect(out[2].text).toBe('Добавьте итоговый вывод в конце главы 2, обобщающий результаты анализа')
+    // Non-text fields survive the rewrite untouched.
+    expect(out[2].quote).toBeNull()
+  })
+
+  it('falls back to original text when rewrite has no usable replacement', () => {
+    const verdicts: CritiqueVerdict[] = [{ kind: 'improvement', index: 0, verdict: 'rewrite', rewritten_text: 'short' }]
+    const out = applyCritiqueVerdicts(bullets, verdicts, 'improvement')
+    expect(out[0].text).toBe('Слабая аргументация')
+  })
+
+  it('ignores verdicts for a different kind', () => {
+    const verdicts: CritiqueVerdict[] = [{ kind: 'strength', index: 0, verdict: 'drop' }]
+    const out = applyCritiqueVerdicts(bullets, verdicts, 'improvement')
+    expect(out).toHaveLength(3)
+  })
+
+  it('is a no-op with no verdicts', () => {
+    const out = applyCritiqueVerdicts(bullets, [], 'improvement')
+    expect(out).toEqual(bullets)
   })
 })
