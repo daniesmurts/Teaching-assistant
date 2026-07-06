@@ -561,6 +561,75 @@ IT-admin self-serve configuration surface designed in [Research.md](Research.md)
 - **Sequencing:** after Feature P (needs the org tree to map course contexts
   into) and alongside Feature Q (provides Q's institutional identity rail).
 
+### S. Agentic calc verification — execute the student's math, don't guess it · Effort: M
+
+Calc-mode grading currently asks DeepSeek Reasoner to «пошагово пересчитать»
+the solution — but LLMs are unreliable calculators, so the check is only as
+good as the model's arithmetic that day. Replace the guessing with a bounded
+agentic loop: the model extracts each computational step from the submission
+(formula, substituted values, claimed result) as structured JSON; our code
+evaluates the expression in a sandboxed numeric evaluator (e.g. `mathjs` —
+no `eval`, no filesystem/network); the verdict (совпадает / расходится, both
+values) is fed back and the loop advances to the next step until the solution
+is covered. Findings become citable per-step evidence in the existing
+strengths/improvements shape: «шаг 3: заявлено 47.3, при пересчёте 52.1».
+
+- **Why:** turns "ИИ считает, что арифметика неверна" into "арифметика
+  неверна: 47.3 ≠ 52.1" — a verifiable claim no GPT-wrapper competitor can
+  make. Strengthens exactly the mode (STEM grading) where LLM-only checking
+  is weakest, and fits the engineering-university segment (КНИТУ orbit).
+  The loop is naturally bounded by the number of steps in the solution, so
+  cost stays predictable — no open-ended agent risk.
+- **Touches:** new `services/calcVerifier.ts` (extract → evaluate → compare
+  loop; structured-JSON tool pattern, no native function-calling needed —
+  works on DeepSeek/Yandex alike); [services/grading.ts](backend/src/services/grading.ts)
+  calc path calls it and merges per-step verdicts into criteria feedback /
+  bullets (same citation-validation contract); new dependency on a safe
+  expression evaluator (`mathjs` or similar — user runs the install);
+  optional `verified_steps` JSONB on assignments for the UI to render a
+  step-check table.
+- **Constraints:** keep `gradeOnce` pure — the verifier runs as a separate
+  pre/post step whose output is passed *into* the prompt path, so eval-harness
+  replay stays valid. Unit-test the extract/compare logic with fixture
+  solutions (correct, arithmetic slip, wrong method) — the evaluator side is
+  fully testable without an LLM.
+- **Sequencing:** independent of P/Q/R. Highest-differentiation item on the
+  agentic track; build before T (shares the structured-JSON tool-loop
+  plumbing that T reuses).
+
+### T. Citation existence checking — flag hallucinated bibliographies · Effort: M
+
+Students paste ChatGPT-drafted работы with plausible-looking but nonexistent
+sources. An agentic loop over the submission's bibliography: extract the
+reference list (LLM, structured JSON); for each reference, query
+[services/yandexSearch.ts](backend/src/services/yandexSearch.ts) (already
+built — inside-Russia, 152-ФЗ clean); if the first query finds nothing, let
+the model reformulate once (title-only, transliterated) before concluding;
+classify each as найден / похожий найден / не найден. Output a neutral
+per-reference report — «не удалось найти источник — возможно, неточная
+ссылка или вымышленный источник» — never an accusation verdict, matching the
+§5.1 attestation tone (facts, teacher judges).
+
+- **Why:** hallucinated bibliographies are the #1 ChatGPT-era grading
+  problem and today's flow is blind to them. Complements process attestation
+  (§5.1): telemetry evidences *how* the work was written, this evidences
+  whether its sources are real. Cost is bounded: ≤2 searches per reference,
+  references capped (~30).
+- **Touches:** new `services/citationChecker.ts` (extract → search →
+  reformulate-once → classify loop); `yandexSearch.ts` reuse; opt-in
+  checkbox on the grading form («Проверить список литературы») rather than
+  always-on — searches add latency and per-call cost; results rendered as a
+  distinct block on the grading result + persisted (new JSONB column or
+  side table) so the Журнал detail can show it; plan-gate as Pro+
+  (`citationCheck` flag in [planLimits.ts](backend/src/config/planLimits.ts)).
+- **Constraints:** deliberate non-goal — this is NOT plagiarism/AI-text
+  detection (see «Intentionally NOT building»); it checks source
+  *existence* only. Neutral phrasing is a legal requirement, same as the
+  §5.1.2 telemetry language. Search misses ≠ proof of fabrication (paywalled
+  journals, offline books) — the UI copy must say so.
+- **Sequencing:** after S (reuses its structured-JSON tool-loop pattern).
+  Independent of P/Q/R.
+
 ---
 
 ## Build order — locked design (§5–§7)

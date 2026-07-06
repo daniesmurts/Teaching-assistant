@@ -378,10 +378,12 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
     <form onSubmit={handleSubmit} className="flex flex-col h-full">
       {/* Revision banner */}
       {revisionOf && (
-        <div className="mx-4 mt-4 px-3 py-2.5 bg-amber-light/60 border border-amber/25 rounded-md flex items-start gap-2.5">
-          <span className="text-amber text-sm mt-0.5 flex-shrink-0">↻</span>
+        <div className="mx-4 mt-4 pl-3 pr-2.5 py-3 bg-amber-light border-l-4 border-amber border-y border-r border-amber/30 rounded-md shadow-sm flex items-start gap-2.5">
+          <span className="flex-shrink-0 mt-0.5 w-6 h-6 rounded-full bg-amber text-surface text-[13px] leading-none flex items-center justify-center">
+            ↻
+          </span>
           <div className="flex-1 min-w-0 text-[12.5px] leading-relaxed">
-            <div className="font-medium text-ink">
+            <div className="font-semibold text-ink text-[13px]">
               Переработка №{(revisionOf.revision_number ?? 1) + 1}
               {revisionOf.student_name && <span className="font-normal text-ink-secondary"> · {revisionOf.student_name}</span>}
             </div>
@@ -396,7 +398,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
               type="button"
               onClick={onClearRevision}
               title="Отвязать от прошлой версии"
-              className="text-ink-tertiary hover:text-ink transition-colors text-sm leading-none flex-shrink-0"
+              className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-ink-tertiary hover:text-ink hover:bg-amber/15 transition-colors text-sm leading-none"
             >
               ×
             </button>

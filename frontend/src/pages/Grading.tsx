@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { usePersistedState, clearPersistedState } from '../hooks/usePersistedState'
 import { useQuery } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
+import Button from '../components/ui/Button'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import GradingForm from '../components/grading/GradingForm'
 import GradingResult from '../components/grading/GradingResult'
@@ -44,7 +45,15 @@ export default function Grading() {
   const [submission, setSubmission] = usePersistedState<GradeRequest | null>('page:submission', null)
   const [result, setResult]         = usePersistedState<GradeResponse | null>('page:result',     null)
   const [review, setReview]         = usePersistedState<LongReview | null>(  'page:review',     null)
+  // When the currently-shown result/review was produced — persisted so a
+  // refresh doesn't lose it, used to tell a teacher apart "just graded this"
+  // from "this is left over from before I navigated away".
+  const [resultSavedAt, setResultSavedAt] = usePersistedState<number | null>('page:resultSavedAt', null)
   const [mobileTab, setMobileTab]   = useState<MobileTab>('form')
+  // True only once something is graded/resumed *during this mount* — starts
+  // false even if a result was rehydrated from localStorage on load, so the
+  // "previous session" notice below only shows for genuinely stale output.
+  const [isFreshInSession, setIsFreshInSession] = useState(false)
   // Highlight is ephemeral UX state — don't carry it across refreshes.
   const [highlight, setHighlight]   = useState<string | null>(null)
 
@@ -90,11 +99,13 @@ export default function Grading() {
       parent_assignment_id: resumeAssignment.parent_assignment_id,
     })
     setMobileTab('result')
+    setResultSavedAt(Date.now())
+    setIsFreshInSession(true)
     // Clean the URL — refresh from here should keep the rehydrated state via
     // localStorage, not re-fetch.
     searchParams.delete('resume')
     setSearchParams(searchParams, { replace: true })
-  }, [resumeAssignment, searchParams, setSearchParams, setSubmission, setResult, setReview])
+  }, [resumeAssignment, searchParams, setSearchParams, setSubmission, setResult, setReview, setResultSavedAt])
 
   const hasOutput = result !== null || review !== null
 
@@ -103,6 +114,8 @@ export default function Grading() {
     setReview(null)
     setResult(res)
     setMobileTab('result')
+    setResultSavedAt(Date.now())
+    setIsFreshInSession(true)
   }
 
   function handleReview(rev: LongReview, req: GradeRequest) {
@@ -110,12 +123,16 @@ export default function Grading() {
     setResult(null)
     setReview(rev)
     setMobileTab('result')
+    setResultSavedAt(Date.now())
+    setIsFreshInSession(true)
   }
 
   function reset() {
     setSubmission(null)
     setResult(null)
     setReview(null)
+    setResultSavedAt(null)
+    setIsFreshInSession(false)
     setMobileTab('form')
     // Wipe the in-progress form draft too — the teacher explicitly asked
     // for a fresh round, they don't want yesterday's submission text back.
@@ -138,9 +155,9 @@ export default function Grading() {
       <TopBar
         title="Проверка работ"
         actions={hasOutput && (
-          <button onClick={reset} className="text-xs font-sans text-ink-secondary hover:text-ink transition-colors">
-            ← Новая работа
-          </button>
+          <Button variant="secondary" size="sm" onClick={reset} title="Очистить результат и вставить новую работу">
+            + Новая проверка
+          </Button>
         )}
       />
 
@@ -215,6 +232,16 @@ export default function Grading() {
           ${hasOutput ? (mobileTab === 'result' ? 'flex' : 'hidden') : 'hidden'}
           md:flex
         `}>
+          {hasOutput && !isFreshInSession && (
+            <div className="mx-4 mt-4 px-3 py-2 bg-info-bg border border-info/15 rounded-md flex items-center justify-between gap-3 flex-shrink-0">
+              <span className="text-[12.5px] font-sans text-info">
+                Показан сохранённый результат{resultSavedAt ? ` от ${formatSavedAt(resultSavedAt)}` : ''} — не из этой сессии
+              </span>
+              <Button variant="secondary" size="sm" onClick={reset} className="flex-shrink-0">
+                + Новая проверка
+              </Button>
+            </div>
+          )}
           {result ? (
             <GradingResult
               result={result}
@@ -242,6 +269,15 @@ export default function Grading() {
       </div>
     </div>
   )
+}
+
+/** "сегодня в 14:32" for today, "3 июня в 14:32" otherwise — for the stale-result notice. */
+function formatSavedAt(ts: number): string {
+  const d = new Date(ts)
+  const isToday = d.toDateString() === new Date().toDateString()
+  const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  if (isToday) return `сегодня в ${time}`
+  return `${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })} в ${time}`
 }
 
 /**

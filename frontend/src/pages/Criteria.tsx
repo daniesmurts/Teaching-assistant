@@ -108,7 +108,7 @@ export default function Criteria() {
         actions={!showForm && <CreateButton onClick={openNew}>Новый критерий</CreateButton>}
       />
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-4 md:px-6 py-6">
+        <div className="max-w-6xl mx-auto px-4 md:px-6 py-6">
 
           {!showForm && (
             <FeatureIntro
@@ -126,7 +126,7 @@ export default function Criteria() {
           )}
 
           {showForm ? (
-            <div className="bg-surface border border-border rounded-lg p-5 space-y-4">
+            <div className="max-w-2xl bg-surface border border-border rounded-lg p-5 space-y-4">
               <h2 className="font-display text-lg font-bold text-ink">
                 {form.id ? 'Редактировать критерий' : 'Новый критерий'}
               </h2>
@@ -188,10 +188,10 @@ export default function Criteria() {
                   </p>
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {criteria.map((c) => (
-                    <div key={c.id} className="bg-surface border border-border rounded-lg p-4 flex items-start justify-between">
-                      <div className="min-w-0">
+                    <div key={c.id} className="bg-surface border border-border rounded-lg p-4 flex flex-col">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-sans text-sm font-medium text-ink">{c.name}</span>
                           {c.subject && <span className="text-[10px] bg-amber-light text-amber px-1.5 py-0.5 rounded-sm">{SUBJECT_LABEL[c.subject] ?? c.subject}</span>}
@@ -199,10 +199,10 @@ export default function Criteria() {
                           {c.is_institution_shared && <span className="text-[10px] bg-info-bg text-info px-1.5 py-0.5 rounded-sm">кафедра</span>}
                         </div>
                         {c.description && (
-                          <div className="text-xs font-sans text-ink-tertiary mt-1 leading-relaxed">{c.description}</div>
+                          <div className="text-xs font-sans text-ink-tertiary mt-1 leading-relaxed line-clamp-3">{c.description}</div>
                         )}
                       </div>
-                      <div className="flex gap-2 flex-shrink-0 ml-3">
+                      <div className="flex gap-2 flex-shrink-0 mt-3 pt-2 border-t border-border/60">
                         <button onClick={() => openEdit(c)} className="text-xs text-ink-secondary hover:text-amber">Изменить</button>
                         <button onClick={() => { if (confirm(`Удалить критерий «${c.name}»?`)) deleteMut.mutate(c.id) }}
                           className="text-xs text-ink-tertiary hover:text-danger">Удалить</button>
