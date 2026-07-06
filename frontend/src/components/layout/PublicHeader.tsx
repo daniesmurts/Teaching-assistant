@@ -13,6 +13,7 @@ export default function PublicHeader() {
       <div className="flex items-center gap-4 md:gap-6">
         <Link to="/about" className="text-sm font-medium text-ink-secondary hover:text-ink transition-colors">О нас</Link>
         <Link to="/institutions" className="text-sm font-medium text-ink-secondary hover:text-ink transition-colors hidden md:block">Для ВУЗов</Link>
+        <Link to="/research" className="text-sm font-medium text-ink-secondary hover:text-ink transition-colors hidden md:block">Исследования</Link>
         <Link to="/login" className="text-sm font-medium text-ink-secondary hover:text-ink transition-colors">Войти</Link>
         <Link to="/register" className="px-4 py-2 rounded-md bg-amber text-white text-sm font-medium hover:opacity-90 transition-opacity">Начать бесплатно</Link>
       </div>

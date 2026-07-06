@@ -18,6 +18,7 @@ import {
 import { syncRoleToTree, clearOrgTiesOutsideInstitution, assignDefaultDepartmentIfUnset } from '../db/queries/orgUnits'
 import { metadataUrlForInstitution, acsUrlForInstitution } from '../services/saml'
 import { listFeedback } from '../db/queries/feedback'
+import { listContactMessages, markContactMessageRead } from '../db/queries/contactMessages'
 import { listAudit } from '../db/queries/audit'
 import {
   findPaymentsByTeacher, findPaymentByOrderId, markPaymentRefunded,
@@ -423,6 +424,19 @@ router.post('/payments/:orderId/refund', asyncHandler(async (req, res) => {
 router.get('/feedback', asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt((req.query.limit as string) ?? '100', 10) || 100, 500)
   res.json(await listFeedback(limit))
+}))
+
+// ─── Contact messages (marketing-site inbox) ──────────────────────────────────
+
+router.get('/contact-messages', asyncHandler(async (req, res) => {
+  const limit = Math.min(parseInt((req.query.limit as string) ?? '200', 10) || 200, 500)
+  res.json(await listContactMessages(limit))
+}))
+
+router.patch('/contact-messages/:id/read', asyncHandler(async (req, res) => {
+  const row = await markContactMessageRead(req.params.id)
+  if (!row) throw new NotFoundError('Обращение')
+  res.json(row)
 }))
 
 // ─── Institutions ─────────────────────────────────────────────────────────────

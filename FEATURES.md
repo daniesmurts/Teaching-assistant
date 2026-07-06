@@ -4,7 +4,7 @@ Single source of truth for what's built, by user type. Update this in the **same
 commit** as any feature change.
 
 **Legend:** ✅ shipped · 🚧 in progress · 📋 planned
-**Last updated:** 2026-07-03 (indicator-level РПД coverage check — индикаторы достижения + Знать/Уметь/Владеть, rolled up to competency; platform-wide activity logging: global audit middleware records every member mutation + IP/UA, new platform-admin Журнал действий with filters; earlier: programme-metadata on org units → prefilled РОП import; org-unit re-type/move + default-department placement + grant-warning UI + delete/lockout/practice-uniqueness hardening; earlier: org-structure audit logging + cross-institution stale-ties fix; discipline-scoped РПД library + coverage check + auto-detect + `program_direction` type)
+**Last updated:** 2026-07-06 (public Contact + Research forms now deliver to a real platform-admin inbox — `contact_messages` table, public `POST /api/contact`, admin Обращения page — instead of a fake local submit; public Research page `/research` — programme pitch, 4 research directions, partner registry component with a signed-agreement gate, application form; earlier: indicator-level РПД coverage check — индикаторы достижения + Знать/Уметь/Владеть, rolled up to competency; platform-wide activity logging: global audit middleware records every member mutation + IP/UA, new platform-admin Журнал действий with filters; earlier: programme-metadata on org units → prefilled РОП import; org-unit re-type/move + default-department placement + grant-warning UI + delete/lockout/practice-uniqueness hardening; earlier: org-structure audit logging + cross-institution stale-ties fix; discipline-scoped РПД library + coverage check + auto-detect + `program_direction` type)
 
 ---
 
@@ -29,7 +29,8 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 ## Public / unauthenticated ✅
 
 - Landing page (hero, problem/solution, 4 feature pillars: проверка / лекции / тесты / аналитика, pricing, feature matrix)
-- Marketing pages: About, Institutions, FAQ, Ethics, Contact, Pricing, Changelog, Use-cases, Offer, Privacy, Terms, Cookies
+- Marketing pages: About, Institutions, Research (`/research` — исследовательская программа, направления, партнёры, заявка), FAQ, Ethics, Contact, Pricing, Changelog, Use-cases, Offer, Privacy, Terms, Cookies
+- Contact + Research application forms deliver to a real inbox: public `POST /api/contact` → `contact_messages` table + admin-owner email notification (not a `mailto:` or fake local submit)
 - Register (with optional `?invite=` institution invite — prefills + locks email)
 - Login (password reveal, inline errors)
 - Forgot / reset password (email link, 1-hour token)
@@ -147,6 +148,7 @@ Panel at `/admin` (direct URL only, `platform_admin`):
 - **Institutions** — create/edit (tier, seat cap, **email auto-join domain**), teacher counts; **SAML SSO config** per institution (IdP entity id / SSO URL / cert, attribute mapping, copy-ready SP metadata + ACS URLs)
 - **Criterion templates** — global templates teachers start from (incl. STEM)
 - **Feedback** — browse in-app user feedback (category filter, reply link)
+- **Обращения** — public Contact/Research form submissions (topic filter, unread/read state, reply link)
 - **Errors** — recent AI/service errors
 - **Журнал действий** — cross-institution activity log (every recorded user action; filter by action/date, paginated; shows actor + IP)
 - **Subscription management** — grant/extend Pro, cancel, refund (T-Bank)
@@ -155,7 +157,7 @@ Panel at `/admin` (direct URL only, `platform_admin`):
 
 ## Cross-cutting / platform ✅
 
-- **Email** — Unisender Go transactional (cluster go2): registration, password reset/changed, institution invite, renewal dunning; **owner notifications** (new signup, purchase, feedback) to `ADMIN_NOTIFY_EMAIL`
+- **Email** — Unisender Go transactional (cluster go2): registration, password reset/changed, institution invite, renewal dunning; **owner notifications** (new signup, purchase, feedback, public contact-form message) to `ADMIN_NOTIFY_EMAIL`
 - **Auth** — JWT (7-day), bcrypt-12, password-change token invalidation, role middleware; **SAML 2.0 SSO** — email-first login routes to the institution's IdP when configured, JIT-provisions the teacher on first login (password auth still works alongside); SLO deferred
 - **Security** — helmet, CORS allowlist, rate limiting, express-validator, parameterized SQL, prompt-injection sanitisation, magic-byte file validation
 - **PWA** — installable, offline, Workbox service worker

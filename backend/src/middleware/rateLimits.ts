@@ -24,6 +24,16 @@ export const aiLimiter = rateLimit({
   message: { error: 'Превышен лимит запросов к ИИ (30 в час). Попробуйте позже.' },
 })
 
+// ─── Public marketing-site forms — unauthenticated, spam-prone ────────────────
+// Contact / research application forms: 5 submissions per hour per IP
+export const publicFormLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Слишком много обращений. Попробуйте позже или напишите на hello@ispum.ru.' },
+})
+
 // ─── General API — broad IP-based catch-all ───────────────────────────────────
 // All other endpoints: 200 requests per 15 minutes per IP
 export const generalLimiter = rateLimit({

@@ -15,6 +15,34 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Added
+- **Public Research page (`/research`).** Showcase for the research programme
+  pitched to universities: goal statement (evidence base, not access sales),
+  4-step collaboration format, 4 research directions (grading calibration,
+  feedback/outcomes, curriculum coherence, teacher time), 5 university
+  benefits, a partner registry, and an application form. Partners live in
+  `frontend/src/components/research/ResearchPartners.tsx` as a small data
+  array (`PARTNERS`) — a new university/publication is just a new entry, no
+  layout change needed. The КНИТУ entry is present but flagged
+  `confirmed: false` (agreement not yet signed) so it stays out of the public
+  list until formally confirmed; the section falls back to an "open for a
+  founding partner" placeholder in the meantime. Linked from `PublicHeader`
+  and `PublicFooter`.
+- **"Исследовательское партнёрство" topic on the Contact page** (`Contact.tsx`
+  dropdown) — routes general contact-page visitors asking about the research
+  programme without needing to find `/research` first.
+- **Public contact/lead inbox — real delivery instead of a fake local submit.**
+  Both `Contact.tsx` and the Research page's application form now POST to a
+  new public, unauthenticated `POST /api/contact` (`backend/src/routes/contact.ts`,
+  rate-limited 5/hour/IP via new `publicFormLimiter`), which persists the
+  message to a new `contact_messages` table (migration `058_contact_messages.sql`
+  — name, email, organisation, topic, message, source_page, status) and
+  best-effort emails the owner (`contactMessageEmail` template). Separate from
+  the existing authenticated in-app `feedback` table by design — different
+  audience (anonymous prospective customers vs. logged-in teachers) and shape.
+  New platform-admin page **Обращения** (`/admin/messages`, `AdminMessages.tsx`)
+  lists submissions with an unread/read state (`GET /api/admin/contact-messages`,
+  `PATCH /api/admin/contact-messages/:id/read`), mirroring `AdminFeedback.tsx`.
+
 - **Stale-analysis banner on the Анализ tab.** Reported as: uploading a
   discipline's РПД after running «Анализировать» updates the live coverage
   table immediately, but «Тематические кластеры» / `content_confidence` still

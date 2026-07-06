@@ -44,6 +44,7 @@ import AdminRubrics from './pages/admin/AdminRubrics'
 import AdminRubricTemplates from './pages/admin/AdminRubricTemplates'
 import AdminInstitutions from './pages/admin/AdminInstitutions'
 import AdminFeedback from './pages/admin/AdminFeedback'
+import AdminMessages from './pages/admin/AdminMessages'
 import AdminErrors from './pages/admin/AdminErrors'
 import AdminAudit from './pages/admin/AdminAudit'
 import AdminEvals from './pages/admin/AdminEvals'
@@ -62,6 +63,7 @@ import InstitutionStructure from './pages/institution/InstitutionStructure'
 import Landing from './pages/Landing'
 import About from './pages/About'
 import Institutions from './pages/Institutions'
+import Research from './pages/Research'
 import FAQ from './pages/FAQ'
 import Ethics from './pages/Ethics'
 import Contact from './pages/Contact'
@@ -198,6 +200,7 @@ export default function App() {
           <Route path="/"         element={<Landing />} />
           <Route path="/about"    element={<About />} />
           <Route path="/institutions" element={<Institutions />} />
+          <Route path="/research"     element={<Research />} />
           <Route path="/faq"      element={<FAQ />} />
           <Route path="/ethics"   element={<Ethics />} />
           <Route path="/contact"  element={<Contact />} />
@@ -252,6 +255,7 @@ export default function App() {
             <Route path="rubrics"   element={<AdminRubrics />} />
             <Route path="rubric-templates" element={<AdminRubricTemplates />} />
             <Route path="feedback"  element={<AdminFeedback />} />
+            <Route path="messages"  element={<AdminMessages />} />
             <Route path="errors"    element={<AdminErrors />} />
             <Route path="audit"     element={<AdminAudit />} />
             <Route path="evals"     element={<AdminEvals />} />

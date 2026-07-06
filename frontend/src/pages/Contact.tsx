@@ -1,20 +1,35 @@
 import { useState } from 'react'
 import PublicHeader from '../components/layout/PublicHeader'
 import PublicFooter from '../components/layout/PublicFooter'
+import { submitContactMessage, type ContactTopic } from '../api/contact'
 
 export default function Contact() {
   const [formState, setFormState] = useState({
     name: '',
     email: '',
     message: '',
-    type: 'support' // support, demo, billing
+    type: 'support' as ContactTopic, // support, demo, research, billing
   })
   const [isSubmitted, setIsSubmitted] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Logic for submitting the form would go here (e.g. API call)
-    setIsSubmitted(true)
+    setIsSubmitting(true)
+    try {
+      await submitContactMessage({
+        name: formState.name,
+        email: formState.email,
+        topic: formState.type,
+        message: formState.message,
+        sourcePage: 'contact',
+      })
+      setIsSubmitted(true)
+    } catch {
+      // Global error toast (client.ts) already surfaced the failure.
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -91,11 +106,12 @@ export default function Contact() {
                   <select 
                     id="type"
                     value={formState.type}
-                    onChange={(e) => setFormState({...formState, type: e.target.value})}
+                    onChange={(e) => setFormState({...formState, type: e.target.value as ContactTopic})}
                     className="w-full px-3 py-2 bg-surface border border-border rounded-md focus:outline-none focus:border-amber focus:ring-1 focus:ring-amber text-sm"
                   >
                     <option value="support">Вопрос в поддержку</option>
                     <option value="demo">Запросить демо (Для ВУЗов)</option>
+                    <option value="research">Исследовательское партнёрство</option>
                     <option value="billing">Вопросы по оплате</option>
                   </select>
                 </div>
@@ -113,11 +129,12 @@ export default function Contact() {
                   />
                 </div>
 
-                <button 
-                  type="submit" 
-                  className="w-full bg-amber hover:bg-amber/90 text-white font-medium py-2.5 rounded-md transition-colors"
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full bg-amber hover:bg-amber/90 disabled:opacity-60 text-white font-medium py-2.5 rounded-md transition-colors"
                 >
-                  Отправить
+                  {isSubmitting ? 'Отправка…' : 'Отправить'}
                 </button>
                 <p className="text-xs text-ink-tertiary text-center mt-2">
                   Нажимая кнопку «Отправить», вы соглашаетесь с <a href="/privacy" className="underline hover:text-ink">политикой конфиденциальности</a>.

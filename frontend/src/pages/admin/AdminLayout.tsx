@@ -9,6 +9,7 @@ const NAV = [
   { to: '/admin/rubrics',  label: 'Шаблоны критериев', end: false },
   { to: '/admin/rubric-templates', label: 'Шаблоны рубрик',   end: false },
   { to: '/admin/feedback', label: 'Отзывы',         end: false },
+  { to: '/admin/messages', label: 'Обращения',      end: false },
   { to: '/admin/errors',   label: 'Ошибки',         end: false },
   { to: '/admin/audit',    label: 'Журнал действий', end: false },
   { to: '/admin/evals',    label: 'Эксперименты',   end: false },

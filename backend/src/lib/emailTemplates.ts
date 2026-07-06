@@ -288,6 +288,31 @@ export function feedbackEmail(data: {
   }
 }
 
+export function contactMessageEmail(data: {
+  name: string; email: string; organization?: string | null; topic: string; message: string; sourcePage: string
+}): Omit<EmailPayload, 'to'> {
+  const labels: Record<string, string> = {
+    support: 'Вопрос в поддержку', demo: 'Демо / Для ВУЗов', research: 'Исследовательское партнёрство', billing: 'Оплата',
+  }
+  const topicLabel = labels[data.topic] ?? data.topic
+  const safe = data.message.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return {
+    subject: `[ИСПУМ] ${topicLabel} — ${data.name}`,
+    html: wrap(`
+      <p><strong>Новое обращение с сайта ИСПУМ (${data.sourcePage === 'research' ? '/research' : '/contact'}).</strong></p>
+      <p style="color:#6B6560;font-size:13px">
+        От: ${data.name} (${data.email})${data.organization ? `<br>Организация: ${data.organization}` : ''}<br>
+        Тема: ${topicLabel}
+      </p>
+      <div style="margin-top:12px;padding:14px 16px;background:#FAF8F4;border:1px solid rgba(0,0,0,0.08);border-radius:8px;white-space:pre-wrap">${safe}</div>
+      <p style="margin-top:16px"><a href="mailto:${data.email}" style="color:#C8860A">Ответить ${data.email}</a></p>
+    `),
+    text:
+      `Новое обращение с сайта ИСПУМ (${data.sourcePage === 'research' ? '/research' : '/contact'})\n\n` +
+      `От: ${data.name} (${data.email})\n${data.organization ? `Организация: ${data.organization}\n` : ''}Тема: ${topicLabel}\n\n${data.message}`,
+  }
+}
+
 // ─── Institution teacher invite ───────────────────────────────────────────────
 
 export function teacherInviteEmail(

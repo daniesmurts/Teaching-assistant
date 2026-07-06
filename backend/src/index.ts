@@ -31,6 +31,7 @@ import publicWriteRouter from './routes/publicWrite'
 import quizzesRouter from './routes/quizzes'
 import paymentsRouter from './routes/payments'
 import accountRouter from './routes/account'
+import contactRouter from './routes/contact'
 import { startRenewalScheduler } from './services/renewals'
 // Side-effect import — registers per-institution provider resolution into the
 // LLM registry before any AI call goes through.
@@ -119,6 +120,7 @@ app.get('/api/health', async (_req, res) => {
 app.use('/api/auth',          authRouter)
 app.use('/api/sso',           ssoRouter)
 app.use('/api/write',         publicWriteRouter)   // public — token-authed student writing surface
+app.use('/api/contact',       contactRouter)       // public — marketing-site Contact + Research forms
 app.use('/api/courses',       coursesRouter)
 app.use('/api/criteria',      criteriaRouter)
 app.use('/api/rubrics',       rubricsRouter)

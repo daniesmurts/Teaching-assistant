@@ -112,6 +112,26 @@ export async function getFeedback(limit = 100): Promise<AdminFeedback[]> {
   return (await client.get<AdminFeedback[]>('/api/admin/feedback', { params: { limit } })).data
 }
 
+export interface AdminContactMessage {
+  id:           string
+  name:         string
+  email:        string
+  organization: string | null
+  topic:        string
+  message:      string
+  source_page:  string
+  status:       string
+  created_at:   string
+}
+
+export async function getContactMessages(limit = 200): Promise<AdminContactMessage[]> {
+  return (await client.get<AdminContactMessage[]>('/api/admin/contact-messages', { params: { limit } })).data
+}
+
+export async function markContactMessageRead(id: string): Promise<AdminContactMessage> {
+  return (await client.patch<AdminContactMessage>(`/api/admin/contact-messages/${id}/read`)).data
+}
+
 export async function getInstitutions(): Promise<AdminInstitution[]> {
   return (await client.get<AdminInstitution[]>('/api/admin/institutions')).data
 }
