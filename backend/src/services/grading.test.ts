@@ -213,6 +213,21 @@ describe('buildGradingMessages', () => {
     expect(m.user).toContain('62,5 м')
   })
 
+  it('embeds the assignment context with a strict-scope instruction when provided', () => {
+    const m = buildGradingMessages({
+      submissionText: SUBMISSION, criteria: [], examples: [],
+      assignmentContext: 'Учебная практика (ознакомительная), проводилась в аудитории, 1 курс',
+    })
+    expect(m.user).toContain('<assignment_context>')
+    expect(m.user).toContain('ознакомительная')
+    expect(m.user).toContain('СТРОГО в рамках этого задания')
+  })
+
+  it('omits the assignment context block when not provided', () => {
+    const m = buildGradingMessages({ submissionText: SUBMISSION, criteria: [], examples: [] })
+    expect(m.user).not.toContain('<assignment_context>')
+  })
+
   it('adds revision context and the revision_check instruction when a parent is given', () => {
     const m = buildGradingMessages({
       submissionText: SUBMISSION, criteria: [], examples: [], parent: fakeParent(),

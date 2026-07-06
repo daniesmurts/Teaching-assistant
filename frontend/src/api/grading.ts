@@ -14,6 +14,7 @@ export interface GradeRequest {
   student_email?: string
   student_group?: string
   reference_solution?: string
+  assignment_context?: string
   assignment_type?: 'essay' | 'calculation'
   parent_assignment_id?: string
   thorough?: boolean                         // run the confidence ensemble (Pro+)

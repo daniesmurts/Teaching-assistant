@@ -152,6 +152,7 @@ export async function gradeEnsemble(
       examples:          base.examples,
       assignmentType:    base.assignmentType,
       referenceSolution: base.referenceSolution,
+      assignmentContext: base.assignmentContext,
       persona:           cfg2.persona,
       temperature:       cfg2.temperature,
       context:           base.context,

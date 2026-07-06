@@ -61,6 +61,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
       student_email:       revisionOf?.student_email ?? '',
       student_group:       revisionOf?.student_group ?? '',
       reference_solution:  '',
+      assignment_context:  '',
       assignment_type:     'essay',
       parent_assignment_id: revisionOf?.id,
     },
@@ -79,6 +80,9 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
   )
 
   const isCalc = form.assignment_type === 'calculation'
+  // Collapsed by default unless a draft already has context text (e.g. after
+  // a page refresh) — keeps the form uncluttered for the common case.
+  const [showAssignmentContext, setShowAssignmentContext] = useState(Boolean(form.assignment_context))
   // Thorough mode (confidence ensemble) — opt-in per grade, Pro+ only. Plain
   // state (not persisted): the safe/cheap default is off on every fresh load.
   const [thorough, setThorough] = useState(false)
@@ -276,6 +280,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
         ...common,
         ...(isCalc ? { assignment_type: 'calculation' as const } : {}),
         ...(form.reference_solution ? { reference_solution: form.reference_solution } : {}),
+        ...(form.assignment_context ? { assignment_context: form.assignment_context } : {}),
         ...(thorough && can('confidenceCheck') ? { thorough: true } : {}),
       }
       const res = await client.post<GradeResponse>('/api/grading/grade', payload)
@@ -447,6 +452,28 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
             </select>
             <NoCourseHint />
           </div>
+
+          {/* Assignment brief / situational context — separate from the rubric:
+              tells the model WHAT was asked and under what conditions, so it
+              doesn't guess (e.g. mistaking a classroom practicum for an
+              industrial one) and judge by the wrong standard. */}
+          {showAssignmentContext ? (
+            <Textarea
+              className="text-[12.5px]"
+              rows={3}
+              placeholder="Формулировка задания и/или условия его выполнения (напр. «Учебная практика (ознакомительная), проводилась в аудитории, 1 курс»)"
+              value={form.assignment_context}
+              onChange={set('assignment_context')}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowAssignmentContext(true)}
+              className="text-xs font-sans font-medium text-amber hover:opacity-80 underline decoration-dotted underline-offset-2"
+            >
+              + Добавить задание и контекст (необязательно) — повышает точность проверки
+            </button>
+          )}
 
           {/* Load preset rubric — visible only when teacher has at least one saved rubric.
               Replaces the picked criteria with the rubric's items; weights are still editable. */}

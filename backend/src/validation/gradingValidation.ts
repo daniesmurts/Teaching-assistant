@@ -56,6 +56,10 @@ export const gradeRules = [
     .optional()
     .isLength({ max: 50_000 }).withMessage('Эталонное решение слишком длинное'),
 
+  body('assignment_context')
+    .optional()
+    .isLength({ max: 20_000 }).withMessage('Описание задания слишком длинное'),
+
   body('assignment_type')
     .optional()
     .isIn(['essay', 'calculation']).withMessage('Неверный тип задания'),

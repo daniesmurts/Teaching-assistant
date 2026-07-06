@@ -31,7 +31,7 @@ router.post(
     const {
       submission_text, criterion_ids, weights, course_id,
       student_name, student_email, student_group,
-      reference_solution, assignment_type, parent_assignment_id, thorough,
+      reference_solution, assignment_context, assignment_type, parent_assignment_id, thorough,
     } = req.body as {
       submission_text: string
       criterion_ids?: string[]
@@ -41,6 +41,7 @@ router.post(
       student_email?: string
       student_group?: string
       reference_solution?: string
+      assignment_context?: string
       assignment_type?: 'essay' | 'calculation'
       parent_assignment_id?: string
       thorough?: boolean
@@ -62,6 +63,7 @@ router.post(
       studentEmail:       student_email,
       studentGroup:       student_group,
       referenceSolution:  reference_solution,
+      assignmentContext:  assignment_context,
       assignmentType:     assignment_type === 'calculation' ? 'calculation' : 'essay',
       parentAssignmentId: parent_assignment_id,
       thorough:           thoroughAllowed,

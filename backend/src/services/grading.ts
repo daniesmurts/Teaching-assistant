@@ -37,6 +37,7 @@ interface GradeParams {
   studentEmail?: string
   studentGroup?: string
   referenceSolution?: string
+  assignmentContext?: string   // teacher-supplied assignment brief / situational context
   assignmentType?: 'essay' | 'calculation'
   parentAssignmentId?: string
   thorough?: boolean   // run the confidence ensemble (premium "тщательная проверка")
@@ -200,6 +201,7 @@ export interface GradeOnceParams {
   policyMemo?:    string | null            // distilled teacher-correction patterns for this course
   assignmentType?: 'essay' | 'calculation'
   referenceSolution?: string
+  assignmentContext?: string               // teacher-supplied assignment brief / situational context
   parent?:        Assignment | null        // revision context, if re-grading a resubmission
   persona?:       GradingPersona           // default 'neutral'
   temperature?:   number                   // for ensemble sampling; default undefined (provider default)
@@ -244,6 +246,7 @@ export function buildGradingMessages(params: {
   policyMemo?:    string | null
   assignmentType?: 'essay' | 'calculation'
   referenceSolution?: string
+  assignmentContext?: string
   parent?:        Assignment | null
   persona?:       GradingPersona
 }): GradingMessages {
@@ -267,6 +270,18 @@ export function buildGradingMessages(params: {
 
   const revisionBlock = isRevision ? buildRevisionContext(params.parent!) : ''
 
+  const assignmentContext = params.assignmentContext?.trim()
+    ? `## Задание и контекст
+Ниже — формулировка задания и/или условия, в которых выполнялась работа (это указал преподаватель).
+Оценивайте работу СТРОГО в рамках этого задания и контекста. Не предъявляйте требований, выходящих
+за его рамки, и не делайте предположений о типе или характере работы, которые ему противоречат.
+<assignment_context>
+${sanitiseForPrompt(params.assignmentContext.trim())}
+</assignment_context>
+
+`
+    : ''
+
   const reference = params.referenceSolution?.trim()
     ? `## Эталонное решение / правильный ответ
 Сравнивайте работу студента с этим эталоном. Если ответ студента совпадает по существу — засчитывайте, даже если оформление отличается.
@@ -279,7 +294,7 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
 
   const { text: annotated, pageCount } = annotateWithPageMarkers(params.submissionText)
 
-  const user = revisionBlock + reference + (params.criteria.length > 0
+  const user = revisionBlock + assignmentContext + reference + (params.criteria.length > 0
     ? buildCriteriaPrompt(annotated, params.criteria, params.examples, params.policyMemo, isCalc, isRevision, pageCount, hasHandoutQuestions)
     : buildHolisticPrompt(annotated, params.examples, params.policyMemo, isCalc, isRevision, pageCount, hasHandoutQuestions))
 
@@ -426,6 +441,7 @@ export interface ScoreOnceParams {
   examples:       SimilarAssignment[]
   assignmentType?: 'essay' | 'calculation'
   referenceSolution?: string
+  assignmentContext?: string
   persona?:       GradingPersona
   temperature?:   number
   context:        CallContext
@@ -445,6 +461,9 @@ export async function scoreOnce(params: ScoreOnceParams): Promise<ScoreOnceResul
   const system = base + PERSONA_MODIFIER[params.persona ?? 'neutral'] +
     ` Отвечайте только валидным JSON.`
 
+  const assignmentContext = params.assignmentContext?.trim()
+    ? `\n## Задание и контекст\nОценивайте СТРОГО в рамках этого задания, не выходя за его условия.\n<assignment_context>\n${sanitiseForPrompt(params.assignmentContext.trim())}\n</assignment_context>\n`
+    : ''
   const reference = params.referenceSolution?.trim()
     ? `\n## Эталон\n<reference>\n${sanitiseForPrompt(params.referenceSolution.trim())}\n</reference>\n`
     : ''
@@ -457,7 +476,7 @@ export async function scoreOnce(params: ScoreOnceParams): Promise<ScoreOnceResul
     : ''
 
   const user =
-    `${criteriaBlock}${examplesBlock}${reference}\n## Работа студента\n<submission>\n` +
+    `${criteriaBlock}${examplesBlock}${assignmentContext}${reference}\n## Работа студента\n<submission>\n` +
     `${sanitiseForPrompt(params.submissionText)}\n</submission>\n\n` +
     `Верните ТОЛЬКО JSON: {"score": число 0–100, "grade": "5"|"4"|"3"|"2"} ` +
     `(5: 87–100, 4: 73–86, 3: 60–72, 2: ниже 60). Без пояснений.`
@@ -503,6 +522,7 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     policyMemo:        policyMemo?.memo_text ?? null,
     assignmentType:    params.assignmentType,
     referenceSolution: params.referenceSolution,
+    assignmentContext: params.assignmentContext,
     parent,
     context:           {
       teacherId:     params.teacherId,

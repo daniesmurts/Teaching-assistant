@@ -46,6 +46,7 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 - **Editable strengths/improvements lists on approval** — teacher can add/remove/edit bullets before approving; teacher-edited improvements drive the revision check on the next resubmission
 - **Assignment revisions** — when a student resubmits an improved version, link from the past-work detail modal («↻ Оценить переработку») → AI sees v1's feedback as context and returns a per-point check (`addressed` / `partial` / `not_addressed`) with notes; revision badge + colour-coded list on the result
 - STEM / calculation mode (reasoning model + optional reference solution)
+- **Задание и контекст** — optional free-text field (collapsed by default) where the teacher pastes the assignment brief and/or situational context (e.g. «ознакомительная практика, проводилась в аудитории»); model is instructed to grade strictly within this scope instead of guessing the assignment from the submission alone. Applies to the primary grade and to all «Тщательная проверка» ensemble samples
 - Grading history / **Журнал** (search by student/group, subject + status filters, pagination)
 - Revisit any past grade (read-only detail modal, incl. ВКР chapter review + revision check)
 - Moodle-compatible **CSV grade export**
