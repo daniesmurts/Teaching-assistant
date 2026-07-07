@@ -59,6 +59,7 @@ export interface PlanState {
     feedbackCritic:        boolean
     cohortSynthesis:       boolean
     calcVerification:      boolean
+    citationCheck:         boolean
   }
 }
 
@@ -301,6 +302,23 @@ export interface CalcStepVerdict {
   note:             string
 }
 
+// Citation existence checking (Feature T) — one entry per extracted
+// bibliography reference. Only 'not_found' entries get merged into
+// ai_improvements as a bullet; 'similar_found' is kept in the persisted
+// raw array only (too uncertain to surface as a finding). Never treat a
+// 'not_found' as proof of fabrication — paywalled/offline sources exist.
+export type CitationVerdictStatus = 'found' | 'similar_found' | 'not_found'
+
+export interface CitationVerdict {
+  index:             number
+  raw_text:          string           // the reference as it appears in the submission
+  query_used:        string           // what was actually searched (after any reformulation)
+  status:            CitationVerdictStatus
+  best_match_title:  string | null
+  best_match_url:    string | null
+  note:              string           // neutral, ≤240 chars
+}
+
 // Mirror shape for the handout's questions — did the next version's text
 // actually answer them? Different status vocabulary because "answered" maps
 // more naturally to a question than "addressed".
@@ -349,6 +367,7 @@ export interface Assignment {
   ai_confidence:     ConfidenceLevel | null       // present only on "thorough" (ensemble) gradings
   ai_ensemble:       AiEnsemble | null            // the variant samples behind the confidence
   ai_calc_verification: CalcStepVerdict[] | null  // present only for calc-mode gradings with verification enabled
+  ai_citation_check: CitationVerdict[] | null      // present only when citation checking was opted into
   ai_provider:       string | null                 // which LLM provider graded this row (Phase 4)
   approved_score: number | null
   approved_grade: GradeLetter | null

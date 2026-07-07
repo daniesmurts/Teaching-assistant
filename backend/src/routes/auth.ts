@@ -357,6 +357,7 @@ async function buildPlanData(
       feedbackCritic:        canUseFeature(tier, 'feedbackCritic'),
       cohortSynthesis:       canUseFeature(tier, 'cohortSynthesis'),
       calcVerification:      canUseFeature(tier, 'calcVerification'),
+      citationCheck:         canUseFeature(tier, 'citationCheck'),
     },
   }
 }

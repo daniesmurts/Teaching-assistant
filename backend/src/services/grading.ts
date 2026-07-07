@@ -19,10 +19,11 @@ import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { getPolicyMemo } from '../db/queries/policyMemos'
 import { maybeRegeneratePolicyMemo } from './policyMemo'
 import { verifyCalculation, toImprovementBullet } from './calcVerifier'
+import { checkCitations, toCitationBullet } from './citationChecker'
 import { canUseFeature } from '../config/planLimits'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import { logger } from '../lib/logger'
-import type { Assignment, GradeLetter, CriterionScore, CriteriaSnapshotItem, BulletItem, BulletSeverity, BulletAction, VerificationQuestion, QuestionResponse, CalcStepVerdict } from '../../../shared/types'
+import type { Assignment, GradeLetter, CriterionScore, CriteriaSnapshotItem, BulletItem, BulletSeverity, BulletAction, VerificationQuestion, QuestionResponse, CalcStepVerdict, CitationVerdict } from '../../../shared/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,7 @@ interface GradeParams {
   assignmentType?: 'essay' | 'calculation'
   parentAssignmentId?: string
   thorough?: boolean   // run the confidence ensemble (premium "тщательная проверка")
+  checkCitations?: boolean   // opt-in per request (adds latency/cost) — plan-gated in the route
 }
 
 interface RevisionCheckItem {
@@ -95,6 +97,7 @@ export interface GradeResponse {
   ai_confidence: import('../../../shared/types').ConfidenceLevel | null
   ai_ensemble: import('../../../shared/types').AiEnsemble | null
   ai_calc_verification: CalcStepVerdict[]
+  ai_citation_check: CitationVerdict[]
   used_examples: number
   revision_number: number
   parent_assignment_id: string | null
@@ -220,6 +223,11 @@ export interface GradeOnceParams {
   // the model's own arithmetic. Only meaningful when assignmentType is
   // 'calculation'; decided by the caller like `critic`.
   calcVerification?: boolean
+  // Citation existence checking (Feature T) — extract the bibliography and
+  // search for each reference instead of trusting it at face value. Opt-in
+  // per request (adds latency/cost), resolved+gated at the route like
+  // `thorough`, not auto-decided from plan tier alone.
+  citationCheck?: boolean
 }
 
 export interface GradeOnceResult {
@@ -234,6 +242,7 @@ export interface GradeOnceResult {
   questionResponses:     QuestionResponse[] | null   // present only on revision-of-handout
   revisionCheck:  RevisionCheckItem[] | null
   calcVerification: CalcStepVerdict[]   // [] when not run or nothing to report
+  citationCheck:  CitationVerdict[]     // [] when not run or nothing to report
 }
 
 export interface GradingMessages {
@@ -358,6 +367,19 @@ export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResul
     improvements = [...improvements, ...mismatchBullets]
   }
 
+  let citationCheck: CitationVerdict[] = []
+  if (params.citationCheck) {
+    citationCheck = await checkCitations({
+      submissionText:   params.submissionText,
+      context:          params.context,
+      providerOverride: params.providerOverride,
+    })
+    const notFoundBullets = citationCheck
+      .filter((v) => v.status === 'not_found')
+      .map((v) => toCitationBullet(v, params.submissionText))
+    improvements = [...improvements, ...notFoundBullets]
+  }
+
   return {
     score:          clampScore(result.score),
     grade,
@@ -372,6 +394,7 @@ export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResul
                             ? normaliseQuestionResponses(result.question_responses)
                             : null,
     calcVerification,
+    citationCheck,
   }
 }
 
@@ -555,6 +578,7 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     },
     critic: canUseFeature(params.planTier, 'feedbackCritic'),
     calcVerification: params.assignmentType === 'calculation' && canUseFeature(params.planTier, 'calcVerification'),
+    citationCheck: Boolean(params.checkCitations),
   }
 
   // "Thorough" mode runs the confidence ensemble: the primary call still
@@ -602,6 +626,7 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     aiConfidence: ensemble?.confidence ?? null,
     aiEnsemble: ensemble?.ensemble ?? null,
     aiCalcVerification: result.calcVerification,
+    aiCitationCheck: result.citationCheck,
     aiProvider: providerName,
   })
 
@@ -637,6 +662,7 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     ai_confidence: assignment.ai_confidence,
     ai_ensemble: assignment.ai_ensemble,
     ai_calc_verification: assignment.ai_calc_verification ?? [],
+    ai_citation_check: assignment.ai_citation_check ?? [],
     used_examples: examples.length,
     revision_number: assignment.revision_number,
     parent_assignment_id: assignment.parent_assignment_id,

@@ -32,6 +32,7 @@ router.post(
       submission_text, criterion_ids, weights, course_id,
       student_name, student_email, student_group,
       reference_solution, assignment_context, assignment_type, parent_assignment_id, thorough,
+      check_citations,
     } = req.body as {
       submission_text: string
       criterion_ids?: string[]
@@ -45,11 +46,15 @@ router.post(
       assignment_type?: 'essay' | 'calculation'
       parent_assignment_id?: string
       thorough?: boolean
+      check_citations?: boolean
     }
     // Thorough (confidence ensemble) is a Pro+ feature — silently downgrade to a
     // normal grade for free tier rather than erroring (the toggle is hidden in
     // the UI there anyway; this just guards a hand-crafted request).
     const thoroughAllowed = Boolean(thorough) && canUseFeature(req.teacher.plan_tier, 'confidenceCheck')
+    // Citation checking is opt-in (adds latency/cost) and Pro+ — same silent-downgrade
+    // pattern as thorough, since the checkbox is hidden for free tier anyway.
+    const checkCitationsAllowed = Boolean(check_citations) && canUseFeature(req.teacher.plan_tier, 'citationCheck')
 
     const result = await grade({
       teacherId:          req.teacher.id,
@@ -67,6 +72,7 @@ router.post(
       assignmentType:     assignment_type === 'calculation' ? 'calculation' : 'essay',
       parentAssignmentId: parent_assignment_id,
       thorough:           thoroughAllowed,
+      checkCitations:     checkCitationsAllowed,
     })
     res.json(result)
   })

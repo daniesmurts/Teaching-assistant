@@ -2,7 +2,7 @@ import client from './client'
 import type {
   Assignment, GradeLetter, LongReview, RevisionCheckItem, CriteriaSnapshotItem, CriterionScore,
   ConfidenceLevel, AiEnsemble, BulletItem, VerificationQuestion, QuestionResponse,
-  ApprovedEditReason, ApprovedRevision, CalcStepVerdict,
+  ApprovedEditReason, ApprovedRevision, CalcStepVerdict, CitationVerdict,
 } from '../types'
 
 export interface GradeRequest {
@@ -18,6 +18,7 @@ export interface GradeRequest {
   assignment_type?: 'essay' | 'calculation'
   parent_assignment_id?: string
   thorough?: boolean                         // run the confidence ensemble (Pro+)
+  check_citations?: boolean                  // check bibliography against a web search (Pro+, opt-in)
 }
 
 export interface GradeResponse {
@@ -36,6 +37,7 @@ export interface GradeResponse {
   ai_confidence: ConfidenceLevel | null
   ai_ensemble: AiEnsemble | null
   ai_calc_verification: CalcStepVerdict[]
+  ai_citation_check: CitationVerdict[]
   used_examples: number
   revision_number: number
   parent_assignment_id: string | null

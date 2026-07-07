@@ -25,6 +25,8 @@ export type {
   RevisionStatus,
   CalcStepVerdict,
   CalcStepVerdictStatus,
+  CitationVerdict,
+  CitationVerdictStatus,
   QuestionResponse,
   QuestionResponseStatus,
   Handout,

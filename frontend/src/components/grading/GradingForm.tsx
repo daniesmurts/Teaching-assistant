@@ -86,6 +86,9 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
   // Thorough mode (confidence ensemble) — opt-in per grade, Pro+ only. Plain
   // state (not persisted): the safe/cheap default is off on every fresh load.
   const [thorough, setThorough] = useState(false)
+  // Citation checking — opt-in per grade, Pro+ only, adds latency (web
+  // searches). Same "off by default" reasoning as thorough.
+  const [checkCitations, setCheckCitations] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
   const [reviewJob, setReviewJob] = useState<LongReview | null>(null)
@@ -282,6 +285,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
         ...(form.reference_solution ? { reference_solution: form.reference_solution } : {}),
         ...(form.assignment_context ? { assignment_context: form.assignment_context } : {}),
         ...(thorough && can('confidenceCheck') ? { thorough: true } : {}),
+        ...(checkCitations && can('citationCheck') ? { check_citations: true } : {}),
       }
       const res = await client.post<GradeResponse>('/api/grading/grade', payload)
       onResult(payload, res.data)
@@ -590,6 +594,31 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
               <span className="mt-0.5 h-4 w-4 rounded border border-border-mid flex-shrink-0" />
               <span className="text-xs font-sans text-ink-tertiary leading-relaxed">
                 <span className="font-medium">Тщательная проверка</span> с расчётом уверенности —
+                <span className="text-amber font-medium"> на тарифе Pro</span>
+              </span>
+            </div>
+          )}
+
+          {/* Citation checking — Pro+ only, opt-in (adds latency: web searches) */}
+          {can('citationCheck') ? (
+            <label className="flex items-start gap-2.5 cursor-pointer select-none pt-1">
+              <input
+                type="checkbox"
+                checked={checkCitations}
+                onChange={(e) => setCheckCitations(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-border-mid accent-amber cursor-pointer flex-shrink-0"
+              />
+              <span className="text-xs font-sans text-ink-secondary leading-relaxed">
+                <span className="text-ink font-medium">Проверить список литературы</span> — поиск источников
+                по списку литературы; результат не доказательство подделки, а повод уточнить у автора.
+                Занимает больше времени.
+              </span>
+            </label>
+          ) : (
+            <div className="flex items-start gap-2.5 pt-1 opacity-60">
+              <span className="mt-0.5 h-4 w-4 rounded border border-border-mid flex-shrink-0" />
+              <span className="text-xs font-sans text-ink-tertiary leading-relaxed">
+                <span className="font-medium">Проверить список литературы</span> —
                 <span className="text-amber font-medium"> на тарифе Pro</span>
               </span>
             </div>

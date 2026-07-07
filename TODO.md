@@ -553,40 +553,24 @@ today. Fixing would mean adding a persisted `assignment_type` column and
 threading it through `ReplayTarget`/`findReplayTargets` — real but separate
 scope from this ship.
 
-### T. Citation existence checking — flag hallucinated bibliographies · Effort: M
+### ~~T. Citation existence checking~~ — already done
 
-Students paste ChatGPT-drafted работы with plausible-looking but nonexistent
-sources. An agentic loop over the submission's bibliography: extract the
-reference list (LLM, structured JSON); for each reference, query
-[services/yandexSearch.ts](backend/src/services/yandexSearch.ts) (already
-built — inside-Russia, 152-ФЗ clean); if the first query finds nothing, let
-the model reformulate once (title-only, transliterated) before concluding;
-classify each as найден / похожий найден / не найден. Output a neutral
-per-reference report — «не удалось найти источник — возможно, неточная
-ссылка или вымышленный источник» — never an accusation verdict, matching the
-§5.1 attestation tone (facts, teacher judges).
-
-- **Why:** hallucinated bibliographies are the #1 ChatGPT-era grading
-  problem and today's flow is blind to them. Complements process attestation
-  (§5.1): telemetry evidences *how* the work was written, this evidences
-  whether its sources are real. Cost is bounded: ≤2 searches per reference,
-  references capped (~30).
-- **Touches:** new `services/citationChecker.ts` (extract → search →
-  reformulate-once → classify loop); `yandexSearch.ts` reuse; opt-in
-  checkbox on the grading form («Проверить список литературы») rather than
-  always-on — searches add latency and per-call cost; results rendered as a
-  distinct block on the grading result + persisted (new JSONB column or
-  side table) so the Журнал detail can show it; plan-gate as Pro+
-  (`citationCheck` flag in [planLimits.ts](backend/src/config/planLimits.ts)).
-- **Constraints:** deliberate non-goal — this is NOT plagiarism/AI-text
-  detection (see «Intentionally NOT building»); it checks source
-  *existence* only. Neutral phrasing is a legal requirement, same as the
-  §5.1.2 telemetry language. Search misses ≠ proof of fabrication (paywalled
-  journals, offline books) — the UI copy must say so.
-- **Sequencing:** S has shipped — mirror its pattern directly:
-  `services/calcVerifier.ts` is now the concrete "one bounded LLM call,
-  then pure local processing, fail-open on error" reference implementation
-  to copy. Independent of P/Q/R.
+Shipped: `services/citationChecker.ts` mirrors `calcVerifier.ts`'s pattern —
+one bounded `chatJSON` call extracts up to 15 bibliography entries; a
+4-worker bounded-concurrency pass (reusing `evalHarness.ts`'s worker-pool
+shape) searches each via `webSearch()` (reformulating once on a zero-result
+first pass), and `classifyMatch()` scores token overlap locally (no further
+LLM call) into found / similar_found / not_found. Only `not_found` merges
+into `ai_improvements` as a citable bullet, always phrased as a neutral
+fact with the "not proof of fabrication" caveat baked into the note text.
+Full trace persists in `assignments.ai_citation_check`
+(migration `064_citation_check.sql`). Opt-in per request (`check_citations`,
+mirrors the existing `thorough` checkbox pattern rather than
+`calcVerification`'s auto-enable, since it applies to any submission type
+and adds real latency) — gated Pro+ via new `citationCheck` plan flag. See
+CHANGELOG for the full design, known constraints (15-reference cap,
+synchronous request, heuristic classification), and 11 unit tests in
+`citationChecker.test.ts`.
 
 ### U. Criteria/rubric marketplace — cross-institution publishing · Effort: L
 

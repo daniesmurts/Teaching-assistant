@@ -95,6 +95,7 @@ export default function Grading() {
       ai_confidence:        resumeAssignment.ai_confidence        ?? null,
       ai_ensemble:          resumeAssignment.ai_ensemble          ?? null,
       ai_calc_verification: resumeAssignment.ai_calc_verification ?? [],
+      ai_citation_check:    resumeAssignment.ai_citation_check    ?? [],
       used_examples:        0,   // not tracked on the assignment row
       revision_number:      resumeAssignment.revision_number,
       parent_assignment_id: resumeAssignment.parent_assignment_id,
