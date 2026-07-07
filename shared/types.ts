@@ -58,6 +58,7 @@ export interface PlanState {
     publishedAssignments:  boolean
     feedbackCritic:        boolean
     cohortSynthesis:       boolean
+    calcVerification:      boolean
   }
 }
 
@@ -284,6 +285,22 @@ export interface RevisionCheckItem {
   note:   string         // 1-sentence justification
 }
 
+// Agentic calc verification (Feature S) — one entry per extracted
+// computational step. 'correct'/'unevaluable' are informational; only
+// 'arithmetic_error' entries get merged into ai_improvements as a bullet.
+export type CalcStepVerdictStatus = 'correct' | 'arithmetic_error' | 'unevaluable'
+
+export interface CalcStepVerdict {
+  step_index:       number
+  description:      string
+  formula:          string | null
+  substitution:     string | null    // numeric expression actually evaluated
+  claimed_result:   string
+  evaluated_result: number | null    // our independently computed value; null if unevaluable
+  verdict:          CalcStepVerdictStatus
+  note:             string
+}
+
 // Mirror shape for the handout's questions — did the next version's text
 // actually answer them? Different status vocabulary because "answered" maps
 // more naturally to a question than "addressed".
@@ -331,6 +348,7 @@ export interface Assignment {
   criteria_snapshot: CriteriaSnapshotItem[] | null   // the criteria + weights used for this grading
   ai_confidence:     ConfidenceLevel | null       // present only on "thorough" (ensemble) gradings
   ai_ensemble:       AiEnsemble | null            // the variant samples behind the confidence
+  ai_calc_verification: CalcStepVerdict[] | null  // present only for calc-mode gradings with verification enabled
   ai_provider:       string | null                 // which LLM provider graded this row (Phase 4)
   approved_score: number | null
   approved_grade: GradeLetter | null

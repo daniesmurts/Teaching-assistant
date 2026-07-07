@@ -2,7 +2,7 @@ import client from './client'
 import type {
   Assignment, GradeLetter, LongReview, RevisionCheckItem, CriteriaSnapshotItem, CriterionScore,
   ConfidenceLevel, AiEnsemble, BulletItem, VerificationQuestion, QuestionResponse,
-  ApprovedEditReason, ApprovedRevision,
+  ApprovedEditReason, ApprovedRevision, CalcStepVerdict,
 } from '../types'
 
 export interface GradeRequest {
@@ -35,6 +35,7 @@ export interface GradeResponse {
   criteria_snapshot: CriteriaSnapshotItem[] | null
   ai_confidence: ConfidenceLevel | null
   ai_ensemble: AiEnsemble | null
+  ai_calc_verification: CalcStepVerdict[]
   used_examples: number
   revision_number: number
   parent_assignment_id: string | null

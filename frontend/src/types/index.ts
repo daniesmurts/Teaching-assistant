@@ -23,6 +23,8 @@ export type {
   VerificationQuestion,
   RevisionCheckItem,
   RevisionStatus,
+  CalcStepVerdict,
+  CalcStepVerdictStatus,
   QuestionResponse,
   QuestionResponseStatus,
   Handout,

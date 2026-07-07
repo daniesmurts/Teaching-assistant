@@ -472,34 +472,44 @@ builder for v1).
   middleware + minimal admin UI. Defer rich per-level dashboards,
   template library, AD sync.
 
-### Q. Published assignments + process-of-creation attestation (§5.1) · Effort: L
+### Q. Published assignments + process-of-creation attestation (§5.1) · Effort: M · 🟢 CORE SHIPPED
 
-In-platform writing surface where students compose published assignments
-(per-student tokenised link, or LTI launch once §6 ships). Captures authoring
-*aggregates* and produces a transparent provenance report the teacher reads
-alongside the grade. Ships the §5.1 + §5.3 + §5.5 v1 authenticity bundle. Full
-design and the legal/UX constraints are in [Research.md](Research.md) §5.1.1–
-§5.1.4 and §5.6–§5.7.
+**Status:** the v1 loop is fully shipped and live (see
+[FEATURES.md](FEATURES.md) — "Задания студентам") — publish an assignment
+definition → per-student tokenised link → student writes in-platform
+(TipTap, consent gate, autosave) → aggregate-only telemetry → teacher opens
+the submission, reads the neutral process report (active time, revisions,
+paste ratio + largest insertion), and grades with one click. The work lands
+in the Журнал carrying its provenance like any other graded assignment.
+Grading is **holistic** for v1. Full original design in
+[Research.md](Research.md) §5.1.1–§5.1.4 and §5.6–§5.7.
 
-- **Why:** the platform's answer to "won't we end up using AI to grade AI?" —
-  it moves assessment onto authorship *process*, which AI cannot reproduce.
-  Strongest single patent claim on the roadmap and a flagship institutional
-  differentiator. Available on Pro (tokenised rail) and Institution (LTI rail).
-- **Touches:** new writing-surface component (editor stack decided — **TipTap,
-  MIT core only**, see §5.1.3 for rationale + integration shape); browser-side
-  telemetry that emits **aggregates only** (never raw keystroke streams — see
-  §5.1.2);
-  `assignments` columns `is_published`, `student_token`, `published_at`,
-  `due_at`, `submission_telemetry` (JSONB), consent record; published-link
-  distribution UI; provenance-report panel in the grading view; rule-based
-  provenance scorer (§5.1.3); a metacognition rubric template (§5.5).
-- **Hard constraints (do not skip):** aggregate-only telemetry + explicit
-  Russian consent gate + Russia-resident storage (§5.1.2); strict publish
-  mode — link is the only submission route (§5.1.1); connectivity required on
-  this surface, overriding offline-first (§5.1.4).
-- **Sequencing:** ships **after** Feature P (org tree) — visibility scoping
-  resolves through the tree. Pairs with §6 LTI for the institutional rail but
-  the tokenised rail does not depend on it, so v1 can ship standalone first.
+**Not yet built — the v2 refinements originally bundled under this item:**
+- **Criteria-scoped grading** on published-assignment submissions (currently
+  always holistic — no criterion/weight picker on this path).
+- **§5.3 trajectory view** — per-student authoring-pattern history across
+  multiple published assignments (paste ratio / revision count trend over
+  the semester, not just one submission's report).
+- **§5.5 metacognition rubric template** — a rubric preset specifically
+  scoring reflective/self-assessment quality, per the original design.
+
+- **Why:** the shipped v1 already answers "won't we end up using AI to grade
+  AI?" for a single submission. The three items above extend that from a
+  one-off report into a *longitudinal* authenticity signal — closer to the
+  original patent-claim framing — but none are required for the feature to
+  be useful today.
+- **Touches:** criteria-scoped grading — reuse the existing criteria
+  snapshot/picker from regular grading, wire into
+  [routes/publishedAssignments.ts](backend/src/routes/publishedAssignments.ts)'s
+  grade endpoint; trajectory view — new aggregation query over
+  `submission_telemetry` across a student's published-assignment
+  submissions, new panel in `PublishedAssignmentDetail.tsx` or a per-student
+  page; metacognition rubric — a new global rubric template (same mechanism
+  as existing rubric templates), no schema change needed.
+- **Sequencing:** independent of each other; pick whichever a real
+  institutional pilot asks for first rather than building all three
+  speculatively — same "concrete over speculative" principle as Feature
+  P's deferred (c).
 
 ### R. LTI 1.3 integration + IT-admin configuration UX (§6) · Effort: L
 
@@ -520,41 +530,28 @@ IT-admin self-serve configuration surface designed in [Research.md](Research.md)
 - **Sequencing:** after Feature P (needs the org tree to map course contexts
   into) and alongside Feature Q (provides Q's institutional identity rail).
 
-### S. Agentic calc verification — execute the student's math, don't guess it · Effort: M
+### ~~S. Agentic calc verification~~ — already done
 
-Calc-mode grading currently asks DeepSeek Reasoner to «пошагово пересчитать»
-the solution — but LLMs are unreliable calculators, so the check is only as
-good as the model's arithmetic that day. Replace the guessing with a bounded
-agentic loop: the model extracts each computational step from the submission
-(formula, substituted values, claimed result) as structured JSON; our code
-evaluates the expression in a sandboxed numeric evaluator (e.g. `mathjs` —
-no `eval`, no filesystem/network); the verdict (совпадает / расходится, both
-values) is fed back and the loop advances to the next step until the solution
-is covered. Findings become citable per-step evidence in the existing
-strengths/improvements shape: «шаг 3: заявлено 47.3, при пересчёте 52.1».
+Shipped: `services/calcVerifier.ts` extracts up to 12 computational steps
+from a calc-mode submission (one bounded `chatJSON` call), evaluates each
+substitution via a sandboxed `mathjs` instance (restricted scope + a
+defense-in-depth character allowlist — `expr-eval` was the original pick
+but had an unpatched high-severity prototype-pollution advisory, ruled out
+during implementation), and compares against the claimed result with a 1%
+relative tolerance. Mismatches merge into `ai_improvements` as citable
+bullets reusing the existing Tier-3 `severity`/`action`/`correction` fields;
+the full per-step trace persists in `assignments.ai_calc_verification`
+(migration `063_calc_verification.sql`). Gated behind `calcVerification`
+plan flag (Pro+). See CHANGELOG for full design including the evaluator
+pivot and 21 unit tests in `calcVerifier.test.ts`.
 
-- **Why:** turns "ИИ считает, что арифметика неверна" into "арифметика
-  неверна: 47.3 ≠ 52.1" — a verifiable claim no GPT-wrapper competitor can
-  make. Strengthens exactly the mode (STEM grading) where LLM-only checking
-  is weakest, and fits the engineering-university segment (КНИТУ orbit).
-  The loop is naturally bounded by the number of steps in the solution, so
-  cost stays predictable — no open-ended agent risk.
-- **Touches:** new `services/calcVerifier.ts` (extract → evaluate → compare
-  loop; structured-JSON tool pattern, no native function-calling needed —
-  works on DeepSeek/Yandex alike); [services/grading.ts](backend/src/services/grading.ts)
-  calc path calls it and merges per-step verdicts into criteria feedback /
-  bullets (same citation-validation contract); new dependency on a safe
-  expression evaluator (`mathjs` or similar — user runs the install);
-  optional `verified_steps` JSONB on assignments for the UI to render a
-  step-check table.
-- **Constraints:** keep `gradeOnce` pure — the verifier runs as a separate
-  pre/post step whose output is passed *into* the prompt path, so eval-harness
-  replay stays valid. Unit-test the extract/compare logic with fixture
-  solutions (correct, arithmetic slip, wrong method) — the evaluator side is
-  fully testable without an LLM.
-- **Sequencing:** independent of P/Q/R. Highest-differentiation item on the
-  agentic track; build before T (shares the structured-JSON tool-loop
-  plumbing that T reuses).
+**Follow-up discovered while building, not yet done:** `assignment_type` is
+never persisted on `assignments` (request-time parameter only) — the eval
+harness's `runReplay()` has no way to identify which historical assignments
+were originally calc-mode, so this feature can't be measured via replay
+today. Fixing would mean adding a persisted `assignment_type` column and
+threading it through `ReplayTarget`/`findReplayTargets` — real but separate
+scope from this ship.
 
 ### T. Citation existence checking — flag hallucinated bibliographies · Effort: M
 
@@ -586,8 +583,10 @@ per-reference report — «не удалось найти источник — �
   *existence* only. Neutral phrasing is a legal requirement, same as the
   §5.1.2 telemetry language. Search misses ≠ proof of fabrication (paywalled
   journals, offline books) — the UI copy must say so.
-- **Sequencing:** after S (reuses its structured-JSON tool-loop pattern).
-  Independent of P/Q/R.
+- **Sequencing:** S has shipped — mirror its pattern directly:
+  `services/calcVerifier.ts` is now the concrete "one bounded LLM call,
+  then pure local processing, fail-open on error" reference implementation
+  to copy. Independent of P/Q/R.
 
 ### U. Criteria/rubric marketplace — cross-institution publishing · Effort: L
 

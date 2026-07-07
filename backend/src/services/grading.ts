@@ -18,10 +18,11 @@ import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { getPolicyMemo } from '../db/queries/policyMemos'
 import { maybeRegeneratePolicyMemo } from './policyMemo'
+import { verifyCalculation, toImprovementBullet } from './calcVerifier'
 import { canUseFeature } from '../config/planLimits'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import { logger } from '../lib/logger'
-import type { Assignment, GradeLetter, CriterionScore, CriteriaSnapshotItem, BulletItem, BulletSeverity, BulletAction, VerificationQuestion, QuestionResponse } from '../../../shared/types'
+import type { Assignment, GradeLetter, CriterionScore, CriteriaSnapshotItem, BulletItem, BulletSeverity, BulletAction, VerificationQuestion, QuestionResponse, CalcStepVerdict } from '../../../shared/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -93,6 +94,7 @@ export interface GradeResponse {
   criteria_snapshot: CriteriaSnapshotItem[] | null
   ai_confidence: import('../../../shared/types').ConfidenceLevel | null
   ai_ensemble: import('../../../shared/types').AiEnsemble | null
+  ai_calc_verification: CalcStepVerdict[]
   used_examples: number
   revision_number: number
   parent_assignment_id: string | null
@@ -213,6 +215,11 @@ export interface GradeOnceParams {
   // check). Decided by the caller (grade() gates it on the 'feedbackCritic'
   // plan flag; the eval harness can toggle it per replay variant).
   critic?: boolean
+  // Agentic calc verification (Feature S) — extract computational steps and
+  // check them against a sandboxed arithmetic evaluator instead of trusting
+  // the model's own arithmetic. Only meaningful when assignmentType is
+  // 'calculation'; decided by the caller like `critic`.
+  calcVerification?: boolean
 }
 
 export interface GradeOnceResult {
@@ -226,6 +233,7 @@ export interface GradeOnceResult {
   verificationQuestions: VerificationQuestion[]   // questions for teacher to ask the student
   questionResponses:     QuestionResponse[] | null   // present only on revision-of-handout
   revisionCheck:  RevisionCheckItem[] | null
+  calcVerification: CalcStepVerdict[]   // [] when not run or nothing to report
 }
 
 export interface GradingMessages {
@@ -335,6 +343,21 @@ export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResul
     }
   }
 
+  let calcVerification: CalcStepVerdict[] = []
+  if (params.calcVerification && isCalc) {
+    calcVerification = await verifyCalculation({
+      submissionText:     params.submissionText,
+      referenceSolution:  params.referenceSolution,
+      assignmentContext:  params.assignmentContext,
+      context:            params.context,
+      providerOverride:   params.providerOverride,
+    })
+    const mismatchBullets = calcVerification
+      .filter((v) => v.verdict === 'arithmetic_error')
+      .map((v) => toImprovementBullet(v, params.submissionText, pageCount))
+    improvements = [...improvements, ...mismatchBullets]
+  }
+
   return {
     score:          clampScore(result.score),
     grade,
@@ -348,6 +371,7 @@ export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResul
     questionResponses:     (params.parent?.ai_handout?.questions.length ?? 0) > 0
                             ? normaliseQuestionResponses(result.question_responses)
                             : null,
+    calcVerification,
   }
 }
 
@@ -530,6 +554,7 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
       feature:       'grading' as const,
     },
     critic: canUseFeature(params.planTier, 'feedbackCritic'),
+    calcVerification: params.assignmentType === 'calculation' && canUseFeature(params.planTier, 'calcVerification'),
   }
 
   // "Thorough" mode runs the confidence ensemble: the primary call still
@@ -576,6 +601,7 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     aiQuestionResponses: result.questionResponses ?? undefined,
     aiConfidence: ensemble?.confidence ?? null,
     aiEnsemble: ensemble?.ensemble ?? null,
+    aiCalcVerification: result.calcVerification,
     aiProvider: providerName,
   })
 
@@ -610,6 +636,7 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     criteria_snapshot: assignment.criteria_snapshot,
     ai_confidence: assignment.ai_confidence,
     ai_ensemble: assignment.ai_ensemble,
+    ai_calc_verification: assignment.ai_calc_verification ?? [],
     used_examples: examples.length,
     revision_number: assignment.revision_number,
     parent_assignment_id: assignment.parent_assignment_id,

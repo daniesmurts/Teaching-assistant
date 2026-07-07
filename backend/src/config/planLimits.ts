@@ -23,6 +23,7 @@ export const PLAN_LIMITS = {
     watermark:             true,
     feedbackCritic:        false,
     cohortSynthesis:       false,
+    calcVerification:      false,
     monthlySpendCapUsd:    3,
   },
   pro: {
@@ -46,6 +47,7 @@ export const PLAN_LIMITS = {
     watermark:             false,
     feedbackCritic:        true,
     cohortSynthesis:       true,
+    calcVerification:      true,
     monthlySpendCapUsd:    30,
   },
   institution: {
@@ -69,6 +71,7 @@ export const PLAN_LIMITS = {
     watermark:             false,
     feedbackCritic:        true,
     cohortSynthesis:       true,
+    calcVerification:      true,
     monthlySpendCapUsd:    150,
   },
 } as const

@@ -11,7 +11,7 @@ import { useUIStore } from '../../store/uiStore'
 import { usePersistedState, clearPersistedState } from '../../hooks/usePersistedState'
 import { GRADES, gradeColor, gradeLabel, GRADE_BRACKETS, scoreToGrade, snapScoreToGrade } from '../../lib/grades'
 import type { GradeResponse } from '../../api/grading'
-import type { GradeLetter, BulletItem, VerificationQuestion, CriterionScore, ApprovedEditReason } from '../../types'
+import type { GradeLetter, BulletItem, BulletSeverity, VerificationQuestion, CriterionScore, ApprovedEditReason } from '../../types'
 
 interface Props {
   result: GradeResponse
@@ -505,6 +505,21 @@ const TONES: Record<'success' | 'warning', { bg: string; border: string; text: s
   warning: { bg: 'bg-warning-bg', border: 'border-warning/15', text: 'text-warning', titleText: 'text-warning', citeBorder: 'border-warning/40' },
 }
 
+// Severity dot + label — same visual language as LongReviewBullet.tsx
+// (ВКР long-review findings). Only improvement bullets ever carry a
+// severity (e.g. calc-verification mismatches), so this only renders on
+// the 'warning' tone.
+const SEVERITY_DOT_CLASS: Record<BulletSeverity, string> = {
+  critical:    'bg-danger',
+  substantial: 'bg-warning',
+  minor:       'bg-ink-tertiary',
+}
+const SEVERITY_LABEL: Record<BulletSeverity, string> = {
+  critical:    'критично',
+  substantial: 'существенно',
+  minor:       'незначительно',
+}
+
 function EditableBulletList({ title, items, onChange, disabled, tone, onCite, criteria = [] }: {
   title: string
   items: BulletItem[]
@@ -535,6 +550,13 @@ function EditableBulletList({ title, items, onChange, disabled, tone, onCite, cr
         {items.map((b, i) => (
           <div key={i}>
             <div className={`flex gap-1.5 text-xs ${t.text} leading-relaxed items-start group`}>
+              {tone === 'warning' && b.severity && (
+                <span
+                  className={`${SEVERITY_DOT_CLASS[b.severity]} w-2 h-2 rounded-full mt-1.5 flex-shrink-0`}
+                  title={SEVERITY_LABEL[b.severity]}
+                  aria-label={`severity: ${SEVERITY_LABEL[b.severity]}`}
+                />
+              )}
               <span className="flex-shrink-0 mt-1">·</span>
               <AutoGrowTextarea
                 value={b.text}
@@ -609,6 +631,14 @@ function EditableBulletList({ title, items, onChange, disabled, tone, onCite, cr
                 >
                   копировать
                 </button>
+              </div>
+            )}
+            {tone === 'warning' && b.correction && (
+              <div className="ml-3 mt-1 flex gap-1 items-start">
+                <span className={`text-[10px] ${t.text} opacity-70 mt-0.5 flex-shrink-0`}>→</span>
+                <span className={`text-[11px] ${t.text} opacity-90 leading-relaxed`}>
+                  {b.correction}
+                </span>
               </div>
             )}
           </div>

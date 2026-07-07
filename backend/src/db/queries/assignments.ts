@@ -2,7 +2,7 @@ import { pool } from '../connection'
 import type {
   Assignment, GradeLetter, CriterionScore, RevisionCheckItem, CriteriaSnapshotItem,
   ConfidenceLevel, AiEnsemble, BulletItem, VerificationQuestion,
-  Handout, QuestionResponse, ApprovedEditReason, ApprovedRevision,
+  Handout, QuestionResponse, ApprovedEditReason, ApprovedRevision, CalcStepVerdict,
 } from '../../../../shared/types'
 
 interface AssignmentRow {
@@ -27,6 +27,7 @@ interface AssignmentRow {
   criteria_snapshot: CriteriaSnapshotItem[] | null
   ai_confidence: string | null
   ai_ensemble: AiEnsemble | null
+  ai_calc_verification: CalcStepVerdict[] | null
   ai_provider: string | null
   approved_score: number | null
   approved_grade: string | null
@@ -65,6 +66,7 @@ function toAssignment(row: AssignmentRow): Assignment {
     criteria_snapshot: row.criteria_snapshot,
     ai_confidence: row.ai_confidence as ConfidenceLevel | null,
     ai_ensemble: row.ai_ensemble,
+    ai_calc_verification: row.ai_calc_verification,
     ai_provider: row.ai_provider,
     approved_score: row.approved_score,
     approved_grade: row.approved_grade as GradeLetter | null,
@@ -102,6 +104,7 @@ export async function createAssignment(data: {
   aiQuestionResponses?: QuestionResponse[]
   aiConfidence?: ConfidenceLevel | null
   aiEnsemble?: AiEnsemble | null
+  aiCalcVerification?: CalcStepVerdict[]
   aiProvider?: string
 }): Promise<Assignment> {
   const { rows } = await pool.query<AssignmentRow>(
@@ -115,11 +118,13 @@ export async function createAssignment(data: {
        ai_criteria_scores, ai_strengths, ai_improvements, criteria_snapshot,
        parent_assignment_id, ai_revision_check, ai_confidence, ai_ensemble,
        ai_verification_questions, ai_question_responses, ai_provider,
+       ai_calc_verification,
        revision_number, status
      ) VALUES (
        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
        $15,$16,$17,$18,
        $19,$20,$21,
+       $22,
        COALESCE((SELECT revision_number + 1 FROM parent), 1),
        'pending'
      )
@@ -146,6 +151,7 @@ export async function createAssignment(data: {
       data.aiVerificationQuestions ? JSON.stringify(data.aiVerificationQuestions) : null,
       data.aiQuestionResponses ? JSON.stringify(data.aiQuestionResponses) : null,
       data.aiProvider ?? null,
+      data.aiCalcVerification && data.aiCalcVerification.length > 0 ? JSON.stringify(data.aiCalcVerification) : null,
     ]
   )
   return toAssignment(rows[0])
