@@ -127,26 +127,24 @@ optional per-teacher override (`teachers.monthly_spend_cap_usd`, migration
 column. See CHANGELOG for the full design (fail-open on infra errors, 60s
 cache, `SpendCapExceededError`). No further action needed.
 
-### 9. Criterion-level RAG retrieval · Effort: M
+### ~~9. Criterion-level RAG retrieval~~ — already done
 
-Current RAG retrieves whole approved assignments as few-shot examples.
-Criteria are the platform's stated moat — retrieving past approved feedback
-*per criterion* (not per assignment) would reinforce that directly: grading
-"аргументация" pulls past approved comments specifically on that criterion,
-not a whole unrelated essay that happens to be similar overall.
-
-- **Why:** Sharper signal than whole-assignment similarity, and it's the
-  natural next step after the contrastive-retrieval + policy-memo work
-  already shipped (see [CHANGELOG.md](CHANGELOG.md) [Unreleased]).
-- **Touches:** new embedding granularity — chunk/embed `approved_criteria_scores[].feedback`
-  per criterion, new query alongside
-  [db/queries/assignments.ts](backend/src/db/queries/assignments.ts)
-  `findSimilarAssignments`, `buildCriteriaPrompt` in
-  [services/grading.ts](backend/src/services/grading.ts) to inject per-criterion
-  examples instead of (or alongside) whole-assignment ones.
-- **Consider:** meaningfully larger scope than the assignment-level RAG —
-  needs its own embedding column/table and a chunking decision (one row per
-  criterion-score) before the retrieval query can exist.
+Shipped: new `criterion_rag_examples` table (migration `065_criterion_rag_examples.sql`)
+— one row per (assignment, criterion), mirroring the `document_chunks`/`chunks.ts`
+pattern (own table, own query file `db/queries/criterionExamples.ts`) rather than
+denormalizing into `assignments`. Cost-conscious design: criterion feedback is
+embedded once at **approval time** (`services/embeddings.ts`'s
+`generateCriterionEmbeddings()`, fire-and-forget alongside the existing
+whole-assignment embedding call), and grading time reuses the **already-computed
+submission embedding** as the query vector — zero new embedding-provider calls per
+grade, only cheap local Postgres queries run in parallel across criteria. Matching
+is by `LOWER(criterion_name)` (criteria are ephemeral per-assignment snapshots, not
+FK-based), rendered as a capped "Похожие прошлые оценки по этому критерию" snippet
+under the relevant criterion line in `buildCriteriaPrompt`. No new plan flag — rides
+the existing `ragFlywheel` gate. v1 is own-course only (no institution-pool
+cross-teacher union) and not threaded through the eval harness's offline replay,
+matching the calc-verification precedent of documenting a scope cut rather than
+silently expanding it. See CHANGELOG for the full design.
 
 ---
 

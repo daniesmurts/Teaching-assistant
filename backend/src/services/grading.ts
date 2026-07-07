@@ -12,8 +12,9 @@ import {
   type SimilarAssignment,
 } from '../db/queries/assignments'
 import { recordRagRetrievals } from '../db/queries/ragRetrievals'
+import { findSimilarCriterionExamples, type CriterionExample } from '../db/queries/criterionExamples'
 import { sanitiseForCrossTeacherRetrieval } from '../lib/crossTeacherSanitiser'
-import { generateAndStoreEmbedding } from './embeddings'
+import { generateAndStoreEmbedding, generateCriterionEmbeddings } from './embeddings'
 import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { getPolicyMemo } from '../db/queries/policyMemos'
@@ -140,7 +141,7 @@ async function retrieveExamples(
   submissionText: string,
   courseId: string,
   teacherId: string
-): Promise<SimilarAssignment[]> {
+): Promise<{ examples: SimilarAssignment[]; vector: number[] | null }> {
   try {
     const vector = await embed(submissionText, { teacherId, feature: 'embedding' })
 
@@ -172,10 +173,10 @@ async function retrieveExamples(
       if (contrast) sanitised.push(contrast)
     }
 
-    return sanitised
+    return { examples: sanitised, vector }
   } catch (err) {
     logger.warn({ message: '[RAG] Could not retrieve similar examples', error: (err as Error).message })
-    return []
+    return { examples: [], vector: null }
   }
 }
 
@@ -228,6 +229,11 @@ export interface GradeOnceParams {
   // per request (adds latency/cost), resolved+gated at the route like
   // `thorough`, not auto-decided from plan tier alone.
   citationCheck?: boolean
+  // Criterion-level RAG (TODO Improvement #9) — past approved feedback for
+  // the same criterion name, keyed by lowercased+trimmed criterion name.
+  // Populated by grade() from the submission's own embedding (no extra
+  // embed() call); undefined/empty when nothing matched or RAG is off.
+  criterionExamples?: Record<string, CriterionExample[]>
 }
 
 export interface GradeOnceResult {
@@ -266,6 +272,7 @@ export function buildGradingMessages(params: {
   assignmentContext?: string
   parent?:        Assignment | null
   persona?:       GradingPersona
+  criterionExamples?: Record<string, CriterionExample[]>
 }): GradingMessages {
   const isCalc     = params.assignmentType === 'calculation'
   const isRevision = params.parent != null
@@ -312,7 +319,7 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
   const { text: annotated, pageCount } = annotateWithPageMarkers(params.submissionText)
 
   const user = revisionBlock + assignmentContext + reference + (params.criteria.length > 0
-    ? buildCriteriaPrompt(annotated, params.criteria, params.examples, params.policyMemo, isCalc, isRevision, pageCount, hasHandoutQuestions)
+    ? buildCriteriaPrompt(annotated, params.criteria, params.examples, params.policyMemo, isCalc, isRevision, pageCount, hasHandoutQuestions, params.criterionExamples)
     : buildHolisticPrompt(annotated, params.examples, params.policyMemo, isCalc, isRevision, pageCount, hasHandoutQuestions))
 
   return { system, user, pageCount }
@@ -549,11 +556,11 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
   const ids     = params.criterionIds ?? []
   const weights = params.weights ?? []
 
-  const [snapshot, examples, parent, policyMemo] = await Promise.all([
+  const [snapshot, ragResult, parent, policyMemo] = await Promise.all([
     resolveCriteriaSnapshot(params.teacherId, params.institutionId ?? null, ids, weights),
     ragEnabled && params.courseId
       ? retrieveExamples(params.submissionText, params.courseId, params.teacherId)
-      : Promise.resolve([]),
+      : Promise.resolve({ examples: [] as SimilarAssignment[], vector: null as number[] | null }),
     params.parentAssignmentId
       ? findAssignmentById(params.parentAssignmentId, params.teacherId)
       : Promise.resolve(null),
@@ -561,11 +568,31 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
       ? getPolicyMemo(params.courseId)
       : Promise.resolve(null),
   ])
+  const { examples, vector } = ragResult
+
+  // Criterion-level RAG (TODO Improvement #9) — reuses the submission vector
+  // already computed above, so this adds zero embedding-provider calls, only
+  // cheap local Postgres queries. Own-course only (see findSimilarCriterionExamples).
+  let criterionExamples: Record<string, CriterionExample[]> | undefined
+  if (ragEnabled && snapshot.length > 0 && vector && params.courseId) {
+    try {
+      const courseId = params.courseId
+      const perCriterion = await Promise.all(
+        snapshot.map(async (c) =>
+          [c.name.toLowerCase().trim(), await findSimilarCriterionExamples(courseId, c.name, vector, 2)] as const
+        )
+      )
+      criterionExamples = Object.fromEntries(perCriterion.filter(([, ex]) => ex.length > 0))
+    } catch (err) {
+      logger.warn({ message: '[RAG] Could not retrieve criterion-level examples', error: (err as Error).message })
+    }
+  }
 
   const gradeParams = {
     submissionText:    params.submissionText,
     criteria:          snapshot,
     examples,
+    criterionExamples,
     policyMemo:        policyMemo?.memo_text ?? null,
     assignmentType:    params.assignmentType,
     referenceSolution: params.referenceSolution,
@@ -981,6 +1008,9 @@ export async function approve(
   if (!assignment) throw new NotFoundError('Работа')
 
   generateAndStoreEmbedding(id, assignment.submission_text).catch(() => null)
+  if (assignment.course_id && data.approvedCriteriaScores?.length) {
+    generateCriterionEmbeddings(id, teacherId, assignment.course_id, data.approvedCriteriaScores).catch(() => null)
+  }
   if (assignment.course_id) {
     maybeRegeneratePolicyMemo(assignment.course_id, teacherId).catch(() => null)
   }
@@ -1064,9 +1094,18 @@ function buildCriteriaPrompt(
   isRevision = false,
   pageCount = 0,
   hasHandoutQuestions = false,
+  criterionExamples?: Record<string, CriterionExample[]>,
 ): string {
   const criteriaBlock = snapshot
-    .map((c) => `- [id: ${c.criterion_id ?? 'null'}] ${c.name} (вес: ${c.weight}%)${c.description ? `: ${c.description}` : ''}`)
+    .map((c) => {
+      const base = `- [id: ${c.criterion_id ?? 'null'}] ${c.name} (вес: ${c.weight}%)${c.description ? `: ${c.description}` : ''}`
+      const matches = criterionExamples?.[c.name.toLowerCase().trim()]
+      if (!matches?.length) return base
+      const snippets = matches
+        .map((m) => `«${m.feedback.slice(0, 200)}${m.feedback.length > 200 ? '…' : ''}» (${m.score}/100)`)
+        .join('; ')
+      return `${base}\n  Похожие прошлые оценки по этому критерию: ${snippets}`
+    })
     .join('\n')
 
   // The criterion-id linking hint is only meaningful when criteria have ids

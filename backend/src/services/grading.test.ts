@@ -255,6 +255,72 @@ describe('buildGradingMessages', () => {
   })
 })
 
+// ─── criterion-level RAG (TODO Improvement #9) ────────────────────────────────
+
+describe('buildGradingMessages — criterion-level RAG examples', () => {
+  const CRITERION_EXAMPLES = {
+    'аргументация': [
+      { feedback: 'Аргументы подкреплены источниками, но не хватает контраргументов.', score: 78, similarity: 0.05 },
+    ],
+  }
+
+  it('renders a per-criterion snippet block when a match exists', () => {
+    const m = buildGradingMessages({
+      submissionText: SUBMISSION, criteria: CRITERIA, examples: [],
+      criterionExamples: CRITERION_EXAMPLES,
+    })
+    expect(m.user).toContain('Похожие прошлые оценки по этому критерию')
+    expect(m.user).toContain('Аргументы подкреплены источниками')
+    expect(m.user).toContain('(78/100)')
+  })
+
+  it('matches criterion names case-insensitively against the lookup key', () => {
+    // CRITERIA has "Аргументация" (capitalised); the lookup map key is lowercased.
+    const m = buildGradingMessages({
+      submissionText: SUBMISSION, criteria: CRITERIA, examples: [],
+      criterionExamples: CRITERION_EXAMPLES,
+    })
+    expect(m.user).toContain('Качество аргументов\n  Похожие прошлые оценки')
+  })
+
+  it('falls back to the plain criterion line when no examples match that name', () => {
+    const m = buildGradingMessages({
+      submissionText: SUBMISSION, criteria: CRITERIA, examples: [],
+      criterionExamples: { 'структура': [{ feedback: 'Чёткая структура.', score: 90, similarity: 0.02 }] },
+    })
+    // "Структура" gets a snippet, "Аргументация" (no matching key) doesn't.
+    expect(m.user).toContain('Структура (вес: 40%)\n  Похожие прошлые оценки')
+    expect(m.user).toContain('Аргументация (вес: 60%): Качество аргументов\n')
+  })
+
+  it('truncates long feedback snippets to 200 characters', () => {
+    const longFeedback = 'А'.repeat(250)
+    const m = buildGradingMessages({
+      submissionText: SUBMISSION, criteria: CRITERIA, examples: [],
+      criterionExamples: { 'аргументация': [{ feedback: longFeedback, score: 50, similarity: 0.1 }] },
+    })
+    expect(m.user).toContain('А'.repeat(200) + '…')
+    expect(m.user).not.toContain('А'.repeat(201))
+  })
+
+  it('produces identical output to today when criterionExamples is omitted (regression guard)', () => {
+    const withoutParam = buildGradingMessages({ submissionText: SUBMISSION, criteria: CRITERIA, examples: [] })
+    const withUndefined = buildGradingMessages({
+      submissionText: SUBMISSION, criteria: CRITERIA, examples: [], criterionExamples: undefined,
+    })
+    expect(withUndefined.user).toBe(withoutParam.user)
+    expect(withoutParam.user).not.toContain('Похожие прошлые оценки')
+  })
+
+  it('has no effect in holistic mode (no criteria to key examples by)', () => {
+    const m = buildGradingMessages({
+      submissionText: SUBMISSION, criteria: [], examples: [],
+      criterionExamples: CRITERION_EXAMPLES,
+    })
+    expect(m.user).not.toContain('Похожие прошлые оценки')
+  })
+})
+
 describe('normaliseCriteriaScores — name cleanup', () => {
   it('strips a weight suffix the model echoed into the criterion name', () => {
     const out = normaliseCriteriaScores(
