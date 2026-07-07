@@ -81,17 +81,18 @@ that no longer represent current course content.
 - **Touches:** [routes/documents.ts](backend/src/routes/documents.ts),
   [services/documents.ts](backend/src/services/documents.ts), migration.
 
-### 6. Onboarding signposting for the criteria model · Effort: S
+### ~~6. Onboarding signposting for the criteria model~~ — already done
 
-A fresh free user lands on grading, sees "Без критериев (общая оценка)" and
-grades holistically forever — never discovers the criteria library that's
-the platform's actual moat.
-
-- **Why:** Criteria are the differentiator vs. "another GPT wrapper."
-  Adoption matters.
-- **Touches:** [components/grading/GradingForm.tsx](frontend/src/components/grading/GradingForm.tsx)
-  (one-time inline hint), dashboard checklist (add "Создайте первый критерий"),
-  maybe a small "пустая библиотека" hero on `/criteria`.
+Shipped: new `components/onboarding/CriteriaHint.tsx`, mirroring the existing
+`NoCourseHint.tsx` pattern exactly — a subtle amber link to `/criteria`,
+rendered in `GradingForm.tsx` right under the criterion-add select, only when
+the teacher has never created a criterion of their own (templates don't
+count) and hasn't picked one for the current grade. Deliberately left the
+dashboard checklist and `/criteria`'s own empty state untouched — `/criteria`
+already had a `FeatureIntro` + template picker + empty-state copy, so the real
+gap was purely the missing signpost at the point of contact; a 4th checklist
+step risked re-surfacing the dashboard checklist for existing users who'd
+already completed and hidden it. See CHANGELOG for the full reasoning.
 
 ### ~~7. Real testing for DB-backed paths~~ — already done
 

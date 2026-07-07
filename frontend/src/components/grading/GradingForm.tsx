@@ -8,6 +8,7 @@ import { getCriteria, getCriteriaTemplates } from '../../api/criteria'
 import { getRubrics, getRubricTemplates } from '../../api/rubrics'
 import DocumentUpload from '../ui/DocumentUpload'
 import NoCourseHint from '../onboarding/NoCourseHint'
+import CriteriaHint from '../onboarding/CriteriaHint'
 import SimilarPastFeedback from './SimilarPastFeedback'
 import { useUIStore } from '../../store/uiStore'
 import { usePlan } from '../../hooks/usePlan'
@@ -519,6 +520,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
               </option>
             ))}
           </select>
+          {picked.length === 0 && <CriteriaHint />}
 
           {/* Picked criteria + weights */}
           {picked.length > 0 && (
