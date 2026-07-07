@@ -1,18 +1,20 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import Icon from '../../components/ui/Icon'
+import type { IconName } from '../../components/ui/Icon'
 
-const NAV = [
-  { to: '/admin',          label: 'Обзор',          end: true },
-  { to: '/admin/usage',    label: 'Использование',  end: false },
-  { to: '/admin/teachers', label: 'Преподаватели',  end: false },
-  { to: '/admin/institutions', label: 'Организации', end: false },
-  { to: '/admin/rubrics',  label: 'Шаблоны критериев', end: false },
-  { to: '/admin/rubric-templates', label: 'Шаблоны рубрик',   end: false },
-  { to: '/admin/feedback', label: 'Отзывы',         end: false },
-  { to: '/admin/messages', label: 'Обращения',      end: false },
-  { to: '/admin/errors',   label: 'Ошибки',         end: false },
-  { to: '/admin/audit',    label: 'Журнал действий', end: false },
-  { to: '/admin/evals',    label: 'Эксперименты',   end: false },
+const NAV: Array<{ to: string; label: string; icon: IconName; end: boolean }> = [
+  { to: '/admin',          label: 'Обзор',               icon: 'home',       end: true },
+  { to: '/admin/usage',    label: 'Использование',       icon: 'bar-chart',  end: false },
+  { to: '/admin/teachers', label: 'Преподаватели',       icon: 'users',      end: false },
+  { to: '/admin/institutions', label: 'Организации',     icon: 'building',   end: false },
+  { to: '/admin/rubrics',  label: 'Шаблоны критериев',   icon: 'list-checks', end: false },
+  { to: '/admin/rubric-templates', label: 'Шаблоны рубрик', icon: 'list-checks', end: false },
+  { to: '/admin/feedback', label: 'Отзывы',              icon: 'mail',       end: false },
+  { to: '/admin/messages', label: 'Обращения',           icon: 'mail',       end: false },
+  { to: '/admin/errors',   label: 'Ошибки',              icon: 'shield',     end: false },
+  { to: '/admin/audit',    label: 'Журнал действий',     icon: 'clock',      end: false },
+  { to: '/admin/evals',    label: 'Эксперименты',        icon: 'sparkle',    end: false },
 ]
 
 export default function AdminLayout() {
@@ -37,9 +39,13 @@ export default function AdminLayout() {
           {NAV.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end}>
               {({ isActive }) => (
-                <div className={`px-3 py-2 rounded-md text-sm font-sans transition-colors ${
+                <div className={`flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-sans transition-colors ${
                   isActive ? 'bg-sidebar-active text-ink-inverse font-medium' : 'text-ink-inv-muted hover:bg-sidebar-hover'
                 }`}>
+                  <Icon
+                    name={item.icon}
+                    className={`flex-shrink-0 ${isActive ? 'text-amber-mid' : ''}`}
+                  />
                   {item.label}
                 </div>
               )}
