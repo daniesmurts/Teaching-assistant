@@ -8,13 +8,17 @@ const { Pool }  = require('pg')
 const fs        = require('fs')
 const path      = require('path')
 
-async function migrate() {
-  if (!process.env.DATABASE_URL) {
-    console.error('❌  DATABASE_URL is not set')
-    process.exit(1)
+// Exported so both this CLI and the integration-test globalSetup (which needs
+// a fresh test DB migrated before the suite runs) share one implementation
+// instead of two copies drifting apart. `connectionString` defaults to
+// process.env.DATABASE_URL for the CLI path; the test harness passes the
+// test DB's URL explicitly instead of relying on env at call time.
+async function migrate(connectionString = process.env.DATABASE_URL) {
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is not set')
   }
 
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+  const pool = new Pool({ connectionString })
 
   // Ensure migrations tracking table exists
   await pool.query(`
@@ -50,4 +54,10 @@ async function migrate() {
   await pool.end()
 }
 
-migrate().catch(err => { console.error('Migration failed:', err.message); process.exit(1) })
+module.exports = { migrate }
+
+// CLI entry point — only runs when invoked directly (`node scripts/migrate.js`),
+// not when required as a module by the integration-test setup.
+if (require.main === module) {
+  migrate().catch(err => { console.error('Migration failed:', err.message); process.exit(1) })
+}
