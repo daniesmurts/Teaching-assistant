@@ -93,17 +93,27 @@ the platform's actual moat.
   (one-time inline hint), dashboard checklist (add "Создайте первый критерий"),
   maybe a small "пустая библиотека" hero on `/criteria`.
 
-### 7. Real testing for DB-backed paths · Effort: M
+### ~~7. Real testing for DB-backed paths~~ — already done
 
-The Vitest suite shipped this session covers pure functions only. The
-high-value untested paths are: plan-limit enforcement, T-Bank webhook flow,
-auth + JWT lifecycle, RAG retrieval queries.
-
-- **Why:** Money + plans + grades + RAG quality all live in DB-backed code
-  paths that currently have zero automated coverage.
-- **Touches:** new `vitest.setup.db.ts` that boots a Postgres test container
-  (Testcontainers Node, or `pg-mem` for fast cases). New test files
-  alongside the queries they cover.
+Shipped: new `vitest.integration.config.ts` (separate from the pure-function
+`vitest.config.ts` — `npm test` stays DB-free) runs 33 tests across 6 files
+against a real dedicated test database (`gradeassist_test`), not
+Testcontainers or `pg-mem` — Docker isn't available in this environment, and
+`pg-mem` doesn't support `pgvector`, a hard blocker for the RAG tests.
+`DB_POOL_MAX=1` + `BEGIN`/`ROLLBACK` per test gives transaction-isolated
+tests with zero cleanup code. Covers all four named paths: plan-limit
+enforcement (`checkPlan.integration.test.ts`, `usageCounters.integration.test.ts`),
+the T-Bank webhook (`webhook.integration.test.ts` — the one flow tested at
+the true HTTP level via `supertest`, since its wire format is a third-party
+contract; `payments.integration.test.ts` for `confirmPayment()` idempotency),
+auth/JWT lifecycle (`authenticate.integration.test.ts`, plus pure JWT edge
+cases moved to `lib/jwt.test.ts`), and RAG retrieval
+(`assignments.rag.integration.test.ts` — including the institution-pool's
+double opt-in gating across all four flag combinations). One-time setup:
+`npm run test:integration:setup`, then `npm run test:integration`. See
+CHANGELOG for the full design and a caught-mid-implementation gotcha (the
+`*.integration.test.ts` suffix also matches the default config's glob —
+now explicitly excluded).
 
 ### ~~8. Token / spend caps per teacher~~ — already done
 
