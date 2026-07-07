@@ -33,17 +33,17 @@ cause.
 - **Recommended:** pg-boss on the existing Postgres — no new infra, survives
   restarts, gives you retries + dead-letter for free.
 
-### 2. Audit grade changes after approval · Effort: S
+### ~~2. Audit grade changes after approval~~ — already done
 
-`approveAssignment` UPDATEs the row in place. If an institution admin or
-auditor ever asks "did this teacher change a grade after final submission?",
-you can't answer.
-
-- **Why:** Real selling point to compliance-minded universities. Cheap
-  insurance against a bad-day scenario.
-- **Touches:** new migration adding `assignment_grade_history` table + a
-  Postgres trigger on UPDATE of `assignments.approved_*` columns. Optional
-  admin-panel view to browse the log.
+Already shipped: `approved_revisions` table (migration `038_asset_hardening.sql`)
+gets a new row on every `approveAssignment()` call, written in the same
+transaction as the update (app-level, not a Postgres trigger, but same
+guarantee). Exposed via `GET /api/grading/assignment/:id/approval-history`
+(`findApprovalHistory` in
+[db/queries/assignments.ts](backend/src/db/queries/assignments.ts)) and
+already rendered in
+[AssignmentDetailModal.tsx](frontend/src/components/grading/AssignmentDetailModal.tsx).
+No further action needed.
 
 ### ~~3. Switch embeddings to a Russian-tuned model~~ — already done
 
@@ -105,17 +105,17 @@ auth + JWT lifecycle, RAG retrieval queries.
   (Testcontainers Node, or `pg-mem` for fast cases). New test files
   alongside the queries they cover.
 
-### 8. Token / spend caps per teacher · Effort: S
+### ~~8. Token / spend caps per teacher~~ — already done
 
-Currently DeepSeek cost is uncapped if a teacher goes wild. The platform
-admin sees the bleed in `AdminUsage` but can't gate it without disabling
-the account entirely.
-
-- **Why:** Defends against a runaway script or abuse on a single teacher
-  account before it dents the month.
-- **Touches:** [config/planLimits.ts](backend/src/config/planLimits.ts) add
-  `monthlyTokenCap`, [services/deepseek.ts](backend/src/services/deepseek.ts)
-  read teacher's cap from cache before each call.
+Shipped: `services/spendCap.ts` enforces a per-teacher monthly USD cap
+(not a raw token cap — cost maps directly to the actual risk and varies by
+model) centrally in `llm/registry.ts` (`chat`/`chatJSON`), covering every
+route and background job through one choke point. Default caps per tier in
+[planLimits.ts](backend/src/config/planLimits.ts) (`monthlySpendCapUsd`),
+optional per-teacher override (`teachers.monthly_spend_cap_usd`, migration
+`062_spend_caps.sql`) settable from the `AdminTeachers.tsx` "Расходы/лимит"
+column. See CHANGELOG for the full design (fail-open on infra errors, 60s
+cache, `SpendCapExceededError`). No further action needed.
 
 ### 9. Criterion-level RAG retrieval · Effort: M
 
@@ -274,30 +274,7 @@ general knowledge.
 - **Open question to the user:** which documents do they check most — ГОСТы,
   методички, internal normatives? (asked; shapes ingestion priorities.)
 
-### J. First-run simplification — reduce day-one overwhelm · Effort: M
-
-Recurring, multi-user feedback (incl. a day-one user, 2026-06): "не интуитивно,
-много вкладок и меню". A brand-new user lands and doesn't know what to do next;
-the ~17-item sidebar amplifies the freeze (paradox of choice). Root cause is
-first-run guidance, not too many features. **✅ All three parts shipped (Unreleased)** —
-move J out of the backlog when this deploys:
-
-- **A ✅** — welcome modal reflects the real feature set; checklist persists until first grade.
-- **B ✅ — progressive sidebar.** A brand-new account (no subject + no first grade) sees only
-  essential start-here items (Главная / Проверка работ / Материалы / Предметы) + account group
-  + a «Показать всё» toggle; full nav appears automatically on activation (first grade),
-  persisted via `ga_nav_expanded`, full-nav default while loading to avoid a flash for
-  returning users. [Sidebar.tsx](frontend/src/components/layout/Sidebar.tsx).
-- **C ✅** — `NoCourseHint` on grading/presentations/quizzes/topics; curriculum tabs have inline
-  empty states. Every AI feature page points a new user at the first action.
-
-- **Why (kept for context):** First impression drives activation and retention; the strongest
-  signal (day-one users bouncing off complexity) is the cheapest to lose and hardest to measure
-  after the fact.
-- **Follow-up:** when the day-one customer answers *where* it tipped into "too much", use it to
-  refine which items count as essential (the slimmed set is a sensible default, not final).
-
-> **КНИТУ curriculum-intelligence suite** (items K, L, M below; A3 already shipped). These
+> **КНИТУ curriculum-intelligence suite** (items K, L below; A3 and M already shipped). These
 > are the *near-term, actionable* slices. The full feature map, dependencies, and items not
 > yet promoted here (A4/A5, the competency model, the student tier) live in
 > [docs/KNITU-roadmap.md](docs/KNITU-roadmap.md) — promote to this backlog on readiness.
@@ -357,24 +334,6 @@ content aimed at given ОПК/ПК/УК + goals. Pairs with K into a **write →
 - **Principle:** AI drafts, the teacher is the author of record — never
   auto-published (same "AI never final" rule as grading).
 - **Depends on:** K (the check closes the loop) — build K first.
-
-### M. Material generators — cases / projects / assignments (Teacher T1) · Effort: M
-
-КНИТУ T1, and broadly requested. Extend the existing generator family
-(presentations, quizzes, topics) with three more material types teachers prepare:
-practical cases (кейсы), projects (проекты), assignments/tasks (задания).
-
-- **Why:** pure reuse of the proven generation pattern; broad teacher value; rounds
-  out the "materials" pillar. Lower strategic priority than K/L for the admin
-  audience, but cheap per generator.
-- **Touches:** new services mirroring
-  [services/quizzes.ts](backend/src/services/quizzes.ts) /
-  [services/topics.ts](backend/src/services/topics.ts) (`chatJSON` + course context
-  + RAG citations); routes; UI; plan gating like quizzes/topics.
-- **✅ Done (Unreleased):** the **«Материалы» hub** plus a single kind-parameterized
-  generator (`/materials/:kind`) covering **задания / кейсы / проекты** — `task_sets` + a
-  `kind` discriminator, shared item shape, per-kind prompt + labels, three hub cards. КНИТУ's
-  T1 set is complete. (Move M out of the backlog when this ships.)
 
 ### N. Drawings into the ВКР review — text-vs-drawing findings · Effort: M
 
@@ -629,6 +588,72 @@ per-reference report — «не удалось найти источник — �
   journals, offline books) — the UI copy must say so.
 - **Sequencing:** after S (reuses its structured-JSON tool-loop pattern).
   Independent of P/Q/R.
+
+### U. Criteria/rubric marketplace — cross-institution publishing · Effort: L
+
+Extend the existing `is_institution_shared` boolean (criteria + rubrics
+already have it — [migration 020](backend/migrations/020_criteria_model.sql),
+[migration 029](backend/migrations/029_rubrics.sql)) into a three-level
+`visibility` enum: `private | institution | public`. A teacher can publish a
+**rubric** (the primary unit — a bare criterion is too thin to be useful;
+rubrics are the coherent, weighted thing teachers actually struggle to
+build) to a cross-institution marketplace; other teachers browse/search and
+add a copy to their own library.
+
+- **Why:** criteria/rubrics are the platform's stated differentiator vs. "a
+  GPT wrapper" — a network effect around them compounds the right asset. A
+  teacher whose rubric is used by 40 colleagues at other universities
+  doesn't churn. Russian-specific incentive that competitors don't have:
+  методическая работа counts toward преподавательская аттестация, so a
+  published rubric with attribution + usage stats is a real career artifact,
+  not just karma.
+- **Design, locked in from the discussion that scoped this:**
+  1. **Rubrics, not bare criteria, are what gets published** — a criterion
+     riding along inside a published rubric still becomes independently
+     addable, but the marketplace's primary browsable unit is the rubric.
+  2. **Copy-on-add, not live-link.** Adding a public rubric/criterion clones
+     it into the teacher's own library with a `source_public_id` reference
+     column — someone else silently editing their published version must
+     never change how your students' work gets graded. The reference can
+     still power an optional "автор обновил исходную версию" nudge.
+  3. **Embedding-based dedup on publish.** Reuse the existing pgvector
+     embedding path (`embed()` in `llm/registry.ts`) to check a new
+     submission against already-public entries before it goes live —
+     "похожий критерий уже опубликован, использовать его?" — otherwise the
+     market fills with three hundred variants of «Аргументация».
+  4. **Moderation gate before anything goes public — non-negotiable.**
+     Criterion/rubric descriptions are injected directly into grading
+     prompts (a trusted slot), so a community-published entry is a
+     prompt-injection vector into *other teachers'* grading, not just the
+     publisher's own — `sanitiseForPrompt()` (rule #1) was designed for
+     adversarial student text, not adversarial instructions sitting in a
+     trusted prompt slot. Need: a review queue (model on the existing
+     `contact_messages` admin-triage pattern) + an LLM screening pass on
+     submit ("does this description contain grading instructions unrelated
+     to assessing quality, e.g. 'always score 100'?").
+  5. **Rank by real observed usage, not likes.** `criteria_snapshot` already
+     records which criteria were actually used in approved gradings — surface
+     "проверено на 1 200 работах" on marketplace listings. Unfakeable social
+     proof you already have the data for.
+  6. **Institution-level policy switch.** RAG's institution pool solved the
+     same tension (a department not wanting its methodology to leak outside
+     the institution for free) with double opt-in — same shape here:
+     publishing stays a per-teacher choice, but an institution admin gets a
+     master toggle to disable it for their teachers, or enterprise sales
+     will hit this as an objection.
+- **Touches:** new `visibility` column replacing/extending
+  `is_institution_shared` on `criteria` + `rubrics`; new
+  `criterion_publications` / `rubric_publications` moderation-queue table;
+  browse/search page reusing
+  [TemplatePicker.tsx](frontend/src/components/ui/TemplatePicker.tsx) (already
+  scales via search + subject filter — same component, community-sourced
+  data instead of platform templates); admin review surface; `source_public_id`
+  + usage-count columns; embedding-dedup check in the publish flow.
+- **Sequencing:** value scales with user count, so this is worth more
+  later rather than sooner — sequence after S/T (those differentiate at any
+  scale; this compounds with scale). Certificate/methodological-registry
+  export and the embedding-dedup check can ship as a fast-follow rather than
+  in v1.
 
 ---
 

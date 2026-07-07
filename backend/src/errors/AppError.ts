@@ -57,3 +57,16 @@ export class DocumentProcessingError extends AppError {
     super(message, 422, 'DOCUMENT_PROCESSING_ERROR')
   }
 }
+
+// Not a plan/paywall gate (upgrade wouldn't necessarily fix it faster than an
+// admin raising the cap) — a cost-protection circuit breaker. 429, not 403.
+export class SpendCapExceededError extends AppError {
+  constructor(capUsd: number) {
+    super(
+      `Достигнут месячный лимит расходов на ИИ для этого аккаунта (${capUsd.toFixed(2)} $). ` +
+      `Лимит обновится в начале следующего месяца или может быть изменён администратором платформы.`,
+      429,
+      'SPEND_CAP_EXCEEDED',
+    )
+  }
+}

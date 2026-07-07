@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getAdminTeachers, patchTeacher, getInstitutions } from '../../api/admin'
+import { getAdminTeachers, patchTeacher, getInstitutions, type AdminTeacher } from '../../api/admin'
 import { useUIStore } from '../../store/uiStore'
 import SubscriptionModal from './SubscriptionModal'
 
@@ -28,8 +28,13 @@ export default function AdminTeachers() {
   const { data: institutions = [] } = useQuery({ queryKey: ['admin-institutions'], queryFn: getInstitutions })
 
   const patchMut = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { plan_tier?: string; role?: string; is_active?: boolean; institution_id?: string | null } }) =>
-      patchTeacher(id, data),
+    mutationFn: ({ id, data }: {
+      id: string
+      data: {
+        plan_tier?: string; role?: string; is_active?: boolean; institution_id?: string | null
+        monthly_spend_cap_usd?: number | null
+      }
+    }) => patchTeacher(id, data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-teachers'] }); addToast('Сохранено', 'success') },
     onError:   () => addToast('Не удалось сохранить', 'error'),
   })
@@ -59,6 +64,7 @@ export default function AdminTeachers() {
               <th className="text-left px-3 py-2 text-ink-secondary font-medium">Роль</th>
               <th className="text-left px-3 py-2 text-ink-secondary font-medium">Организация</th>
               <th className="text-center px-3 py-2 text-ink-secondary font-medium">Активен</th>
+              <th className="text-right px-3 py-2 text-ink-secondary font-medium">Расходы/лимит $</th>
               <th className="text-right px-3 py-2 text-ink-secondary font-medium">Подписка</th>
             </tr></thead>
             <tbody>
@@ -108,6 +114,12 @@ export default function AdminTeachers() {
                     </button>
                   </td>
                   <td className="px-3 py-2 text-right">
+                    <SpendCapCell
+                      teacher={t}
+                      onSave={(cap) => patchMut.mutate({ id: t.id, data: { monthly_spend_cap_usd: cap } })}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-right">
                     <button
                       onClick={() => setSubTeacher({ id: t.id, name: t.name, email: t.email, plan_tier: t.plan_tier })}
                       className="text-xs text-amber hover:underline"
@@ -117,7 +129,7 @@ export default function AdminTeachers() {
                   </td>
                 </tr>
               ))}
-              {teachers.length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-ink-tertiary">Ничего не найдено</td></tr>}
+              {teachers.length === 0 && <tr><td colSpan={8} className="px-3 py-6 text-center text-ink-tertiary">Ничего не найдено</td></tr>}
             </tbody>
           </table>
         </div>
@@ -134,6 +146,40 @@ export default function AdminTeachers() {
       {subTeacher && (
         <SubscriptionModal teacher={subTeacher} onClose={() => setSubTeacher(null)} />
       )}
+    </div>
+  )
+}
+
+// Editable monthly spend cap — a nullable override on top of the plan-tier
+// default (TODO #8). Empty input = clear the override (falls back to the
+// plan default); a number = explicit cap for this account. Commits on blur,
+// not on every keystroke.
+function SpendCapCell({ teacher, onSave }: { teacher: AdminTeacher; onSave: (cap: number | null) => void }) {
+  const [value, setValue] = useState(teacher.monthly_spend_cap_usd?.toString() ?? '')
+  const overCap = teacher.monthly_spend_cap_usd != null && teacher.month_spend_usd >= teacher.monthly_spend_cap_usd
+
+  function commit() {
+    const trimmed = value.trim()
+    if (trimmed === '') { onSave(null); return }
+    const n = Number(trimmed)
+    if (Number.isFinite(n) && n >= 0) onSave(n)
+  }
+
+  return (
+    <div className="flex items-center justify-end gap-1.5">
+      <span className={`text-xs ${overCap ? 'text-danger font-medium' : 'text-ink-secondary'}`}>
+        {teacher.month_spend_usd.toFixed(2)}
+      </span>
+      <span className="text-ink-tertiary">/</span>
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+        placeholder="по тарифу"
+        title="Оставьте пустым, чтобы использовать лимит по тарифу"
+        className="w-20 text-xs bg-transparent border border-border rounded px-1.5 py-1 text-right placeholder:text-ink-tertiary"
+      />
     </div>
   )
 }

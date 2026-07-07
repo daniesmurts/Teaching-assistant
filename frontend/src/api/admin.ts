@@ -71,6 +71,8 @@ export interface AdminTeacher {
   institution_name: string | null
   grade_count:      number
   created_at:       string
+  monthly_spend_cap_usd: number | null   // null = plan-tier default
+  month_spend_usd:       number
 }
 
 export async function getAdminTeachers(params: { page?: number; search?: string } = {}): Promise<{ teachers: AdminTeacher[]; total: number }> {
@@ -80,7 +82,10 @@ export async function getAdminTeachers(params: { page?: number; search?: string 
 
 export async function patchTeacher(
   id: string,
-  data: { role?: string; plan_tier?: string; is_active?: boolean; institution_id?: string | null }
+  data: {
+    role?: string; plan_tier?: string; is_active?: boolean; institution_id?: string | null
+    monthly_spend_cap_usd?: number | null
+  }
 ): Promise<AdminTeacher> {
   const res = await client.patch<AdminTeacher>(`/api/admin/teachers/${id}`, data)
   return res.data

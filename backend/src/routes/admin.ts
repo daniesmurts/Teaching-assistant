@@ -9,6 +9,7 @@ import {
   getUsageByFeature, getRecentErrors,
 } from '../db/queries/usageLog'
 import { upgradeTeacherToPro, cancelTeacherSubscription } from '../db/queries/teachers'
+import { invalidateSpendCapCache } from '../services/spendCap'
 import { sendEmail } from '../services/emailTransport'
 import { proGrantedEmail } from '../lib/emailTemplates'
 import {
@@ -271,12 +272,20 @@ router.get('/teachers', asyncHandler(async (req, res) => {
     pool.query(
       `SELECT t.id, t.email, t.name, t.university, t.role, t.plan_tier,
               t.is_active, t.created_at, t.institution_id, i.name AS institution_name,
-              COUNT(a.id)::int AS grade_count
+              t.monthly_spend_cap_usd,
+              COUNT(a.id)::int AS grade_count,
+              ROUND(COALESCE(u.month_cost, 0)::numeric, 4) AS month_spend_usd
        FROM teachers t
        LEFT JOIN assignments a  ON a.teacher_id = t.id
        LEFT JOIN institutions i ON i.id = t.institution_id
+       LEFT JOIN (
+         SELECT teacher_id, SUM(cost_usd) AS month_cost
+           FROM api_usage_log
+          WHERE created_at >= date_trunc('month', NOW())
+          GROUP BY teacher_id
+       ) u ON u.teacher_id = t.id
        ${where}
-       GROUP BY t.id, i.name
+       GROUP BY t.id, i.name, u.month_cost
        ORDER BY t.created_at DESC
        LIMIT $1 OFFSET $2`,
       params
@@ -295,11 +304,23 @@ router.get('/teachers', asyncHandler(async (req, res) => {
 router.patch('/teachers/:id', asyncHandler(async (req, res) => {
   const body = req.body as {
     role?: string; plan_tier?: string; is_active?: boolean; institution_id?: string | null
+    monthly_spend_cap_usd?: number | null
   }
   const { role, plan_tier, is_active } = body
   // institution_id is explicit: '' / null → unassign, uuid → assign, absent → leave
   const hasInstitution = Object.prototype.hasOwnProperty.call(body, 'institution_id')
   const institutionId  = body.institution_id ? body.institution_id : null
+
+  // monthly_spend_cap_usd is explicit too: null → reset to plan-tier default,
+  // a number → override, absent → leave untouched.
+  const hasSpendCap = Object.prototype.hasOwnProperty.call(body, 'monthly_spend_cap_usd')
+  if (hasSpendCap && body.monthly_spend_cap_usd != null) {
+    const cap = Number(body.monthly_spend_cap_usd)
+    if (!Number.isFinite(cap) || cap < 0) {
+      throw new ValidationError('Лимит расходов должен быть неотрицательным числом')
+    }
+  }
+  const spendCapValue = hasSpendCap && body.monthly_spend_cap_usd != null ? Number(body.monthly_spend_cap_usd) : null
 
   // Previous institution — needed to detect a real move so we can clear the
   // teacher's org-tree ties (roles + primary unit) in the old institution.
@@ -312,15 +333,17 @@ router.patch('/teachers/:id', asyncHandler(async (req, res) => {
 
   const { rows } = await pool.query(
     `UPDATE teachers
-     SET role           = COALESCE($2, role),
-         plan_tier      = COALESCE($3, plan_tier),
-         is_active      = COALESCE($4, is_active),
-         institution_id = CASE WHEN $5 THEN $6 ELSE institution_id END
+     SET role                  = COALESCE($2, role),
+         plan_tier             = COALESCE($3, plan_tier),
+         is_active             = COALESCE($4, is_active),
+         institution_id        = CASE WHEN $5 THEN $6 ELSE institution_id END,
+         monthly_spend_cap_usd = CASE WHEN $7 THEN $8 ELSE monthly_spend_cap_usd END
      WHERE id = $1
-     RETURNING id, email, name, role, plan_tier, is_active, institution_id`,
-    [req.params.id, role ?? null, plan_tier ?? null, is_active ?? null, hasInstitution, institutionId]
+     RETURNING id, email, name, role, plan_tier, is_active, institution_id, monthly_spend_cap_usd`,
+    [req.params.id, role ?? null, plan_tier ?? null, is_active ?? null, hasInstitution, institutionId, hasSpendCap, spendCapValue]
   )
   if (!rows[0]) { res.status(404).json({ error: 'Преподаватель не найден' }); return }
+  if (hasSpendCap) invalidateSpendCapCache(req.params.id)
 
   // A real institution move (or detach) invalidates every org-tree tie the
   // teacher held in the old institution: unit roles would otherwise keep

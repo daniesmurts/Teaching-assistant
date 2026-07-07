@@ -17,6 +17,7 @@
 import { logger } from '../../lib/logger'
 import { DeepSeekProvider } from './deepseek'
 import { YandexProvider }   from './yandex'
+import { checkSpendCap } from '../spendCap'
 import type {
   CallContext, ChatMessage, ChatOptions, LLMProvider, ProviderName,
 } from './types'
@@ -88,6 +89,7 @@ async function resolveProvider(ctx?: CallContext): Promise<LLMProvider> {
 // ─── Public API — drop-in replacement for services/deepseek.ts exports ──────
 
 export async function chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<string> {
+  if (opts.context?.teacherId) await checkSpendCap(opts.context.teacherId)
   if (opts.reasoner) {
     return PROVIDERS.deepseek.chat(messages, opts)
   }
@@ -107,6 +109,7 @@ export async function chatJSON<T>(
   retryLabel = 'response',
   opts:       ChatOptions = {},
 ): Promise<T> {
+  if (opts.context?.teacherId) await checkSpendCap(opts.context.teacherId)
   // Calc grading uses the reasoner. No other provider has one — route directly
   // to DeepSeek regardless of the institution's preferred provider, and skip
   // the fallback ladder (there's nowhere else to go). The institutional
