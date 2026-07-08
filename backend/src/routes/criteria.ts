@@ -2,13 +2,16 @@ import { Router } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { asyncHandler } from '../lib/asyncHandler'
-import { NotFoundError } from '../errors/AppError'
-import { checkResourceLimit } from '../middleware/checkPlan'
-import { createCriterionRules, updateCriterionRules } from '../validation/criteriaValidation'
+import { NotFoundError, ValidationError } from '../errors/AppError'
+import { checkResourceLimit, checkMonthlyLimit } from '../middleware/checkPlan'
+import { aiLimiter } from '../middleware/rateLimits'
+import { createCriterionRules, updateCriterionRules, improveDescriptionRules } from '../validation/criteriaValidation'
 import {
   findCriteriaByTeacher, findCriterionById, createCriterion, updateCriterion, deleteCriterion,
   findGlobalTemplates, findCriteriaByInstitution,
 } from '../db/queries/criteria'
+import { incrementUsage } from '../db/queries/usageCounters'
+import { improveCriterionDescription } from '../services/criteriaAssist'
 import type { Criterion, CriterionSubject } from '../../../shared/types'
 
 const router = Router()
@@ -52,6 +55,33 @@ router.post(
       subject,
     })
     res.status(201).json(criterion)
+  })
+)
+
+// POST /api/criteria/improve-description — AI rewrite of a rough description
+// into grading-prompt-friendly text. Teacher accepts/rejects client-side;
+// nothing persists here.
+router.post(
+  '/improve-description',
+  aiLimiter,
+  checkMonthlyLimit('criteriaImprovePerMonth'),
+  validate(improveDescriptionRules),
+  asyncHandler(async (req, res) => {
+    const { name, description } = req.body as { name: string; description: string }
+    if (!description.trim()) throw new ValidationError('Сначала введите описание критерия')
+
+    const improved = await improveCriterionDescription({
+      name,
+      description,
+      context: {
+        teacherId:     req.teacher.id,
+        institutionId: req.teacher.institution_id ?? undefined,
+        feature:       'criteria_assist',
+      },
+    })
+
+    incrementUsage(req.teacher.id, 'criteria_improve').catch(() => null)
+    res.json({ improved })
   })
 )
 

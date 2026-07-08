@@ -1,10 +1,11 @@
 import { pool } from '../connection'
 
 export interface UsageCounter {
-  teacher_id:               string
-  grades_this_month:        number
-  presentations_this_month: number
-  month_year:               string
+  teacher_id:                   string
+  grades_this_month:            number
+  presentations_this_month:     number
+  criteria_improve_this_month:  number
+  month_year:                   string
 }
 
 export async function getOrCreateCounter(teacherId: string): Promise<UsageCounter> {
@@ -24,7 +25,7 @@ export async function getOrCreateCounter(teacherId: string): Promise<UsageCounte
 
 export async function incrementUsage(
   teacherId: string,
-  feature: 'grade' | 'presentation'
+  feature: 'grade' | 'presentation' | 'criteria_improve'
 ): Promise<void> {
   await pool.query('SELECT increment_usage($1, $2)', [teacherId, feature])
 }

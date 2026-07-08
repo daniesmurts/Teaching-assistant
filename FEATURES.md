@@ -55,7 +55,7 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 
 **Topics** — AI topic generator for research/practicals: student level + field + interests + practice site → level-appropriate, valuable topics (with rationale, scope, novelty). Yandex Search grounding. Optional student attachment (name + group, autocomplete from existing students) for later lookup. Free: 3/mo, Pro: unlimited
 **Subjects (formerly «Курсы»)** — CRUD, level, syllabus text/upload. Renamed in UI per Russian-academic vocab («курс» = year of study; «предмет» = subject). URL `/courses` and DB `course_id` unchanged
-**Criteria** — library of reusable criteria (name + description + optional subject), start from global templates. Selected at grading time with per-criterion weights and a live sum-to-100 check
+**Criteria** — library of reusable criteria (name + description + optional subject), start from global templates. Selected at grading time with per-criterion weights and a live sum-to-100 check. **«Улучшить» AI-assist** on the description field rewrites a rough draft into clearer grading-prompt input — teacher accepts/rejects the suggestion, nothing is overwritten silently. Free: 5/mo, Pro: unlimited
 **Students** — auto-collected roster from graded work, per-student grade-over-time chart, groups
 **Учебный план и РПД — суите** 🚧 — one page (`/curriculum`), three tabs (КНИТУ curriculum-intelligence; teacher-scoped pending a first-class учебный план entity; see `docs/KNITU-roadmap.md`):
 - **Дублирование тем** (A3) — select ≥2 disciplines → extracts each discipline's topics, compares them semantically across disciplines, flags duplicated / partially-overlapping / adjacent topics with a recommendation

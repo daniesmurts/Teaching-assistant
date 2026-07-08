@@ -36,7 +36,7 @@ const CARDS: MaterialCard[] = [
   },
   {
     icon: 'list-checks',
-    title: 'Задания',
+    title: 'Практические задания',
     desc: 'Практические задания по теме — с условиями и подсказками для преподавателя.',
     to: '/materials/assignment',
   },

@@ -6,7 +6,7 @@ import { pool } from '../db/connection'
 // ─── Monthly usage limits (grades, presentations) ─────────────────────────────
 
 export function checkMonthlyLimit(
-  feature: 'gradesPerMonth' | 'presentationsPerMonth'
+  feature: 'gradesPerMonth' | 'presentationsPerMonth' | 'criteriaImprovePerMonth'
 ) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
@@ -23,13 +23,17 @@ export function checkMonthlyLimit(
         ? 0
         : feature === 'gradesPerMonth'
           ? counter.grades_this_month
-          : counter.presentations_this_month
+          : feature === 'presentationsPerMonth'
+            ? counter.presentations_this_month
+            : counter.criteria_improve_this_month
 
       if (used >= limit) {
         res.status(403).json({
           error:   feature === 'gradesPerMonth'
             ? `Вы использовали все ${limit} бесплатных проверок в этом месяце.`
-            : `Вы использовали все ${limit} бесплатных презентации в этом месяце.`,
+            : feature === 'presentationsPerMonth'
+              ? `Вы использовали все ${limit} бесплатных презентации в этом месяце.`
+              : `Вы использовали все ${limit} бесплатных улучшений описания в этом месяце.`,
           code:    'PLAN_LIMIT_REACHED',
           feature,
           limit,

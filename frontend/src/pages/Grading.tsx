@@ -50,6 +50,7 @@ export default function Grading() {
   // from "this is left over from before I navigated away".
   const [resultSavedAt, setResultSavedAt] = usePersistedState<number | null>('page:resultSavedAt', null)
   const [mobileTab, setMobileTab]   = useState<MobileTab>('form')
+  const resultPaneRef = useRef<HTMLDivElement | null>(null)
   // True only once something is graded/resumed *during this mount* — starts
   // false even if a result was rehydrated from localStorage on load, so the
   // "previous session" notice below only shows for genuinely stale output.
@@ -110,6 +111,17 @@ export default function Grading() {
   }, [resumeAssignment, searchParams, setSearchParams, setSubmission, setResult, setReview, setResultSavedAt])
 
   const hasOutput = result !== null || review !== null
+
+  // A newly-graded (or resumed) result should always open scrolled to the
+  // top — the grade badge lives there. Two scroll containers can be holding
+  // a leftover position from a previous (often long) result: the panel's own
+  // overflow-y-auto, and — because AppShell's main-content column has no
+  // min-h-0, so it grows past the viewport instead of clipping — the window
+  // itself. Reset both.
+  useEffect(() => {
+    resultPaneRef.current?.scrollTo({ top: 0 })
+    window.scrollTo({ top: 0 })
+  }, [resultSavedAt])
 
   function handleResult(req: GradeRequest, res: GradeResponse) {
     setSubmission(req)
@@ -229,7 +241,7 @@ export default function Grading() {
         </div>
 
         {/* Right panel */}
-        <div className={`
+        <div ref={resultPaneRef} className={`
           flex-1 bg-surface overflow-y-auto flex-col
           ${hasOutput ? (mobileTab === 'result' ? 'flex' : 'hidden') : 'hidden'}
           md:flex

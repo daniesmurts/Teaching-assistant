@@ -664,6 +664,90 @@ add a copy to their own library.
   export and the embedding-dedup check can ship as a fast-follow rather than
   in v1.
 
+### V. УМЦ dashboard — УМК readiness/quality statistics + export · Effort: M
+
+Institution admin request (2026-07-08, HR/УМЦ feature ideas). A dashboard for
+methodology-office staff (УМЦ): a readiness matrix (programme × course × УМК
+artifact — syllabus exists? reviewed? conformant? last updated?) with quality
+scores rolled up by department, plus data export.
+
+- **Why:** almost entirely assembly, not new capability — `curriculumAnalysis`,
+  `syllabusReview`, `programAnalysis`, and `programReportPdf` already compute
+  the underlying quality signals; the org tree (§7) already supports scoped
+  roles. Low political risk (methodology QA, not teacher evaluation), visible
+  value fast, sells the institution tier to exactly the people who hold that
+  budget line.
+- **Design decisions:**
+  - **Role:** УМЦ's access pattern is horizontal (all syllabi across
+    faculties, no grading/student data) rather than the vertical cascade
+    `org_unit_roles` currently expresses. Worth a distinct methodologist role
+    rather than overloading `viewer`/`head` on an org unit — resolve before
+    building, since it affects the authorisation helper in
+    [services/orgScope.ts](backend/src/services/orgScope.ts).
+  - **Export:** existing report generation is PDF-only
+    ([services/programReportPdf.ts](backend/src/services/programReportPdf.ts)).
+    УМЦ explicitly asked for "выгрузка" — add XLSX (they live in Excel), not
+    just a nicer PDF.
+- **Touches:** new aggregation queries (readiness matrix rollup by org unit),
+  new `pages/institution/UmcDashboard.tsx` (or similar), XLSX export endpoint,
+  methodologist role addition to `org_unit_roles` if that path is chosen.
+- **Sequencing:** do this before W — same underlying aggregation layer, lower
+  risk, and it's a natural first slice of that layer.
+
+### W. HR faculty profile ("аватар ППС") + development trajectory · Effort: L (needs further design)
+
+Institution admin request (2026-07-08). HR wants to identify ППС strengths/
+weaknesses from student surveys, build a per-teacher profile, and construct
+individual professional/personal development trajectories. Differentiate ППС
+into types.
+
+**This idea still needs real design work before it's buildable — do not
+scope it directly into a sprint from this entry.** Open questions and a
+starting direction below, but expect a Research.md section (or at least a
+proper design pass) before implementation.
+
+- **Reframe from the original ask:** don't build this survey-only. The
+  platform already has behavioral signal the admin didn't ask for but that's
+  more valuable than perception data — syllabus/curriculum quality scores,
+  presentation/quiz/case tool usage, grading consistency, how often AI grades
+  get edited before approval. The profile should combine platform-derived
+  practice signal with imported survey results, not rely on survey alone.
+- **Survey data ingestion — do not connect directly to a university DB.**
+  Direct DB access to an external survey system is fragile and a 152-ФЗ
+  surface increase. Import instead (CSV/Excel upload or a small API
+  endpoint), normalized into our own schema — same per-institution pattern
+  used elsewhere (LTI/SAML config, document upload).
+- **Trust framing is the hard part, and it's non-negotiable, not a nice-to-
+  have.** Teachers are our users; if ИСПУМ becomes visibly "the tool HR uses
+  to rank you," adoption dies. Apply the same neutral-process principle
+  already designed for attestation (§5, Feature Q — process reports, not
+  verdicts):
+  - Teacher sees their own full profile first, framed as development
+    ("strengths / growth areas + recommended platform features/courses"),
+    not a score.
+  - HR/leadership sees aggregates and trajectories, gated behind org-tree
+    roles, with typology framed as development profiles ("strong
+    methodologist, low interactivity") rather than performance grades or
+    rankings.
+- **The differentiating piece is the closed loop**, not the profile itself:
+  diagnose → recommend a specific platform feature → measure the delta over
+  time (e.g. "low quiz variety → quiz generator with these templates → score
+  improves in 3 months"). That's what no competitor can replicate inside one
+  product — worth designing the trajectory tracking around this loop
+  specifically rather than as a static report.
+- **Open questions to resolve before scoping:** what survey format(s) do
+  target institutions actually use (single tool, or per-institution
+  variance)? What's the minimum viable typology (how many "types," defined
+  how, and by whom — HR or us)? Does this need a new role distinct from the
+  УМЦ methodologist role in V, or can HR reuse it?
+- **Touches (provisional, will change with design):** new survey-import
+  endpoint + table, new aggregation layer shared with V (per-teacher/course
+  quality rollup), new `services/facultyProfile.ts`, new HR-facing pages,
+  likely a Research.md design section before any of this is final.
+- **Sequencing:** after V — reuses the aggregation layer V builds, and V's
+  lower-risk shape is a better first proof point for this kind of
+  institution-facing analytics before tackling the trust-sensitive one.
+
 ---
 
 ## Build order — locked design (§5–§7)

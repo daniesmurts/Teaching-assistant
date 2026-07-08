@@ -1100,7 +1100,7 @@ function buildCriteriaPrompt(
 ): string {
   const criteriaBlock = snapshot
     .map((c) => {
-      const base = `- [id: ${c.criterion_id ?? 'null'}] ${c.name} (вес: ${c.weight}%)${c.description ? `: ${c.description}` : ''}`
+      const base = `- [id: ${c.criterion_id ?? 'null'}] ${c.name} (вес: ${c.weight}%)${c.description ? `: ${sanitiseForPrompt(c.description)}` : ''}`
       const matches = criterionExamples?.[c.name.toLowerCase().trim()]
       if (!matches?.length) return base
       const snippets = matches

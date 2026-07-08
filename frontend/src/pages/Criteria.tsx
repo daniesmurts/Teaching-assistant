@@ -4,11 +4,13 @@ import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
 import CreateButton from '../components/ui/CreateButton'
+import Icon from '../components/ui/Icon'
 import { Input } from '../components/ui/Input'
 import TemplatePicker from '../components/ui/TemplatePicker'
 import { getCourses } from '../api/courses'
 import {
   getCriteria, getCriteriaTemplates, createCriterion, updateCriterion, deleteCriterion,
+  improveCriterionDescription,
   type CriterionPayload,
 } from '../api/criteria'
 import { useUIStore } from '../store/uiStore'
@@ -35,8 +37,10 @@ const emptyForm: FormState = { name: '', description: '', course_id: '', subject
 export default function Criteria() {
   const qc = useQueryClient()
   const addToast = useUIStore((s) => s.addToast)
+  const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<FormState>(emptyForm)
+  const [suggestion, setSuggestion] = useState<string | null>(null)
 
   const { data: criteria = [] }  = useQuery({ queryKey: ['criteria-all'], queryFn: () => getCriteria() })
   const { data: courses = [] }   = useQuery({ queryKey: ['courses'], queryFn: getCourses })
@@ -72,9 +76,22 @@ export default function Criteria() {
     onError:   () => addToast('Не удалось удалить критерий', 'error'),
   })
 
-  function close() { setShowForm(false); setForm(emptyForm) }
+  const improveMut = useMutation({
+    mutationFn: () => improveCriterionDescription(form.name, form.description),
+    onSuccess: (improved) => setSuggestion(improved),
+    onError: (err: unknown) => {
+      const data = (err as { response?: { data?: { code?: string; error?: string } } }).response?.data
+      if (data?.code === 'PLAN_LIMIT_REACHED') {
+        showUpgradeModal('PLAN_LIMIT_REACHED')
+        return
+      }
+      addToast(data?.error ?? 'Не удалось улучшить описание', 'error')
+    },
+  })
 
-  function openNew() { setForm(emptyForm); setShowForm(true) }
+  function close() { setShowForm(false); setForm(emptyForm); setSuggestion(null) }
+
+  function openNew() { setForm(emptyForm); setSuggestion(null); setShowForm(true) }
   function openEdit(c: Criterion) {
     setForm({
       id: c.id, name: c.name,
@@ -82,6 +99,7 @@ export default function Criteria() {
       course_id: c.course_id ?? '',
       subject: c.subject ?? '',
     })
+    setSuggestion(null)
     setShowForm(true)
   }
   function fromTemplate(t: Criterion) {
@@ -91,8 +109,22 @@ export default function Criteria() {
       course_id: '',
       subject: t.subject ?? '',
     })
+    setSuggestion(null)
     setShowForm(true)
   }
+
+  function requestImprove() {
+    if (!form.name.trim()) { addToast('Сначала укажите название критерия', 'error'); return }
+    if (!form.description.trim()) { addToast('Сначала введите описание критерия', 'error'); return }
+    setSuggestion(null)
+    improveMut.mutate()
+  }
+  function acceptSuggestion() {
+    if (!suggestion) return
+    setForm((f) => ({ ...f, description: suggestion }))
+    setSuggestion(null)
+  }
+  function rejectSuggestion() { setSuggestion(null) }
 
   function submit() {
     if (!form.name.trim()) { addToast('Введите название критерия', 'error'); return }
@@ -136,14 +168,35 @@ export default function Criteria() {
                 placeholder="Напр. Аргументация" />
 
               <div>
-                <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">Описание</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-sans font-medium text-ink-secondary">Описание</label>
+                  <button
+                    type="button"
+                    onClick={requestImprove}
+                    disabled={improveMut.isPending}
+                    className="inline-flex items-center gap-1 text-xs font-sans text-amber hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Icon name="sparkle" size={12} />
+                    {improveMut.isPending ? 'Улучшаем…' : 'Улучшить'}
+                  </button>
+                </div>
                 <textarea
                   className={`${inputClass} resize-none`}
                   rows={3}
                   placeholder="Что именно оценивается — это попадает в подсказку ИИ при проверке"
                   value={form.description}
-                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  onChange={(e) => { setForm((f) => ({ ...f, description: e.target.value })); setSuggestion(null) }}
                 />
+                {suggestion && (
+                  <div className="mt-2 p-3 bg-amber-light/40 border border-amber/30 rounded-md">
+                    <div className="text-[10px] font-sans font-medium text-amber uppercase tracking-wide mb-1">Предложенная формулировка</div>
+                    <p className="text-xs font-sans text-ink leading-relaxed mb-2">{suggestion}</p>
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={acceptSuggestion}>Принять</Button>
+                      <Button size="sm" variant="secondary" onClick={rejectSuggestion}>Отклонить</Button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">

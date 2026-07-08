@@ -31,3 +31,8 @@ export async function updateCriterion(id: string, data: Partial<CriterionPayload
 export async function deleteCriterion(id: string): Promise<void> {
   await client.delete(`/api/criteria/${id}`)
 }
+
+export async function improveCriterionDescription(name: string, description: string): Promise<string> {
+  const res = await client.post<{ improved: string }>('/api/criteria/improve-description', { name, description })
+  return res.data.improved
+}

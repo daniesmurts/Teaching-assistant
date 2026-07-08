@@ -24,6 +24,20 @@ export const createCriterionRules = [
     .isIn(SUBJECTS).withMessage('Неверная предметная область'),
 ]
 
+export const improveDescriptionRules = [
+  body('name')
+    .trim()
+    .notEmpty().withMessage('Название критерия обязательно')
+    .isLength({ max: 100 }).withMessage('Название критерия слишком длинное')
+    .escape(),
+
+  body('description')
+    .trim()
+    .notEmpty().withMessage('Описание критерия обязательно')
+    .isLength({ max: 500 }).withMessage('Описание критерия слишком длинное')
+    .escape(),
+]
+
 export const updateCriterionRules = [
   body('name')
     .optional()
