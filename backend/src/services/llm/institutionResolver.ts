@@ -7,7 +7,11 @@ import { pool } from '../../db/connection'
 import { registerInstitutionResolver } from './registry'
 import type { ProviderName } from './types'
 
-const VALID: ReadonlySet<ProviderName> = new Set(['deepseek', 'yandex', 'gigachat'])
+// Narrower than ProviderName on purpose — gigachat is a registered provider
+// (schema + registry stub) but not yet selectable via routes/institution.ts's
+// own allow-list, since it isn't implemented (registry.ts throws on call).
+// Keep in sync with that route's `allowed` array.
+const VALID: ReadonlySet<ProviderName> = new Set(['deepseek', 'yandex'])
 
 // Tiny in-process cache — the column never changes mid-request, and the
 // registry calls resolve() per LLM round-trip. 60s TTL is fine.

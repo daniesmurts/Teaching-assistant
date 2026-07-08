@@ -26,6 +26,38 @@ export async function countChunksForDocument(documentId: string): Promise<number
   return parseInt(rows[0].count, 10)
 }
 
+/**
+ * Deletes chunks belonging to every OTHER 'syllabus'-type document on this
+ * course (TODO.md #5 — document re-ingestion lifecycle). A course's syllabus
+ * is single-source-of-truth by existing design (`courses.syllabus_text` is
+ * one column, always overwritten by the latest upload — see
+ * `setCourseSyllabusText`); this makes RAG retrieval follow the same
+ * semantic instead of silently mixing an old syllabus's chunks into results
+ * alongside the new one forever. Scoped to 'syllabus' only — 'material'
+ * documents are intentionally cumulative (a course can have many distinct
+ * reading-list docs) and are left untouched.
+ *
+ * Safe to call after already-generated presentations/quizzes exist: their
+ * citations are text snapshots captured at generation time, not live FKs
+ * into document_chunks, so deleting old chunks doesn't corrupt history —
+ * it only stops them from being retrieved for *future* generations.
+ */
+export async function deleteChunksForOtherSyllabusDocuments(
+  courseId: string,
+  keepDocumentId: string
+): Promise<number> {
+  const { rowCount } = await pool.query(
+    `DELETE FROM document_chunks
+       WHERE course_id = $1
+         AND document_id IN (
+           SELECT id FROM documents
+            WHERE course_id = $1 AND document_type = 'syllabus' AND id != $2
+         )`,
+    [courseId, keepDocumentId]
+  )
+  return rowCount ?? 0
+}
+
 export interface RelevantChunk {
   document_id: string
   file_name:   string

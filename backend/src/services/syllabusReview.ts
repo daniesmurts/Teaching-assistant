@@ -112,7 +112,7 @@ interface ParsedSyllabus {
   content:      Record<ContentSection, string | null>
 }
 
-interface Requirement {
+export interface Requirement {
   ref:         string                 // stable id for the round-trip (G0 / C0 / I0_1 / K0 / S0 / M0)
   kind:        RequirementKind
   code:        string | null
@@ -154,7 +154,11 @@ async function parseSyllabusStructure(teacherId: string, text: string): Promise<
   const result = await chatJSON<RawParse>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'структура РПД',
-    { context: { teacherId, feature: 'grading' } },
+    // temperature 0 — this is pure extraction, and the provider default (1.0)
+    // made the parse itself non-deterministic: the same РПД would sometimes
+    // lose a whole content section (e.g. §6 практ.) between runs, so the
+    // scorer saw different evidence and the verdict counts jumped around.
+    { context: { teacherId, feature: 'grading' }, temperature: 0 },
   )
 
   return normaliseParse(result)
@@ -219,7 +223,7 @@ function buildRequirements(p: ParsedSyllabus): Requirement[] {
 
 // ── Scorer pass — score each requirement against the CONTENT sections only ────
 
-interface RawScored {
+export interface RawScored {
   ref?:            string
   status?:         string
   score?:          number
@@ -246,7 +250,15 @@ async function scoreCoverage(
     `## Требования к обеспечению\n${reqBlock}\n\n` +
     `## Задача\nДля КАЖДОГО требования (с ref) определите, обеспечивает ли его СОДЕРЖАНИЕ выше.\n` +
     `ВАЖНО: ищите подтверждение в РАЗДЕЛАХ СОДЕРЖАНИЯ (LECTURES/PRACTICALS/LABS/INDEPENDENT/CONTROL), ` +
-    `а не в формулировке самого требования. Если в содержании опереться не на что — это «missing».\n\n` +
+    `а не в формулировке самого требования.\n\n` +
+    `## Критерии статуса (применяйте строго, в этом порядке)\n` +
+    `- "covered": в содержании есть тема/занятие/форма контроля, ПРЯМО обеспечивающая требование ` +
+    `(тот же предмет деятельности, а не смежный) — и вы можете привести дословную цитату.\n` +
+    `- "partial": в содержании есть только СМЕЖНАЯ тема (часть требования обеспечена, часть нет), ` +
+    `либо тема упомянута без соответствующей деятельности (например, «Знать» подкреплено лекцией, ` +
+    `но «Уметь»-требование не имеет ни практического занятия, ни лабораторной).\n` +
+    `- "missing": ни одной цитаты из содержания привести нельзя — опереться не на что.\n` +
+    `Правило при сомнении между двумя статусами: выбирайте более строгий (ниже) статус.\n\n` +
     `## Формат ответа\nВерните JSON: {"items":[ ... ]}, где каждый элемент:\n` +
     `- "ref": идентификатор требования из списка выше,\n` +
     `- "status": "covered" / "partial" / "missing",\n` +
@@ -260,7 +272,11 @@ async function scoreCoverage(
   const result = await chatJSON<{ items: RawScored[] }>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'оценка покрытия РПД',
-    { context: { teacherId, feature: 'grading' } },
+    // temperature 0 — classification over a fixed evidence set. At the
+    // provider default (1.0) borderline requirements flipped between
+    // covered/partial on every run; greedy decoding + the explicit status
+    // rubric above pins the same input to (almost always) the same verdict.
+    { context: { teacherId, feature: 'grading' }, temperature: 0 },
   )
 
   const byRef = new Map<string, RawScored>()
@@ -268,7 +284,17 @@ async function scoreCoverage(
     if (it.ref) byRef.set(String(it.ref).trim().toUpperCase(), it)
   }
 
-  return requirements.map((req) => toItem(req, byRef.get(req.ref.toUpperCase())))
+  // Pre-normalised haystacks per section, for verbatim excerpt validation
+  // (same anti-hallucination contract as grading's validateCitation — rule #2).
+  const haystacks = Object.fromEntries(
+    VALID_SECTION.map((s) => [s, normaliseForMatch(content[s] ?? '')])
+  ) as Record<ContentSection, string>
+
+  return requirements.map((req) => toItem(req, byRef.get(req.ref.toUpperCase()), haystacks))
+}
+
+function normaliseForMatch(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, ' ').trim()
 }
 
 function buildContentBlock(content: Record<ContentSection, string | null>): string {
@@ -300,18 +326,39 @@ function buildRequirementsBlock(reqs: Requirement[]): string {
     .join('\n\n')
 }
 
-function toItem(req: Requirement, raw: RawScored | undefined): SyllabusCoverageItem {
-  const status: CoverageStatus = VALID_STATUS.includes(raw?.status as CoverageStatus)
+// Exported for unit tests (excerpt validation + rubric-enforcement demotion) —
+// same convention as longReview.ts's clusterByName.
+export function toItem(
+  req: Requirement,
+  raw: RawScored | undefined,
+  haystacks: Record<ContentSection, string>,
+): SyllabusCoverageItem {
+  let status: CoverageStatus = VALID_STATUS.includes(raw?.status as CoverageStatus)
     ? (raw!.status as CoverageStatus)
     : 'missing'
 
+  // Keep a source only if its excerpt genuinely appears (verbatim,
+  // case/whitespace-insensitive) in the claimed section — hallucinated
+  // quotes get dropped rather than shown to the admin as "evidence".
   const sources: CoverageSource[] = (raw?.sources ?? [])
     .map((s) => ({
       section: (VALID_SECTION as readonly string[]).includes(String(s.section)) ? (s.section as ContentSection) : null,
       excerpt: String(s.excerpt ?? '').trim(),
     }))
-    .filter((s): s is CoverageSource => s.section !== null && s.excerpt.length > 0)
+    .filter((s): s is CoverageSource =>
+      s.section !== null &&
+      s.excerpt.length >= 8 &&
+      haystacks[s.section].includes(normaliseForMatch(s.excerpt))
+    )
     .slice(0, 3)
+
+  // Enforce the scoring rubric deterministically: "covered" requires at
+  // least one verifiable citation. If every quote failed validation, the
+  // claim is unverified — demote to partial so the admin sees it flagged,
+  // and discard the model's score along with it (it rated the unverified
+  // "covered" claim, not the demoted state).
+  let demoted = false
+  if (status === 'covered' && sources.length === 0) { status = 'partial'; demoted = true }
 
   return {
     kind:           req.kind,
@@ -319,7 +366,7 @@ function toItem(req: Requirement, raw: RawScored | undefined): SyllabusCoverageI
     title:          req.title,
     parent_code:    req.parent_code,
     status,
-    score:          clampScore(raw?.score, status),
+    score:          clampScore(demoted ? undefined : raw?.score, status),
     sources,
     evidence:       sources[0]?.excerpt ?? null,    // back-compat with existing UI
     gap:            (raw?.gap ?? '').trim(),

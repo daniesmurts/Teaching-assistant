@@ -1,13 +1,18 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
 import { getCourses } from '../api/courses'
 import {
-  draftSyllabus, reviewSyllabusText, type DraftCompetency,
+  draftSyllabus, reviewSyllabusText, getSavedSyllabusDraft, saveSyllabusDraft, type DraftCompetency,
 } from '../api/curriculum'
 import { useUIStore } from '../store/uiStore'
 import type { SyllabusSection, SyllabusReview } from '../types'
+
+// Debounce for autosaving freehand edits — long enough that normal typing
+// doesn't fire a request per keystroke, short enough that a refresh a few
+// seconds after the last edit doesn't lose anything.
+const AUTOSAVE_DEBOUNCE_MS = 1200
 
 export default function CurriculumStudio() {
   const addToast = useUIStore((s) => s.addToast)
@@ -18,6 +23,29 @@ export default function CurriculumStudio() {
   const [review, setReview]       = useState<SyllabusReview | null>(null)
 
   const { data: courses = [] } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
+  const disciplineName = courses.find((c) => c.id === courseId)?.name ?? ''
+
+  // Reload a saved draft (initial generation or later edits) whenever the
+  // selected course changes — this is what makes the studio survive a
+  // refresh instead of always starting blank.
+  const savedDraftQuery = useQuery({
+    queryKey: ['syllabus-studio-draft', courseId],
+    queryFn: () => getSavedSyllabusDraft(courseId),
+    enabled: Boolean(courseId),
+  })
+
+  useEffect(() => {
+    if (!courseId) { setSections(null); setTargets({ competencies: [], goals: [] }); setReview(null); return }
+    const saved = savedDraftQuery.data
+    if (saved) {
+      setSections(saved.sections)
+      setTargets({ competencies: saved.competencies, goals: saved.goals })
+      setReview(saved.review)
+    } else if (savedDraftQuery.isFetched) {
+      setSections(null); setTargets({ competencies: [], goals: [] }); setReview(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseId, savedDraftQuery.data, savedDraftQuery.isFetched])
 
   const draftMut = useMutation({
     mutationFn: () => draftSyllabus(courseId),
@@ -25,12 +53,21 @@ export default function CurriculumStudio() {
       setSections(data.draft.sections)
       setTargets({ competencies: data.competencies, goals: data.goals })
       setReview(data.review)
+      // Already persisted server-side (POST /syllabus-draft auto-saves) —
+      // no client-side save needed here.
     },
   })
 
   const recheckMut = useMutation({
     mutationFn: () => reviewSyllabusText(assembled(), targets.competencies, targets.goals),
-    onSuccess: (data) => { setReview(data); addToast('Покрытие пересчитано', 'success') },
+    onSuccess: (data) => {
+      setReview(data)
+      addToast('Покрытие пересчитано', 'success')
+      if (sections) {
+        saveSyllabusDraft({ courseId, disciplineName, sections, competencies: targets.competencies, goals: targets.goals, review: data })
+          .catch(() => null)
+      }
+    },
   })
 
   function assembled(): string {
@@ -43,9 +80,26 @@ export default function CurriculumStudio() {
     draftMut.mutate()
   }
 
+  // Autosave freehand edits (debounced) so a refresh mid-edit doesn't lose
+  // them — not just the original AI-generated content.
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   function editSection(i: number, content: string) {
-    setSections((prev) => prev ? prev.map((s, idx) => idx === i ? { ...s, content } : s) : prev)
+    setSections((prev) => {
+      if (!prev) return prev
+      const next = prev.map((s, idx) => idx === i ? { ...s, content } : s)
+      if (autosaveTimer.current) clearTimeout(autosaveTimer.current)
+      autosaveTimer.current = setTimeout(() => {
+        saveSyllabusDraft({ courseId, disciplineName, sections: next, competencies: targets.competencies, goals: targets.goals, review })
+          .catch(() => null)
+      }, AUTOSAVE_DEBOUNCE_MS)
+      return next
+    })
   }
+
+  // Cancel any pending autosave on unmount — avoids a stale-closure save
+  // firing after navigation. Worst case on an untimely navigate-away is
+  // losing up to the last ~1.2s of unsaved keystrokes, not the whole edit.
+  useEffect(() => () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current) }, [])
 
   return (
     <>

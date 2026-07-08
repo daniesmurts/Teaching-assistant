@@ -17,21 +17,25 @@ the line to `CHANGELOG.md` and delete here.
 
 ## Improvements
 
-### 1. Move long reviews onto a real job queue · Effort: M
+### ~~1. Move long reviews onto a real job queue~~ — already done
 
-Today `runLongReview` runs inside the Express process via fire-and-forget. A
-PM2 restart mid-job orphans the work; the teacher refreshes and lands on
-`failed`. The resume logic we shipped masks the symptom, doesn't fix the
-cause.
-
-- **Why:** ВКР reviews can take 5+ minutes. Losing one mid-flight is a real
-  customer-trust event. Same machinery would power bulk grading (feature
-  below) without bespoke plumbing.
-- **Touches:** [services/longReview.ts](backend/src/services/longReview.ts),
-  new `services/jobQueue.ts`, `routes/grading.ts` review endpoints, schema
-  for job persistence (or pg-boss tables).
-- **Recommended:** pg-boss on the existing Postgres — no new infra, survives
-  restarts, gives you retries + dead-letter for free.
+Shipped: `POST /api/grading/review` now enqueues onto pg-boss
+(`services/jobQueue.ts`, `services/longReviewWorker.ts`) instead of running
+`runLongReview` fire-and-forget in-process — a PM2 restart mid-job no longer
+orphans the work; pg-boss persists the job as a Postgres row before the 202
+response and picks a still-running job back up via retry (retryLimit 2,
+30-minute expiry) if the process dies mid-attempt, with a dead-letter queue
+after retries are exhausted. `runLongReview` now throws on failure (was:
+swallowed internally) so pg-boss's retry machinery actually sees it;
+`long_reviews.status = 'failed'` is written only on the last attempt, so the
+UI doesn't flash "failed" before a silent retry. Retries re-run the whole
+pipeline from scratch — no section-level checkpointing in v1; a natural
+follow-up if retry-from-scratch proves too costly for the common failure
+modes (transient provider blip, restart) it's actually solving for. pg-boss
+v10.4.2 pinned (not the current v12, which is ESM-only and incompatible with
+this CommonJS-compiled backend); no new migration needed — pg-boss manages
+its own schema. Same infra now powers bulk grading (feature below) without
+bespoke plumbing when that ships. See CHANGELOG for the full design.
 
 ### ~~2. Audit grade changes after approval~~ — already done
 
@@ -67,19 +71,23 @@ laptop is a real scenario.
 - **Touches:** [hooks/usePersistedState.ts](frontend/src/hooks/usePersistedState.ts)
   — single file, everything else inherits.
 
-### 5. Document re-ingestion lifecycle · Effort: S
+### ~~5. Document re-ingestion lifecycle~~ — already done
 
-If a teacher uploads a new version of a syllabus, the old `document_chunks`
-rows stay forever. Citations in old presentations + quizzes point at chunks
-that no longer represent current course content.
-
-- **Why:** Silent data rot. Bites worst at the end of semester when
-  syllabuses are updated for the next term.
-- **Options:**
-  - Cascade-delete chunks when a document is replaced (simple, lossy)
-  - Version documents and let presentations/quizzes bind to a doc version
-- **Touches:** [routes/documents.ts](backend/src/routes/documents.ts),
-  [services/documents.ts](backend/src/services/documents.ts), migration.
+Shipped: took the "cascade-delete chunks when replaced" option (simple,
+matches `courses.syllabus_text`'s existing overwrite-not-append design).
+New `deleteChunksForOtherSyllabusDocuments()`
+([db/queries/chunks.ts](backend/src/db/queries/chunks.ts)), called from
+[services/documents.ts](backend/src/services/documents.ts)'s
+`processDocument` once a replacement syllabus has produced at least one
+chunk of its own (never deletes the old ones first — a total embedding
+failure on the new upload should leave the stale-but-present old chunks,
+not zero). Scoped to `document_type = 'syllabus'` only; `'material'`
+documents are untouched — a course accumulates many of those on purpose,
+unlike syllabus which is single-source-of-truth by design. No migration
+needed — no schema change, just a DELETE query. Old presentations/quizzes
+are unaffected since their citations are text snapshots captured at
+generation time, not live FKs into `document_chunks`. See CHANGELOG for
+the full design.
 
 ### ~~6. Onboarding signposting for the criteria model~~ — already done
 

@@ -5,13 +5,16 @@ import { aiLimiter } from '../middleware/rateLimits'
 import { asyncHandler } from '../lib/asyncHandler'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import {
-  analyzeOverlapRules, syllabusReviewRules, syllabusDraftRules,
+  analyzeOverlapRules, syllabusReviewRules, syllabusDraftRules, syllabusStudioSaveRules,
 } from '../validation/curriculumValidation'
 import { analyzeCurriculumOverlap } from '../services/curriculumAnalysis'
 import { reviewSyllabus, extractDeclared, type CompetencyInput } from '../services/syllabusReview'
 import { draftSyllabus, draftToText } from '../services/syllabusAuthor'
 import { findCourseById } from '../db/queries/courses'
 import { getLatestKnowledgeText } from '../db/queries/documents'
+import { saveSyllabusStudioDraft, getSyllabusStudioDraft } from '../db/queries/syllabusStudioDrafts'
+import type { SyllabusSection, SyllabusReview } from '../../../shared/types'
+import { logger } from '../lib/logger'
 
 const router = Router()
 router.use(authenticate)
@@ -113,7 +116,70 @@ router.post(
       teacherId: req.teacher.id, syllabusText: draftToText(draft), competencies, goals,
     })
 
+    // Persist so the teacher can reopen this draft after a refresh (only
+    // when tied to a real course — the raw discipline_name path has no
+    // stable key to save under and isn't used by the frontend today).
+    if (body.course_id) {
+      await saveSyllabusStudioDraft({
+        courseId:       body.course_id,
+        teacherId:      req.teacher.id,
+        disciplineName: name,
+        sections:       draft.sections,
+        competencies,
+        goals,
+        review,
+      }).catch((err) => {
+        // Never let a save failure break the generation response the
+        // teacher is actively waiting on.
+        logger.warn({ message: 'Could not save РПД-студия draft', courseId: body.course_id, error: (err as Error).message })
+      })
+    }
+
     res.json({ draft, review, competencies, goals })
+  })
+)
+
+// GET /api/curriculum/syllabus-draft/:courseId — reload a previously saved
+// РПД-студия draft (initial generation or later edits/rechecks), if any.
+router.get(
+  '/syllabus-draft/:courseId',
+  asyncHandler(async (req, res) => {
+    const saved = await getSyllabusStudioDraft(req.params.courseId, req.teacher.id)
+    res.json({
+      draft: saved
+        ? { sections: saved.sections, competencies: saved.competencies, goals: saved.goals, review: saved.review }
+        : null,
+    })
+  })
+)
+
+// PUT /api/curriculum/syllabus-draft — save the current client-side state
+// (a teacher's freehand edits, or an updated coverage review after
+// "Перепроверить покрытие") so it survives a refresh, not just the
+// original AI output.
+router.put(
+  '/syllabus-draft',
+  validate(syllabusStudioSaveRules),
+  asyncHandler(async (req, res) => {
+    const body = req.body as {
+      course_id: string; discipline_name: string
+      sections: SyllabusSection[]; competencies?: CompetencyInput[]; goals?: string[]
+      review?: SyllabusReview | null
+    }
+    const course = await findCourseById(body.course_id, req.teacher.id)
+    if (!course) throw new NotFoundError('Дисциплина')
+
+    await saveSyllabusStudioDraft({
+      courseId:       body.course_id,
+      teacherId:      req.teacher.id,
+      disciplineName: body.discipline_name,
+      sections:       body.sections,
+      competencies:   body.competencies ?? [],
+      goals:          body.goals ?? [],
+      review:         body.review ?? null,
+    })
+
+    res.json({ saved: true })
   })
 )
 

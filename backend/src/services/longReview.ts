@@ -26,7 +26,7 @@ const VERBATIM_CHARS       = 6_000    // intro/conclusion kept in full for the r
 
 // ─── Public entry — runs the whole pipeline for one review job ─────────────────
 
-interface RunParams {
+export interface RunParams {
   reviewId:       string
   teacherId:      string
   institutionId?: string | null
@@ -39,113 +39,115 @@ interface RunParams {
   submissionText: string
 }
 
-/** Fire-and-forget orchestrator. Updates the job row as it progresses. */
+/**
+ * Runs the whole map-reduce pipeline for one review job. Called by the
+ * pg-boss worker (services/longReviewWorker.ts) — throws on failure rather
+ * than swallowing errors, so pg-boss's retry/dead-letter policy actually
+ * sees the failure. The worker wrapper is responsible for writing
+ * `long_reviews.status = 'failed'` (only once retries are exhausted, so the
+ * UI doesn't flash "failed" while a retry is still about to run).
+ */
 export async function runLongReview(p: RunParams): Promise<void> {
   const ctx: CallContext = { teacherId: p.teacherId, feature: 'grading' }
-  try {
-    const snapshot = await resolveCriteriaSnapshot(
-      p.teacherId,
-      p.institutionId ?? null,
-      p.criterionIds ?? [],
-      p.weights ?? [],
-    )
-    if (snapshot.length > 0) {
-      await setLongReviewSnapshot(p.reviewId, snapshot).catch(() => null)
-    }
-
-    const sections = splitIntoSections(p.submissionText)
-    await setLongReviewStatus(p.reviewId, 'analyzing')
-    await setLongReviewProgress(p.reviewId, 0, sections.length)
-
-    // ── Map: analyse each section, with bounded concurrency + progress ──────────
-    let done = 0
-    const analyses = await mapWithConcurrency(sections, MAP_CONCURRENCY, async (sec, idx) => {
-      const a = await analyzeSection(sec, snapshot, ctx)
-      // Tier-2: stamp each key quantity with the index of THIS section so the
-      // cross-section pass — and the frontend — can show where it came from.
-      a.key_quantities = a.key_quantities.map((q) => ({ ...q, chapter_index: idx }))
-      done += 1
-      await setLongReviewProgress(p.reviewId, done, sections.length).catch(() => null)
-      return a
-    })
-
-    // ── Reduce: synthesise the overall review ───────────────────────────────────
-    await setLongReviewStatus(p.reviewId, 'synthesizing')
-    const result = await synthesizeReview(sections, analyses, snapshot, p.submissionText, ctx)
-
-    // Defence questions go through their own dedicated call — the synthesis
-    // JSON for a long ВКР (24 chapters × prose + arrays) regularly drained the
-    // model's output budget before this field. Failing the call here is
-    // recoverable: the rest of the review still goes through.
-    try {
-      result.defense_questions = await generateDefenseQuestions(sections, analyses, result, ctx)
-    } catch (err) {
-      logger.warn({ message: 'Defence questions failed', reviewId: p.reviewId, error: (err as Error).message })
-      result.defense_questions = []
-    }
-
-    // Tier-2 cross-section consistency. Cluster extracted quantities by name;
-    // if any cluster has conflicting numeric values, ask the model to confirm
-    // it's a real contradiction (vs. two different concepts that happen to
-    // share a name). Failing the call leaves inconsistencies=[] — review still
-    // ships.
-    try {
-      result.inconsistencies = await findInconsistencies(analyses, result.chapter_reviews, ctx)
-    } catch (err) {
-      logger.warn({ message: 'Consistency pass failed', reviewId: p.reviewId, error: (err as Error).message })
-      result.inconsistencies = []
-    }
-
-    // Tier-4 independent recomputation of headline numerical results. Runs on
-    // the reasoner (slow + costly — only fire if there's actually math). Same
-    // soft-fail contract as defence/consistency.
-    try {
-      result.recomputation_findings = await findRecomputations(sections, analyses, result.chapter_reviews, ctx)
-    } catch (err) {
-      logger.warn({ message: 'Recomputation pass failed', reviewId: p.reviewId, error: (err as Error).message })
-      result.recomputation_findings = []
-    }
-
-    // Tier-5 cross-section premise pass. Document-level reasoning over every
-    // section's summary + quantities at once — catches contradictions spanning
-    // sections (composition vs. reaction equation) and physically/logically
-    // implausible assumptions (phase equilibrium, stoichiometry). Reasoner +
-    // soft-fail, same contract as the passes above.
-    try {
-      result.premise_findings = await findPremiseIssues(sections, analyses, result.chapter_reviews, p.submissionText, ctx)
-    } catch (err) {
-      logger.warn({ message: 'Premise pass failed', reviewId: p.reviewId, error: (err as Error).message })
-      result.premise_findings = []
-    }
-
-    // ── Draft assignment so it flows into history / approval / email / RAG ──────
-    const assignment = await createAssignment({
-      teacherId:     p.teacherId,
-      courseId:      p.courseId ?? undefined,
-      studentName:   p.studentName ?? undefined,
-      studentEmail:  p.studentEmail ?? undefined,
-      studentGroup:  p.studentGroup ?? undefined,
-      submissionText: p.submissionText,
-      aiScore:       clampScore(result.suggested_score),
-      aiGrade:       normaliseGrade(result.suggested_grade),
-      aiGradeLabel:  result.grade_label ?? gradeToLabel(normaliseGrade(result.suggested_grade)),
-      aiFeedback:    result.overall_summary,
-      aiCriteriaScores: [],
-      // Tier-1: overall_strengths/gaps are now BulletItem[] (with verbatim
-      // quotes validated against the submission). Older review rows may still
-      // hold plain strings — wrap any straggler defensively.
-      aiStrengths:    (result.overall_strengths ?? []).map(toBulletItem),
-      aiImprovements: (result.overall_gaps      ?? []).map(toBulletItem),
-      criteriaSnapshot: snapshot.length > 0 ? snapshot : null,
-    })
-
-    await completeLongReview(p.reviewId, result, assignment.id)
-    incrementUsage(p.teacherId, 'grade').catch(() => null)
-    logger.info({ message: 'Long review completed', reviewId: p.reviewId, sections: sections.length })
-  } catch (err) {
-    logger.error({ message: 'Long review failed', reviewId: p.reviewId, error: (err as Error).message })
-    await failLongReview(p.reviewId, (err as Error).message).catch(() => null)
+  const snapshot = await resolveCriteriaSnapshot(
+    p.teacherId,
+    p.institutionId ?? null,
+    p.criterionIds ?? [],
+    p.weights ?? [],
+  )
+  if (snapshot.length > 0) {
+    await setLongReviewSnapshot(p.reviewId, snapshot).catch(() => null)
   }
+
+  const sections = splitIntoSections(p.submissionText)
+  await setLongReviewStatus(p.reviewId, 'analyzing')
+  await setLongReviewProgress(p.reviewId, 0, sections.length)
+
+  // ── Map: analyse each section, with bounded concurrency + progress ──────────
+  let done = 0
+  const analyses = await mapWithConcurrency(sections, MAP_CONCURRENCY, async (sec, idx) => {
+    const a = await analyzeSection(sec, snapshot, ctx)
+    // Tier-2: stamp each key quantity with the index of THIS section so the
+    // cross-section pass — and the frontend — can show where it came from.
+    a.key_quantities = a.key_quantities.map((q) => ({ ...q, chapter_index: idx }))
+    done += 1
+    await setLongReviewProgress(p.reviewId, done, sections.length).catch(() => null)
+    return a
+  })
+
+  // ── Reduce: synthesise the overall review ───────────────────────────────────
+  await setLongReviewStatus(p.reviewId, 'synthesizing')
+  const result = await synthesizeReview(sections, analyses, snapshot, p.submissionText, ctx)
+
+  // Defence questions go through their own dedicated call — the synthesis
+  // JSON for a long ВКР (24 chapters × prose + arrays) regularly drained the
+  // model's output budget before this field. Failing the call here is
+  // recoverable: the rest of the review still goes through.
+  try {
+    result.defense_questions = await generateDefenseQuestions(sections, analyses, result, ctx)
+  } catch (err) {
+    logger.warn({ message: 'Defence questions failed', reviewId: p.reviewId, error: (err as Error).message })
+    result.defense_questions = []
+  }
+
+  // Tier-2 cross-section consistency. Cluster extracted quantities by name;
+  // if any cluster has conflicting numeric values, ask the model to confirm
+  // it's a real contradiction (vs. two different concepts that happen to
+  // share a name). Failing the call leaves inconsistencies=[] — review still
+  // ships.
+  try {
+    result.inconsistencies = await findInconsistencies(analyses, result.chapter_reviews, ctx)
+  } catch (err) {
+    logger.warn({ message: 'Consistency pass failed', reviewId: p.reviewId, error: (err as Error).message })
+    result.inconsistencies = []
+  }
+
+  // Tier-4 independent recomputation of headline numerical results. Runs on
+  // the reasoner (slow + costly — only fire if there's actually math). Same
+  // soft-fail contract as defence/consistency.
+  try {
+    result.recomputation_findings = await findRecomputations(sections, analyses, result.chapter_reviews, ctx)
+  } catch (err) {
+    logger.warn({ message: 'Recomputation pass failed', reviewId: p.reviewId, error: (err as Error).message })
+    result.recomputation_findings = []
+  }
+
+  // Tier-5 cross-section premise pass. Document-level reasoning over every
+  // section's summary + quantities at once — catches contradictions spanning
+  // sections (composition vs. reaction equation) and physically/logically
+  // implausible assumptions (phase equilibrium, stoichiometry). Reasoner +
+  // soft-fail, same contract as the passes above.
+  try {
+    result.premise_findings = await findPremiseIssues(sections, analyses, result.chapter_reviews, p.submissionText, ctx)
+  } catch (err) {
+    logger.warn({ message: 'Premise pass failed', reviewId: p.reviewId, error: (err as Error).message })
+    result.premise_findings = []
+  }
+
+  // ── Draft assignment so it flows into history / approval / email / RAG ──────
+  const assignment = await createAssignment({
+    teacherId:     p.teacherId,
+    courseId:      p.courseId ?? undefined,
+    studentName:   p.studentName ?? undefined,
+    studentEmail:  p.studentEmail ?? undefined,
+    studentGroup:  p.studentGroup ?? undefined,
+    submissionText: p.submissionText,
+    aiScore:       clampScore(result.suggested_score),
+    aiGrade:       normaliseGrade(result.suggested_grade),
+    aiGradeLabel:  result.grade_label ?? gradeToLabel(normaliseGrade(result.suggested_grade)),
+    aiFeedback:    result.overall_summary,
+    aiCriteriaScores: [],
+    // Tier-1: overall_strengths/gaps are now BulletItem[] (with verbatim
+    // quotes validated against the submission). Older review rows may still
+    // hold plain strings — wrap any straggler defensively.
+    aiStrengths:    (result.overall_strengths ?? []).map(toBulletItem),
+    aiImprovements: (result.overall_gaps      ?? []).map(toBulletItem),
+    criteriaSnapshot: snapshot.length > 0 ? snapshot : null,
+  })
+
+  await completeLongReview(p.reviewId, result, assignment.id)
+  incrementUsage(p.teacherId, 'grade').catch(() => null)
+  logger.info({ message: 'Long review completed', reviewId: p.reviewId, sections: sections.length })
 }
 
 // ─── Section splitting ─────────────────────────────────────────────────────────

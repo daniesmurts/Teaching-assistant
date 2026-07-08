@@ -7,7 +7,9 @@ import { asyncHandler } from '../lib/asyncHandler'
 import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
 import { canUseFeature } from '../config/planLimits'
 import { grade, approve } from '../services/grading'
-import { runLongReview } from '../services/longReview'
+import type { RunParams } from '../services/longReview'
+import { LONG_REVIEW_QUEUE } from '../services/longReviewWorker'
+import { getJobQueue } from '../services/jobQueue'
 import { createLongReview, getLongReviewById, getLongReviewByAssignmentId } from '../db/queries/longReviews'
 import { generateEmailDraft } from '../services/email'
 import { composeHandout } from '../services/handout'
@@ -109,8 +111,12 @@ router.post(
       submissionText: submission_text,
     })
 
-    // Process asynchronously — do not await. The client polls GET /review/:id.
-    runLongReview({
+    // Enqueue durably (pg-boss persists this as a Postgres row before we
+    // respond) rather than running fire-and-forget in-process — a PM2
+    // restart mid-review no longer orphans the work. The client polls
+    // GET /review/:id same as before; the worker (longReviewWorker.ts)
+    // processes the job asynchronously.
+    const jobPayload: RunParams = {
       reviewId:       review.id,
       teacherId:      req.teacher.id,
       institutionId:  req.teacher.institution_id ?? null,
@@ -121,7 +127,8 @@ router.post(
       studentEmail:   student_email,
       studentGroup:   student_group,
       submissionText: submission_text,
-    }).catch(() => null)
+    }
+    await getJobQueue().send(LONG_REVIEW_QUEUE, jobPayload)
 
     res.status(202).json({
       id:             review.id,

@@ -1,5 +1,5 @@
 import client from './client'
-import type { CurriculumAnalysis, SyllabusReview, SyllabusDraft } from '../types'
+import type { CurriculumAnalysis, SyllabusReview, SyllabusDraft, SyllabusSection } from '../types'
 
 export interface DraftCompetency { code: string; title: string }
 
@@ -45,4 +45,40 @@ export async function reviewSyllabusText(
     syllabus_text: syllabusText, competencies, goals,
   }, { timeout: 120_000 })
   return res.data
+}
+
+export interface SavedSyllabusDraft {
+  sections:     SyllabusSection[]
+  competencies: DraftCompetency[]
+  goals:        string[]
+  review:       SyllabusReview | null
+}
+
+// Reload a previously saved РПД-студия draft for this course, if any —
+// survives a page refresh instead of the studio always starting blank.
+export async function getSavedSyllabusDraft(courseId: string): Promise<SavedSyllabusDraft | null> {
+  const res = await client.get<{ draft: SavedSyllabusDraft | null }>(
+    `/api/curriculum/syllabus-draft/${courseId}`
+  )
+  return res.data.draft
+}
+
+// Persist the current state (freehand edits or an updated coverage review)
+// so a later refresh reopens exactly where the teacher left off.
+export async function saveSyllabusDraft(data: {
+  courseId:        string
+  disciplineName:  string
+  sections:        SyllabusSection[]
+  competencies:    DraftCompetency[]
+  goals:           string[]
+  review:          SyllabusReview | null
+}): Promise<void> {
+  await client.put('/api/curriculum/syllabus-draft', {
+    course_id:       data.courseId,
+    discipline_name: data.disciplineName,
+    sections:        data.sections,
+    competencies:    data.competencies,
+    goals:           data.goals,
+    review:          data.review,
+  })
 }

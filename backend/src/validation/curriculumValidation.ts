@@ -25,3 +25,16 @@ export const syllabusDraftRules = [
   body('current_content').optional().isString().isLength({ max: 20000 }),
   body('gaps').optional().isArray({ max: 30 }),
 ]
+
+// Persist a РПД-студия draft's current state (initial generation or a later
+// edit/recheck) — course_id required, this is the only path that saves.
+export const syllabusStudioSaveRules = [
+  body('course_id').isUUID().withMessage('Некорректная дисциплина'),
+  body('discipline_name').isString().trim().isLength({ min: 1, max: 300 }),
+  body('sections').isArray({ min: 1, max: 20 }),
+  body('sections.*.heading').isString().isLength({ min: 1, max: 300 }),
+  body('sections.*.content').isString().isLength({ min: 1, max: 20000 }),
+  body('competencies').optional().isArray({ max: 30 }),
+  body('goals').optional().isArray({ max: 30 }),
+  body('review').optional(),
+]

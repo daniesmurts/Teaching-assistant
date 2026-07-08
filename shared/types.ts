@@ -921,7 +921,9 @@ export interface TaskSet {
 // ─── РПД-студия — AI-assisted syllabus authoring (КНИТУ T5) ─────────────────────
 // AI drafts/updates syllabus content aimed at target ОПК/ПК/УК + goals. Pairs with
 // the SyllabusReview check (above) into a write → check → fix loop. AI drafts, the
-// teacher (разработчик РПД) is the author of record. Computed live, not persisted.
+// teacher (разработчик РПД) is the author of record. Persisted per course
+// (syllabus_studio_drafts, migration 070) — the teacher's latest generation and
+// any subsequent edits/rechecks survive a refresh.
 
 export interface SyllabusSection {
   heading: string     // e.g. «Цели освоения дисциплины», «Содержание (темы)»
