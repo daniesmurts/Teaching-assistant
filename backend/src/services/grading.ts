@@ -19,6 +19,7 @@ import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { getPolicyMemo } from '../db/queries/policyMemos'
 import { maybeRegeneratePolicyMemo } from './policyMemo'
+import { syncGradeToLtiGradebook } from './ltiServices'
 import { verifyCalculation, toImprovementBullet } from './calcVerifier'
 import { checkCitations, toCitationBullet } from './citationChecker'
 import { canUseFeature } from '../config/planLimits'
@@ -1014,6 +1015,7 @@ export async function approve(
   if (assignment.course_id) {
     maybeRegeneratePolicyMemo(assignment.course_id, teacherId).catch(() => null)
   }
+  syncGradeToLtiGradebook(assignment).catch(() => null)
 
   return assignment
 }

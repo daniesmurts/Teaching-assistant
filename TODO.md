@@ -522,22 +522,31 @@ Grading is **holistic** for v1. Full original design in
 
 ### R. LTI 1.3 integration + IT-admin configuration UX (§6) · Effort: L
 
-LTI 1.3 + Advantage (launch, NRPS roster sync, AGS grade write-back) so
-GradeAssist plugs into Moodle and the wider LMS ecosystem. Includes the
-IT-admin self-serve configuration surface designed in [Research.md](Research.md)
-§6.5 (Setup + Test Connection, Course Mapping, Activity Log). Full strategy in
-§6.
+**Shipped** (see CHANGELOG.md [Unreleased]): OIDC launch + JWKS validation,
+teacher JIT provisioning, auto-created course-context resolution, self-serve
+Settings → Organisation → LTI config + test-connection page, Deep Linking +
+student launch (tokenised `/student/:token` rail unchanged), AGS grade
+write-back with a sync-status badge, NRPS roster import into the
+published-assignment invite UI, a course-mapping table (`lti_course_links` →
+`org_units`, purely additive — never gates grading), and IMS Dynamic
+Registration (one-click handshake as an alternative to manual Setup-screen
+entry). Schema across migrations `066`–`068` covers all of it.
+
+Remaining scope (low priority, no customer has asked yet):
+- **Activity log** — a simple "last 100 LTI launches" list on
+  `InstitutionLti.tsx` for troubleshooting; every launch already flows
+  through `routes/lti.ts` so this is a logging/query addition, not new
+  protocol work.
+- **Known v1 limitation:** a co-taught Moodle course maps to whichever
+  teacher launches it first — a second instructor's launch reuses the same
+  `course_id` but the course row stays owned by the first. Needs a
+  `course_collaborators`-style join if/when it comes up with a real customer.
 
 - **Why:** the institutional wedge. Without LTI, GradeAssist is "another system
   to migrate to" and procurement stalls; with it, it is "a compatible tool."
   Sources verified student identity from the LMS, so we never store student
   credentials (§6.1). The §6.5 config UX is what keeps each institutional sale
   from becoming a hand-held engineering engagement.
-- **Touches:** LTI 1.3 OIDC/JWT launch handling; JWKS endpoint; NRPS + AGS
-  clients; `org_units.external_code` mapping; Settings → Organisation → LTI
-  surface (gated on root-unit `admin`); course-context-to-org-unit mapping.
-- **Sequencing:** after Feature P (needs the org tree to map course contexts
-  into) and alongside Feature Q (provides Q's institutional identity rail).
 
 ### ~~S. Agentic calc verification~~ — already done
 

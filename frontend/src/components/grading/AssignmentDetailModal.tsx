@@ -134,6 +134,22 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
             </div>
           </div>
           <Badge variant={a.status as AssignmentStatus} />
+          {a.lti_gradebook_synced_at && (
+            <span
+              className="text-xs font-sans px-2 py-0.5 rounded-full bg-green-50 border border-green-200 text-green-800 flex-shrink-0"
+              title={`Синхронизировано с LMS: ${fmt(a.lti_gradebook_synced_at)}`}
+            >
+              ✓ Moodle
+            </span>
+          )}
+          {!a.lti_gradebook_synced_at && a.lti_gradebook_sync_error && (
+            <span
+              className="text-xs font-sans px-2 py-0.5 rounded-full bg-red-50 border border-red-200 text-red-800 flex-shrink-0"
+              title={a.lti_gradebook_sync_error}
+            >
+              ⚠ Moodle
+            </span>
+          )}
           {a.status === 'pending' && (
             <button
               onClick={resumeApproval}

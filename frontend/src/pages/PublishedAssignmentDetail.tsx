@@ -5,7 +5,7 @@ import Button from '../components/ui/Button'
 import { useUIStore } from '../store/uiStore'
 import {
   getPublishedAssignment, updatePublishedAssignment, addInvite, deleteInvite, writeUrl,
-  type PublishedStatus, type InviteStatus,
+  getLtiRoster, importLtiRoster, type PublishedStatus, type InviteStatus, type LtiRosterMember,
 } from '../api/publishedAssignments'
 import CohortSynthesisPanel from '../components/publishedAssignments/CohortSynthesisPanel'
 import { usePlan } from '../hooks/usePlan'
@@ -33,6 +33,8 @@ export default function PublishedAssignmentDetail() {
 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [rosterOpen, setRosterOpen] = useState(false)
+  const [rosterPicked, setRosterPicked] = useState<Set<string>>(new Set())
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['published-assignment', id] })
@@ -51,6 +53,21 @@ export default function PublishedAssignmentDetail() {
   const delMut = useMutation({
     mutationFn: (inviteId: string) => deleteInvite(id, inviteId),
     onSuccess: () => { invalidate(); addToast('Удалено', 'success') }, onError,
+  })
+
+  const rosterQuery = useQuery({
+    queryKey: ['published-assignment-lti-roster', id],
+    queryFn:  () => getLtiRoster(id),
+  })
+  const importMut = useMutation({
+    mutationFn: (members: LtiRosterMember[]) => importLtiRoster(id, members),
+    onSuccess: (res) => {
+      invalidate()
+      setRosterOpen(false)
+      setRosterPicked(new Set())
+      addToast(`Добавлено студентов: ${res.invites.length}`, 'success')
+    },
+    onError,
   })
 
   function copyLink(token: string) {
@@ -121,10 +138,58 @@ export default function PublishedAssignmentDetail() {
         )}
 
         {/* Roster */}
-        <h2 className="font-display text-lg font-bold text-ink mb-1">Студенты</h2>
+        <div className="flex items-center justify-between gap-3 mb-1">
+          <h2 className="font-display text-lg font-bold text-ink">Студенты</h2>
+          {rosterQuery.data?.available && (
+            <button onClick={() => setRosterOpen(true)}
+              className="text-xs font-sans font-medium text-amber hover:opacity-80 transition-opacity flex-shrink-0">
+              Импортировать из Moodle
+            </button>
+          )}
+        </div>
         <p className="text-sm font-sans text-ink-secondary mb-3">
           Сдано {invites.filter((i) => i.status === 'submitted').length} из {invites.length}. Отправьте каждому персональную ссылку.
         </p>
+
+        {rosterOpen && rosterQuery.data?.available && (
+          <div className="mb-4 bg-surface-warm border border-border rounded-lg px-3 py-3">
+            <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">
+              Список студентов из Moodle
+            </div>
+            <div className="space-y-1 max-h-56 overflow-y-auto mb-3">
+              {rosterQuery.data.members.map((m) => (
+                <label key={m.userId} className="flex items-center gap-2 text-sm font-sans text-ink px-1 py-0.5">
+                  <input
+                    type="checkbox"
+                    checked={rosterPicked.has(m.userId)}
+                    onChange={(e) => {
+                      const next = new Set(rosterPicked)
+                      if (e.target.checked) next.add(m.userId); else next.delete(m.userId)
+                      setRosterPicked(next)
+                    }}
+                  />
+                  {m.name || m.email || m.userId}
+                  {m.name && m.email && <span className="text-xs text-ink-tertiary">{m.email}</span>}
+                </label>
+              ))}
+              {rosterQuery.data.members.length === 0 && (
+                <div className="text-xs font-sans text-ink-tertiary px-1">Список студентов пуст.</div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => importMut.mutate(rosterQuery.data!.available
+                  ? rosterQuery.data.members.filter((m) => rosterPicked.has(m.userId))
+                  : [])}
+                loading={importMut.isPending}
+                disabled={rosterPicked.size === 0}
+              >
+                Добавить выбранных ({rosterPicked.size})
+              </Button>
+              <Button variant="secondary" onClick={() => setRosterOpen(false)}>Отмена</Button>
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-wrap items-end gap-2 mb-4 bg-surface-warm border border-border rounded-lg px-3 py-3">
           <label className="block flex-1 min-w-[140px]">

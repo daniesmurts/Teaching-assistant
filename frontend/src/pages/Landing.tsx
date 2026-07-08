@@ -214,6 +214,36 @@ export default function Landing() {
             </div>
           </div>
 
+          {/* Feature 5 — LTI / Moodle integration */}
+          <div className="flex flex-col md:flex-row items-center gap-12">
+            <div className="flex-1 space-y-4">
+              <div className="text-xs font-bold text-amber uppercase tracking-wider">Интеграция с Moodle</div>
+              <h3 className="font-display text-3xl font-bold">Прямо из курса — без отдельного входа</h3>
+              <p className="text-ink-secondary leading-relaxed">
+                Подключите ИСПУМ к Moodle по стандарту LTI 1.3. Преподаватель открывает задание в своём курсе и сразу оказывается в ИСПУМ авторизованным. Студент сдаёт работу без регистрации. Утверждённая оценка автоматически возвращается в журнал Moodle — никакого ручного экспорта.
+              </p>
+            </div>
+            <div className="flex-1 w-full bg-surface border border-border rounded-xl p-6 shadow-sm">
+              <div className="text-xs font-semibold text-ink-tertiary uppercase tracking-wider mb-3">Курс в Moodle</div>
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-border-mid bg-bg mb-4">
+                <div className="w-8 h-8 rounded-md bg-info-bg flex items-center justify-center text-info font-display font-bold text-xs flex-shrink-0">М</div>
+                <div className="flex-1 min-w-0">
+                  <div className="h-2 w-2/3 bg-border rounded-sm mb-1.5"></div>
+                  <div className="h-2 w-1/3 bg-border rounded-sm"></div>
+                </div>
+                <span className="text-[10px] font-sans font-medium bg-amber text-white px-2 py-1 rounded-sm flex-shrink-0">Открыть в ИСПУМ →</span>
+              </div>
+              <div className="flex justify-center text-ink-tertiary mb-4">↓</div>
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-amber/30 bg-amber-light/30">
+                <div className="w-8 h-8 rounded-full bg-success-bg flex items-center justify-center text-success font-bold text-sm flex-shrink-0">✓</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-sans font-medium text-ink">Авторизован в ИСПУМ</div>
+                  <div className="text-[10px] font-sans text-ink-tertiary">Оценка передана в журнал Moodle</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
         </div>
       </section>
 
@@ -325,6 +355,7 @@ export default function Landing() {
                 <li className="flex gap-2"><span>•</span> Панель администратора и журнал действий</li>
                 <li className="flex gap-2"><span>•</span> Массовое приглашение преподавателей</li>
                 <li className="flex gap-2"><span>•</span> Авто-вход по корпоративному домену</li>
+                <li className="flex gap-2"><span>•</span> Интеграция с Moodle (LTI 1.3) — вход и передача оценок без ручного экспорта</li>
                 <li className="flex gap-2"><span>•</span> Общие рубрики кафедры</li>
                 <li className="flex gap-2"><span>•</span> Отчёты по использованию (CSV)</li>
                 <li className="flex gap-2"><span>•</span> Выделенная поддержка и онбординг</li>
@@ -451,6 +482,12 @@ export default function Landing() {
                 </tr>
                 <tr className="border-b border-border hover:bg-surface transition-colors">
                   <td className="py-3 px-4">Авто-вход по корпоративному домену</td>
+                  <td className="py-3 px-4 text-ink-tertiary">✕</td>
+                  <td className="py-3 px-4 text-ink-tertiary">✕</td>
+                  <td className="py-3 px-4 text-success">✓</td>
+                </tr>
+                <tr className="border-b border-border hover:bg-surface transition-colors">
+                  <td className="py-3 px-4">Интеграция с Moodle (LTI 1.3) — вход и оценки без CSV</td>
                   <td className="py-3 px-4 text-ink-tertiary">✕</td>
                   <td className="py-3 px-4 text-ink-tertiary">✕</td>
                   <td className="py-3 px-4 text-success">✓</td>

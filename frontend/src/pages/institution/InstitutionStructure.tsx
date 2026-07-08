@@ -10,17 +10,7 @@ import {
   type OrgUnit, type OrgUnitType, type OrgUnitMeta, type InstitutionMember, type UnitRole,
 } from '../../api/orgStructure'
 import { EDUCATION_LEVELS, STUDY_FORMS } from '../../types'
-
-const TYPE_LABEL: Record<OrgUnitType, string> = {
-  institution:       'Организация',
-  governance:        'Руководство',
-  admin_office:      'Управление / центр',
-  cluster:           'Полигруппа',
-  division:          'Институт / факультет',
-  program:           'Образовательная программа',
-  program_direction: 'Направление подготовки',
-  department:        'Кафедра',
-}
+import { buildTree, TYPE_LABEL, type TreeNode } from '../../lib/orgTree'
 
 const ROLE_LABEL: Record<UnitRole, string> = {
   admin:  'Администратор',
@@ -168,19 +158,6 @@ function ProgrammeMetaFields({ value, onChange }: { value: MetaForm; onChange: (
       </div>
     </div>
   )
-}
-
-interface TreeNode extends OrgUnit { children: TreeNode[] }
-
-function buildTree(units: OrgUnit[]): TreeNode[] {
-  const byId = new Map<string, TreeNode>()
-  units.forEach((u) => byId.set(u.id, { ...u, children: [] }))
-  const roots: TreeNode[] = []
-  byId.forEach((node) => {
-    if (node.parent_id && byId.has(node.parent_id)) byId.get(node.parent_id)!.children.push(node)
-    else roots.push(node)
-  })
-  return roots
 }
 
 export default function InstitutionStructure() {

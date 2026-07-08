@@ -123,6 +123,43 @@ export async function addInvite(
   return rows[0]
 }
 
+/**
+ * LTI student launch — find or create the invite for this (published
+ * assignment, LMS student) pair. Idempotent so re-launching the same Moodle
+ * activity (closed tab, re-opened) lands on the same in-progress draft
+ * instead of minting a fresh token each time. The student still authenticates
+ * purely via the resulting `token` — LTI only changes how the invite is
+ * created and how the student arrives at the URL, never what secures it.
+ */
+export async function findOrCreateLtiInvite(params: {
+  publishedAssignmentId: string
+  ltiSubject:            string
+  ltiDeploymentId:       string
+  ltiContextId:          string
+  studentName:           string | null
+  studentEmail:          string | null
+}): Promise<AssignmentInviteRow> {
+  const { rows: existing } = await pool.query<AssignmentInviteRow>(
+    `SELECT id, published_assignment_id, student_name, student_email, token, status, submitted_at, created_at
+       FROM assignment_invites
+      WHERE published_assignment_id = $1 AND lti_subject = $2
+      LIMIT 1`,
+    [params.publishedAssignmentId, params.ltiSubject]
+  )
+  if (existing[0]) return existing[0]
+
+  const { rows } = await pool.query<AssignmentInviteRow>(
+    `INSERT INTO assignment_invites
+       (published_assignment_id, student_name, student_email, token,
+        lti_subject, lti_deployment_id, lti_context_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, published_assignment_id, student_name, student_email, token, status, submitted_at, created_at`,
+    [params.publishedAssignmentId, params.studentName, params.studentEmail, generateInviteToken(),
+     params.ltiSubject, params.ltiDeploymentId, params.ltiContextId]
+  )
+  return rows[0]
+}
+
 export async function listInvites(publishedAssignmentId: string): Promise<AssignmentInviteRow[]> {
   const { rows } = await pool.query<AssignmentInviteRow>(
     `SELECT id, published_assignment_id, student_name, student_email, token, status, submitted_at, created_at

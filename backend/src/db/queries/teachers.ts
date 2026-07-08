@@ -323,3 +323,52 @@ export async function findOrCreateSamlTeacher(params: {
   // be minted with the right effective tier — re-fetch through the joined query.
   return (await findTeacherRowById(rows[0].id))!
 }
+
+// ─── LTI 1.3 — JIT provisioning ────────────────────────────────────────────────
+
+/**
+ * Find a teacher by email or create one from an LTI launch's id_token. Direct
+ * mirror of findOrCreateSamlTeacher — same "never re-attach institution_id
+ * across institutions" guard, same always-place-in-default-department call.
+ * Called from the /api/lti/launch handler after the platform's signature is
+ * verified via services/lti.ts validateLaunchToken().
+ */
+export async function findOrCreateLtiTeacher(params: {
+  email:         string
+  name:          string | null
+  institutionId: string
+  ltiSubject:    string
+}): Promise<TeacherRow> {
+  const email = params.email.toLowerCase()
+
+  const existing = await findTeacherByEmail(email)
+  if (existing) {
+    await pool.query(
+      `UPDATE teachers SET
+         lti_subject        = COALESCE(lti_subject, $2),
+         lti_provisioned_at = COALESCE(lti_provisioned_at, NOW()),
+         institution_id     = COALESCE(institution_id, $3)
+       WHERE id = $1`,
+      [existing.id, params.ltiSubject, params.institutionId]
+    )
+    const row = (await findTeacherRowById(existing.id))!
+    if (row.institution_id) await assignDefaultDepartmentIfUnset(row.id, row.institution_id)
+    return (await findTeacherRowById(existing.id))!
+  }
+
+  // Random 256-bit hex password — the LTI-launched teacher never sees or
+  // needs it; the platform (Moodle) owns their credentials.
+  const randomPassword = randomBytes(32).toString('hex')
+  const passwordHash   = await bcrypt.hash(randomPassword, 12)
+
+  const { rows } = await pool.query<TeacherRow>(
+    `INSERT INTO teachers (email, password_hash, name, institution_id,
+                            lti_subject, lti_provisioned_at)
+     VALUES ($1, $2, $3, $4, $5, NOW())
+     RETURNING *`,
+    [email, passwordHash, params.name, params.institutionId, params.ltiSubject]
+  )
+  await assignDefaultDepartmentIfUnset(rows[0].id, params.institutionId)
+
+  return (await findTeacherRowById(rows[0].id))!
+}

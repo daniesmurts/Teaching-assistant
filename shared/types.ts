@@ -381,6 +381,8 @@ export interface Assignment {
   parent_assignment_id: string | null              // linked previous version, if any
   revision_number: number                          // 1 = original, 2+ = revision chain
   created_at: string
+  lti_gradebook_synced_at:  string | null   // set once the grade posts back to the LMS gradebook
+  lti_gradebook_sync_error: string | null   // last sync failure, if any (null once a retry succeeds)
 }
 
 // ─── Long-document review (ВКР / диплом / большие работы) ─────────────────────

@@ -42,6 +42,8 @@ interface AssignmentRow {
   parent_assignment_id: string | null
   revision_number: number
   created_at: Date
+  lti_gradebook_synced_at: Date | null
+  lti_gradebook_sync_error: string | null
 }
 
 function toAssignment(row: AssignmentRow): Assignment {
@@ -82,6 +84,8 @@ function toAssignment(row: AssignmentRow): Assignment {
     parent_assignment_id: row.parent_assignment_id,
     revision_number: row.revision_number,
     created_at: row.created_at.toISOString(),
+    lti_gradebook_synced_at: row.lti_gradebook_synced_at?.toISOString() ?? null,
+    lti_gradebook_sync_error: row.lti_gradebook_sync_error,
   }
 }
 

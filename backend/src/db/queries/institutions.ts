@@ -112,6 +112,95 @@ export async function findSamlConfigForEmailDomain(
   return rows[0] ?? null
 }
 
+// ─── LTI 1.3 platform config (migration 066) ──────────────────────────────────
+// Mirrors the SAML config shape above — one registered platform per
+// institution, edited by the institution admin (Settings → Organisation →
+// LTI), not platform-admin.
+
+export interface LtiConfigRow {
+  lti_enabled:                boolean
+  lti_platform_issuer:        string | null
+  lti_platform_client_id:     string | null
+  lti_platform_deployment_ids: string[]
+  lti_platform_auth_login_url: string | null
+  lti_platform_auth_token_url: string | null
+  lti_platform_jwks_url:      string | null
+}
+
+// A config is "complete" when everything a launch needs is present. Service
+// calls (AGS/NRPS) additionally need auth_token_url, checked separately by
+// callers that need it (not required just to accept launches).
+export function isLtiConfigComplete(c: LtiConfigRow): boolean {
+  return Boolean(
+    c.lti_enabled &&
+    c.lti_platform_issuer &&
+    c.lti_platform_client_id &&
+    c.lti_platform_deployment_ids.length > 0 &&
+    c.lti_platform_auth_login_url &&
+    c.lti_platform_jwks_url
+  )
+}
+
+const LTI_CONFIG_COLUMNS = `
+  lti_enabled, lti_platform_issuer, lti_platform_client_id,
+  lti_platform_deployment_ids, lti_platform_auth_login_url,
+  lti_platform_auth_token_url, lti_platform_jwks_url
+`
+
+export async function getLtiConfig(institutionId: string): Promise<LtiConfigRow | null> {
+  const { rows } = await pool.query<LtiConfigRow>(
+    `SELECT ${LTI_CONFIG_COLUMNS} FROM institutions WHERE id = $1`,
+    [institutionId]
+  )
+  return rows[0] ?? null
+}
+
+export async function setLtiConfig(
+  institutionId: string,
+  patch: Partial<LtiConfigRow>
+): Promise<LtiConfigRow | null> {
+  const { rows } = await pool.query<LtiConfigRow>(
+    `UPDATE institutions SET
+       lti_enabled                 = COALESCE($2, lti_enabled),
+       lti_platform_issuer         = CASE WHEN $3  THEN $4  ELSE lti_platform_issuer         END,
+       lti_platform_client_id      = CASE WHEN $5  THEN $6  ELSE lti_platform_client_id      END,
+       lti_platform_deployment_ids = CASE WHEN $7  THEN $8::jsonb ELSE lti_platform_deployment_ids END,
+       lti_platform_auth_login_url = CASE WHEN $9  THEN $10 ELSE lti_platform_auth_login_url END,
+       lti_platform_auth_token_url = CASE WHEN $11 THEN $12 ELSE lti_platform_auth_token_url END,
+       lti_platform_jwks_url       = CASE WHEN $13 THEN $14 ELSE lti_platform_jwks_url       END
+     WHERE id = $1
+     RETURNING ${LTI_CONFIG_COLUMNS}`,
+    [
+      institutionId,
+      patch.lti_enabled ?? null,
+      patch.lti_platform_issuer !== undefined, patch.lti_platform_issuer ?? null,
+      patch.lti_platform_client_id !== undefined, patch.lti_platform_client_id ?? null,
+      patch.lti_platform_deployment_ids !== undefined, JSON.stringify(patch.lti_platform_deployment_ids ?? []),
+      patch.lti_platform_auth_login_url !== undefined, patch.lti_platform_auth_login_url ?? null,
+      patch.lti_platform_auth_token_url !== undefined, patch.lti_platform_auth_token_url ?? null,
+      patch.lti_platform_jwks_url !== undefined, patch.lti_platform_jwks_url ?? null,
+    ]
+  )
+  return rows[0] ?? null
+}
+
+// Discovery: the OIDC login-init request carries the platform's `iss` — find
+// which institution registered it. Mirrors findSamlConfigForEmailDomain.
+export interface LtiDiscoveryRow extends LtiConfigRow {
+  institution_id: string
+}
+
+export async function findLtiConfigForIssuer(issuer: string): Promise<LtiDiscoveryRow | null> {
+  const { rows } = await pool.query<LtiDiscoveryRow>(
+    `SELECT id AS institution_id, ${LTI_CONFIG_COLUMNS}
+       FROM institutions
+      WHERE lti_platform_issuer = $1
+      LIMIT 1`,
+    [issuer]
+  )
+  return rows[0] ?? null
+}
+
 // ─── Platform-admin management ────────────────────────────────────────────────
 
 export interface InstitutionWithCount extends InstitutionRow {

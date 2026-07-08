@@ -1,4 +1,4 @@
-# GradeAssist — Innovation & Patentability Research
+# Ispum — Innovation & Patentability Research
 
 Working document for grant applications and patent strategy. Captures candidate
 innovations, their novelty angle, what infrastructure they require, and a rough

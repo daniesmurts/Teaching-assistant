@@ -26,6 +26,11 @@ import { generateRawToken } from '../db/queries/passwordReset'
 import { sendEmail } from '../services/emailTransport'
 import { teacherInviteEmail } from '../lib/emailTemplates'
 import { toCsv, csvFilename } from '../lib/csv'
+import axios from 'axios'
+import { getLtiConfig, setLtiConfig, isLtiConfigComplete } from '../db/queries/institutions'
+import { loginInitUrl, launchCallbackUrl, jwksUrl as toolJwksUrl, createRegistrationSession, registrationInitUrl } from '../services/lti'
+import { listLtiCourseLinksForInstitution, setLtiCourseLinkOrgUnit } from '../db/queries/ltiCourseLinks'
+import { getOrgUnitById } from '../db/queries/orgUnits'
 import type { CriterionSubject, RubricItem } from '../../../shared/types'
 
 const router = Router()
@@ -346,6 +351,129 @@ router.patch('/shared-rag', asyncHandler(async (req, res) => {
     target:           '',
   })
   res.json(await getSharedRagSummary(id))
+}))
+
+// ─── LTI 1.3 platform registration (Settings → Organisation → LTI) ────────────
+// Self-serve config, unlike SAML which platform-admin edits on the customer's
+// behalf (Research.md §6.5) — LTI setup is comparatively high-friction and
+// self-service-critical for institutional sales, so it gets its own gate here
+// rather than mirroring the SAML admin-panel location.
+
+router.get('/lti', asyncHandler(async (req, res) => {
+  const id = institutionId(req)
+  const cfg = await getLtiConfig(id)
+  if (!cfg) throw new NotFoundError('Организация')
+  res.json({
+    ...cfg,
+    complete:   isLtiConfigComplete(cfg),
+    login_url:  loginInitUrl(),
+    launch_url: launchCallbackUrl(),
+    jwks_url:   toolJwksUrl(),
+    // ^ tool_jwks_url is the URL WE publish (for the admin to paste into
+    // Moodle); lti_platform_jwks_url in `cfg` above is the platform's own.
+  })
+}))
+
+router.put('/lti', asyncHandler(async (req, res) => {
+  const id = institutionId(req)
+  const body = req.body as Partial<{
+    lti_enabled: boolean
+    lti_platform_issuer: string | null
+    lti_platform_client_id: string | null
+    lti_platform_deployment_ids: string[]
+    lti_platform_auth_login_url: string | null
+    lti_platform_auth_token_url: string | null
+    lti_platform_jwks_url: string | null
+  }>
+
+  if (body.lti_platform_deployment_ids !== undefined && !Array.isArray(body.lti_platform_deployment_ids)) {
+    throw new ValidationError('lti_platform_deployment_ids должен быть массивом строк')
+  }
+
+  const updated = await setLtiConfig(id, body)
+  if (!updated) throw new NotFoundError('Организация')
+
+  recordAudit({
+    institutionId:  id,
+    actorTeacherId: req.teacher.id,
+    actorEmail:     req.teacher.email,
+    action:         'lti.config_updated',
+    target:         '',
+  })
+  res.json({ ...updated, complete: isLtiConfigComplete(updated) })
+}))
+
+// Synthetic diagnostic — no live launch to test against, so this checks the
+// one thing that's independently verifiable without the platform initiating
+// anything: that the registered JWKS URL is reachable and actually serves a
+// JWK set. Catches the most common setup mistake (wrong/unreachable URL)
+// before the admin's first real launch attempt.
+router.post('/lti/test-connection', asyncHandler(async (req, res) => {
+  const id = institutionId(req)
+  const cfg = await getLtiConfig(id)
+  if (!cfg?.lti_platform_jwks_url) {
+    res.json({ ok: false, message: 'Укажите URL JWKS платформы перед проверкой соединения.' })
+    return
+  }
+
+  try {
+    const response = await axios.get(cfg.lti_platform_jwks_url, { timeout: 5000 })
+    const keys = (response.data as { keys?: unknown[] })?.keys
+    if (!Array.isArray(keys) || keys.length === 0) {
+      res.json({ ok: false, message: 'URL JWKS доступен, но не содержит ключей.' })
+      return
+    }
+    res.json({ ok: true, message: `Соединение успешно — получено ${keys.length} ключ(ей).` })
+  } catch (err) {
+    res.json({
+      ok: false,
+      message: `Не удалось подключиться к URL JWKS: ${err instanceof Error ? err.message : String(err)}`,
+    })
+  }
+}))
+
+// Generates a one-time link the admin pastes into Moodle's own "Dynamic
+// registration" screen — Moodle then navigates to it, appending its own
+// openid_configuration + registration_token query params (routes/lti.ts
+// GET /register handles that side of the handshake).
+router.get('/lti/registration-link', asyncHandler(async (req, res) => {
+  const id = institutionId(req)
+  const sessionId = await createRegistrationSession(id)
+  res.json({ url: registrationInitUrl(sessionId) })
+}))
+
+// ─── Course mapping — Moodle context ↔ org_unit ────────────────────────────────
+// Purely informational for institutional reporting rollups. An unmapped link
+// never blocks a teacher from grading — course auto-creation already
+// happened at first launch (db/queries/ltiCourseLinks.ts).
+
+router.get('/lti/course-links', asyncHandler(async (req, res) => {
+  const id = institutionId(req)
+  res.json({ links: await listLtiCourseLinksForInstitution(id) })
+}))
+
+router.put('/lti/course-links/:id', asyncHandler(async (req, res) => {
+  const id = institutionId(req)
+  const { org_unit_id } = req.body as { org_unit_id?: string | null }
+
+  if (org_unit_id) {
+    const unit = await getOrgUnitById(org_unit_id)
+    if (!unit || unit.institution_id !== id) {
+      throw new ValidationError('Раздел оргструктуры не найден в этой организации')
+    }
+  }
+
+  const updated = await setLtiCourseLinkOrgUnit(req.params.id, id, org_unit_id ?? null)
+  if (!updated) throw new NotFoundError('Сопоставление курса')
+
+  recordAudit({
+    institutionId:  id,
+    actorTeacherId: req.teacher.id,
+    actorEmail:     req.teacher.email,
+    action:         'lti.course_link_mapped',
+    target:         req.params.id,
+  })
+  res.json(updated)
 }))
 
 export default router

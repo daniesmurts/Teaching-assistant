@@ -65,6 +65,26 @@ export async function deleteInvite(id: string, inviteId: string): Promise<void> 
   await client.delete(`/api/published-assignments/${id}/invites/${inviteId}`, { skipErrorToast: true })
 }
 
+// ─── Moodle roster import (NRPS) ───────────────────────────────────────────────
+
+export interface LtiRosterMember {
+  userId: string
+  name:   string | null
+  email:  string | null
+}
+
+export type LtiRosterResult =
+  | { available: false }
+  | { available: true; members: LtiRosterMember[] }
+
+export async function getLtiRoster(id: string): Promise<LtiRosterResult> {
+  return (await client.get<LtiRosterResult>(`/api/published-assignments/${id}/lti-roster`)).data
+}
+
+export async function importLtiRoster(id: string, members: LtiRosterMember[]): Promise<{ invites: AssignmentInvite[] }> {
+  return (await client.post<{ invites: AssignmentInvite[] }>(`/api/published-assignments/${id}/lti-roster/import`, { members })).data
+}
+
 export interface GradeSummary {
   assignment_id:   string
   ai_score:        number | null

@@ -8,6 +8,7 @@ import { generalLimiter } from './middleware/rateLimits'
 import { auditLog } from './middleware/auditLog'
 import authRouter from './routes/auth'
 import ssoRouter from './routes/sso'
+import ltiRouter from './routes/lti'
 import coursesRouter from './routes/courses'
 import criteriaRouter from './routes/criteria'
 import rubricsRouter from './routes/rubrics'
@@ -120,6 +121,7 @@ app.get('/api/health', async (_req, res) => {
 
 app.use('/api/auth',          authRouter)
 app.use('/api/sso',           ssoRouter)
+app.use('/api/lti',           ltiRouter)
 app.use('/api/write',         publicWriteRouter)   // public — token-authed student writing surface
 app.use('/api/contact',       contactRouter)       // public — marketing-site Contact + Research forms
 app.use('/api/courses',       coursesRouter)

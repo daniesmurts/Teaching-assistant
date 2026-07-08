@@ -34,6 +34,19 @@ export const publicFormLimiter = rateLimit({
   message: { error: 'Слишком много обращений. Попробуйте позже или напишите на hello@ispum.ru.' },
 })
 
+// ─── LTI launch — platform-initiated but still bounded ────────────────────────
+// A misconfigured or malicious platform shouldn't be able to hammer the OIDC
+// login-init endpoint. 30/15min/IP is generous for legitimate classroom
+// traffic (dozens of students launching at once from one campus network)
+// while still bounding abuse.
+export const ltiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Слишком много запросов LTI. Попробуйте позже.' },
+})
+
 // ─── General API — broad IP-based catch-all ───────────────────────────────────
 // All other endpoints: 200 requests per 15 minutes per IP
 export const generalLimiter = rateLimit({

@@ -11,6 +11,7 @@ const NAV = [
   { to: '/programs',              label: 'Образовательные программы', end: false },
   { to: '/institution/shared-rag', label: 'Общий цикл',  end: false },
   { to: '/institution/model',      label: 'Модель ИИ',   end: false },
+  { to: '/institution/lti',        label: 'LTI / LMS',   end: false },
   { to: '/institution/audit',    label: 'Журнал действий', end: false },
 ]
 

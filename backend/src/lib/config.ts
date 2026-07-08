@@ -47,6 +47,10 @@ export const config = {
     spPrivateKey: optional('SAML_SP_PRIVATE_KEY'),
     spCert:      optional('SAML_SP_CERTIFICATE'),
   },
+  lti: {
+    toolPrivateKey: optional('LTI_TOOL_PRIVATE_KEY'),
+    toolKid:        optional('LTI_TOOL_KID'),
+  },
 } as const
 
 /** Call once at boot. Validates essentials and warns about degraded features. */
@@ -59,6 +63,10 @@ export function validateConfig(): void {
   if (!config.email.host)              warnings.push('SMTP email (emails logged to console)')
   if (!config.saml.spPrivateKey || !config.saml.spCert || !config.saml.spEntityId) {
     warnings.push('SAML SSO (institutional SSO logins will be rejected — run scripts/generateSamlSpKeypair.ts)')
+  }
+
+  if (!config.lti.toolPrivateKey) {
+    warnings.push('LTI 1.3 (LMS launches will be rejected — run scripts/generateLtiToolKeypair.ts)')
   }
 
   if (warnings.length > 0 && config.nodeEnv === 'production') {

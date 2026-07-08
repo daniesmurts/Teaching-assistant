@@ -12,6 +12,9 @@ import {
   updatePublishedAssignment, addInvite, listInvites, deleteInvite,
   getSubmissionForTeacher, attachSubmissionToGrade, type SubmittedInvite,
 } from '../db/queries/publishedAssignments'
+import { findLtiCourseLinkByCourseId } from '../db/queries/ltiCourseLinks'
+import { getLtiConfig } from '../db/queries/institutions'
+import { fetchRoster } from '../services/ltiServices'
 import { getCohortSynthesis } from '../db/queries/cohortSyntheses'
 import { synthesizeCohort } from '../services/cohortSynthesis'
 import { tiptapToText } from '../lib/tiptapText'
@@ -105,6 +108,48 @@ router.delete('/:id/invites/:inviteId', asyncHandler(async (req, res) => {
   const ok = await deleteInvite(req.params.inviteId, pa.id)
   if (!ok) throw new ValidationError('Нельзя удалить: приглашение не найдено или работа уже сдана')
   res.status(204).end()
+}))
+
+// ─── Moodle roster import (NRPS) ───────────────────────────────────────────────
+// Only available when the assignment's course was itself created from an LTI
+// launch and the institution's NRPS membership URL was captured at that
+// launch — a silent { available: false } otherwise, no error.
+
+router.get('/:id/lti-roster', asyncHandler(async (req, res) => {
+  const pa = await ownedAssignment(req.params.id, req.teacher.id)
+  const link = pa.course_id ? await findLtiCourseLinkByCourseId(pa.course_id) : null
+  if (!link?.nrps_context_memberships_url) {
+    res.json({ available: false })
+    return
+  }
+
+  const cfg = await getLtiConfig(link.institution_id)
+  if (!cfg) {
+    res.json({ available: false })
+    return
+  }
+
+  const members = await fetchRoster(cfg, link.nrps_context_memberships_url)
+  res.json({ available: true, members })
+}))
+
+router.post('/:id/lti-roster/import', asyncHandler(async (req, res) => {
+  const pa = await ownedAssignment(req.params.id, req.teacher.id)
+  const link = pa.course_id ? await findLtiCourseLinkByCourseId(pa.course_id) : null
+  if (!link?.nrps_context_memberships_url) {
+    throw new ValidationError('Список студентов Moodle недоступен для этого курса')
+  }
+
+  const { members } = req.body as { members?: Array<{ userId: string; name: string | null; email: string | null }> }
+  if (!Array.isArray(members) || members.length === 0) {
+    throw new ValidationError('Выберите хотя бы одного студента')
+  }
+
+  const invites = []
+  for (const m of members) {
+    invites.push(await addInvite(pa.id, { studentName: m.name, studentEmail: m.email }))
+  }
+  res.status(201).json({ invites })
 }))
 
 // ─── Submission review + provenance (Q4) ──────────────────────────────────────

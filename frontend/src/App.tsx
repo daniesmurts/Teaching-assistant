@@ -10,6 +10,8 @@ import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import SsoCallback from './pages/SsoCallback'
+import LtiCallback from './pages/LtiCallback'
+import LtiDeepLink from './pages/LtiDeepLink'
 import PaymentResult from './pages/PaymentResult'
 import Dashboard from './pages/Dashboard'
 import Courses from './pages/Courses'
@@ -56,6 +58,7 @@ import InstitutionRubrics from './pages/institution/InstitutionRubrics'
 import InstitutionRubricPresets from './pages/institution/InstitutionRubricPresets'
 import InstitutionSharedRag from './pages/institution/InstitutionSharedRag'
 import InstitutionModel from './pages/institution/InstitutionModel'
+import InstitutionLti from './pages/institution/InstitutionLti'
 import InstitutionAudit from './pages/institution/InstitutionAudit'
 import InstitutionPrograms from './pages/institution/InstitutionPrograms'
 import InstitutionProgramDetail from './pages/institution/InstitutionProgramDetail'
@@ -216,6 +219,8 @@ export default function App() {
           <Route path="/forgot-password"  element={<ForgotPassword />} />
           <Route path="/reset-password"   element={<ResetPassword />} />
           <Route path="/sso/callback"     element={<SsoCallback />} />
+          <Route path="/lti/callback"     element={<LtiCallback />} />
+          <Route path="/lti/deep-link"    element={<LtiDeepLink />} />
           <Route path="/write/:token"     element={<StudentWrite />} />
           <Route path="/payment/result"   element={<PaymentResult />} />
           <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
@@ -273,6 +278,7 @@ export default function App() {
             <Route path="programs/:id"    element={<InstitutionProgramDetail />} />
             <Route path="shared-rag"   element={<InstitutionSharedRag />} />
             <Route path="model"        element={<InstitutionModel />} />
+            <Route path="lti"          element={<InstitutionLti />} />
             <Route path="audit"    element={<InstitutionAudit />} />
           </Route>
         </Routes>
