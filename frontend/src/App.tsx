@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { Suspense, lazy, useEffect, useRef } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
@@ -63,21 +63,35 @@ import InstitutionAudit from './pages/institution/InstitutionAudit'
 import InstitutionPrograms from './pages/institution/InstitutionPrograms'
 import InstitutionProgramDetail from './pages/institution/InstitutionProgramDetail'
 import InstitutionStructure from './pages/institution/InstitutionStructure'
-import Landing from './pages/Landing'
-import About from './pages/About'
-import Institutions from './pages/Institutions'
-import Research from './pages/Research'
-import FAQ from './pages/FAQ'
-import Ethics from './pages/Ethics'
-import Contact from './pages/Contact'
-import Pricing from './pages/Pricing'
-import Changelog from './pages/Changelog'
-import UseCases from './pages/UseCases'
-import Offer from './pages/legal/Offer'
-import Privacy from './pages/legal/Privacy'
-import Terms from './pages/legal/Terms'
-import Cookies from './pages/legal/Cookies'
 import NewVersionToast from './components/NewVersionToast'
+import LoadingSpinner from './components/ui/LoadingSpinner'
+
+// Public marketing + legal pages, lazy-loaded — a logged-in teacher's session
+// lives entirely inside AppShell's routes and never needs this bundle; a
+// logged-out visitor never needs the ~70-route authenticated app. Splitting
+// keeps both sides of the audience from paying for the other's code.
+const Landing    = lazy(() => import('./pages/Landing'))
+const About      = lazy(() => import('./pages/About'))
+const Institutions = lazy(() => import('./pages/Institutions'))
+const Research   = lazy(() => import('./pages/Research'))
+const FAQ        = lazy(() => import('./pages/FAQ'))
+const Ethics     = lazy(() => import('./pages/Ethics'))
+const Contact    = lazy(() => import('./pages/Contact'))
+const Pricing    = lazy(() => import('./pages/Pricing'))
+const Changelog  = lazy(() => import('./pages/Changelog'))
+const UseCases   = lazy(() => import('./pages/UseCases'))
+const Offer      = lazy(() => import('./pages/legal/Offer'))
+const Privacy    = lazy(() => import('./pages/legal/Privacy'))
+const Terms      = lazy(() => import('./pages/legal/Terms'))
+const Cookies    = lazy(() => import('./pages/legal/Cookies'))
+
+function PageLoading() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <LoadingSpinner size={24} />
+    </div>
+  )
+}
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -199,6 +213,7 @@ export default function App() {
         <PlanSync />
         <RouteTracker />
         <NewVersionToast />
+        <Suspense fallback={<PageLoading />}>
         <Routes>
           <Route path="/"         element={<Landing />} />
           <Route path="/about"    element={<About />} />
@@ -282,6 +297,7 @@ export default function App() {
             <Route path="audit"    element={<InstitutionAudit />} />
           </Route>
         </Routes>
+        </Suspense>
       </BrowserRouter>
     </QueryClientProvider>
   )

@@ -6,11 +6,24 @@ import Select from '../components/ui/Select'
 import Badge from '../components/ui/Badge'
 import AssignmentDetailModal from '../components/grading/AssignmentDetailModal'
 import { gradeColor } from '../lib/grades'
+import { buildChains, computeStudentStats, formatHours } from '../lib/studentStats'
 import { getStudents, getGradingHistory, type StudentSummary } from '../api/grading'
 import { getCourses } from '../api/courses'
 import type { Assignment, AssignmentStatus } from '../types'
 
 const fmt = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+
+// ─── Stat card ────────────────────────────────────────────────────────────────
+
+function StatCard({ label, value, hint, color }: { label: string; value: string; hint?: string; color?: string }) {
+  return (
+    <div className="bg-surface border border-border rounded-lg px-4 py-3">
+      <div className="text-[10px] font-sans font-semibold text-ink-tertiary uppercase tracking-wider">{label}</div>
+      <div className="font-display text-xl font-bold mt-1" style={color ? { color } : undefined}>{value}</div>
+      {hint && <div className="text-[10px] font-sans text-ink-tertiary mt-0.5">{hint}</div>}
+    </div>
+  )
+}
 
 // ─── Per-student detail (assignments + grade-over-time) ───────────────────────
 
@@ -25,7 +38,11 @@ function StudentDetail({ student, courseId, onBack }: { student: StudentSummary;
       limit:         100,
     }),
   })
-  const assignments = (data?.assignments ?? []).slice().reverse() // chronological for the chart
+  const all = data?.assignments ?? []
+  const assignments = all.slice().reverse() // chronological for the chart
+  const stats = computeStudentStats(all)
+  const chains = buildChains(all)
+  const totalChecks = stats.corrections.addressed + stats.corrections.partial + stats.corrections.not_addressed
 
   return (
     <div>
@@ -40,6 +57,60 @@ function StudentDetail({ student, courseId, onBack }: { student: StudentSummary;
         </p>
       </div>
 
+      {/* Submission / rework stats */}
+      {all.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <StatCard label="Первые сдачи" value={String(stats.firstSubmissions)} />
+          <StatCard
+            label="Доработки"
+            value={String(stats.resubmissions)}
+            hint={stats.chainsWithRework > 0 ? `${stats.chainsWithRework} из ${stats.totalChains} работ дорабатывались` : 'работы не дорабатывались'}
+          />
+          <StatCard
+            label="Время на доработку"
+            value={stats.medianReworkHours != null ? formatHours(stats.medianReworkHours) : '—'}
+            hint={stats.medianReworkHours != null ? 'медиана между версиями' : undefined}
+          />
+          <StatCard
+            label="Прогресс версий"
+            value={stats.avgScoreDelta != null ? `${stats.avgScoreDelta > 0 ? '+' : ''}${stats.avgScoreDelta}` : '—'}
+            hint={stats.avgScoreDelta != null ? 'ср. изменение балла' : undefined}
+            color={stats.avgScoreDelta != null ? (stats.avgScoreDelta > 0 ? 'var(--color-success)' : stats.avgScoreDelta < 0 ? 'var(--color-danger)' : undefined) : undefined}
+          />
+        </div>
+      )}
+
+      {/* How well the student fixes what feedback pointed out (ai_revision_check) */}
+      {totalChecks > 0 && (
+        <div className="bg-surface border border-border rounded-lg p-5 mb-6">
+          <div className="flex items-baseline justify-between mb-3">
+            <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">Работа с замечаниями</div>
+            {stats.correctionRate != null && (
+              <div className="text-sm font-display font-bold" style={{ color: stats.correctionRate >= 70 ? 'var(--color-success)' : stats.correctionRate >= 40 ? 'var(--color-warning)' : 'var(--color-danger)' }}>
+                {stats.correctionRate}% исправлено
+              </div>
+            )}
+          </div>
+          <div className="flex h-2.5 rounded-full overflow-hidden bg-surface-warm">
+            {stats.corrections.addressed > 0 && (
+              <div style={{ width: `${(stats.corrections.addressed / totalChecks) * 100}%`, backgroundColor: 'var(--color-success)' }} />
+            )}
+            {stats.corrections.partial > 0 && (
+              <div style={{ width: `${(stats.corrections.partial / totalChecks) * 100}%`, backgroundColor: 'var(--color-warning)' }} />
+            )}
+            {stats.corrections.not_addressed > 0 && (
+              <div style={{ width: `${(stats.corrections.not_addressed / totalChecks) * 100}%`, backgroundColor: 'var(--color-danger)' }} />
+            )}
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[11px] font-sans text-ink-secondary">
+            <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ backgroundColor: 'var(--color-success)' }} />исправлено {stats.corrections.addressed}</span>
+            <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ backgroundColor: 'var(--color-warning)' }} />частично {stats.corrections.partial}</span>
+            <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ backgroundColor: 'var(--color-danger)' }} />не исправлено {stats.corrections.not_addressed}</span>
+          </div>
+          <p className="text-[10px] font-sans text-ink-tertiary mt-2">По замечаниям из отзыва, проверенным ИИ при повторной сдаче ({totalChecks} зам.)</p>
+        </div>
+      )}
+
       {/* Grade-over-time chart */}
       {assignments.length > 0 && (
         <div className="bg-surface border border-border rounded-lg p-5 mb-6">
@@ -48,9 +119,10 @@ function StudentDetail({ student, courseId, onBack }: { student: StudentSummary;
             {assignments.map((a) => {
               const score = a.approved_score ?? a.ai_score ?? 0
               const grade = a.approved_grade ?? a.ai_grade
+              const isRevision = a.revision_number > 1
               return (
-                <div key={a.id} className="flex-1 flex flex-col items-center justify-end group relative" title={`${fmt(a.created_at)} — ${grade ?? '?'} (${score})`}>
-                  <span className="text-[10px] font-display font-bold mb-1" style={{ color: gradeColor(grade) }}>{grade}</span>
+                <div key={a.id} className="flex-1 flex flex-col items-center justify-end group relative" title={`${fmt(a.created_at)} — ${grade ?? '?'} (${score})${isRevision ? ` · доработка №${a.revision_number - 1}` : ''}`}>
+                  <span className="text-[10px] font-display font-bold mb-1" style={{ color: gradeColor(grade) }}>{grade}{isRevision && <span className="text-ink-tertiary font-sans font-normal"> ↻</span>}</span>
                   <div className="w-full max-w-[40px] rounded-t-sm transition-all" style={{ height: `${Math.max(6, score)}%`, backgroundColor: gradeColor(grade), opacity: 0.85 }} />
                 </div>
               )
@@ -64,28 +136,56 @@ function StudentDetail({ student, courseId, onBack }: { student: StudentSummary;
         </div>
       )}
 
-      {/* Assignment list */}
+      {/* Assignment list — grouped into revision chains, newest activity first */}
       <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">Работы</div>
-      <div className="bg-surface border border-border rounded-lg overflow-hidden">
-        {(data?.assignments ?? []).map((a, i, arr) => (
-          <button
-            key={a.id}
-            onClick={() => setOpenAssignment(a)}
-            className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-warm transition-colors ${i < arr.length - 1 ? 'border-b border-border' : ''}`}
-          >
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-sans text-ink">{fmt(a.created_at)}</div>
-              <div className="text-xs font-sans text-ink-tertiary truncate">{a.submission_text.slice(0, 80)}…</div>
+      <div className="space-y-3">
+        {chains.map((chain) => {
+          const reversed = chain.versions.slice().reverse() // newest version on top
+          return (
+            <div key={chain.root.id} className="bg-surface border border-border rounded-lg overflow-hidden">
+              {reversed.map((a, i) => {
+                // Score delta vs the previous version in the chain (chronologically earlier).
+                const idx = chain.versions.indexOf(a)
+                const prev = idx > 0 ? chain.versions[idx - 1] : null
+                const score = a.approved_score ?? a.ai_score
+                const prevScore = prev ? (prev.approved_score ?? prev.ai_score) : null
+                const delta = score != null && prevScore != null ? score - prevScore : null
+                const isRevision = idx > 0 || a.revision_number > 1
+                return (
+                  <button
+                    key={a.id}
+                    onClick={() => setOpenAssignment(a)}
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-warm transition-colors ${i < reversed.length - 1 ? 'border-b border-border' : ''} ${isRevision && chain.versions.length > 1 && i > 0 ? 'pl-8' : ''}`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-sans text-ink flex items-center gap-2">
+                        {fmt(a.created_at)}
+                        {isRevision && (
+                          <span className="text-[10px] font-sans font-medium text-ink-secondary bg-surface-warm border border-border rounded-full px-2 py-0.5">
+                            версия {Math.max(a.revision_number, idx + 1)}
+                          </span>
+                        )}
+                        {delta != null && delta !== 0 && (
+                          <span className="text-[10px] font-sans font-semibold" style={{ color: delta > 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                            {delta > 0 ? '+' : ''}{delta}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs font-sans text-ink-tertiary truncate">{a.submission_text.slice(0, 80)}…</div>
+                    </div>
+                    {(a.approved_grade ?? a.ai_grade) && (
+                      <div className="font-display text-xl font-bold w-6 text-center" style={{ color: gradeColor(a.approved_grade ?? a.ai_grade) }}>
+                        {a.approved_grade ?? a.ai_grade}
+                      </div>
+                    )}
+                    <Badge variant={a.status as AssignmentStatus} />
+                    <span className="text-ink-tertiary text-xs flex-shrink-0">→</span>
+                  </button>
+                )
+              })}
             </div>
-            {(a.approved_grade ?? a.ai_grade) && (
-              <div className="font-display text-xl font-bold w-6 text-center" style={{ color: gradeColor(a.approved_grade ?? a.ai_grade) }}>
-                {a.approved_grade ?? a.ai_grade}
-              </div>
-            )}
-            <Badge variant={a.status as AssignmentStatus} />
-            <span className="text-ink-tertiary text-xs flex-shrink-0">→</span>
-          </button>
-        ))}
+          )
+        })}
       </div>
 
       {openAssignment && (
