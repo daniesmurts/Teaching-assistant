@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { clusterByName } from './longReview'
+import { clusterByName, buildDrawingSection, splitIntoSections } from './longReview'
 import type { KeyQuantity } from '../../../shared/types'
 
 function kq(name: string, value: string, chapter_index: number): KeyQuantity {
@@ -71,5 +71,23 @@ describe('clusterByName', () => {
       kq('температура',     '320 °C',    4),
     ])
     expect(clusters).toHaveLength(2)
+  })
+})
+
+describe('buildDrawingSection', () => {
+  it('wraps a drawing as a pseudo-section tagged kind: drawing', () => {
+    const section = buildDrawingSection({ fileName: 'аппарат.pdf', extractedText: 'H 15000 мм' })
+    expect(section.kind).toBe('drawing')
+    expect(section.title).toBe('Чертёж: аппарат.pdf')
+    expect(section.text).toBe('H 15000 мм')
+  })
+
+  it('never collides with a kind splitIntoSections can produce on its own', () => {
+    // Guards the assumption the orchestrator relies on: a "drawing" section
+    // can only ever come from an uploaded чертёж, never from parsing the ПЗ
+    // text itself — even if the ПЗ has a heading that literally says
+    // "ЧЕРТЁЖ ОБЩЕГО ВИДА".
+    const sections = splitIntoSections('ЧЕРТЁЖ ОБЩЕГО ВИДА\nСм. приложение А.\n\nВВЕДЕНИЕ\nТекст введения ради длины текста ради длины.')
+    expect(sections.every((s) => s.kind !== 'drawing')).toBe(true)
   })
 })

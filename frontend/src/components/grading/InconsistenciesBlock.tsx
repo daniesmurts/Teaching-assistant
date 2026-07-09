@@ -5,15 +5,20 @@ import type { Inconsistency, ChapterReview } from '../../types'
 // chapter reviews so the teacher sees it before drilling in. Hidden when
 // empty so legacy review rows render unchanged.
 interface Props {
-  items:    Inconsistency[]
-  chapters: ChapterReview[]
+  items:     Inconsistency[]
+  chapters:  ChapterReview[]
+  // Feature N — чертежи appended after chapters; an occurrence chapter_index
+  // >= chapters.length refers to drawings[idx - chapters.length], not a
+  // written section. Optional so legacy call sites without drawings compile
+  // unchanged.
+  drawings?: Array<{ title: string }>
 }
 
-export default function InconsistenciesBlock({ items, chapters }: Props) {
+export default function InconsistenciesBlock({ items, chapters, drawings = [] }: Props) {
   if (items.length === 0) return null
 
   const chapterTitle = (idx: number) =>
-    chapters[idx]?.title || `Раздел ${idx + 1}`
+    chapters[idx]?.title || drawings[idx - chapters.length]?.title || `Раздел ${idx + 1}`
 
   return (
     <section className="bg-danger-bg border border-danger/20 rounded-lg p-3.5">

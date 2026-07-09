@@ -275,13 +275,13 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
           {/* Premise findings (ВКР review) — Tier-5: document-level reasoning.
               Leads the verification blocks. Hidden when empty. */}
           {r && (
-            <PremiseFindingsBlock items={r.premise_findings ?? []} chapters={r.chapter_reviews} />
+            <PremiseFindingsBlock items={r.premise_findings ?? []} chapters={r.chapter_reviews} drawings={r.drawings} />
           )}
 
           {/* Cross-section contradictions (ВКР review) — Tier-2 addition.
               Hidden when empty. */}
           {r && (
-            <InconsistenciesBlock items={r.inconsistencies ?? []} chapters={r.chapter_reviews} />
+            <InconsistenciesBlock items={r.inconsistencies ?? []} chapters={r.chapter_reviews} drawings={r.drawings} />
           )}
 
           {/* Recomputation findings (ВКР review) — Tier-4 addition. Hidden when empty. */}

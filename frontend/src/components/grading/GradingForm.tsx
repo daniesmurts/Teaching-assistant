@@ -11,6 +11,7 @@ import NoCourseHint from '../onboarding/NoCourseHint'
 import CriteriaHint from '../onboarding/CriteriaHint'
 import SimilarPastFeedback from './SimilarPastFeedback'
 import DocChatModal from './DocChatModal'
+import DrawingsUpload from './DrawingsUpload'
 import Icon from '../ui/Icon'
 import { useUIStore } from '../../store/uiStore'
 import { usePlan } from '../../hooks/usePlan'
@@ -93,6 +94,10 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
   // searches). Same "off by default" reasoning as thorough.
   const [checkCitations, setCheckCitations] = useState(false)
   const [docChatOpen, setDocChatOpen] = useState(false)
+  // Feature N — чертежи attached to a ВКР long review. Not persisted (like
+  // thorough/checkCitations, an ephemeral per-submission toggle set), reset
+  // implicitly whenever the teacher starts a fresh submission.
+  const [drawings, setDrawings] = useState<Array<{ file_name: string; extracted_text: string }>>([])
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
   const [reviewJob, setReviewJob] = useState<LongReview | null>(null)
@@ -273,6 +278,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
       ...(form.student_group ? { student_group: form.student_group } : {}),
       ...(form.student_email ? { student_email: form.student_email } : {}),
       ...(form.parent_assignment_id ? { parent_assignment_id: form.parent_assignment_id } : {}),
+      ...(isLong && drawings.length > 0 ? { drawings } : {}),
       ...criterionFields,
     }
 
@@ -676,6 +682,13 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
         <div className="mx-4 mb-2 px-3 py-2 bg-amber-light/60 border border-amber/20 text-[12px] font-sans text-ink-secondary rounded-md leading-relaxed">
           <span className="font-medium text-ink">Объёмная работа</span> (~{approxPages} стр.). Она будет проверена
           в режиме рецензирования — поразделно, с разбором по главам и вопросами к защите. Это займёт несколько минут.
+        </div>
+      )}
+
+      {/* Drawings — Feature N, only relevant to the ВКР long-review path */}
+      {isLong && (
+        <div className="mx-4 mb-2 px-3 py-2.5 bg-surface-warm border border-border rounded-md">
+          <DrawingsUpload onChange={setDrawings} />
         </div>
       )}
 

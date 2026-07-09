@@ -122,6 +122,19 @@ export const reviewRules = [
     .optional({ nullable: true, checkFalsy: true })
     .isEmail().withMessage('Неверный адрес эл. почты студента')
     .normalizeEmail(),
+
+  // Feature N — чертежи (drawings) OCR'd client-side before submission.
+  // Capped well below submission_text's own limit: a drawing's useful text
+  // (title block + callouts) is short, not another whole document.
+  body('drawings')
+    .optional({ nullable: true })
+    .isArray({ max: 6 }).withMessage('Можно приложить не более 6 чертежей'),
+  body('drawings.*.file_name')
+    .trim()
+    .isLength({ min: 1, max: 255 }).withMessage('Некорректное имя файла чертежа'),
+  body('drawings.*.extracted_text')
+    .trim()
+    .isLength({ min: 1, max: 20_000 }).withMessage('Распознанный текст чертежа слишком большой'),
 ]
 
 export const approveRules = [

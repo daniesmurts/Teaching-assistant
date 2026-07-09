@@ -217,6 +217,8 @@ export interface ReviewRequest {
   student_name?:  string
   student_email?: string
   student_group?: string
+  /** Чертежи (TODO Feature N) — OCR'd client-side (via /api/documents/upload) before submission. */
+  drawings?:      Array<{ file_name: string; extracted_text: string }>
 }
 
 export async function startReview(data: ReviewRequest): Promise<LongReview> {

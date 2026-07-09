@@ -92,7 +92,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const {
       submission_text, criterion_ids, weights, course_id,
-      student_name, student_email, student_group,
+      student_name, student_email, student_group, drawings,
     } = req.body as {
       submission_text: string
       criterion_ids?: string[]
@@ -101,6 +101,7 @@ router.post(
       student_name?: string
       student_email?: string
       student_group?: string
+      drawings?: Array<{ file_name: string; extracted_text: string }>
     }
 
     const review = await createLongReview({
@@ -128,6 +129,7 @@ router.post(
       studentEmail:   student_email,
       studentGroup:   student_group,
       submissionText: submission_text,
+      drawings:       drawings?.map((d) => ({ fileName: d.file_name, extractedText: d.extracted_text })),
     }
     await getJobQueue().send(LONG_REVIEW_QUEUE, jobPayload)
 

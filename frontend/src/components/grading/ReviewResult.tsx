@@ -124,12 +124,12 @@ export default function ReviewResult({ review, onApproved }: Props) {
             across sections + implausible physical/logical assumptions). A wrong
             premise invalidates the numbers below it, so it leads the verification
             blocks. Hidden when empty / on legacy rows. */}
-        <PremiseFindingsBlock items={r.premise_findings ?? []} chapters={r.chapter_reviews} />
+        <PremiseFindingsBlock items={r.premise_findings ?? []} chapters={r.chapter_reviews} drawings={r.drawings} />
 
         {/* Cross-section contradictions — Tier-2 addition. Hidden when empty
             (which is most reviews and all legacy rows). High-signal so it
             sits above the coverage note. */}
-        <InconsistenciesBlock items={r.inconsistencies ?? []} chapters={r.chapter_reviews} />
+        <InconsistenciesBlock items={r.inconsistencies ?? []} chapters={r.chapter_reviews} drawings={r.drawings} />
 
         {/* Recomputation findings — Tier-4: reasoner-checked headline
             numerical results. Highest-effort signal in the review; placed

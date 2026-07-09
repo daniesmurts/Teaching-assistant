@@ -379,36 +379,48 @@ content aimed at given ОПК/ПК/УК + goals. Pairs with K into a **write →
   auto-published (same "AI never final" rule as grading).
 - **Depends on:** K (the check closes the loop) — build K first.
 
-### N. Drawings into the ВКР review — text-vs-drawing findings · Effort: M
+### ~~N. Drawings into the ВКР review — text-vs-drawing findings~~ — already done
 
-Teachers submit чертежи as **separate files** alongside the ПЗ. Today the long
-review only sees the extracted ПЗ text, so a whole class of high-value findings
-is structurally unreachable — the ones the reference Opus review caught by
-*reading the drawings*: габаритная высота 15 м в тексте vs 54 000 мм на чертеже,
-сепаратор горизонтальный в расчёте vs вертикальный в таблице, штуцер Ду50 на
-чертеже vs Ду20 в ПЗ, опечатки на чертеже («Возжушник»).
+Shipped: teachers can attach up to 6 чертежи (PDF/photo) to a ВКР long review
+via new **`DrawingsUpload.tsx`** (visible only on the long-review path). Each
+file reuses the *existing* `/api/documents/upload` pipeline unchanged — no new
+OCR plumbing needed, `services/documentExtractor.ts` already routes a
+low-text-layer PDF or an image through `yandexVisionOCR` — so steps 1-2 from
+the original plan turned out to be almost entirely a UI addition on
+already-shipped infrastructure, not new backend work.
 
-Three steps, in order — **the third is the payoff**:
-1. **Accept drawing files** alongside the ПЗ on a long review (multi-file upload).
-2. **OCR each** with Yandex Vision (already wired in
-   [services/yandexVision.ts](backend/src/services/yandexVision.ts)) → pull
-   dimension callouts, штуцер tables, titles, title-block text.
-3. **Feed the OCR text into `findPremiseIssues`** as additional "sections" so the
-   Tier-5 cross-section pass surfaces **text-vs-drawing contradictions** — the
-   same machinery that already catches composition-vs-reaction, now spanning ПЗ
-   ↔ чертёж.
+**Step 3 (the payoff) landed exactly as scoped, plus one free addition.** Each
+OCR'd drawing is analysed by a new, deliberately *non*-reused function,
+`analyzeDrawing()` — extractive only (summary + key_quantities with verbatim
+quotes), no strengths/gaps critique, since a title block isn't prose to
+review. Wrapped as a pseudo-`Section` (new `kind: 'drawing'`, via pure
+`buildDrawingSection()`) appended *after* the ПЗ's own sections so indices
+never collide with real chapters. Fed into **both** contradiction-detecting
+passes:
+- **Tier-5 (`findPremiseIssues`)** — the originally-scoped target.
+- **Tier-2 (`findInconsistencies`)** — realized during implementation that
+  this cheap, non-reasoner, name-clustering pass is actually the more precise
+  mechanism for the TODO's own headline example ("15 м в тексте vs 54 000 мм
+  на чертеже" is a same-name, different-value cluster — exactly what Tier-2
+  already does for cross-chapter numbers). Free to add since both passes take
+  the same `analyses: SectionAnalysis[]` shape — no new prompt.
 
-- **Why:** This is the single biggest remaining slice of the depth gap vs. a
-  hand-prompted Opus review (~40% of its standout findings came from the
-  drawings). Steps 1–2 are plumbing; step 3 reuses the premise pass shipped this
-  session, so most of the value is one integration away once the OCR text exists.
-- **Touches:** long-review upload UI (multi-file), `routes/grading.ts` review
-  endpoints to accept drawing docs,
-  [services/documentExtractor.ts](backend/src/services/documentExtractor.ts) /
-  [services/yandexVision.ts](backend/src/services/yandexVision.ts) for per-file
-  OCR, [services/longReview.ts](backend/src/services/longReview.ts)
-  `findPremiseIssues` to ingest drawing text as pseudo-sections (tag the source
-  so the UI can label «чертёж» vs «раздел»).
+Deliberately **excluded** from `synthesizeReview` (chapter_reviews — a
+drawing isn't a chapter) and `findRecomputations` (no derivable formula in a
+dimension callout).
+
+**UI labeling:** a finding whose evidence points at a drawing needs to render
+"Чертёж: файл.pdf", not "Раздел 7" — new `LongReviewResult.drawings:
+{title}[]` (rides in the existing `result` JSONB column, **no migration**)
+lets `PremiseFindingsBlock`/`InconsistenciesBlock` resolve `chapter_index >=
+chapter_reviews.length` back to the right drawing title, in both
+`ReviewResult.tsx` (live) and `AssignmentDetailModal.tsx` (history).
+
+- **Touches:** `services/longReview.ts` (`Section.kind`, `buildDrawingSection`,
+  `analyzeDrawing`, orchestrator wiring), `routes/grading.ts` +
+  `gradingValidation.ts` (`drawings` on the review request, capped at 6 files /
+  20k chars OCR text each), `shared/types.ts`, new `DrawingsUpload.tsx`,
+  `PremiseFindingsBlock.tsx` / `InconsistenciesBlock.tsx`.
 - **Note:** OCR won't recover pure geometry ("horizontal vs vertical" as shapes),
   but it does recover the dimension/label *text* where most contradictions live.
 - **Pricing hook:** rides on `documentUpload` (already Pro-only); OCR cost is

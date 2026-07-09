@@ -26,15 +26,20 @@ const KIND_LABEL: Record<PremiseFindingKind, string> = {
 }
 
 interface Props {
-  items:    PremiseFinding[]
-  chapters: ChapterReview[]
+  items:     PremiseFinding[]
+  chapters:  ChapterReview[]
+  // Feature N — чертежи appended after chapters; an evidence chapter_index
+  // >= chapters.length refers to drawings[idx - chapters.length], not a
+  // written section. Optional so legacy call sites without drawings compile
+  // unchanged.
+  drawings?: Array<{ title: string }>
 }
 
-export default function PremiseFindingsBlock({ items, chapters }: Props) {
+export default function PremiseFindingsBlock({ items, chapters, drawings = [] }: Props) {
   if (items.length === 0) return null
 
   const chapterTitle = (idx: number) =>
-    chapters[idx]?.title || `Раздел ${idx + 1}`
+    chapters[idx]?.title || drawings[idx - chapters.length]?.title || `Раздел ${idx + 1}`
 
   const SEVERITY_RANK: Record<BulletSeverity, number> = { critical: 3, substantial: 2, minor: 1 }
   const sorted = [...items].sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity])

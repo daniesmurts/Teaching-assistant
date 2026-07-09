@@ -37,6 +37,10 @@ export interface RunParams {
   studentEmail?:  string | null
   studentGroup?:  string | null
   submissionText: string
+  // Feature N — чертежи submitted alongside the ПЗ (OCR'd client-side upload,
+  // already-extracted text by the time the job runs). Optional/empty on every
+  // review that isn't a ВКР with drawings attached.
+  drawings?:      DrawingInput[]
 }
 
 /**
@@ -90,13 +94,34 @@ export async function runLongReview(p: RunParams): Promise<void> {
     result.defense_questions = []
   }
 
+  // Feature N — чертежи (drawings) submitted alongside the ПЗ. Each is
+  // analysed as a lightweight pseudo-section (title-block facts + dimension/
+  // label key_quantities, no chapter-style strengths/gaps critique — a
+  // drawing isn't prose to review, it's a source of facts to cross-check).
+  // Appended AFTER the written work's sections so drawing indices never
+  // collide with real chapter indices; chapter_reviews/defense_questions/
+  // recomputation stay scoped to the base sections/analyses (a drawing isn't
+  // a "chapter" and has no formula to independently recompute) — only the
+  // two contradiction-detecting passes below see the combined arrays.
+  const drawingInputs   = p.drawings ?? []
+  const drawingSections = drawingInputs.map(buildDrawingSection)
+  const drawingAnalyses = await mapWithConcurrency(drawingInputs, MAP_CONCURRENCY, async (d, i) => {
+    const a = await analyzeDrawing(d, ctx)
+    a.key_quantities = a.key_quantities.map((q) => ({ ...q, chapter_index: sections.length + i }))
+    return a
+  })
+  result.drawings = drawingSections.map((d) => ({ title: d.title }))
+  const sectionsForChecks = [...sections, ...drawingSections]
+  const analysesForChecks = [...analyses, ...drawingAnalyses]
+
   // Tier-2 cross-section consistency. Cluster extracted quantities by name;
   // if any cluster has conflicting numeric values, ask the model to confirm
   // it's a real contradiction (vs. two different concepts that happen to
   // share a name). Failing the call leaves inconsistencies=[] — review still
-  // ships.
+  // ships. Drawings included: this is exactly what catches "15 м in the
+  // text vs. 54 000 мм on the чертёж" — same value, same name, two sources.
   try {
-    result.inconsistencies = await findInconsistencies(analyses, result.chapter_reviews, ctx)
+    result.inconsistencies = await findInconsistencies(analysesForChecks, result.chapter_reviews, ctx)
   } catch (err) {
     logger.warn({ message: 'Consistency pass failed', reviewId: p.reviewId, error: (err as Error).message })
     result.inconsistencies = []
@@ -104,7 +129,8 @@ export async function runLongReview(p: RunParams): Promise<void> {
 
   // Tier-4 independent recomputation of headline numerical results. Runs on
   // the reasoner (slow + costly — only fire if there's actually math). Same
-  // soft-fail contract as defence/consistency.
+  // soft-fail contract as defence/consistency. Drawings excluded on purpose —
+  // dimension callouts aren't a derivable formula to re-check.
   try {
     result.recomputation_findings = await findRecomputations(sections, analyses, result.chapter_reviews, ctx)
   } catch (err) {
@@ -116,9 +142,11 @@ export async function runLongReview(p: RunParams): Promise<void> {
   // section's summary + quantities at once — catches contradictions spanning
   // sections (composition vs. reaction equation) and physically/logically
   // implausible assumptions (phase equilibrium, stoichiometry). Reasoner +
-  // soft-fail, same contract as the passes above.
+  // soft-fail, same contract as the passes above. Drawings included — the
+  // whole point of Feature N: a mislabeled part or dimension callout that
+  // contradicts the ПЗ's description of the same object.
   try {
-    result.premise_findings = await findPremiseIssues(sections, analyses, result.chapter_reviews, p.submissionText, ctx)
+    result.premise_findings = await findPremiseIssues(sectionsForChecks, analysesForChecks, result.chapter_reviews, p.submissionText, ctx)
   } catch (err) {
     logger.warn({ message: 'Premise pass failed', reviewId: p.reviewId, error: (err as Error).message })
     result.premise_findings = []
@@ -155,7 +183,19 @@ export async function runLongReview(p: RunParams): Promise<void> {
 export interface Section {
   title: string
   text:  string
-  kind:  'intro' | 'conclusion' | 'references' | 'body'
+  kind:  'intro' | 'conclusion' | 'references' | 'body' | 'drawing'
+}
+
+/** OCR'd чертёж, as pure per-drawing input — title-block/extractor text, no analysis yet. */
+export interface DrawingInput {
+  fileName:      string
+  extractedText: string
+}
+
+/** Wrap an OCR'd drawing as a pseudo-section — pure, so it's unit-testable
+ * without the LLM call that turns it into a SectionAnalysis. */
+export function buildDrawingSection(drawing: DrawingInput): Section {
+  return { title: `Чертёж: ${drawing.fileName}`, text: drawing.extractedText, kind: 'drawing' }
 }
 
 const HEADING_KEYWORDS =
@@ -415,6 +455,59 @@ function normaliseKeyQuantities(raw: unknown, sectionText: string): KeyQuantity[
   return out
 }
 
+// ─── Drawings (Feature N) ───────────────────────────────────────────────────────
+//
+// Deliberately NOT a reuse of analyzeSection: that prompt asks for a
+// prose-critique (strengths/gaps of a "chapter") which doesn't make sense
+// applied to raw OCR of a title block and dimension callouts. This is purely
+// extractive — pull out the facts (what's depicted, key dimensions/labels
+// with their exact quote) and nothing else. strengths/gaps come back empty;
+// only summary + key_quantities feed the contradiction-detecting passes.
+
+const DRAWING_TEXT_CAP = 12_000   // OCR of a title block + callouts is short; generous cap
+
+async function analyzeDrawing(drawing: DrawingInput, ctx: CallContext): Promise<SectionAnalysis> {
+  const body = capMiddle(drawing.extractedText, DRAWING_TEXT_CAP)
+
+  const system =
+    `Вы читаете распознанный (OCR) текст инженерного чертежа — размеры, обозначения штуцеров/позиций, ` +
+    `титульный блок, спецификацию. Текст может быть фрагментированным и не в порядке чтения — это нормально ` +
+    `для OCR чертежа. Извлекайте ТОЛЬКО факты, ничего не оценивайте. Отвечайте только валидным JSON на русском.`
+
+  const user =
+    `Распознанный текст чертежа «${drawing.fileName}»:
+<drawing_ocr>
+${sanitiseForPrompt(body)}
+</drawing_ocr>
+
+Верните JSON:
+- "summary": 1–2 предложения — что изображено на чертеже (тип аппарата/узла, что видно из титульного блока).
+- "key_quantities": массив объектов вида ` +
+    `{"name": "название величины, стандартизованное так же, как её могли бы назвать в тексте работы (например, «габаритная высота», а не «H, мм»)", "value": "значение с единицами как в тексте", "quote": "точная цитата из распознанного текста, содержащая значение"}. ` +
+    `Включайте размеры, диаметры, обозначения штуцеров/позиций с их значениями, марки материалов — всё, что может быть сверено с текстом работы. ` +
+    `Если ничего значимого не распознано — верните пустой массив.
+
+Ответьте ТОЛЬКО JSON-объектом.`
+
+  try {
+    const r = await chatJSON<{ summary?: string; key_quantities?: unknown[] }>(
+      [{ role: 'system', content: system }, { role: 'user', content: user }],
+      'анализ чертежа',
+      { context: ctx },
+    )
+    return {
+      title:          `Чертёж: ${drawing.fileName}`,
+      summary:        r.summary ?? '',
+      strengths:      [],
+      gaps:           [],
+      key_quantities: normaliseKeyQuantities(r.key_quantities, body).slice(0, 12),
+    }
+  } catch (err) {
+    logger.warn({ message: 'Drawing analysis failed', fileName: drawing.fileName, error: (err as Error).message })
+    return { title: `Чертёж: ${drawing.fileName}`, summary: '(не удалось распознать чертёж)', strengths: [], gaps: [], key_quantities: [] }
+  }
+}
+
 // ─── Reduce: synthesise the overall review ─────────────────────────────────────
 
 async function synthesizeReview(
@@ -531,6 +624,7 @@ ${analysisBlock}
     inconsistencies:   [],        // populated by findInconsistencies in the orchestrator
     recomputation_findings: [],   // populated by findRecomputations in the orchestrator
     premise_findings:  [],        // populated by findPremiseIssues in the orchestrator
+    drawings:          [],        // populated by the orchestrator after analysing any uploaded чертежи
   }
 }
 

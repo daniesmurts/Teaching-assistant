@@ -512,6 +512,15 @@ export interface LongReviewResult {
   // physically/logically implausible assumptions. Empty when nothing found OR
   // on legacy rows. Frontend hides the block when empty.
   premise_findings: PremiseFinding[]
+  // Feature N: чертежи (drawings) submitted alongside the ПЗ, OCR'd and fed into
+  // the inconsistencies (Tier-2) and premise (Tier-5) passes as pseudo-sections
+  // appended after chapter_reviews — so text-vs-drawing contradictions (dimension
+  // mismatches, mislabeled parts) surface the same way cross-chapter ones do.
+  // A finding's `chapter_index` >= chapter_reviews.length refers to
+  // drawings[chapter_index - chapter_reviews.length], not a written chapter —
+  // this array is what lets the UI tell "Раздел N" from "Чертёж: файл.pdf"
+  // apart. Empty on reviews with no uploaded drawings OR on legacy rows.
+  drawings: Array<{ title: string }>
 }
 
 // Returned by POST /api/grading/review and polled via GET /api/grading/review/:id
