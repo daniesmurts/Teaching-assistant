@@ -7,7 +7,7 @@ import Badge from '../components/ui/Badge'
 import AssignmentDetailModal from '../components/grading/AssignmentDetailModal'
 import { gradeColor } from '../lib/grades'
 import { buildChains, computeStudentStats, formatHours } from '../lib/studentStats'
-import { getStudents, getGradingHistory, type StudentSummary } from '../api/grading'
+import { getStudents, getGradingHistory, getCohortAnalytics, type StudentSummary } from '../api/grading'
 import { getCourses } from '../api/courses'
 import type { Assignment, AssignmentStatus } from '../types'
 
@@ -195,11 +195,153 @@ function StudentDetail({ student, courseId, onBack }: { student: StudentSummary;
   )
 }
 
+// ─── Cohort analytics (Feature C) ──────────────────────────────────────────────
+
+function scoreColor(score: number): string {
+  if (score >= 75) return 'var(--color-success)'
+  if (score >= 55) return 'var(--color-amber)'
+  return 'var(--color-danger)'
+}
+
+function CohortView({ courseId, students, onSelectStudent }: {
+  courseId?: string
+  students: StudentSummary[]
+  onSelectStudent: (s: StudentSummary) => void
+}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['cohort-analytics', courseId],
+    queryFn: () => getCohortAnalytics(courseId),
+  })
+
+  if (isLoading) {
+    return <p className="text-sm font-sans text-ink-secondary py-8 text-center">Загрузка…</p>
+  }
+  if (!data || data.total_submissions === 0) {
+    return (
+      <div className="text-center py-12">
+        <p className="font-sans text-sm text-ink-secondary mb-1">Пока недостаточно данных для аналитики по группе.</p>
+        <p className="font-sans text-xs text-ink-tertiary">Появится, как только наберётся несколько проверенных работ.</p>
+      </div>
+    )
+  }
+
+  const totalGraded = Object.values(data.histogram).reduce((s, n) => s + n, 0)
+  // Find each slipping student's roster summary (submissions/avg/last date) so
+  // the click-through to their profile shows a real header, not placeholder text.
+  const findRosterEntry = (name: string, group: string | null) =>
+    students.find((s) => s.student_name === name && (s.student_group ?? null) === group)
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3">
+        <StatCard label="Студентов" value={String(data.total_students)} />
+        <StatCard label="Проверенных работ" value={String(data.total_submissions)} />
+      </div>
+
+      {/* Overall grade distribution */}
+      {totalGraded > 0 && (
+        <div className="bg-surface border border-border rounded-lg p-5">
+          <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">Распределение оценок</div>
+          <div className="space-y-1.5">
+            {(['5', '4', '3', '2'] as const).map((g) => {
+              const count = data.histogram[g] ?? 0
+              return (
+                <div key={g} className="flex items-center gap-2.5">
+                  <span className="font-display font-bold w-4 text-center flex-shrink-0" style={{ color: gradeColor(g) }}>{g}</span>
+                  <div className="flex-1 h-3 bg-surface-warm rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${totalGraded ? (count / totalGraded) * 100 : 0}%`, backgroundColor: gradeColor(g) }} />
+                  </div>
+                  <span className="text-xs font-sans text-ink-secondary w-6 text-right flex-shrink-0">{count}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Per-group breakdown */}
+      {data.by_group.length > 1 && (
+        <div className="bg-surface border border-border rounded-lg overflow-hidden">
+          <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider px-4 pt-4 pb-2">По группам</div>
+          <table className="w-full text-sm font-sans">
+            <thead>
+              <tr className="border-b border-border bg-surface-warm text-xs text-ink-secondary">
+                <th className="text-left px-4 py-2 font-medium">Группа</th>
+                <th className="text-right px-4 py-2 font-medium">Работ</th>
+                <th className="text-right px-4 py-2 font-medium">Ср. балл</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.by_group.map((g) => (
+                <tr key={g.group ?? '—'} className="border-b border-border last:border-0">
+                  <td className="px-4 py-2.5 text-ink">{g.group ?? 'Без группы'}</td>
+                  <td className="px-4 py-2.5 text-right text-ink-secondary">{g.count}</td>
+                  <td className="px-4 py-2.5 text-right text-ink">{g.avg_score ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Weakest criteria across the cohort */}
+      {data.top_missed_criteria.length > 0 && (
+        <div className="bg-surface border border-border rounded-lg p-5">
+          <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">Слабые места по критериям</div>
+          <div className="space-y-3">
+            {data.top_missed_criteria.map((c) => (
+              <div key={c.name}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-sans text-ink">{c.name}</span>
+                  <span className="text-xs font-sans text-ink-secondary">{c.avg_score} · {c.count} работ</span>
+                </div>
+                <div className="h-1.5 bg-border rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all duration-700" style={{ width: `${c.avg_score}%`, backgroundColor: scoreColor(c.avg_score) }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Students whose recent grades dropped meaningfully */}
+      {data.slipping.length > 0 && (
+        <div className="bg-surface border border-border rounded-lg overflow-hidden">
+          <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider px-4 pt-4 pb-2">Требуют внимания</div>
+          <p className="text-[11px] font-sans text-ink-tertiary px-4 pb-2">Средний балл заметно снизился за последние работы</p>
+          {data.slipping.map((s, i) => {
+            const rosterEntry = findRosterEntry(s.student_name, s.student_group)
+            return (
+              <button
+                key={`${s.student_name}|${s.student_group}`}
+                onClick={() => rosterEntry && onSelectStudent(rosterEntry)}
+                disabled={!rosterEntry}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-warm transition-colors ${i < data.slipping.length - 1 ? 'border-b border-border' : ''}`}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-sans text-ink font-medium">{s.student_name}</div>
+                  <div className="text-xs font-sans text-ink-tertiary">
+                    {s.student_group && <span>Группа {s.student_group} · </span>}
+                    было {s.prior_avg} → стало {s.recent_avg}
+                  </div>
+                </div>
+                <span className="text-sm font-sans font-semibold" style={{ color: 'var(--color-danger)' }}>{s.delta}</span>
+                {rosterEntry && <span className="text-ink-tertiary text-xs flex-shrink-0">→</span>}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Students list ─────────────────────────────────────────────────────────────
 
 export default function Students() {
   const [courseId, setCourseId] = useState('')
   const [selected, setSelected] = useState<StudentSummary | null>(null)
+  const [view, setView] = useState<'list' | 'cohort'>('list')
 
   const { data: courses = [] }  = useQuery({ queryKey: ['courses'], queryFn: getCourses })
   const { data: students = [] } = useQuery({ queryKey: ['students', courseId], queryFn: () => getStudents(courseId || undefined) })
@@ -242,7 +384,23 @@ export default function Students() {
                 </span>
               </div>
 
-              {students.length === 0 ? (
+              <div className="flex border-b border-border mb-4">
+                {([['list', 'Список'], ['cohort', 'По группе']] as const).map(([v, label]) => (
+                  <button
+                    key={v}
+                    onClick={() => setView(v)}
+                    className={`px-3 py-2 text-xs font-sans font-medium border-b-2 transition-colors cursor-pointer ${
+                      view === v ? 'border-amber text-amber' : 'border-transparent text-ink-secondary hover:text-ink'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {view === 'cohort' ? (
+                <CohortView courseId={courseId || undefined} students={students} onSelectStudent={setSelected} />
+              ) : students.length === 0 ? (
                 <div className="text-center py-12">
                   <p className="font-sans text-sm text-ink-secondary mb-1">Студентов пока нет.</p>
                   <p className="font-sans text-xs text-ink-tertiary">Укажите имя студента при проверке работы — он появится здесь.</p>

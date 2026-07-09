@@ -1,15 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import Button from '../ui/Button'
 import FeedbackEmail from './FeedbackEmail'
 import RevisionCheckList from './RevisionCheckList'
 import QuestionResponseList from './QuestionResponseList'
 import ConfidenceBadge from './ConfidenceBadge'
 import HandoutModal from './HandoutModal'
+import StudentTrajectory from './StudentTrajectory'
 import { useApprove } from '../../hooks/useGrading'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
 import { usePersistedState, clearPersistedState } from '../../hooks/usePersistedState'
 import { GRADES, gradeColor, gradeLabel, GRADE_BRACKETS, scoreToGrade, snapScoreToGrade } from '../../lib/grades'
+import { getStudentTrajectory } from '../../api/grading'
 import type { GradeResponse } from '../../api/grading'
 import type { GradeLetter, BulletItem, BulletSeverity, VerificationQuestion, CriterionScore, ApprovedEditReason } from '../../types'
 
@@ -19,11 +22,14 @@ interface Props {
   // When the teacher clicks a citation in the per-criterion feedback, the
   // host page highlights and scrolls to the quote in the submission pane.
   onCite?: (quote: string) => void
+  // Identity of the student just graded, if known — powers the "За семестр"
+  // tab. Absent (no student_name on the submission) hides the tab entirely.
+  student?: { name?: string; group?: string; courseId?: string }
 }
 
-type Tab = 'feedback' | 'criteria' | 'email'
+type Tab = 'feedback' | 'criteria' | 'email' | 'trajectory'
 
-export default function GradingResult({ result, onApproved, onCite }: Props) {
+export default function GradingResult({ result, onApproved, onCite, student }: Props) {
   const [tab, setTab] = useState<Tab>('feedback')
   const { can } = usePlan()
   const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
@@ -73,6 +79,20 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
   const [approved, setApproved]         = useState(false)
   const [handoutOpen, setHandoutOpen]   = useState(false)
   const approveMut = useApprove()
+
+  // Trajectory (Feature B) — last few grades for this student, fetched only
+  // when the teacher supplied a name. No new AI calls: pure history lookup.
+  const trajectoryEnabled = Boolean(student?.name)
+  const { data: trajectory, isLoading: trajectoryLoading } = useQuery({
+    queryKey: ['student-trajectory', student?.name, student?.group, student?.courseId, result.assignment_id],
+    queryFn: () => getStudentTrajectory({
+      student_name:  student!.name!,
+      student_group: student?.group,
+      course_id:     student?.courseId,
+      exclude_id:    result.assignment_id,
+    }),
+    enabled: trajectoryEnabled,
+  })
 
   // Per-criterion approved scores. Start with the AI's scores; teacher can edit
   // individual entries from the Критерии tab. Persisted under the same draft
@@ -237,6 +257,11 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
             {label}
           </button>
         ))}
+        {trajectoryEnabled && (
+          <button onClick={() => setTab('trajectory')} className={tabClass('trajectory')}>
+            За семестр
+          </button>
+        )}
         {/* Email tab — locked on free tier */}
         {emailEnabled ? (
           <button onClick={() => setTab('email')} className={tabClass('email')}>
@@ -407,6 +432,16 @@ export default function GradingResult({ result, onApproved, onCite }: Props) {
 
         {tab === 'email' && (
           <FeedbackEmail assignmentId={result.assignment_id} />
+        )}
+
+        {tab === 'trajectory' && (
+          <StudentTrajectory
+            loading={trajectoryLoading}
+            entries={trajectory ?? []}
+            currentScore={parseInt(editScore, 10)}
+            currentGrade={editGrade}
+            currentCriteriaScores={editCriteriaScores}
+          />
         )}
       </div>
     </div>

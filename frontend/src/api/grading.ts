@@ -152,6 +152,61 @@ export async function getStudents(courseId?: string): Promise<StudentSummary[]> 
   return res.data
 }
 
+export interface TrajectoryEntry {
+  id:              string
+  created_at:      string
+  score:           number | null
+  grade:           GradeLetter | null
+  criteria_scores: CriterionScore[] | null
+}
+
+/** Last few grades for a known student — powers the grading screen's "За семестр" tab (Feature B). */
+export async function getStudentTrajectory(params: {
+  student_name:  string
+  student_group?: string
+  course_id?:    string
+  exclude_id?:   string
+}): Promise<TrajectoryEntry[]> {
+  const res = await client.get<TrajectoryEntry[]>('/api/grading/student-trajectory', { params })
+  return res.data
+}
+
+export interface GroupBreakdown {
+  group:     string | null
+  count:     number
+  avg_score: number | null
+  histogram: Record<string, number>
+}
+
+export interface MissedCriterion {
+  name:      string
+  avg_score: number
+  count:     number
+}
+
+export interface SlippingStudent {
+  student_name:  string
+  student_group: string | null
+  recent_avg:    number
+  prior_avg:     number
+  delta:         number
+}
+
+export interface CohortAnalytics {
+  total_students:      number
+  total_submissions:   number
+  histogram:            Record<string, number>
+  by_group:             GroupBreakdown[]
+  top_missed_criteria:  MissedCriterion[]
+  slipping:             SlippingStudent[]
+}
+
+/** Roster-wide grade distribution, per-group breakdown, weakest criteria, and who's slipping — pure aggregation, no AI (Feature C). */
+export async function getCohortAnalytics(courseId?: string): Promise<CohortAnalytics> {
+  const res = await client.get<CohortAnalytics>('/api/grading/cohort-analytics', { params: { course_id: courseId } })
+  return res.data
+}
+
 // ─── Long-document review (ВКР / диплом) ───────────────────────────────────────
 
 export interface ReviewRequest {

@@ -65,3 +65,34 @@ export async function uploadAndWait(
     setTimeout(poll, 1500)
   })
 }
+
+// ─── "Спроси документ" grounded chat (Feature I) ───────────────────────────────
+
+export interface ChatTurn {
+  role:    'user' | 'assistant'
+  content: string
+}
+
+export interface DocChatSource {
+  idx:         number
+  document_id: string
+  file_name:   string
+  page_start:  number | null
+  page_end:    number | null
+  excerpt:     string
+}
+
+export interface DocChatResult {
+  answer:   string
+  sources:  DocChatSource[]
+  grounded: boolean
+}
+
+export async function askDocument(params: {
+  course_id: string
+  question:  string
+  history?:  ChatTurn[]
+}): Promise<DocChatResult> {
+  const res = await client.post<DocChatResult>('/api/documents/chat', params)
+  return res.data
+}

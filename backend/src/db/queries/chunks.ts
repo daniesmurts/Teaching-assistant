@@ -90,3 +90,32 @@ export async function findRelevantChunks(
   )
   return rows
 }
+
+export interface ScoredChunk extends RelevantChunk {
+  distance: number   // cosine distance (embedding <=> query) — 0 = identical, larger = less similar
+}
+
+/**
+ * Twin of findRelevantChunks that also surfaces the cosine distance, so a
+ * caller can refuse to answer when even the best match is a poor one — the
+ * "Спроси документ" grounded-chat feature's non-negotiable requirement
+ * (Research/TODO Feature I) that a weak/no match must not fall back to the
+ * model's general knowledge.
+ */
+export async function findRelevantChunksScored(
+  courseId: string,
+  embedding: number[],
+  limit = 5
+): Promise<ScoredChunk[]> {
+  const { rows } = await pool.query<ScoredChunk>(
+    `SELECT c.document_id, d.file_name, c.chunk_index, c.chunk_type, c.text,
+            c.page_start, c.page_end, (c.embedding <=> $2) AS distance
+       FROM document_chunks c
+       JOIN documents d ON d.id = c.document_id
+      WHERE c.course_id = $1 AND c.embedding IS NOT NULL
+      ORDER BY c.embedding <=> $2
+      LIMIT $3`,
+    [courseId, `[${embedding.join(',')}]`, limit]
+  )
+  return rows
+}

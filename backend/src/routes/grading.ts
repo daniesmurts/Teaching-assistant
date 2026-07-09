@@ -15,7 +15,8 @@ import { generateEmailDraft } from '../services/email'
 import { composeHandout } from '../services/handout'
 import { searchFeedbackLibrary } from '../services/feedbackLibrary'
 import { getCrossInstitutionUseCount } from '../db/queries/ragRetrievals'
-import { findAssignmentsByTeacher, findStudentsByTeacher, findAssignmentsForExport, findAssignmentById, findApprovalHistory } from '../db/queries/assignments'
+import { findAssignmentsByTeacher, findStudentsByTeacher, findAssignmentsForExport, findAssignmentById, findApprovalHistory, findStudentTrajectory, findCohortRows } from '../db/queries/assignments'
+import { computeCohortAnalytics } from '../services/cohortAnalytics'
 import { toCsv, csvFilename } from '../lib/csv'
 import { pool } from '../db/connection'
 import type { GradeLetter, BulletItem } from '../../../shared/types'
@@ -362,6 +363,29 @@ router.get(
   asyncHandler(async (req, res) => {
     const courseId = req.query.course_id as string | undefined
     res.json(await findStudentsByTeacher(req.teacher.id, courseId))
+  })
+)
+
+// GET /api/grading/student-trajectory — last N grades for a known student (Feature B)
+router.get(
+  '/student-trajectory',
+  asyncHandler(async (req, res) => {
+    const studentName  = req.query.student_name as string | undefined
+    const studentGroup = req.query.student_group as string | undefined
+    const courseId     = req.query.course_id as string | undefined
+    const excludeId    = req.query.exclude_id as string | undefined
+    if (!studentName) return res.json([])
+    res.json(await findStudentTrajectory(req.teacher.id, studentName, studentGroup, { courseId, excludeId, limit: 3 }))
+  })
+)
+
+// GET /api/grading/cohort-analytics — roster-wide rollup for the Students cohort tab (Feature C)
+router.get(
+  '/cohort-analytics',
+  asyncHandler(async (req, res) => {
+    const courseId = req.query.course_id as string | undefined
+    const rows = await findCohortRows(req.teacher.id, courseId)
+    res.json(computeCohortAnalytics(rows))
   })
 )
 

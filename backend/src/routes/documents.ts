@@ -2,10 +2,13 @@ import { Router } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { asyncHandler } from '../lib/asyncHandler'
 import { checkFeatureAccess } from '../middleware/checkPlan'
+import { aiLimiter } from '../middleware/rateLimits'
 import { uploadConfig, verifyFileContent } from '../middleware/fileValidation'
 import { uploadAndProcess } from '../services/documents'
+import { askDocument, type ChatTurn } from '../services/docChat'
 import { getDocumentById } from '../db/queries/documents'
 import { countChunksForDocument } from '../db/queries/chunks'
+import { findCourseById } from '../db/queries/courses'
 import { ValidationError, NotFoundError, DocumentProcessingError } from '../errors/AppError'
 
 const router = Router()
@@ -74,5 +77,45 @@ router.get('/:id/status', asyncHandler(async (req, res) => {
     chunkCount,
   })
 }))
+
+const MAX_QUESTION_LEN = 2000
+const MAX_HISTORY_ITEMS = 12
+
+// POST /api/documents/chat — "Спроси документ" grounded Q&A over a course's materials (TODO Feature I)
+router.post(
+  '/chat',
+  aiLimiter,
+  checkFeatureAccess('documentUpload'),
+  asyncHandler(async (req, res) => {
+    const { course_id, question, history } = req.body as {
+      course_id?: string
+      question?:  string
+      history?:   ChatTurn[]
+    }
+
+    if (!course_id) throw new ValidationError('Укажите предмет')
+    if (!question || !question.trim()) throw new ValidationError('Введите вопрос')
+    if (question.length > MAX_QUESTION_LEN) throw new ValidationError(`Вопрос слишком длинный (максимум ${MAX_QUESTION_LEN} символов)`)
+
+    const course = await findCourseById(course_id, req.teacher.id)
+    if (!course) throw new NotFoundError('Предмет')
+
+    const cleanHistory = Array.isArray(history)
+      ? history
+          .filter((t) => t && (t.role === 'user' || t.role === 'assistant') && typeof t.content === 'string')
+          .slice(-MAX_HISTORY_ITEMS)
+      : undefined
+
+    const result = await askDocument({
+      teacherId:     req.teacher.id,
+      institutionId: req.teacher.institution_id ?? undefined,
+      courseId:      course_id,
+      question,
+      history:       cleanHistory,
+    })
+
+    res.json(result)
+  })
+)
 
 export default router

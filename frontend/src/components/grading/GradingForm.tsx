@@ -10,6 +10,8 @@ import DocumentUpload from '../ui/DocumentUpload'
 import NoCourseHint from '../onboarding/NoCourseHint'
 import CriteriaHint from '../onboarding/CriteriaHint'
 import SimilarPastFeedback from './SimilarPastFeedback'
+import DocChatModal from './DocChatModal'
+import Icon from '../ui/Icon'
 import { useUIStore } from '../../store/uiStore'
 import { usePlan } from '../../hooks/usePlan'
 import { usePersistedState } from '../../hooks/usePersistedState'
@@ -90,6 +92,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
   // Citation checking — opt-in per grade, Pro+ only, adds latency (web
   // searches). Same "off by default" reasoning as thorough.
   const [checkCitations, setCheckCitations] = useState(false)
+  const [docChatOpen, setDocChatOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
   const [reviewJob, setReviewJob] = useState<LongReview | null>(null)
@@ -453,10 +456,23 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
         </div>
         <div className="space-y-2.5">
           <div>
-            <select className={selectClass} value={form.course_id} onChange={set('course_id')}>
-              <option value="">Предмет не выбран</option>
-              {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <div className="flex items-center gap-2">
+              <select className={`${selectClass} flex-1`} value={form.course_id} onChange={set('course_id')}>
+                <option value="">Предмет не выбран</option>
+                {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              {form.course_id && can('documentUpload') && (
+                <button
+                  type="button"
+                  onClick={() => setDocChatOpen(true)}
+                  title="Спросить документ — вопрос по загруженным материалам предмета"
+                  className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-sans font-medium text-amber bg-amber-light/40 border border-amber/25 rounded-full hover:bg-amber-light hover:border-amber/50 transition-colors whitespace-nowrap"
+                >
+                  <Icon name="message-chat" size={13} />
+                  Спросить документ
+                </button>
+              )}
+            </div>
             <NoCourseHint />
           </div>
 
@@ -750,6 +766,10 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
           </>
         )}
       </div>
+
+      {docChatOpen && form.course_id && (
+        <DocChatModal courseId={form.course_id} onClose={() => setDocChatOpen(false)} />
+      )}
     </form>
   )
 }

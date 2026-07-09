@@ -174,35 +174,52 @@ land in History.
 - **Pricing hook:** worth gating to Pro; institution tier could add
   per-batch templates.
 
-### B. Per-student trajectory panel · Effort: M
+### ~~B. Per-student trajectory panel~~ — already done
 
-When grading a known student (matched by name+group), surface their last 3
-grades and per-criterion movement in the right-hand panel. Pair with the
-revision check we already have.
+Shipped: new "За семестр" tab in
+[GradingResult.tsx](frontend/src/components/grading/GradingResult.tsx),
+visible only when the current submission has a `student_name`. New
+`findStudentTrajectory()` in
+[db/queries/assignments.ts](backend/src/db/queries/assignments.ts) — last 3
+grades for the same (student_name, student_group) pair, scoped to the
+current course when one is selected (criteria are only comparable within a
+course), excluding the assignment being viewed. New
+[StudentTrajectory.tsx](frontend/src/components/grading/StudentTrajectory.tsx)
+renders the score/grade history plus **per-criterion movement**: each
+current criterion is matched by normalised name against the most recent
+prior occurrence, showing `72 → 85 (+13)` with a colored delta, or "впервые"
+when the criterion has no history yet. New route
+`GET /api/grading/student-trajectory`. No new AI calls — pure history
+lookup, matching the original design note.
 
-- **Why:** Turns the platform from "a grading tool" into "an actual
-  longitudinal teaching aid." The only durable differentiator against
-  generic LLM apps.
-- **Touches:** [components/grading/GradingResult.tsx](frontend/src/components/grading/GradingResult.tsx)
-  adds a "За семестр" tab, new query in
-  [db/queries/assignments.ts](backend/src/db/queries/assignments.ts) for
-  by-student timeline, optional small per-criterion sparkline.
-- **Note:** no new AI calls — all data we already capture.
+**Also added to [AssignmentDetailModal.tsx](frontend/src/components/grading/AssignmentDetailModal.tsx)** (the История/past-grades detail view), not just the live grading screen — user testing surfaced that checking on a student's trajectory happens at least as often from browsing history as from a fresh grading, and the original scope had only wired the live screen. Reuses the same `StudentTrajectory` component and `getStudentTrajectory` query, anchored on the historical assignment's own score/grade instead of an in-progress edit. 6 integration tests
+(`assignments.trajectory.integration.test.ts`) covering course scoping,
+NULL-group matching, cross-teacher isolation, and the limit/ordering
+contract.
 
-### C. Cohort / group analytics for the Students page · Effort: M
+### ~~C. Cohort / group analytics for the Students page~~ — already done
 
-Per-group histograms, top-3 missed criteria across the cohort, who's
-slipping.
-
-- **Why:** End-of-semester gold for teachers. Sells the institution tier
-  to department heads ("see your whole faculty's grade distributions").
-- **Touches:** [pages/Students.tsx](frontend/src/pages/Students.tsx) gets a
-  cohort tab. New aggregation queries. Optional CSV export.
-- **Note:** no AI calls — pure aggregation. Distinct from the AI-driven
-  cohort synthesis shipped for published assignments
-  ([services/cohortSynthesis.ts](backend/src/services/cohortSynthesis.ts)) —
-  that one is scoped to a single published assignment's submissions and
-  produces qualitative gaps/topics via LLM, not a roster-wide histogram.
+Shipped: new **«По группе»** tab on [Students.tsx](frontend/src/pages/Students.tsx)
+next to the existing roster list. New pure `computeCohortAnalytics()`
+([services/cohortAnalytics.ts](backend/src/services/cohortAnalytics.ts)) over a
+flat per-assignment row set — overall grade histogram, per-group breakdown
+(count + avg score, sorted alphabetically with ungrouped last), **top 3
+weakest criteria** (lowest average score, criteria matched case-insensitively
+by name, requires ≥3 samples so one harsh grading of one student can't read
+as "the whole cohort struggles here"), and **«Требуют внимания»** — students
+whose last-2-submissions average dropped ≥8 points vs. their prior average
+(minimum 4 submissions to have a meaningful split), sorted worst-first,
+capped at 10, clickable straight into their profile. New
+`findCohortRows()` ([db/queries/assignments.ts](backend/src/db/queries/assignments.ts),
+capped at 5000 rows) + `GET /api/grading/cohort-analytics`. **No AI calls** —
+pure aggregation, distinct from the AI-driven cohort synthesis on published
+assignments ([services/cohortSynthesis.ts](backend/src/services/cohortSynthesis.ts)),
+which is scoped to one published assignment and produces qualitative
+gaps/topics via LLM rather than a roster-wide histogram. 10 unit tests
+(`cohortAnalytics.test.ts`) + 2 integration tests
+(`assignments.cohort.integration.test.ts`). CSV export not built — no
+demand signal yet, easy fast-follow via the existing `toCsv` helper if
+asked for.
 
 ### D. Real PPTX export · Effort: M
 
@@ -259,37 +276,47 @@ are under-using the platform? Useful institutional decisions data.
 - **Touches:** [routes/institution.ts](backend/src/routes/institution.ts)
   new aggregation endpoints, new admin pages under `/institution/analytics`.
 
-### I. "Спроси документ" — grounded chat over reference materials · Effort: M
+### ~~I. "Спроси документ" — grounded chat over reference materials~~ — already done
 
-User-requested (early adopter, 2026-06). While grading, a teacher often needs
-to check a fact against a standard or methodology — e.g. a welding ГОСТ. Let
-them upload the reference document and **ask the AI questions answered from that
-document, with a citation to the exact chunk/page** — not from the model's
-general knowledge.
+Shipped: **per-subject** scope (the lean option from the original design
+choice) — reuses the `course_id` chunk scoping presentations/quizzes already
+use, rather than a per-document picker. New `askDocument()`
+([services/docChat.ts](backend/src/services/docChat.ts)) embeds the question,
+retrieves the top 5 chunks via a new `findRelevantChunksScored()`
+([db/queries/chunks.ts](backend/src/db/queries/chunks.ts) — a distance-aware
+twin of the existing `findRelevantChunks`), and answers with `chat()` (plain
+prose, `[N]` bracket citations mirroring `presentations.ts`'s citation
+convention, parsed by a small `extractCitedIndices()` that also strips
+markers pointing at nonexistent sources).
 
-- **Why:** Reuses the stack we already have (document upload → chunking →
-  embeddings → `findRelevantChunks` → `chatJSON`), so it's mostly UI + an
-  endpoint, not new plumbing. The **grounded + cited** framing is the whole
-  point: a generic AI chat would hallucinate ГОСТ numbers and clauses, which is
-  dangerous for normative checks. Citing the source makes answers verifiable and
-  is a genuine differentiator vs. "another GPT wrapper." Pairs naturally with
-  grading ("свериться со стандартом" without leaving the work).
-- **Key design decisions (resolve before building):**
-  - Scope: per-document, or a per-subject "reference library" queried across all
-    of a subject's materials? (Lean: per-subject, reusing the `course_id` chunk
-    scoping that presentations/quizzes already use.)
-  - Multi-turn: keep short conversation context, but re-retrieve chunks per turn.
-  - Refuse-when-ungrounded: if retrieval finds nothing relevant, say so instead
-    of answering from general knowledge — non-negotiable for ГОСТ/normative use.
-- **Touches:** reuse [db/queries/chunks.ts](backend/src/db/queries/chunks.ts)
-  `findRelevantChunks` + [services/embeddings.ts](backend/src/services/embeddings.ts);
-  new `services/docChat.ts` + `routes/docChat.ts` (or extend documents), citation
-  shape like the quiz/presentation `sources`; new chat UI (panel or page), with a
-  hook to open it from the grading screen.
-- **Pricing hook:** Teacher Pro — naturally gated behind `documentUpload`
-  (already Pro-only), so no new entitlement needed.
-- **Open question to the user:** which documents do they check most — ГОСТы,
-  методички, internal normatives? (asked; shapes ingestion priorities.)
+**Both non-negotiable design constraints landed as designed:**
+- **Refuse-when-ungrounded is deterministic, not prompt-only.** If the course
+  has no chunks at all, or the best-matching chunk's cosine distance exceeds
+  `0.35` (a starting heuristic — revisit against real usage, same posture as
+  `calcVerifier`'s tolerance and `citationChecker`'s reference cap), the
+  request never reaches the LLM — a fixed Russian refusal is returned
+  instead. The system prompt *additionally* forbids answering from general
+  knowledge as defense-in-depth, but the hard gate doesn't rely on the model
+  behaving.
+- **Multi-turn, re-retrieve per turn.** The client resends the local
+  conversation history (capped, both client- and server-side) for
+  continuity, but retrieval always re-runs fresh on the latest question —
+  the model never drifts onto stale context from three turns ago.
+
+New `POST /api/documents/chat` (extends `routes/documents.ts` rather than a
+separate router — natural home next to upload/status), gated by the existing
+`documentUpload` Pro+ flag exactly as planned (no new entitlement). New
+`DocChatModal.tsx` opens from a **«Спросить документ»** button next to the
+subject picker in `GradingForm.tsx`, visible once a subject is selected —
+the "hook to open it from the grading screen" from the original design.
+5 unit tests (`docChat.test.ts`, citation-extraction edge cases) + 3
+integration tests (`chunks.integration.test.ts`, real pgvector distance
+ordering).
+
+**Open question from the original entry, still genuinely open:** which
+documents teachers check most (ГОСТы vs. методички vs. internal
+normatives) — no usage data yet since this just shipped; revisit ingestion
+priorities once it's used.
 
 > **КНИТУ curriculum-intelligence suite** (items K, L below; A3 and M already shipped). These
 > are the *near-term, actionable* slices. The full feature map, dependencies, and items not

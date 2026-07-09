@@ -264,6 +264,11 @@ export default function Grading() {
                 setHighlight(quote)
                 setMobileTab('form')   // mobile: jump to the submission pane
               }}
+              student={submission?.student_name ? {
+                name:     submission.student_name,
+                group:    submission.student_group,
+                courseId: submission.course_id,
+              } : undefined}
             />
           ) : review ? (
             <ReviewResult review={review} onApproved={() => {}} />

@@ -9,7 +9,8 @@ import LongReviewBullet, { sortGapsBySeverity } from './LongReviewBullet'
 import InconsistenciesBlock from './InconsistenciesBlock'
 import RecomputationBlock from './RecomputationBlock'
 import PremiseFindingsBlock from './PremiseFindingsBlock'
-import { getReviewByAssignment, getAssignmentCrossUses, getApprovalHistory } from '../../api/grading'
+import StudentTrajectory from './StudentTrajectory'
+import { getReviewByAssignment, getAssignmentCrossUses, getApprovalHistory, getStudentTrajectory } from '../../api/grading'
 import { gradeColor } from '../../lib/grades'
 import type { Assignment, GradeLetter, AssignmentStatus, BulletItem, DefenseQuestion, ChapterReview, VerificationQuestion, Handout, ApprovedRevision } from '../../types'
 import { usePlan } from '../../hooks/usePlan'
@@ -75,6 +76,20 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
   const score    = a.approved_score ?? a.ai_score
   const feedback = a.approved_feedback ?? a.ai_feedback
   const color    = gradeColor(grade)
+
+  // Trajectory (Feature B) — this is where a teacher actually browsing past
+  // grades to check on a student lands, so it belongs here too, not just on
+  // the live grading screen.
+  const { data: trajectory, isLoading: trajectoryLoading } = useQuery({
+    queryKey: ['student-trajectory', a.student_name, a.student_group, a.course_id, a.id],
+    queryFn: () => getStudentTrajectory({
+      student_name:  a.student_name!,
+      student_group: a.student_group ?? undefined,
+      course_id:     a.course_id ?? undefined,
+      exclude_id:    a.id,
+    }),
+    enabled: Boolean(a.student_name),
+  })
 
   return (
     <div
@@ -178,6 +193,20 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
         </div>
 
         <div className="px-5 py-4 space-y-5 max-h-[70vh] overflow-y-auto">
+          {/* Trajectory — only when the student is known and has a grade to anchor on */}
+          {a.student_name && grade && (
+            <section>
+              <Label>За семестр</Label>
+              <StudentTrajectory
+                loading={trajectoryLoading}
+                entries={trajectory ?? []}
+                currentScore={score ?? NaN}
+                currentGrade={grade}
+                currentCriteriaScores={a.approved_criteria_scores ?? a.ai_criteria_scores ?? []}
+              />
+            </section>
+          )}
+
           {/* Feedback */}
           {feedback && (
             <section>

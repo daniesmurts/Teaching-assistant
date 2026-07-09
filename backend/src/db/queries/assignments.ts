@@ -735,3 +735,109 @@ export async function findStudentsByTeacher(
     last_submission: r.last_submission.toISOString(),
   }))
 }
+
+// ─── Per-student trajectory (Feature B — grading-screen "За семестр" panel) ───
+
+export interface TrajectoryEntry {
+  id:               string
+  created_at:       string
+  score:            number | null
+  grade:            string | null
+  criteria_scores:  CriterionScore[] | null   // approved preferred, else the AI draft
+}
+
+/**
+ * Last `limit` grades for a student the teacher already knows by name+group —
+ * same identity key the Students page roster uses. Scoped to a course when
+ * given (criteria are only comparable within one course); otherwise spans all
+ * of the teacher's courses for that student. Excludes the assignment being
+ * viewed right now so the panel never echoes the just-produced result back at
+ * itself.
+ */
+export async function findStudentTrajectory(
+  teacherId: string,
+  studentName: string,
+  studentGroup: string | null | undefined,
+  options: { courseId?: string; excludeId?: string; limit?: number } = {}
+): Promise<TrajectoryEntry[]> {
+  const limit = Math.min(20, options.limit ?? 3)
+  const params: unknown[] = [teacherId, studentName]
+  let where = `teacher_id = $1 AND student_name = $2`
+  // student_group is nullable — match NULL-to-NULL as "same student" too.
+  params.push(studentGroup ?? null)
+  where += ` AND student_group IS NOT DISTINCT FROM $${params.length}`
+  if (options.courseId) { params.push(options.courseId); where += ` AND course_id = $${params.length}` }
+  if (options.excludeId) { params.push(options.excludeId); where += ` AND id <> $${params.length}` }
+  params.push(limit)
+
+  const { rows } = await pool.query<{
+    id: string; created_at: Date
+    score: number | null; grade: string | null
+    criteria_scores: CriterionScore[] | null
+  }>(
+    `SELECT id, created_at,
+            COALESCE(approved_score, ai_score) AS score,
+            COALESCE(approved_grade, ai_grade) AS grade,
+            COALESCE(approved_criteria_scores, ai_criteria_scores) AS criteria_scores
+       FROM assignments
+      WHERE ${where}
+      ORDER BY created_at DESC
+      LIMIT $${params.length}`,
+    params
+  )
+
+  return rows.map((r) => ({
+    id:              r.id,
+    created_at:      r.created_at.toISOString(),
+    score:           r.score,
+    grade:           r.grade,
+    criteria_scores: r.criteria_scores,
+  }))
+}
+
+// ─── Cohort analytics (Feature C — Students page cohort tab) ──────────────────
+
+export interface CohortRow {
+  student_name:    string
+  student_group:   string | null
+  created_at:      string
+  score:           number | null
+  grade:           string | null
+  criteria_scores: CriterionScore[] | null
+}
+
+// Cap keeps one aggregation request bounded even for a teacher with years of
+// history piled onto one course — plenty for a semester's roster in practice.
+const COHORT_ROW_LIMIT = 5000
+
+/** Flat per-assignment rows for cohort aggregation — one row per graded work with a named student. */
+export async function findCohortRows(teacherId: string, courseId?: string): Promise<CohortRow[]> {
+  const params: unknown[] = [teacherId]
+  let where = `teacher_id = $1 AND student_name IS NOT NULL AND student_name <> ''`
+  if (courseId) { params.push(courseId); where += ` AND course_id = $${params.length}` }
+  params.push(COHORT_ROW_LIMIT)
+
+  const { rows } = await pool.query<{
+    student_name: string; student_group: string | null; created_at: Date
+    score: number | null; grade: string | null; criteria_scores: CriterionScore[] | null
+  }>(
+    `SELECT student_name, student_group, created_at,
+            COALESCE(approved_score, ai_score) AS score,
+            COALESCE(approved_grade, ai_grade) AS grade,
+            COALESCE(approved_criteria_scores, ai_criteria_scores) AS criteria_scores
+       FROM assignments
+      WHERE ${where}
+      ORDER BY created_at DESC
+      LIMIT $${params.length}`,
+    params
+  )
+
+  return rows.map((r) => ({
+    student_name:    r.student_name,
+    student_group:   r.student_group,
+    created_at:      r.created_at.toISOString(),
+    score:           r.score,
+    grade:           r.grade,
+    criteria_scores: r.criteria_scores,
+  }))
+}

@@ -29,6 +29,7 @@ export type IconName =
   | 'scale'           // calibration / consistency
   | 'file-check'      // programme conformance
   | 'shield'          // security / compliance / trust
+  | 'message-chat'    // grounded document chat ("Спросить документ")
 
 const PATHS: Record<IconName, JSX.Element> = {
   home: (
@@ -205,6 +206,15 @@ const PATHS: Record<IconName, JSX.Element> = {
 
   shield: (
     <path d="M12 2.5l7.5 3v5.2c0 4.7-3.2 8.9-7.5 10.3-4.3-1.4-7.5-5.6-7.5-10.3V5.5l7.5-3z" />
+  ),
+
+  'message-chat': (
+    <>
+      <path d="M4 4.5h16a1 1 0 0 1 1 1V16a1 1 0 0 1-1 1H10l-4.5 4V17H4a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1z" />
+      <circle cx="8.5" cy="10.5" r="0.75" fill="currentColor" stroke="none" />
+      <circle cx="12"  cy="10.5" r="0.75" fill="currentColor" stroke="none" />
+      <circle cx="15.5" cy="10.5" r="0.75" fill="currentColor" stroke="none" />
+    </>
   ),
 }
 
