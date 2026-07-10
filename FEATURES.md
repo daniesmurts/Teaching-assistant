@@ -149,6 +149,7 @@ Panel at `/institution` (gated to `institution_admin` / `platform_admin`):
 Panel at `/admin` (direct URL only, `platform_admin`):
 - **Overview** — platform stats + today's cost
 - **Usage** — by day / feature / teacher (cost visible here only)
+- **Платежи** — business metrics: revenue this month / 30 days, active auto-renew subscriptions, failed charges, teachers in grace period; monthly revenue table; full payment list (who/when/plan/amount, покупка vs продление via `rb_` order-id prefix) with status filter + pagination
 - **Активация** — activation funnel (signup → предмет → первая проверка → презентация, derived retroactively from existing data), 24h/72h/7d aha-conversion + median time-to-first-grade, weekly signup cohorts, «застрявшие» triage list (48h+ old, never graded, not seen 48h)
 - **Teachers** — search, change role / plan / institution assignment, activate/deactivate
 - **Institutions** — create/edit (tier, seat cap, **email auto-join domain**), teacher counts; **SAML SSO config** per institution (IdP entity id / SSO URL / cert, attribute mapping, copy-ready SP metadata + ACS URLs)

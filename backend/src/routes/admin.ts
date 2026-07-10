@@ -24,6 +24,7 @@ import { listAudit } from '../db/queries/audit'
 import { getFunnelSummary, getFunnelByWeek, getStalledTeachers } from '../db/queries/activation'
 import {
   findPaymentsByTeacher, findPaymentByOrderId, markPaymentRefunded,
+  listAllPayments, getPaymentsSummary, getRevenueByMonth,
 } from '../db/queries/payments'
 import { refundPayment } from '../services/tbank'
 import {
@@ -98,6 +99,30 @@ router.get('/usage/by-feature', asyncHandler(async (req, res) => {
 router.get('/errors', asyncHandler(async (req, res) => {
   const days = parseInt((req.query.days as string) ?? '7', 10)
   res.json(await getRecentErrors(Math.min(days, 90)))
+}))
+
+// ─── Business metrics — payments & renewals ───────────────────────────────────
+// Platform-wide view over the payments table. Renewal charges carry the
+// `rb_` order-id prefix (renewals.ts); grace state lives on teachers.
+
+router.get('/payments/summary', asyncHandler(async (req, res) => {
+  const months = parseInt((req.query.months as string) ?? '12', 10)
+  const [summary, byMonth] = await Promise.all([
+    getPaymentsSummary(),
+    getRevenueByMonth(Math.min(months, 36)),
+  ])
+  res.json({ summary, byMonth })
+}))
+
+router.get('/payments', asyncHandler(async (req, res) => {
+  const q = req.query as Record<string, string | undefined>
+  const status = q.status && ['pending', 'confirmed', 'rejected', 'refunded'].includes(q.status)
+    ? q.status : undefined
+  res.json(await listAllPayments({
+    status,
+    limit:  Math.min(q.limit ? parseInt(q.limit, 10) : 50, 200),
+    offset: q.offset ? parseInt(q.offset, 10) : 0,
+  }))
 }))
 
 // ─── Activation funnel ────────────────────────────────────────────────────────

@@ -366,3 +366,45 @@ export async function getStalledTeachers(limit = 100): Promise<StalledTeacher[]>
   const res = await client.get<StalledTeacher[]>('/api/admin/activation/stalled', { params: { limit } })
   return res.data
 }
+
+// ─── Payments / business metrics ──────────────────────────────────────────────
+
+export interface PaymentsSummary {
+  revenue_this_month_kopecks: number
+  revenue_30d_kopecks:        number
+  confirmed_30d:              number
+  rejected_30d:               number
+  active_subscribers:         number
+  in_grace:                   number
+}
+
+export interface MonthlyRevenue {
+  month:           string
+  revenue_kopecks: number
+  confirmed_count: number
+  rejected_count:  number
+}
+
+export async function getPaymentsSummary(months = 12): Promise<{ summary: PaymentsSummary; byMonth: MonthlyRevenue[] }> {
+  const res = await client.get<{ summary: PaymentsSummary; byMonth: MonthlyRevenue[] }>('/api/admin/payments/summary', { params: { months } })
+  return res.data
+}
+
+export interface AdminPayment {
+  id:             string
+  order_id:       string
+  teacher_id:     string
+  teacher_email:  string
+  teacher_name:   string | null
+  plan:           string
+  amount_kopecks: number
+  status:         string
+  is_renewal:     boolean
+  created_at:     string
+  confirmed_at:   string | null
+}
+
+export async function getAdminPayments(params: { status?: string; limit?: number; offset?: number } = {}): Promise<{ rows: AdminPayment[]; total: number }> {
+  const res = await client.get<{ rows: AdminPayment[]; total: number }>('/api/admin/payments', { params })
+  return res.data
+}
