@@ -51,6 +51,10 @@ export const config = {
     toolPrivateKey: optional('LTI_TOOL_PRIVATE_KEY'),
     toolKid:        optional('LTI_TOOL_KID'),
   },
+  telegram: {
+    botToken: optional('TELEGRAM_BOT_TOKEN'),
+    chatId:   optional('TELEGRAM_CHAT_ID'),
+  },
 } as const
 
 /** Call once at boot. Validates essentials and warns about degraded features. */
@@ -67,6 +71,10 @@ export function validateConfig(): void {
 
   if (!config.lti.toolPrivateKey) {
     warnings.push('LTI 1.3 (LMS launches will be rejected — run scripts/generateLtiToolKeypair.ts)')
+  }
+
+  if (!config.telegram.botToken || !config.telegram.chatId) {
+    warnings.push('Telegram incident alerts (production errors will only be logged, not pushed)')
   }
 
   if (warnings.length > 0 && config.nodeEnv === 'production') {

@@ -325,3 +325,44 @@ export async function getAudit(
   })
   return res.data
 }
+
+// ─── Activation funnel ────────────────────────────────────────────────────────
+
+export interface FunnelSummary {
+  total_teachers:        number
+  created_course:        number
+  reached_first_grade:   number
+  created_presentation:  number
+  graded_within_24h:     number
+  graded_within_72h:     number
+  graded_within_7d:      number
+  median_hours_to_grade: number | null
+}
+
+export interface FunnelCohort {
+  week:                  string
+  signups:               number
+  created_course:        number
+  reached_first_grade:   number
+  median_hours_to_grade: number | null
+}
+
+export async function getActivationFunnel(weeks = 12): Promise<{ summary: FunnelSummary; cohorts: FunnelCohort[] }> {
+  const res = await client.get<{ summary: FunnelSummary; cohorts: FunnelCohort[] }>('/api/admin/activation/funnel', { params: { weeks } })
+  return res.data
+}
+
+export interface StalledTeacher {
+  id:              string
+  email:           string
+  name:            string | null
+  created_at:      string
+  last_seen_at:    string | null
+  first_course_at: string | null
+  first_grade_at:  string | null
+}
+
+export async function getStalledTeachers(limit = 100): Promise<StalledTeacher[]> {
+  const res = await client.get<StalledTeacher[]>('/api/admin/activation/stalled', { params: { limit } })
+  return res.data
+}

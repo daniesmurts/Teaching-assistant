@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import { verifyToken } from '../lib/jwt'
-import { findTeacherRowById } from '../db/queries/teachers'
+import { findTeacherRowById, touchLastSeen } from '../db/queries/teachers'
 import { computeEffectiveTier } from '../lib/planTier'
 import { UnauthorizedError } from '../errors/AppError'
 
@@ -92,6 +92,7 @@ export async function authenticate(
       primary_org_unit_id: row.primary_org_unit_id ?? null,
       is_platform_admin:   row.is_platform_admin   ?? false,
     }
+    touchLastSeen(row.id)   // throttled fire-and-forget activity mark
     next()
   } catch (err) {
     next(err)

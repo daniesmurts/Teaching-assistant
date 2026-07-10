@@ -21,6 +21,7 @@ import { metadataUrlForInstitution, acsUrlForInstitution } from '../services/sam
 import { listFeedback } from '../db/queries/feedback'
 import { listContactMessages, markContactMessageRead } from '../db/queries/contactMessages'
 import { listAudit } from '../db/queries/audit'
+import { getFunnelSummary, getFunnelByWeek, getStalledTeachers } from '../db/queries/activation'
 import {
   findPaymentsByTeacher, findPaymentByOrderId, markPaymentRefunded,
 } from '../db/queries/payments'
@@ -97,6 +98,24 @@ router.get('/usage/by-feature', asyncHandler(async (req, res) => {
 router.get('/errors', asyncHandler(async (req, res) => {
   const days = parseInt((req.query.days as string) ?? '7', 10)
   res.json(await getRecentErrors(Math.min(days, 90)))
+}))
+
+// ─── Activation funnel ────────────────────────────────────────────────────────
+// Derived from courses/assignments/presentations MIN(created_at) — see
+// db/queries/activation.ts. Summary + weekly cohorts + stalled-user triage list.
+
+router.get('/activation/funnel', asyncHandler(async (req, res) => {
+  const weeks = parseInt((req.query.weeks as string) ?? '12', 10)
+  const [summary, cohorts] = await Promise.all([
+    getFunnelSummary(),
+    getFunnelByWeek(Math.min(weeks, 52)),
+  ])
+  res.json({ summary, cohorts })
+}))
+
+router.get('/activation/stalled', asyncHandler(async (req, res) => {
+  const limit = parseInt((req.query.limit as string) ?? '100', 10)
+  res.json(await getStalledTeachers(Math.min(limit, 500)))
 }))
 
 // ─── Cross-institution activity log ───────────────────────────────────────────

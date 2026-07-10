@@ -1,6 +1,8 @@
 import type { Request, Response, NextFunction } from 'express'
 import { AppError } from '../errors/AppError'
 import { logger } from '../lib/logger'
+import { recordIncident } from '../db/queries/incidents'
+import { sendTelegramAlert } from '../lib/telegramAlert'
 
 interface RawError extends Error {
   status?: number
@@ -17,6 +19,47 @@ function sanitiseBody(body: unknown): unknown {
       sensitive.has(k) ? '[REDACTED]' : v,
     ])
   )
+}
+
+// Unknown 500s and infra failures are the failure modes Uptime Kuma's
+// black-box probing can't see (the app still answers 200 on /api/health
+// while one route is broken) — push them to Telegram and log a row for
+// per-client impact + future runbook matching. Fire-and-forget: alerting
+// must never delay or fail the error response itself.
+function alertAndRecordIncident(params: {
+  code: string
+  message: string
+  req: Request
+  stack?: string
+}): void {
+  const teacherId = (params.req as Request & { teacher?: { id: string } }).teacher?.id ?? null
+  sendTelegramAlert({
+    code: params.code,
+    message: params.message,
+    path: params.req.path,
+    method: params.req.method,
+  }).then((telegramSent) => {
+    recordIncident({
+      code: params.code,
+      message: params.message,
+      path: params.req.path,
+      method: params.req.method,
+      teacherId,
+      stack: params.stack ?? null,
+      telegramSent,
+    })
+  }).catch(() => {
+    // sendTelegramAlert already logs its own failures; still record the incident.
+    recordIncident({
+      code: params.code,
+      message: params.message,
+      path: params.req.path,
+      method: params.req.method,
+      teacherId,
+      stack: params.stack ?? null,
+      telegramSent: false,
+    })
+  })
 }
 
 export function errorHandler(
@@ -53,6 +96,7 @@ export function errorHandler(
       : 'Сервис временно недоступен'
 
     logger.error({ message: 'DB connection refused', path: req.path })
+    alertAndRecordIncident({ code: 'DB_UNAVAILABLE', message: 'DB connection refused', req })
     res.status(503).json({ error: message, code: 'DB_UNAVAILABLE' })
     return
   }
@@ -66,6 +110,8 @@ export function errorHandler(
     body:    sanitiseBody(req.body),
     teacherId: (req as Request & { teacher?: { id: string } }).teacher?.id,
   })
+
+  alertAndRecordIncident({ code: 'INTERNAL_ERROR', message: err.message, req, stack: err.stack })
 
   res.status(500).json({
     error: 'Произошла непредвиденная ошибка. Попробуйте ещё раз.',

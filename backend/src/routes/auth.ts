@@ -28,6 +28,8 @@ import {
 import { findValidInviteByToken, markInviteAccepted } from '../db/queries/teacherInvites'
 import { getInstitutionById, findInstitutionByEmailDomain, countInstitutionTeachers } from '../db/queries/institutions'
 import { isInstitutionAdmin, assignDefaultDepartmentIfUnset } from '../db/queries/orgUnits'
+import { verifyNudgeUnsubToken } from '../services/activation'
+import { setNudgeEmailsEnabled } from '../db/queries/activation'
 import { hasLeadershipRole } from '../db/queries/leadership'
 import { getProgramAccessScope } from '../services/programAccess'
 import { recordAudit } from '../db/queries/audit'
@@ -155,6 +157,22 @@ router.get('/invite/:token', asyncHandler(async (req, res) => {
     email:            invite.email,
     institution_name: institution?.name ?? null,
   })
+}))
+
+// ─── GET /api/auth/nudge-unsubscribe?token=… ──────────────────────────────────
+// Public — target of the «Отписаться» link in activation nudge emails. Token
+// is a stateless HMAC over the teacher id (services/activation.ts), so links
+// keep working indefinitely. Returns a tiny HTML page, not JSON — this opens
+// in the teacher's browser straight from their mail client.
+router.get('/nudge-unsubscribe', asyncHandler(async (req, res) => {
+  const token = String(req.query.token ?? '')
+  const teacherId = verifyNudgeUnsubToken(token)
+  if (!teacherId) {
+    res.status(400).send('<html lang="ru"><body style="font-family:sans-serif;padding:40px">Ссылка недействительна.</body></html>')
+    return
+  }
+  await setNudgeEmailsEnabled(teacherId, false)
+  res.send('<html lang="ru"><body style="font-family:sans-serif;padding:40px">Вы отписаны от подсказок по началу работы. Письма о безопасности аккаунта и оплате продолжат приходить.</body></html>')
 }))
 
 // ─── POST /api/auth/login ─────────────────────────────────────────────────────

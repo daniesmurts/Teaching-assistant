@@ -41,6 +41,7 @@ import Feedback from './pages/Feedback'
 import AdminLayout from './pages/admin/AdminLayout'
 import AdminOverview from './pages/admin/AdminOverview'
 import AdminUsage from './pages/admin/AdminUsage'
+import AdminActivation from './pages/admin/AdminActivation'
 import AdminTeachers from './pages/admin/AdminTeachers'
 import AdminRubrics from './pages/admin/AdminRubrics'
 import AdminRubricTemplates from './pages/admin/AdminRubricTemplates'
@@ -270,6 +271,7 @@ export default function App() {
           <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>
             <Route index            element={<AdminOverview />} />
             <Route path="usage"     element={<AdminUsage />} />
+            <Route path="activation" element={<AdminActivation />} />
             <Route path="teachers"  element={<AdminTeachers />} />
             <Route path="institutions" element={<AdminInstitutions />} />
             <Route path="rubrics"   element={<AdminRubrics />} />

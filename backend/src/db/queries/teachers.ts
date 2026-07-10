@@ -82,6 +82,30 @@ export async function findTeacherRowById(id: string): Promise<TeacherRow | null>
   return rows[0] ?? null
 }
 
+// ─── last_seen_at touch (activation/retention tracking) ──────────────────────
+// Called by authenticate on every request; the in-memory map keeps it to one
+// DB write per teacher per 15 min per worker (2 PM2 workers → worst case two
+// writes per window, fine). Fire-and-forget — activity tracking must never
+// slow down or fail the request being authenticated.
+
+const LAST_SEEN_THROTTLE_MS = 15 * 60 * 1000
+const lastSeenTouchedAt = new Map<string, number>()
+
+export function touchLastSeen(teacherId: string): void {
+  const now = Date.now()
+  const last = lastSeenTouchedAt.get(teacherId)
+  if (last && now - last < LAST_SEEN_THROTTLE_MS) return
+  lastSeenTouchedAt.set(teacherId, now)
+
+  pool.query(
+    `UPDATE teachers SET last_seen_at = NOW() WHERE id = $1`,
+    [teacherId]
+  ).catch(() => {
+    // Forget the throttle entry so the next request retries the write.
+    lastSeenTouchedAt.delete(teacherId)
+  })
+}
+
 /** Update the teacher's display name. Used by the Settings page so a mistyped
  *  name at signup can be corrected without rebuilding the account. */
 export async function updateTeacherName(teacherId: string, name: string): Promise<void> {

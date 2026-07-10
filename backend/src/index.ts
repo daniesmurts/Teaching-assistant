@@ -2,6 +2,8 @@ import { app } from './app'
 import { logger } from './lib/logger'
 import { config } from './lib/config'
 import { startRenewalScheduler } from './services/renewals'
+import { startActivationScheduler } from './services/activation'
+import { startActivationDigestScheduler } from './services/activationDigest'
 import { startJobQueue, stopJobQueue } from './services/jobQueue'
 import { registerLongReviewWorker } from './services/longReviewWorker'
 
@@ -16,6 +18,8 @@ async function main(): Promise<void> {
   app.listen(PORT, () => {
     logger.info({ message: `Backend running on port ${PORT}`, env: process.env.NODE_ENV })
     startRenewalScheduler()   // daily auto-renewal sweep
+    startActivationScheduler()        // hourly onboarding-nudge sweep
+    startActivationDigestScheduler()  // weekly Telegram activation summary
   })
 }
 

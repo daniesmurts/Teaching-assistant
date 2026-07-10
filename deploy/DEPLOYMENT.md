@@ -132,3 +132,32 @@ pm2 save
 - [ ] SSL cert present at the Nginx paths
 - [ ] `GET https://gradeassist.ru/api/health` → 200 after deploy
 - [ ] Login + one grading call work in production
+
+---
+
+## Part D — Database backups (set up once, before you need it)
+
+A single-VM setup has no redundancy — a bad migration, a disk failure, or a
+compromised VM can permanently destroy the database. Two independent
+mechanisms, both needed:
+
+1. **Nightly `pg_dump` → dedicated Object Storage bucket** (`npm run
+   backup:db`, `backend/scripts/backupDatabase.ts`). Reports success/failure
+   to Telegram every run.
+   ```bash
+   # VM one-time setup:
+   #  1. Create a SEPARATE bucket + write-only service account (not the
+   #     uploads bucket/account) — see .env.example for the BACKUP_STORAGE_*
+   #     vars, and set a bucket lifecycle rule (~35 day expiry) in the console
+   #     instead of giving the app delete permissions.
+   #  2. crontab -e:
+   0 3 * * * cd /var/www/gradeassist/backend && npm run backup:db >> /var/log/gradeassist/backup.log 2>&1
+   #  3. Run it once manually and confirm the Telegram message arrives.
+   ```
+
+2. **Yandex Compute Cloud disk snapshot schedule** (console: Compute Cloud →
+   VM → Disks → snapshot schedule, weekly, keep 2–3) — covers "the whole VM
+   is gone," which the DB-only dump doesn't.
+
+Full restore procedure: `docs/support/runbooks/restore-database.md`. Run it
+as a quarterly drill, not just when something breaks.

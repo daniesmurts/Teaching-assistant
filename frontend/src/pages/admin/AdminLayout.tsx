@@ -6,6 +6,7 @@ import type { IconName } from '../../components/ui/Icon'
 const NAV: Array<{ to: string; label: string; icon: IconName; end: boolean }> = [
   { to: '/admin',          label: 'Обзор',               icon: 'home',       end: true },
   { to: '/admin/usage',    label: 'Использование',       icon: 'bar-chart',  end: false },
+  { to: '/admin/activation', label: 'Активация',         icon: 'play-circle', end: false },
   { to: '/admin/teachers', label: 'Преподаватели',       icon: 'users',      end: false },
   { to: '/admin/institutions', label: 'Организации',     icon: 'building',   end: false },
   { to: '/admin/rubrics',  label: 'Шаблоны критериев',   icon: 'list-checks', end: false },
