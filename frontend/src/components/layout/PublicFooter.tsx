@@ -30,12 +30,9 @@ export default function PublicFooter() {
         <Link to="/contact" className="hover:text-ink cursor-pointer transition-colors">Контакты</Link>
         
         <span className="text-border-mid hidden md:inline">|</span>
-        
-        <Link to="/offer" className="hover:text-ink transition-colors">Оферта</Link>
-        <Link to="/privacy" className="hover:text-ink transition-colors">Конфиденциальность</Link>
-        <Link to="/terms" className="hover:text-ink transition-colors">Правила</Link>
-        <Link to="/cookies" className="hover:text-ink transition-colors">Cookie</Link>
-        
+
+        <Link to="/legal" className="hover:text-ink transition-colors">Правовые документы</Link>
+
         <span className="text-ink-inv-muted md:ml-2 md:border-l border-border md:pl-4">Работает без VPN в РФ</span>
       </div>
     </footer>

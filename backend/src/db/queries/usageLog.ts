@@ -150,6 +150,45 @@ export async function getRecentErrors(days = 7): Promise<ErrorRow[]> {
   return rows
 }
 
+export interface UsageByModelRow {
+  provider:            string   // 'deepseek' | 'yandex' | 'qwen' | 'gigachat'
+  model:               string   // e.g. 'deepseek-v4-flash', 'qwen3.7-max'
+  total_tokens:        number
+  cost_usd:            number
+  call_count:          number
+  error_count:         number
+}
+
+// `model` is logged as "<provider>:<model-id>" by every LLMProvider since the
+// Phase 4 registry refactor — split it here rather than adding a separate
+// provider column, since the compound string is already the source of truth
+// ai_provider elsewhere reads from. Rows logged before that refactor have no
+// prefix at all ('deepseek-chat', 'deepseek-reasoner', 'text-search-doc') —
+// inferred by name so they fold into the right provider bucket instead of
+// each showing up as its own fake "provider".
+export async function getUsageByModel(days = 30): Promise<UsageByModelRow[]> {
+  const { rows } = await pool.query<UsageByModelRow>(
+    `SELECT
+       CASE
+         WHEN model LIKE '%:%'        THEN split_part(model, ':', 1)
+         WHEN model LIKE 'deepseek%'  THEN 'deepseek'
+         WHEN model LIKE 'yandex%' OR model = 'text-search-doc' THEN 'yandex'
+         ELSE 'unknown'
+       END                                               AS provider,
+       CASE WHEN model LIKE '%:%' THEN split_part(model, ':', 2) ELSE model END AS model,
+       SUM(input_tokens + output_tokens)::int           AS total_tokens,
+       ROUND(SUM(cost_usd)::numeric, 6)                 AS cost_usd,
+       COUNT(*)::int                                    AS call_count,
+       COUNT(*) FILTER (WHERE NOT success)::int         AS error_count
+     FROM api_usage_log
+     WHERE created_at >= NOW() - ($1 || ' days')::INTERVAL
+     GROUP BY 1, 2
+     ORDER BY cost_usd DESC`,
+    [days]
+  )
+  return rows
+}
+
 export async function getTodayCost(): Promise<number> {
   const { rows } = await pool.query<{ cost: string }>(
     `SELECT ROUND(COALESCE(SUM(cost_usd), 0)::numeric, 6)::text AS cost

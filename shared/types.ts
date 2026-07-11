@@ -269,6 +269,11 @@ export interface EnsembleSample {
   temperature: number | null
   score:       number
   grade:       GradeLetter
+  // Which provider produced this sample. Omitted (implicitly the
+  // institution's default provider) for the primary and same-family
+  // secondaries; set explicitly when a secondary is routed to a different
+  // provider on purpose to decorrelate ensemble errors.
+  provider?:   'deepseek' | 'yandex' | 'qwen'
 }
 
 export interface AiEnsemble {

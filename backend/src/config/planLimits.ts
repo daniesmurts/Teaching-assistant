@@ -113,3 +113,22 @@ export function calculateDeepSeekCost(inputTokens: number, outputTokens: number,
   const r = RATES[model] ?? RATES['deepseek-v4-flash']
   return (inputTokens / 1_000_000) * r.in + (outputTokens / 1_000_000) * r.out
 }
+
+// ─── Qwen3 pricing (DashScope compatible-mode rates) ──────────────────────────
+// USD per 1M tokens. Confirmed against DashScope's console pricing page
+// (2026-07-11) — standard international tier, 0–256K context for Plus /
+// 0–1M for Max. Plus steps up to $1.20 in / $4.80 out per 1M above 256K
+// context, not modelled here (flat single-tier rate, same simplification
+// DeepSeek's calculator already makes for its own cache-hit discount tier);
+// underprices the rare submission whose prompt crosses 256K tokens. Ignores
+// the temporary 20% Plus discount (input only, expires 2026-07-23) since a
+// promo rate would go stale within days of landing.
+const QWEN_RATES: Record<string, { in: number; out: number }> = {
+  'qwen3.7-plus': { in: 0.40, out: 1.60 },
+  'qwen3.7-max':  { in: 2.50, out: 7.50 },
+}
+
+export function calculateQwenCost(inputTokens: number, outputTokens: number, model = 'qwen3.7-plus'): number {
+  const r = QWEN_RATES[model] ?? QWEN_RATES['qwen3.7-plus']
+  return (inputTokens / 1_000_000) * r.in + (outputTokens / 1_000_000) * r.out
+}

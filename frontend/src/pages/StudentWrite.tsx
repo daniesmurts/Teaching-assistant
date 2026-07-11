@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import type { SubmissionTelemetry } from '../types'
@@ -87,7 +87,10 @@ function ConsentGate({ state, onAccept }: { state: WriteState; onAccept: () => P
             Отдельные нажатия клавиш не записываются — только эти общие показатели.
           </p>
           <p className="font-sans text-xs text-ink-tertiary">
-            Начиная работу, вы соглашаетесь с сохранением этих сведений.
+            Начиная работу, вы соглашаетесь с сохранением этих сведений. Подробнее — в{' '}
+            <Link to="/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-ink">
+              Политике конфиденциальности
+            </Link>.
           </p>
         </div>
 

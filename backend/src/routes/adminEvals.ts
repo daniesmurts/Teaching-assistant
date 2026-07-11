@@ -37,7 +37,7 @@ router.post('/', asyncHandler(async (req, res) => {
   const { teacher_id, course_id, k, variants, limit, notes, provider } = req.body as {
     teacher_id?: string; course_id?: string; k?: number[]; variants?: string[]
     limit?: number; notes?: string
-    provider?: 'deepseek' | 'yandex' | 'gigachat'
+    provider?: 'deepseek' | 'yandex' | 'gigachat' | 'qwen'
   }
   if (!teacher_id) throw new ValidationError('Укажите преподавателя')
   const conditions = Array.isArray(k) && k.length ? k.map(Number).filter((n) => Number.isInteger(n) && n >= 0) : [0, 3, 5]

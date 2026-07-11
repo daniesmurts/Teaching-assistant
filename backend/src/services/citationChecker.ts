@@ -102,7 +102,7 @@ function noteFor(status: CitationVerdict['status']): string {
 export async function checkCitations(params: {
   submissionText: string
   context:        CallContext
-  providerOverride?: 'deepseek' | 'yandex' | 'gigachat'
+  providerOverride?: 'deepseek' | 'yandex' | 'gigachat' | 'qwen'
 }): Promise<CitationVerdict[]> {
   try {
     const system = `Вы извлекаете список использованных источников (библиографию) из работы студента. ` +

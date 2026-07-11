@@ -7,7 +7,7 @@ export const feedbackRules = [
     .isLength({ max: 5000 }).withMessage('Сообщение слишком длинное (максимум 5000 символов)'),
   body('category')
     .optional()
-    .isIn(['bug', 'idea', 'question', 'other']).withMessage('Неверная категория'),
+    .isIn(['bug', 'idea', 'question', 'other', 'help_up', 'help_down', 'help_search']).withMessage('Неверная категория'),
   body('page')
     .optional()
     .isLength({ max: 200 }),

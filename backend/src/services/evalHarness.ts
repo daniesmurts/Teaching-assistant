@@ -55,7 +55,7 @@ export interface ReplayConfig {
   limit?:      number          // cap on assignments (newest dropped), for cheap pilots
   resumeRunId?: string
   notes?:      string
-  providerOverride?: 'deepseek' | 'yandex' | 'gigachat'
+  providerOverride?: 'deepseek' | 'yandex' | 'gigachat' | 'qwen'
 }
 
 export interface ReplayProgress {

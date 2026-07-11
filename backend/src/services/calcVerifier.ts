@@ -100,7 +100,7 @@ export async function verifyCalculation(params: {
   referenceSolution?: string
   assignmentContext?: string
   context:            CallContext
-  providerOverride?:  'deepseek' | 'yandex' | 'gigachat'
+  providerOverride?:  'deepseek' | 'yandex' | 'gigachat' | 'qwen'
 }): Promise<CalcStepVerdict[]> {
   try {
     const system = `Вы извлекаете численные шаги расчёта из работы студента для независимой проверки арифметики. ` +

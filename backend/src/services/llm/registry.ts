@@ -17,6 +17,7 @@
 import { logger } from '../../lib/logger'
 import { DeepSeekProvider } from './deepseek'
 import { YandexProvider }   from './yandex'
+import { QwenProvider }     from './qwen'
 import { checkSpendCap } from '../spendCap'
 import type {
   CallContext, ChatMessage, ChatOptions, LLMProvider, ProviderName,
@@ -25,6 +26,7 @@ import type {
 const PROVIDERS: Record<ProviderName, LLMProvider> = {
   deepseek: new DeepSeekProvider(),
   yandex:   new YandexProvider(),
+  qwen:     new QwenProvider(),
   // gigachat is Phase 4 v2 — stub raises if anyone tries to use it.
   gigachat: new (class implements LLMProvider {
     name: 'gigachat' = 'gigachat'
@@ -90,11 +92,20 @@ async function resolveProvider(ctx?: CallContext): Promise<LLMProvider> {
 
 export async function chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<string> {
   if (opts.context?.teacherId) await checkSpendCap(opts.context.teacherId)
+  // An explicit override that itself has a reasoner wins even under
+  // opts.reasoner — this is what lets a blind cross-provider verification
+  // pass (e.g. Qwen-thinking recomputing what DeepSeek-reasoner graded)
+  // actually land on the requested provider instead of being silently
+  // redirected to DeepSeek. An override lacking reasoner support falls
+  // through to the DeepSeek-reasoner default below.
+  if (opts.providerOverride && PROVIDERS[opts.providerOverride]) {
+    const overridden = PROVIDERS[opts.providerOverride]
+    if (!opts.reasoner || overridden.capabilities.reasonerMode) {
+      return overridden.chat(messages, opts)
+    }
+  }
   if (opts.reasoner) {
     return PROVIDERS.deepseek.chat(messages, opts)
-  }
-  if (opts.providerOverride && PROVIDERS[opts.providerOverride]) {
-    return PROVIDERS[opts.providerOverride].chat(messages, opts)
   }
   const primary = await resolveProvider(opts.context)
   try {
@@ -110,15 +121,20 @@ export async function chatJSON<T>(
   opts:       ChatOptions = {},
 ): Promise<T> {
   if (opts.context?.teacherId) await checkSpendCap(opts.context.teacherId)
-  // Calc grading uses the reasoner. No other provider has one — route directly
-  // to DeepSeek regardless of the institution's preferred provider, and skip
+  // Calc grading uses the reasoner. An explicit providerOverride that itself
+  // has a reasoner (e.g. Qwen-thinking, for a blind cross-provider
+  // recomputation pass) is honoured; otherwise reasoner calls route directly
+  // to DeepSeek regardless of the institution's preferred provider, skipping
   // the fallback ladder (there's nowhere else to go). The institutional
   // sovereignty story handles this via the help-article carve-out.
+  if (opts.providerOverride && PROVIDERS[opts.providerOverride]) {
+    const overridden = PROVIDERS[opts.providerOverride]
+    if (!opts.reasoner || overridden.capabilities.reasonerMode) {
+      return overridden.chatJSON<T>(messages, retryLabel, opts)
+    }
+  }
   if (opts.reasoner) {
     return PROVIDERS.deepseek.chatJSON<T>(messages, retryLabel, opts)
-  }
-  if (opts.providerOverride && PROVIDERS[opts.providerOverride]) {
-    return PROVIDERS[opts.providerOverride].chatJSON<T>(messages, retryLabel, opts)
   }
   const primary = await resolveProvider(opts.context)
   try {

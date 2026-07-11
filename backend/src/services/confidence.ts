@@ -126,10 +126,25 @@ export interface EnsembleOutcome {
 // Persona/temperature schedule for the secondary (score-only) samples. The
 // primary is always neutral; secondaries alternate strict/lenient at a raised
 // temperature to surface genuine disagreement.
-const SECONDARY_SCHEDULE: Array<{ persona: 'strict' | 'lenient'; temperature: number }> = [
-  { persona: 'strict',  temperature: 0.8 },
+//
+// Same-model temperature/persona jitter under-reports uncertainty: when a
+// model misreads the submission (wrong premise, an arithmetic step it's
+// blind to), every sample tends to inherit the same misreading, and
+// dispersion looks falsely low ("confidently wrong"). Routing every other
+// secondary to Qwen via providerOverride decorrelates that failure mode —
+// cross-family disagreement is real evidence the grade needs a closer look,
+// not just sampling noise. At the default sample count (3 → 2 secondaries)
+// this already puts one cross-provider sample into every ensemble. If Qwen
+// isn't configured (no QWEN_API_KEY) that sample fails and drops silently —
+// see the .catch(() => null) below — degrading to the pre-Qwen behaviour.
+const SECONDARY_SCHEDULE: Array<{
+  persona: 'strict' | 'lenient'
+  temperature: number
+  provider?: 'qwen'
+}> = [
+  { persona: 'strict',  temperature: 0.8, provider: 'qwen' },
   { persona: 'lenient', temperature: 0.8 },
-  { persona: 'strict',  temperature: 0.4 },
+  { persona: 'strict',  temperature: 0.4, provider: 'qwen' },
   { persona: 'lenient', temperature: 0.4 },
 ]
 
@@ -145,6 +160,7 @@ export async function gradeEnsemble(
   const primaryPromise = gradeOnce({ ...base, persona: 'neutral' })
 
   // Secondaries: cheap score-only samples with persona/temperature variation.
+  // A subset carries providerOverride: 'qwen' — see SECONDARY_SCHEDULE comment.
   const secondaryPromises = SECONDARY_SCHEDULE.slice(0, secondaryCount).map((cfg2) =>
     scoreOnce({
       submissionText:    base.submissionText,
@@ -156,6 +172,7 @@ export async function gradeEnsemble(
       persona:           cfg2.persona,
       temperature:       cfg2.temperature,
       context:           base.context,
+      providerOverride:  cfg2.provider,
     }).then((r) => ({ ...r, ...cfg2 }))
      .catch(() => null),   // a failed sample drops out, doesn't sink the ensemble
   )
@@ -169,7 +186,10 @@ export async function gradeEnsemble(
     { persona: 'neutral', temperature: null, score: primary.score, grade: primary.grade },
     ...secondaries
       .filter((s): s is NonNullable<typeof s> => s != null)
-      .map((s) => ({ persona: s.persona, temperature: s.temperature, score: s.score, grade: s.grade })),
+      .map((s) => ({
+        persona: s.persona, temperature: s.temperature, score: s.score, grade: s.grade,
+        ...(s.provider ? { provider: s.provider } : {}),
+      })),
   ]
 
   const stats = computeDispersion(samples)

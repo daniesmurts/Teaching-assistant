@@ -215,7 +215,7 @@ export interface GradeOnceParams {
   context:        CallContext              // teacherId + feature, for usage logging
   // Eval harness only — force routing to a specific provider, ignoring the
   // institution preference. Untouched in production.
-  providerOverride?: 'deepseek' | 'yandex' | 'gigachat'
+  providerOverride?: 'deepseek' | 'yandex' | 'gigachat' | 'qwen'
   // Run the critic pass over strengths/improvements (grounded + actionable
   // check). Decided by the caller (grade() gates it on the 'feedbackCritic'
   // plan flag; the eval harness can toggle it per replay variant).
@@ -448,7 +448,7 @@ async function critiqueFeedback(
   improvements: BulletItem[],
   submissionText: string,
   context: CallContext,
-  providerOverride?: 'deepseek' | 'yandex' | 'gigachat',
+  providerOverride?: 'deepseek' | 'yandex' | 'gigachat' | 'qwen',
 ): Promise<{ strengths: BulletItem[]; improvements: BulletItem[] }> {
   if (strengths.length === 0 && improvements.length === 0) return { strengths, improvements }
 
@@ -500,7 +500,7 @@ export interface ScoreOnceParams {
   persona?:       GradingPersona
   temperature?:   number
   context:        CallContext
-  providerOverride?: 'deepseek' | 'yandex' | 'gigachat'
+  providerOverride?: 'deepseek' | 'yandex' | 'gigachat' | 'qwen'
 }
 
 export interface ScoreOnceResult {

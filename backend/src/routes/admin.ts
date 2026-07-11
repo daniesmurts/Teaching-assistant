@@ -6,7 +6,7 @@ import { pool } from '../db/connection'
 import { ValidationError, NotFoundError } from '../errors/AppError'
 import {
   getDailyUsage, getUsageByTeacher, getTodayCost,
-  getUsageByFeature, getRecentErrors,
+  getUsageByFeature, getUsageByModel, getRecentErrors,
 } from '../db/queries/usageLog'
 import { upgradeTeacherToPro, cancelTeacherSubscription } from '../db/queries/teachers'
 import { invalidateSpendCapCache } from '../services/spendCap'
@@ -92,6 +92,15 @@ router.get('/usage/by-teacher', asyncHandler(async (req, res) => {
 router.get('/usage/by-feature', asyncHandler(async (req, res) => {
   const days = parseInt((req.query.days as string) ?? '30', 10)
   res.json(await getUsageByFeature(Math.min(days, 365)))
+}))
+
+// ─── GET /api/admin/usage/by-model?days=30 ───────────────────────────────────
+// Provider/model breakdown (DeepSeek flash vs pro, Qwen plus vs max, etc.) —
+// parsed from the "<provider>:<model-id>" string every LLMProvider logs.
+
+router.get('/usage/by-model', asyncHandler(async (req, res) => {
+  const days = parseInt((req.query.days as string) ?? '30', 10)
+  res.json(await getUsageByModel(Math.min(days, 365)))
 }))
 
 // ─── GET /api/admin/errors?days=7 ────────────────────────────────────────────

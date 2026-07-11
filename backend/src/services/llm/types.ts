@@ -10,7 +10,7 @@
 // caller's institutional preference — that's a hard technical constraint
 // (vector-space compatibility), not a configuration. The registry enforces it.
 
-export type ProviderName = 'deepseek' | 'yandex' | 'gigachat'
+export type ProviderName = 'deepseek' | 'yandex' | 'gigachat' | 'qwen'
 
 export interface ChatMessage {
   role:    'system' | 'user' | 'assistant'

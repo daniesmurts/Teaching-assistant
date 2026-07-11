@@ -1,11 +1,13 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import TopBar from '../components/layout/TopBar'
 import Markdown from '../components/help/Markdown'
 import VkVideoEmbed from '../components/help/VkVideoEmbed'
+import ArticleFeedback from '../components/help/ArticleFeedback'
 import Icon from '../components/ui/Icon'
 import { HELP_ARTICLES, HELP_CATEGORIES, type HelpArticle } from '../data/helpArticles'
 import { HELP_VIDEOS, VIDEO_CATEGORIES, type HelpVideo } from '../data/helpVideos'
+import { submitFeedback } from '../api/feedback'
 
 type ActiveKey = { kind: 'article'; slug: string } | { kind: 'video'; slug: string }
 
@@ -52,6 +54,20 @@ export default function Help() {
     : undefined
 
   const nothingFound = filteredArticles.length === 0 && filteredVideos.length === 0
+
+  // Log searches that come back empty — a stronger "missing article" signal
+  // than any rating, and it works from the very first search. Debounced so
+  // we log the settled query, not every keystroke; skipped if unchanged.
+  const lastLoggedQuery = useRef<string | null>(null)
+  useEffect(() => {
+    if (!nothingFound || q.length < 3) return
+    const timer = setTimeout(() => {
+      if (lastLoggedQuery.current === q) return
+      lastLoggedQuery.current = q
+      submitFeedback({ category: 'help_search', message: q, page: 'help:search' }).catch(() => null)
+    }, 1200)
+    return () => clearTimeout(timer)
+  }, [q, nothingFound])
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -187,6 +203,7 @@ export default function Help() {
                   </button>
                 )}
                 <Markdown>{activeArticle.body}</Markdown>
+                <ArticleFeedback key={activeArticle.slug} slug={activeArticle.slug} title={activeArticle.title} />
               </>
             )}
 

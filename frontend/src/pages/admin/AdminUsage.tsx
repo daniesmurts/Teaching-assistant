@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getDailyUsage, getUsageByFeature, getUsageByTeacher } from '../../api/admin'
+import { getDailyUsage, getUsageByFeature, getUsageByModel, getUsageByTeacher } from '../../api/admin'
 
-type Tab = 'day' | 'feature' | 'teacher'
+type Tab = 'day' | 'feature' | 'model' | 'teacher'
 
 const FEATURE_LABEL: Record<string, string> = {
   grading:        'Проверка',
@@ -11,18 +11,26 @@ const FEATURE_LABEL: Record<string, string> = {
   embedding:      'Эмбеддинги',
 }
 
+const PROVIDER_LABEL: Record<string, string> = {
+  deepseek: 'DeepSeek',
+  yandex:   'Yandex',
+  qwen:     'Qwen',
+  gigachat: 'GigaChat',
+}
+
 export default function AdminUsage() {
   const [tab, setTab]   = useState<Tab>('day')
   const [days, setDays] = useState(30)
 
   const { data: daily = [] }   = useQuery({ queryKey: ['admin-daily', days],   queryFn: () => getDailyUsage(days) })
   const { data: feature = [] } = useQuery({ queryKey: ['admin-feature', days], queryFn: () => getUsageByFeature(days) })
+  const { data: model = [] }   = useQuery({ queryKey: ['admin-model', days],   queryFn: () => getUsageByModel(days) })
   const { data: teacher = [] } = useQuery({ queryKey: ['admin-teachers-usage'], queryFn: getUsageByTeacher })
 
   const mtdCost = daily.reduce((s, d) => s + Number(d.cost_usd), 0)
 
   const tabClass = (t: Tab) =>
-    `px-3 py-1.5 text-xs font-sans font-medium rounded-md transition-colors ${
+    `px-3 py-1.5 text-sm font-sans font-medium rounded-md whitespace-nowrap transition-colors ${
       tab === t ? 'bg-amber text-white' : 'text-ink-secondary hover:bg-surface-warm'
     }`
 
@@ -32,7 +40,7 @@ export default function AdminUsage() {
         <div className="flex items-center justify-between mb-6">
           <h1 className="font-display text-2xl font-bold text-ink">Использование</h1>
           <div className="text-right">
-            <div className="text-xs font-sans text-ink-tertiary">Расходы за период</div>
+            <div className="text-sm font-sans text-ink-tertiary">Расходы за период</div>
             <div className="font-display text-2xl font-bold text-amber">${mtdCost.toFixed(4)}</div>
           </div>
         </div>
@@ -42,13 +50,14 @@ export default function AdminUsage() {
           <div className="flex gap-1">
             <button className={tabClass('day')}     onClick={() => setTab('day')}>По дням</button>
             <button className={tabClass('feature')} onClick={() => setTab('feature')}>По функциям</button>
+            <button className={tabClass('model')}   onClick={() => setTab('model')}>По моделям</button>
             <button className={tabClass('teacher')} onClick={() => setTab('teacher')}>По преподавателям</button>
           </div>
           {tab !== 'teacher' && (
             <select
               value={days}
               onChange={(e) => setDays(Number(e.target.value))}
-              className="text-xs font-sans bg-surface border border-border rounded-md px-2 py-1.5"
+              className="text-sm font-sans bg-surface border border-border rounded-md px-2 py-1.5"
             >
               <option value={7}>7 дней</option>
               <option value={30}>30 дней</option>
@@ -58,7 +67,7 @@ export default function AdminUsage() {
         </div>
 
         <div className="bg-surface border border-border rounded-lg overflow-hidden">
-          <table className="w-full text-xs font-sans">
+          <table className="w-full text-sm font-sans">
             {tab === 'day' && (
               <>
                 <thead><tr className="border-b border-border bg-surface-warm">
@@ -103,6 +112,32 @@ export default function AdminUsage() {
                     </tr>
                   ))}
                   {feature.length === 0 && <tr><td colSpan={5} className="px-3 py-6 text-center text-ink-tertiary">Нет данных</td></tr>}
+                </tbody>
+              </>
+            )}
+
+            {tab === 'model' && (
+              <>
+                <thead><tr className="border-b border-border bg-surface-warm">
+                  <th className="text-left px-3 py-2 text-ink-secondary font-medium">Провайдер</th>
+                  <th className="text-left px-3 py-2 text-ink-secondary font-medium">Модель</th>
+                  <th className="text-right px-3 py-2 text-ink-secondary font-medium">Вызовов</th>
+                  <th className="text-right px-3 py-2 text-ink-secondary font-medium">Ошибок</th>
+                  <th className="text-right px-3 py-2 text-ink-secondary font-medium">Токенов</th>
+                  <th className="text-right px-3 py-2 text-ink-secondary font-medium">Стоимость</th>
+                </tr></thead>
+                <tbody>
+                  {model.map((r) => (
+                    <tr key={`${r.provider}:${r.model}`} className="border-b border-border last:border-0">
+                      <td className="px-3 py-2 text-ink">{PROVIDER_LABEL[r.provider] ?? r.provider}</td>
+                      <td className="px-3 py-2 text-ink-secondary">{r.model}</td>
+                      <td className="px-3 py-2 text-right text-ink">{r.call_count}</td>
+                      <td className="px-3 py-2 text-right text-ink">{r.error_count > 0 ? r.error_count : '—'}</td>
+                      <td className="px-3 py-2 text-right text-ink-secondary">{r.total_tokens.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-medium text-ink">${Number(r.cost_usd).toFixed(4)}</td>
+                    </tr>
+                  ))}
+                  {model.length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-ink-tertiary">Нет данных</td></tr>}
                 </tbody>
               </>
             )}

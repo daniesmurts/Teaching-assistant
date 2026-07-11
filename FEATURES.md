@@ -30,6 +30,7 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 
 - Landing page (hero, problem/solution, 4 feature pillars: проверка / лекции / тесты / аналитика, pricing, feature matrix)
 - Marketing pages: About, Institutions, Research (`/research` — исследовательская программа, направления, партнёры, заявка), FAQ, Ethics, Contact, Pricing, Changelog, Use-cases, Offer, Privacy, Terms, Cookies
+- Legal docs hub (`/legal`) — single entry point listing all legal documents (Пользовательское соглашение, Политика допустимого использования, Публичная оферта incl. Условия оплаты и возврата, Конфиденциальность, Cookie, Этика ИИ); every legal page shows a persistent sidebar (`LegalSidebar`) for cross-navigation instead of routing back through the footer
 - Contact + Research application forms deliver to a real inbox: public `POST /api/contact` → `contact_messages` table + admin-owner email notification (not a `mailto:` or fake local submit)
 - Register (with optional `?invite=` institution invite — prefills + locks email)
 - Login (password reveal, inline errors)
@@ -67,7 +68,7 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 **Presentations** — slide-by-slide generator with typed layouts (title, понятие, формула с KaTeX, сравнение, схема, обсуждение, итоги — модель выбирает тип под содержание) + спикерские заметки и подбор изображения Yandex Images для слайдов-схем, copy-per-slide
 **Quizzes («Тесты»)** — 5–20 multiple-choice questions on a topic, at one of three Bloom-style levels (recall / understanding / application), grounded in the subject's materials via RAG with source citations. Answer reveal, history. Free: 3/mo, Pro: unlimited
 **Onboarding** — welcome modal (first login), getting-started checklist (persists until first grade), per-page "how it works" intros, no-subject hints on every generator page, and a **progressive sidebar** (new users see only essential start-here items + a «Показать всё» toggle; full nav unlocks automatically after the first grade)
-**Account** — feedback page, in-app help center, settings, password change, account deletion (152-ФЗ cascade)
+**Account** — feedback page, in-app help center (article 👍/👎 rating with an optional "what's missing" comment on 👎, plus silent logging of searches that return no results), settings, password change, account deletion (152-ФЗ cascade)
 
 ---
 
@@ -154,7 +155,7 @@ Panel at `/admin` (direct URL only, `platform_admin`):
 - **Teachers** — search, change role / plan / institution assignment, activate/deactivate
 - **Institutions** — create/edit (tier, seat cap, **email auto-join domain**), teacher counts; **SAML SSO config** per institution (IdP entity id / SSO URL / cert, attribute mapping, copy-ready SP metadata + ACS URLs)
 - **Criterion templates** — global templates teachers start from (incl. STEM)
-- **Feedback** — browse in-app user feedback (category filter, reply link)
+- **Feedback** — browse in-app user feedback (category filter, reply link); per-article help-center 👍/👎 aggregate table and a "not found" search-query list, derived client-side from the same feed
 - **Обращения** — public Contact/Research form submissions (topic filter, unread/read state, reply link)
 - **Errors** — recent AI/service errors
 - **Журнал действий** — cross-institution activity log (every recorded user action; filter by action/date, paginated; shows actor + IP)

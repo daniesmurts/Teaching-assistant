@@ -59,6 +59,20 @@ export async function getUsageByFeature(days = 30): Promise<FeatureUsage[]> {
   return res.data
 }
 
+export interface ModelUsage {
+  provider:     string
+  model:        string
+  total_tokens: number
+  cost_usd:     number
+  call_count:   number
+  error_count:  number
+}
+
+export async function getUsageByModel(days = 30): Promise<ModelUsage[]> {
+  const res = await client.get<ModelUsage[]>('/api/admin/usage/by-model', { params: { days } })
+  return res.data
+}
+
 export interface AdminTeacher {
   id:               string
   email:            string

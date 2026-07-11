@@ -82,6 +82,8 @@ const Contact    = lazy(() => import('./pages/Contact'))
 const Pricing    = lazy(() => import('./pages/Pricing'))
 const Changelog  = lazy(() => import('./pages/Changelog'))
 const UseCases   = lazy(() => import('./pages/UseCases'))
+const LegalIndex  = lazy(() => import('./pages/legal/LegalIndex'))
+const AcceptableUse = lazy(() => import('./pages/legal/AcceptableUse'))
 const Offer      = lazy(() => import('./pages/legal/Offer'))
 const Privacy    = lazy(() => import('./pages/legal/Privacy'))
 const Terms      = lazy(() => import('./pages/legal/Terms'))
@@ -113,6 +115,19 @@ function RouteTracker() {
     if (first.current) { first.current = false; return }
     metricaHit(window.location.href)
   }, [location, token])
+  return null
+}
+
+// React Router doesn't scroll to `#anchor` targets on client-side navigation
+// (only the browser's native full-page load does). Deep links like
+// /offer#payment need this to actually land on the section.
+function ScrollToHash() {
+  const { hash, pathname } = useLocation()
+  useEffect(() => {
+    if (!hash) return
+    const el = document.getElementById(hash.slice(1))
+    el?.scrollIntoView({ block: 'start' })
+  }, [hash, pathname])
   return null
 }
 
@@ -214,6 +229,7 @@ export default function App() {
       <BrowserRouter>
         <PlanSync />
         <RouteTracker />
+        <ScrollToHash />
         <NewVersionToast />
         <Suspense fallback={<PageLoading />}>
         <Routes>
@@ -227,6 +243,8 @@ export default function App() {
           <Route path="/pricing"  element={<Pricing />} />
           <Route path="/changelog" element={<Changelog />} />
           <Route path="/use-cases" element={<UseCases />} />
+          <Route path="/legal"    element={<LegalIndex />} />
+          <Route path="/acceptable-use" element={<AcceptableUse />} />
           <Route path="/offer"    element={<Offer />} />
           <Route path="/privacy"  element={<Privacy />} />
           <Route path="/terms"    element={<Terms />} />
