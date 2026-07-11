@@ -60,6 +60,7 @@ export interface PlanState {
     cohortSynthesis:       boolean
     calcVerification:      boolean
     citationCheck:         boolean
+    challengeFeedback:     boolean
   }
 }
 
@@ -904,6 +905,42 @@ export interface SyllabusReview {
   partial:      number
   missing:      number
   generated_at: string
+}
+
+// ─── "Оспорить" — challenge a piece of AI feedback ───────────────────────────
+// Teacher highlights a bullet / criterion / coverage finding they believe is
+// wrong or unexpected and asks the model to re-verify against the same source
+// text, rather than opening a free-form chat. The model must ground its
+// verdict in a fresh verbatim quote — validated server-side the same way
+// grading citations are (see validateQuoteAgainstSource in lib/citation.ts) —
+// so a teacher's pushback can't just talk the model into caving (sycophancy).
+
+export type ChallengeSourceType =
+  | 'grading_bullet'      // BulletItem.text (strengths/improvements)
+  | 'grading_criterion'   // CriterionScore.feedback
+  | 'grading_question'    // VerificationQuestion.question
+  | 'syllabus_coverage'   // SyllabusCoverageItem — Curriculum Studio РПД coverage
+
+export type ChallengeVerdict =
+  | 'confirm'   // original claim stands; evidence_quote backs it up (freshly re-verified)
+  | 'clarify'   // claim is directionally right but misleading; suggested_text rewords it
+  | 'retract'   // claim was wrong; suggested_text is a replacement, or null to just remove it
+
+export interface ChallengeRequest {
+  source_type:     ChallengeSourceType
+  assignment_id?:  string | null   // grading only — links the challenge to its assignment
+  item_ref?:       string | null   // criterion name / coverage item code, for display + audit
+  claim_text:      string          // the feedback text being challenged
+  claim_quote?:    string | null   // the citation the original claim carried, if any
+  source_text:     string          // passage(s) to re-verify against
+  objection:       string          // teacher's free-text explanation of what's wrong
+}
+
+export interface ChallengeResult {
+  verdict:         ChallengeVerdict
+  explanation:     string           // shown to the teacher — why the model landed here
+  evidence_quote:  string | null    // fresh verbatim quote backing the verdict
+  suggested_text:  string | null    // rewritten bullet/finding text when verdict != 'confirm'
 }
 
 // ─── Материалы — AI practical-material generator (КНИТУ T1) ─────────────────────

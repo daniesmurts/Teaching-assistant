@@ -26,6 +26,7 @@ export const PLAN_LIMITS = {
     cohortSynthesis:       false,
     calcVerification:      false,
     citationCheck:         false,
+    challengeFeedback:     false,
     monthlySpendCapUsd:    3,
   },
   pro: {
@@ -52,6 +53,7 @@ export const PLAN_LIMITS = {
     cohortSynthesis:       true,
     calcVerification:      true,
     citationCheck:         true,
+    challengeFeedback:     true,
     monthlySpendCapUsd:    30,
   },
   institution: {
@@ -78,6 +80,7 @@ export const PLAN_LIMITS = {
     cohortSynthesis:       true,
     calcVerification:      true,
     citationCheck:         true,
+    challengeFeedback:     true,
     monthlySpendCapUsd:    150,
   },
 } as const

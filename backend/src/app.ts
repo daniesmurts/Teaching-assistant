@@ -32,6 +32,7 @@ import quizzesRouter from './routes/quizzes'
 import paymentsRouter from './routes/payments'
 import accountRouter from './routes/account'
 import contactRouter from './routes/contact'
+import challengesRouter from './routes/challenges'
 // Side-effect import — registers per-institution provider resolution into the
 // LLM registry before any AI call goes through.
 import './services/llm/institutionResolver'
@@ -143,6 +144,7 @@ app.use('/api/institution/structure', orgStructureRouter)  // before /api/instit
 app.use('/api/leadership', leadershipRouter)
 app.use('/api/institution',   institutionRouter)
 app.use('/api/feedback',      feedbackRouter)
+app.use('/api/challenges',    challengesRouter)
 app.use('/api/payments',      paymentsRouter)
 app.use('/api/account',       accountRouter)
 

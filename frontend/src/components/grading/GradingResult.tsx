@@ -5,6 +5,7 @@ import FeedbackEmail from './FeedbackEmail'
 import RevisionCheckList from './RevisionCheckList'
 import QuestionResponseList from './QuestionResponseList'
 import ConfidenceBadge from './ConfidenceBadge'
+import ChallengeButton from './ChallengeButton'
 import HandoutModal from './HandoutModal'
 import StudentTrajectory from './StudentTrajectory'
 import { useApprove } from '../../hooks/useGrading'
@@ -14,7 +15,7 @@ import { usePersistedState, clearPersistedState } from '../../hooks/usePersisted
 import { GRADES, gradeColor, gradeLabel, GRADE_BRACKETS, scoreToGrade, snapScoreToGrade } from '../../lib/grades'
 import { getStudentTrajectory } from '../../api/grading'
 import type { GradeResponse } from '../../api/grading'
-import type { GradeLetter, BulletItem, BulletSeverity, VerificationQuestion, CriterionScore, ApprovedEditReason } from '../../types'
+import type { GradeLetter, BulletItem, BulletSeverity, VerificationQuestion, CriterionScore, ApprovedEditReason, ChallengeSourceType, ChallengeVerdict } from '../../types'
 
 interface Props {
   result: GradeResponse
@@ -25,11 +26,14 @@ interface Props {
   // Identity of the student just graded, if known — powers the "За семестр"
   // tab. Absent (no student_name on the submission) hides the tab entirely.
   student?: { name?: string; group?: string; courseId?: string }
+  // Raw submission text — the re-verification target for "Оспорить" (Pro).
+  // Absent only when the submission itself hasn't loaded; hides the button.
+  submissionText?: string
 }
 
 type Tab = 'feedback' | 'criteria' | 'email' | 'trajectory'
 
-export default function GradingResult({ result, onApproved, onCite, student }: Props) {
+export default function GradingResult({ result, onApproved, onCite, student, submissionText }: Props) {
   const [tab, setTab] = useState<Tab>('feedback')
   const { can } = usePlan()
   const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
@@ -317,6 +321,9 @@ export default function GradingResult({ result, onApproved, onCite, student }: P
                   tone="success"
                   onCite={onCite}
                   criteria={result.criteria_snapshot ?? []}
+                  sourceType="grading_bullet"
+                  sourceText={submissionText}
+                  assignmentId={result.assignment_id}
                 />
                 <EditableBulletList
                   title="Что улучшить"
@@ -326,6 +333,9 @@ export default function GradingResult({ result, onApproved, onCite, student }: P
                   tone="warning"
                   onCite={onCite}
                   criteria={result.criteria_snapshot ?? []}
+                  sourceType="grading_bullet"
+                  sourceText={submissionText}
+                  assignmentId={result.assignment_id}
                 />
               </div>
             )}
@@ -422,6 +432,23 @@ export default function GradingResult({ result, onApproved, onCite, student }: P
                           )}
                         </span>
                       </button>
+                    )}
+                    {submissionText && cs.feedback.trim() && (
+                      <ChallengeButton
+                        sourceType="grading_criterion"
+                        claimText={cs.feedback}
+                        claimQuote={cs.quote}
+                        sourceText={submissionText}
+                        assignmentId={result.assignment_id}
+                        itemRef={cs.name}
+                        onCite={onCite}
+                        onApply={(suggested) => {
+                          if (!suggested) return
+                          setEditCriteriaScores((prev) =>
+                            prev.map((p, i) => i === idx ? { ...p, feedback: suggested } : p)
+                          )
+                        }}
+                      />
                     )}
                   </div>
                 )
@@ -555,7 +582,9 @@ const SEVERITY_LABEL: Record<BulletSeverity, string> = {
   minor:       'незначительно',
 }
 
-function EditableBulletList({ title, items, onChange, disabled, tone, onCite, criteria = [] }: {
+function EditableBulletList({
+  title, items, onChange, disabled, tone, onCite, criteria = [], sourceType, sourceText, assignmentId,
+}: {
   title: string
   items: BulletItem[]
   onChange: (next: BulletItem[]) => void
@@ -564,6 +593,10 @@ function EditableBulletList({ title, items, onChange, disabled, tone, onCite, cr
   onCite?: (quote: string) => void
   /** When present, each bullet gets a "к критерию: …" dropdown. */
   criteria?: Array<{ criterion_id: string | null; name: string }>
+  /** "Оспорить" wiring — omitted (no sourceText) hides the button entirely. */
+  sourceType?:    ChallengeSourceType
+  sourceText?:    string
+  assignmentId?:  string
 }) {
   const t = TONES[tone]
   const criteriaWithId = criteria.filter((c) => !!c.criterion_id)
@@ -577,6 +610,10 @@ function EditableBulletList({ title, items, onChange, disabled, tone, onCite, cr
   }
   function removeAt(i: number) { onChange(items.filter((_, idx) => idx !== i)) }
   function add() { onChange([...items, { text: '', quote: null, page: null }]) }
+  function applyChallenge(i: number, suggestedText: string | null, verdict: ChallengeVerdict) {
+    if (verdict === 'retract' && !suggestedText) { removeAt(i); return }
+    if (suggestedText) setTextAt(i, suggestedText)
+  }
 
   return (
     <div className={`${t.bg} border ${t.border} rounded-lg p-3`}>
@@ -674,6 +711,20 @@ function EditableBulletList({ title, items, onChange, disabled, tone, onCite, cr
                 <span className={`text-[11px] ${t.text} opacity-90 leading-relaxed`}>
                   {b.correction}
                 </span>
+              </div>
+            )}
+            {sourceType && sourceText && b.text.trim() && (
+              <div className="ml-3">
+                <ChallengeButton
+                  sourceType={sourceType}
+                  claimText={b.text}
+                  claimQuote={b.quote}
+                  sourceText={sourceText}
+                  assignmentId={assignmentId}
+                  itemRef={`${tone}:${i}`}
+                  onCite={onCite}
+                  onApply={(suggested, verdict) => applyChallenge(i, suggested, verdict)}
+                />
               </div>
             )}
           </div>

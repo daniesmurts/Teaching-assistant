@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
+import ChallengeButton from '../components/grading/ChallengeButton'
 import { getCourses } from '../api/courses'
 import { reviewSyllabus } from '../api/curriculum'
 import { useUIStore } from '../store/uiStore'
@@ -261,6 +262,18 @@ function CoverageCard({ item }: { item: SyllabusCoverageItem }) {
       {/* Empty sources but not missing — note it explicitly */}
       {item.sources.length === 0 && item.status !== 'missing' && (
         <div className="mt-2 text-xs font-sans text-ink-tertiary">Источники в содержании РПД не указаны.</div>
+      )}
+
+      {item.sources.length > 0 && (
+        <div className="mt-2">
+          <ChallengeButton
+            sourceType="syllabus_coverage"
+            claimText={item.gap || item.recommendation || `${meta.label}: ${item.title}`}
+            claimQuote={item.evidence}
+            sourceText={item.sources.map((s) => `[${SECTION_LABEL[s.section]}] ${s.excerpt}`).join('\n\n')}
+            itemRef={item.code || item.title}
+          />
+        </div>
       )}
 
       {(item.gap || item.recommendation) && item.status !== 'covered' && (
