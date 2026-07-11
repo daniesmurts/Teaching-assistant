@@ -27,16 +27,29 @@ export function usePersistedState<T>(
   const fullKey = key ? PREFIX + key : null
   const [value, setValue] = useState<T>(initial)
   const writeSeq = useRef(0)
+  // Guards the mirror effect below from firing on the pre-hydration render.
+  // Without this, a `null`-initial value (e.g. Grading.tsx's `page:result`)
+  // reads as "nothing to persist" on mount and the mirror effect deletes the
+  // key it hasn't even finished reading yet — under StrictMode's mount →
+  // cleanup → remount, the first mount's decrypt lands after `cancelled` is
+  // already true, so the correctly-decrypted value is discarded and the
+  // just-deleted key never comes back. `[]`/`''`-initial values (the
+  // `edits:*` drafts) never hit this because they're never `null`.
+  const hydrated = useRef(false)
 
   // Hydrate on mount and whenever the key changes (e.g. switching assignments).
   useEffect(() => {
     let cancelled = false
+    hydrated.current = false
     if (!fullKey) {
       setValue(initial)
+      hydrated.current = true
       return
     }
     readKey(fullKey, initial).then((v) => {
-      if (!cancelled) setValue(v)
+      if (cancelled) return
+      setValue(v)
+      hydrated.current = true
     })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -46,6 +59,7 @@ export function usePersistedState<T>(
   // encrypt from an earlier value landing after a newer one already wrote.
   useEffect(() => {
     if (!fullKey) return
+    if (!hydrated.current) return
     const seq = ++writeSeq.current
     if (value === null || value === undefined) {
       try { localStorage.removeItem(fullKey) } catch { /* noop */ }

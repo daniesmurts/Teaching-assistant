@@ -52,6 +52,7 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
   // rather than jumping to the middle of the 5-bracket.
   function handleScoreChange(raw: string) {
     setEditScore(raw)
+    setScoreNudge(false)
     const n = parseInt(raw, 10)
     if (!Number.isNaN(n) && n >= 0 && n <= 100) {
       const next = scoreToGrade(n)
@@ -61,6 +62,7 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
 
   function handleGradeChange(next: GradeLetter) {
     setEditGrade(next)
+    setScoreNudge(false)
     const current = parseInt(editScore, 10)
     const snapped = snapScoreToGrade(Number.isNaN(current) ? 0 : current, next)
     if (snapped !== current) setEditScore(String(snapped))
@@ -109,6 +111,16 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
     `${editKey}:edit_reason`,
     '',
   )
+
+  // "Оспорить" nudge — a retracted/reworded bullet or criterion comment may
+  // have been part of why the AI landed on this score, but applyChallenge
+  // only ever touches the text, never editScore/editGrade (there's no
+  // formula linking a holistic bullet to a point value to auto-adjust by).
+  // Ephemeral, not persisted — ephemeral matches its purpose. Clears itself
+  // once the teacher actually touches the score/grade, on the assumption
+  // they've now looked.
+  const [scoreNudge, setScoreNudge]           = useState(false)
+  const [flaggedCriteria, setFlaggedCriteria] = useState<Set<number>>(new Set())
 
   const gradeClr = gradeColor(editGrade)
 
@@ -254,6 +266,27 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
         </div>
       )}
 
+      {/* "Оспорить" score nudge — a bullet/criterion comment was retracted or
+          reworded; the score itself was never touched (see comment above
+          scoreNudge's declaration), so ask the teacher to sanity-check it. */}
+      {scoreNudge && !approved && (
+        <div className="mx-5 mt-3 px-3 py-2.5 bg-warning-bg border border-warning/20 rounded-md flex items-start gap-2.5">
+          <span className="text-warning text-sm mt-0.5 flex-shrink-0">⚠</span>
+          <div className="text-[12.5px] font-sans text-ink leading-relaxed flex-1">
+            <span className="font-medium">Пункт отзыва был изменён после оспаривания.</span>{' '}
+            <span className="text-ink-secondary">Балл и оценка не обновляются автоматически — проверьте, не изменились ли они.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setScoreNudge(false)}
+            className="text-warning/70 hover:text-warning text-sm leading-none flex-shrink-0"
+            aria-label="Скрыть"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex border-b border-border px-5">
         {([['feedback', 'Отзыв'], ['criteria', 'Критерии']] as [Tab, string][]).map(([t, label]) => (
@@ -324,6 +357,7 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
                   sourceType="grading_bullet"
                   sourceText={submissionText}
                   assignmentId={result.assignment_id}
+                  onChallengeApplied={() => setScoreNudge(true)}
                 />
                 <EditableBulletList
                   title="Что улучшить"
@@ -336,6 +370,7 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
                   sourceType="grading_bullet"
                   sourceText={submissionText}
                   assignmentId={result.assignment_id}
+                  onChallengeApplied={() => setScoreNudge(true)}
                 />
               </div>
             )}
@@ -391,6 +426,14 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-sm font-sans font-medium text-ink">{cs.name}</span>
                       <div className="flex items-center gap-2">
+                        {flaggedCriteria.has(idx) && (
+                          <span
+                            className="text-warning text-sm leading-none"
+                            title="Отзыв по этому критерию был изменён после оспаривания — проверьте балл"
+                          >
+                            ⚠
+                          </span>
+                        )}
                         {edited && aiCs && (
                           <span className="text-[10px] font-sans text-ink-tertiary">
                             ИИ: {aiCs.score}
@@ -404,6 +447,12 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
                             setEditCriteriaScores((prev) =>
                               prev.map((p, i) => i === idx ? { ...p, score: next } : p)
                             )
+                            setFlaggedCriteria((prev) => {
+                              if (!prev.has(idx)) return prev
+                              const next = new Set(prev)
+                              next.delete(idx)
+                              return next
+                            })
                           }}
                           className="w-14 px-1.5 py-0.5 text-sm font-sans text-ink bg-surface border border-border rounded-md text-center disabled:opacity-70"
                         />
@@ -416,7 +465,7 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
                         style={{ width: `${cs.score}%`, backgroundColor: scoreColor(cs.score) }}
                       />
                     </div>
-                    <p className="text-xs font-sans text-ink-secondary leading-relaxed">{cs.feedback}</p>
+                    <p className="text-sm font-sans text-ink-secondary leading-relaxed">{cs.feedback}</p>
                     {cs.quote && (
                       <button
                         type="button"
@@ -443,10 +492,13 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
                         itemRef={cs.name}
                         onCite={onCite}
                         onApply={(suggested) => {
-                          if (!suggested) return
-                          setEditCriteriaScores((prev) =>
-                            prev.map((p, i) => i === idx ? { ...p, feedback: suggested } : p)
-                          )
+                          if (suggested) {
+                            setEditCriteriaScores((prev) =>
+                              prev.map((p, i) => i === idx ? { ...p, feedback: suggested } : p)
+                            )
+                          }
+                          setScoreNudge(true)
+                          setFlaggedCriteria((prev) => new Set(prev).add(idx))
                         }}
                       />
                     )}
@@ -583,7 +635,7 @@ const SEVERITY_LABEL: Record<BulletSeverity, string> = {
 }
 
 function EditableBulletList({
-  title, items, onChange, disabled, tone, onCite, criteria = [], sourceType, sourceText, assignmentId,
+  title, items, onChange, disabled, tone, onCite, criteria = [], sourceType, sourceText, assignmentId, onChallengeApplied,
 }: {
   title: string
   items: BulletItem[]
@@ -597,6 +649,8 @@ function EditableBulletList({
   sourceType?:    ChallengeSourceType
   sourceText?:    string
   assignmentId?:  string
+  /** Fired when a challenge verdict actually changes a bullet — the score/grade weren't touched, so the host surfaces a nudge to double-check them. */
+  onChallengeApplied?: () => void
 }) {
   const t = TONES[tone]
   const criteriaWithId = criteria.filter((c) => !!c.criterion_id)
@@ -611,8 +665,9 @@ function EditableBulletList({
   function removeAt(i: number) { onChange(items.filter((_, idx) => idx !== i)) }
   function add() { onChange([...items, { text: '', quote: null, page: null }]) }
   function applyChallenge(i: number, suggestedText: string | null, verdict: ChallengeVerdict) {
-    if (verdict === 'retract' && !suggestedText) { removeAt(i); return }
+    if (verdict === 'retract' && !suggestedText) { removeAt(i); onChallengeApplied?.(); return }
     if (suggestedText) setTextAt(i, suggestedText)
+    onChallengeApplied?.()
   }
 
   return (
@@ -621,7 +676,7 @@ function EditableBulletList({
       <div className="space-y-1.5">
         {items.map((b, i) => (
           <div key={i}>
-            <div className={`flex gap-1.5 text-xs ${t.text} leading-relaxed items-start group`}>
+            <div className={`flex gap-1.5 text-sm ${t.text} leading-relaxed items-start group`}>
               {tone === 'warning' && b.severity && (
                 <span
                   className={`${SEVERITY_DOT_CLASS[b.severity]} w-2 h-2 rounded-full mt-1.5 flex-shrink-0`}
@@ -634,7 +689,7 @@ function EditableBulletList({
                 value={b.text}
                 onChange={(e) => setTextAt(i, e.target.value)}
                 disabled={disabled}
-                className={`flex-1 bg-transparent ${t.text} text-xs leading-relaxed focus:outline-none focus:bg-surface/40 rounded px-1 py-0.5 disabled:opacity-90`}
+                className={`flex-1 bg-transparent ${t.text} text-sm leading-relaxed focus:outline-none focus:bg-surface/40 rounded px-1 py-0.5 disabled:opacity-90`}
               />
               {!disabled && (
                 <button
@@ -655,8 +710,8 @@ function EditableBulletList({
                 title="Показать в работе"
                 className="ml-3 mt-0.5 inline-flex items-start gap-1 text-left max-w-full group/cite"
               >
-                <span className={`text-[10px] mt-0.5 flex-shrink-0 ${t.text} opacity-80`}>↳</span>
-                <span className={`text-[11px] italic ${t.text} opacity-90 leading-relaxed border-l-2 ${t.citeBorder} group-hover/cite:opacity-100 pl-1.5 transition-opacity`}>
+                <span className={`text-xs mt-0.5 flex-shrink-0 ${t.text} opacity-80`}>↳</span>
+                <span className={`text-xs italic ${t.text} opacity-90 leading-relaxed border-l-2 ${t.citeBorder} group-hover/cite:opacity-100 pl-1.5 transition-opacity`}>
                   «{b.quote}»
                   {b.page != null && <span className="not-italic font-normal opacity-70"> · стр. {b.page}</span>}
                 </span>
@@ -667,16 +722,16 @@ function EditableBulletList({
                 this grade actually has criteria. */}
             {criteriaWithId.length > 0 && (
               <div className="ml-3 mt-0.5 flex items-center gap-1">
-                <span className={`text-[10px] ${t.text} opacity-60`}>к критерию:</span>
+                <span className={`text-xs ${t.text} opacity-60`}>к критерию:</span>
                 {disabled ? (
-                  <span className={`text-[10px] ${t.text} opacity-80`}>
+                  <span className={`text-xs ${t.text} opacity-80`}>
                     {b.criterion_id ? nameById.get(b.criterion_id) ?? '—' : '—'}
                   </span>
                 ) : (
                   <select
                     value={b.criterion_id ?? ''}
                     onChange={(e) => setCriterionAt(i, e.target.value || null)}
-                    className={`text-[10px] bg-transparent ${t.text} border-0 border-b border-dotted ${t.citeBorder} focus:outline-none cursor-pointer`}
+                    className={`text-xs bg-transparent ${t.text} border-0 border-b border-dotted ${t.citeBorder} focus:outline-none cursor-pointer`}
                   >
                     <option value="">—</option>
                     {criteriaWithId.map((c) => (
@@ -691,14 +746,14 @@ function EditableBulletList({
                 parent; here we just render if present. */}
             {tone === 'warning' && b.question && (
               <div className="ml-3 mt-1 flex items-start gap-1.5">
-                <span className={`text-[10px] flex-shrink-0 mt-0.5 ${t.text} opacity-70`}>?</span>
-                <span className={`text-[11px] ${t.text} opacity-90 leading-relaxed flex-1`}>
+                <span className={`text-xs flex-shrink-0 mt-0.5 ${t.text} opacity-70`}>?</span>
+                <span className={`text-xs ${t.text} opacity-90 leading-relaxed flex-1`}>
                   {b.question}
                 </span>
                 <button
                   type="button"
                   onClick={() => navigator.clipboard?.writeText(b.question!)}
-                  className={`text-[10px] ${t.text} opacity-70 hover:opacity-100 transition-opacity flex-shrink-0`}
+                  className={`text-xs ${t.text} opacity-70 hover:opacity-100 transition-opacity flex-shrink-0`}
                   title="Скопировать вопрос"
                 >
                   копировать
@@ -707,8 +762,8 @@ function EditableBulletList({
             )}
             {tone === 'warning' && b.correction && (
               <div className="ml-3 mt-1 flex gap-1 items-start">
-                <span className={`text-[10px] ${t.text} opacity-70 mt-0.5 flex-shrink-0`}>→</span>
-                <span className={`text-[11px] ${t.text} opacity-90 leading-relaxed`}>
+                <span className={`text-xs ${t.text} opacity-70 mt-0.5 flex-shrink-0`}>→</span>
+                <span className={`text-xs ${t.text} opacity-90 leading-relaxed`}>
                   {b.correction}
                 </span>
               </div>
@@ -734,7 +789,7 @@ function EditableBulletList({
         <button
           type="button"
           onClick={add}
-          className={`mt-1.5 text-[11px] font-sans ${t.text} hover:underline`}
+          className={`mt-1.5 text-xs font-sans ${t.text} hover:underline`}
         >
           + Добавить
         </button>

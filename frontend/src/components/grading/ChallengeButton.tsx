@@ -66,9 +66,9 @@ export default function ChallengeButton({
       <button
         type="button"
         onClick={toggle}
-        className="text-[11px] font-sans text-ink-tertiary hover:text-amber transition-colors"
+        className="mt-1 inline-flex items-center gap-1 text-xs font-sans font-semibold text-info hover:text-info/80 transition-colors"
       >
-        Оспорить{!enabled && ' · Pro'}
+        <span aria-hidden>⚑</span> Оспорить{!enabled && ' · Pro'}
       </button>
     )
   }
@@ -76,18 +76,18 @@ export default function ChallengeButton({
   if (result) {
     const meta = VERDICT_META[result.verdict]
     return (
-      <div className="mt-1.5 border-l-2 border-amber/40 pl-2.5 space-y-1.5">
+      <div className="mt-1.5 border-l-2 border-info/40 pl-2.5 space-y-1.5">
         <div className="flex items-center gap-2">
-          <span className={`text-[10px] font-sans font-medium px-1.5 py-0.5 rounded-sm ${meta.cls}`}>{meta.label}</span>
+          <span className={`text-xs font-sans font-medium px-1.5 py-0.5 rounded-sm ${meta.cls}`}>{meta.label}</span>
           <button
             type="button"
             onClick={() => { setResult(null); setOpen(false); setObjection('') }}
-            className="text-[11px] font-sans text-ink-tertiary hover:text-ink"
+            className="text-xs font-sans text-ink-tertiary hover:text-ink"
           >
             Закрыть
           </button>
         </div>
-        <p className="text-xs font-sans text-ink-secondary leading-relaxed">{result.explanation}</p>
+        <p className="text-sm font-sans text-ink-secondary leading-relaxed">{result.explanation}</p>
         {result.evidence_quote && (
           <button
             type="button"
@@ -101,7 +101,7 @@ export default function ChallengeButton({
           <button
             type="button"
             onClick={() => { onApply(result.suggested_text, result.verdict); setResult(null); setOpen(false); setObjection('') }}
-            className="text-[11px] font-sans font-medium text-amber hover:underline"
+            className="text-xs font-sans font-semibold text-info hover:underline"
           >
             {result.verdict === 'retract' && !result.suggested_text ? 'Убрать пункт' : 'Применить формулировку'}
           </button>
@@ -111,14 +111,14 @@ export default function ChallengeButton({
   }
 
   return (
-    <div className="mt-1.5 border-l-2 border-border-mid pl-2.5 space-y-1.5">
+    <div className="mt-1.5 border-l-2 border-info/40 pl-2.5 space-y-1.5">
       <textarea
         autoFocus
         rows={2}
         value={objection}
         onChange={(e) => setObjection(e.target.value)}
         placeholder="В чём проблема? Например: это верно, а не отмечено как ошибка."
-        className="w-full px-2 py-1.5 text-xs font-sans bg-surface border border-border rounded-md resize-y focus:outline-none focus:border-border-strong"
+        className="w-full px-2 py-1.5 text-sm font-sans bg-surface border border-border rounded-md resize-y focus:outline-none focus:border-border-strong"
         maxLength={1200}
       />
       <div className="flex items-center gap-2">
@@ -126,14 +126,14 @@ export default function ChallengeButton({
           type="button"
           disabled={objection.trim().length < 3 || mut.isPending}
           onClick={() => mut.mutate()}
-          className="text-[11px] font-sans font-medium text-amber hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+          className="text-xs font-sans font-semibold text-info hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {mut.isPending ? 'Проверяем…' : 'Отправить'}
         </button>
         <button
           type="button"
           onClick={() => { setOpen(false); setObjection('') }}
-          className="text-[11px] font-sans text-ink-tertiary hover:text-ink"
+          className="text-xs font-sans text-ink-tertiary hover:text-ink"
         >
           Отмена
         </button>
