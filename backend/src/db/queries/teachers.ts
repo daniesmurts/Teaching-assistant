@@ -176,6 +176,28 @@ export async function deleteTeacher(teacherId: string): Promise<void> {
   await pool.query('DELETE FROM teachers WHERE id = $1', [teacherId])
 }
 
+// ─── One-off marketing broadcasts (feature announcements, sent externally) ────
+
+export async function setMarketingEmailsEnabled(teacherId: string, enabled: boolean): Promise<void> {
+  await pool.query(
+    `UPDATE teachers SET marketing_emails_enabled = $2 WHERE id = $1`,
+    [teacherId, enabled]
+  )
+}
+
+/** Teachers eligible for a mail-merge broadcast — opted in, scoped to given plan tiers. */
+export async function findMarketingOptedInTeachers(
+  planTiers: string[]
+): Promise<Array<{ id: string; email: string; name: string | null }>> {
+  const { rows } = await pool.query<{ id: string; email: string; name: string | null }>(
+    `SELECT id, email, name FROM teachers
+     WHERE marketing_emails_enabled = TRUE AND is_active = TRUE AND plan_tier = ANY($1)
+     ORDER BY email`,
+    [planTiers]
+  )
+  return rows
+}
+
 // ─── Recurring subscription state ─────────────────────────────────────────────
 
 /** Store the saved-card token + plan and enable auto-renewal (after first payment). */

@@ -2,12 +2,13 @@ import { Router, type Request } from 'express'
 import bcrypt from 'bcryptjs'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
-import { authLimiter } from '../middleware/rateLimits'
+import { authLimiter, publicFormLimiter } from '../middleware/rateLimits'
 import { asyncHandler } from '../lib/asyncHandler'
 import { signToken } from '../lib/jwt'
 import { ValidationError, NotFoundError } from '../errors/AppError'
 import {
   registerRules, loginRules, forgotPasswordRules, resetPasswordRules,
+  marketingUnsubscribeByEmailRules,
 } from '../validation/authValidation'
 import {
   findTeacherByEmail, findTeacherRowById, createTeacher, updateTeacherPassword,
@@ -30,6 +31,8 @@ import { getInstitutionById, findInstitutionByEmailDomain, countInstitutionTeach
 import { isInstitutionAdmin, assignDefaultDepartmentIfUnset } from '../db/queries/orgUnits'
 import { verifyNudgeUnsubToken } from '../services/activation'
 import { setNudgeEmailsEnabled } from '../db/queries/activation'
+import { verifyMarketingUnsubToken } from '../services/marketingEmails'
+import { setMarketingEmailsEnabled } from '../db/queries/teachers'
 import { hasLeadershipRole } from '../db/queries/leadership'
 import { getProgramAccessScope } from '../services/programAccess'
 import { recordAudit } from '../db/queries/audit'
@@ -174,6 +177,42 @@ router.get('/nudge-unsubscribe', asyncHandler(async (req, res) => {
   await setNudgeEmailsEnabled(teacherId, false)
   res.send('<html lang="ru"><body style="font-family:sans-serif;padding:40px">Вы отписаны от подсказок по началу работы. Письма о безопасности аккаунта и оплате продолжат приходить.</body></html>')
 }))
+
+// ─── GET /api/auth/marketing-unsubscribe?token=… ──────────────────────────────
+// Public — target of the «Отписаться» link in one-off feature-announcement
+// broadcasts (sent externally, not through emailTransport.ts). Distinct from
+// nudge-unsubscribe above: a teacher may want onboarding tips but not feature
+// announcements, or vice versa. Same stateless-HMAC token shape.
+router.get('/marketing-unsubscribe', asyncHandler(async (req, res) => {
+  const token = String(req.query.token ?? '')
+  const teacherId = verifyMarketingUnsubToken(token)
+  if (!teacherId) {
+    res.status(400).send('<html lang="ru"><body style="font-family:sans-serif;padding:40px">Ссылка недействительна.</body></html>')
+    return
+  }
+  await setMarketingEmailsEnabled(teacherId, false)
+  res.send('<html lang="ru"><body style="font-family:sans-serif;padding:40px">Вы отписаны от писем о новых функциях. Письма о безопасности аккаунта и оплате продолжат приходить.</body></html>')
+}))
+
+// ─── POST /api/auth/marketing-unsubscribe — by email ──────────────────────────
+// Fallback for broadcasts sent through a tool that can't do per-recipient
+// merge links (one static link for everyone) — target of a public frontend
+// page where the teacher types their own email instead of clicking a
+// pre-tokenised one. Public, rate-limited (same threat model as Contact/
+// Research forms — unauthenticated, spam-prone). Always responds the same
+// way regardless of whether the email is a registered teacher, so this can't
+// be used to probe which addresses exist in the system.
+router.post(
+  '/marketing-unsubscribe',
+  publicFormLimiter,
+  validate(marketingUnsubscribeByEmailRules),
+  asyncHandler(async (req, res) => {
+    const { email } = req.body as { email: string }
+    const teacher = await findTeacherByEmail(email)
+    if (teacher) await setMarketingEmailsEnabled(teacher.id, false)
+    res.json({ ok: true })
+  })
+)
 
 // ─── POST /api/auth/login ─────────────────────────────────────────────────────
 

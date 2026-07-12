@@ -98,23 +98,34 @@ const MAGIC_BYTES: Record<string, string> = {
   '89504e47': 'image/png',
 }
 
+function contentMatchesDeclaredType(file: Express.Multer.File): boolean {
+  const header       = file.buffer.subarray(0, 4).toString('hex').toLowerCase()
+  const detectedMime = MAGIC_BYTES[header]
+  return !detectedMime || detectedMime === file.mimetype
+}
+
+// Covers both `uploadConfig.single()` (req.file) and `uploadFields()`
+// (req.files, keyed by field name) — the latter previously went unchecked,
+// so a disguised file sent through e.g. POST /programs/import would only be
+// caught by its client-declared MIME type.
 export async function verifyFileContent(
   req: Request,
   _res: Response,
   next: NextFunction
 ): Promise<void> {
-  const file = req.file
-  if (!file) { next(); return }
+  const single = req.file
+  if (single && !contentMatchesDeclaredType(single)) {
+    return next(new DocumentProcessingError('Содержимое файла не соответствует его расширению.'))
+  }
 
-  const header       = file.buffer.subarray(0, 4).toString('hex').toLowerCase()
-  const detectedMime = MAGIC_BYTES[header]
-
-  if (detectedMime && detectedMime !== file.mimetype) {
-    return next(
-      new DocumentProcessingError(
-        'Содержимое файла не соответствует его расширению.'
-      )
-    )
+  const grouped = req.files as Record<string, Express.Multer.File[]> | Express.Multer.File[] | undefined
+  if (grouped) {
+    const files = Array.isArray(grouped) ? grouped : Object.values(grouped).flat()
+    for (const file of files) {
+      if (!contentMatchesDeclaredType(file)) {
+        return next(new DocumentProcessingError('Содержимое файла не соответствует его расширению.'))
+      }
+    }
   }
 
   next()

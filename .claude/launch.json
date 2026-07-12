@@ -13,6 +13,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--workspace=backend"],
       "port": 3001
+    },
+    {
+      "name": "email-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-l", "4321", "docs/emails"],
+      "port": 4321
     }
   ]
 }

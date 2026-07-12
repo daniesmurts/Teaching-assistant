@@ -56,3 +56,9 @@ export const resetPasswordRules = [
     .matches(/[A-Z]/)      .withMessage('Пароль должен содержать хотя бы одну заглавную букву')
     .matches(/[0-9]/)      .withMessage('Пароль должен содержать хотя бы одну цифру'),
 ]
+
+export const marketingUnsubscribeByEmailRules = [
+  body('email')
+    .isEmail().withMessage('Введите действительный адрес эл. почты')
+    .normalizeEmail(),
+]

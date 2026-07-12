@@ -121,9 +121,12 @@ export default function Sidebar({ onClose }: Props) {
   const initials =
     initialsForAvatar(teacher?.name) || teacher?.email?.[0]?.toUpperCase() || '?'
 
+  // Flat platform-owner flag — distinct from isInstitutionAdmin below, which
+  // also covers per-institution admins that shouldn't see the platform panel.
+  const isPlatformAdmin = teacher?.is_platform_admin ?? teacher?.role === 'platform_admin'
   // Org-tree-derived (§7), with legacy-enum fallback for pre-upgrade sessions.
   const isInstitutionAdmin =
-    (teacher?.is_platform_admin ?? teacher?.role === 'platform_admin') ||
+    isPlatformAdmin ||
     (teacher?.is_institution_admin ?? teacher?.role === 'institution_admin')
   // Any head/admin on a unit (or platform/institution admin transitively).
   const isLeader =
@@ -211,6 +214,9 @@ export default function Sidebar({ onClose }: Props) {
             )}
             {isInstitutionAdmin && (
               <NavRow item={{ icon: 'building', label: 'Организация', to: '/institution' }} />
+            )}
+            {isPlatformAdmin && (
+              <NavRow item={{ icon: 'shield', label: 'Админ-панель', to: '/admin' }} />
             )}
           </div>
         )}

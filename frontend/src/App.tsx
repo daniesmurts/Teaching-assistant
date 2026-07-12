@@ -79,6 +79,7 @@ const Research   = lazy(() => import('./pages/Research'))
 const FAQ        = lazy(() => import('./pages/FAQ'))
 const Ethics     = lazy(() => import('./pages/Ethics'))
 const Contact    = lazy(() => import('./pages/Contact'))
+const Unsubscribe = lazy(() => import('./pages/Unsubscribe'))
 const Pricing    = lazy(() => import('./pages/Pricing'))
 const Changelog  = lazy(() => import('./pages/Changelog'))
 const UseCases   = lazy(() => import('./pages/UseCases'))
@@ -240,6 +241,7 @@ export default function App() {
           <Route path="/faq"      element={<FAQ />} />
           <Route path="/ethics"   element={<Ethics />} />
           <Route path="/contact"  element={<Contact />} />
+          <Route path="/unsubscribe" element={<Unsubscribe />} />
           <Route path="/pricing"  element={<Pricing />} />
           <Route path="/changelog" element={<Changelog />} />
           <Route path="/use-cases" element={<UseCases />} />

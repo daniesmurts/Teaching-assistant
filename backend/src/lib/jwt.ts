@@ -30,9 +30,7 @@ export function verifyToken(token: string): TokenPayload {
   try {
     return jwt.verify(token, secret(), {
       algorithms: [ALGORITHM],
-      // Accept tokens with or without issuer to handle sessions
-      // issued before this lib was introduced — once those expire
-      // (7d TTL) all live tokens will carry the issuer.
+      issuer:     ISSUER,
     }) as TokenPayload
   } catch (err) {
     if (err instanceof jwt.TokenExpiredError) {

@@ -19,7 +19,7 @@ import { listAncestorsOfUnit } from '../db/queries/orgUnits'
 import { analyzeProgram } from '../services/programAnalysis'
 import { reviewDocumentCoverage, detectDeclaredCompetencyCodes } from '../services/documentReview'
 import { generateProgramReportPdf } from '../services/programReportPdf'
-import { uploadFields } from '../middleware/fileValidation'
+import { uploadFields, verifyFileContent } from '../middleware/fileValidation'
 import { extractText } from '../services/documentExtractor'
 import { parseStudyPlan, parseDescription, parseCompetencyMatrix } from '../services/programImport'
 import { setProgramDocs, setReportedSemesterTotals } from '../db/queries/programs'
@@ -184,6 +184,7 @@ router.post(
     // the programme's document library once each discipline's file is found.
     { name: 'practices',   maxCount: 8 },
   ]),
+  verifyFileContent,
   asyncHandler(async (req, res) => {
     // РОП + УМЦ + IT admin can all import. РОП must link on import to a
     // program unit they hold (same rule as POST /).
@@ -480,6 +481,7 @@ router.get('/:id/analysis.pdf', asyncHandler(async (req, res) => {
 router.post(
   '/:id/documents',
   uploadFields([{ name: 'file', maxCount: 1 }]),
+  verifyFileContent,
   asyncHandler(async (req, res) => {
     const detail = await loadReadable(req)
     assertEdit(req, detail.org_unit_id)
