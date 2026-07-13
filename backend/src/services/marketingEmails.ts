@@ -24,6 +24,9 @@ export function verifyMarketingUnsubToken(token: string): string | null {
   return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected)) ? teacherId : null
 }
 
+// Links to the GET confirm page — the mutation happens on the POST that
+// page's button submits, not on this link itself (mail-scanner prefetch
+// safety; see the comment above unsubscribeConfirmPage in routes/auth.ts).
 export function marketingUnsubUrl(teacherId: string): string {
   return `${config.frontendUrl}/api/auth/marketing-unsubscribe?token=${marketingUnsubToken(teacherId)}`
 }

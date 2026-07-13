@@ -5,6 +5,7 @@ import { validate } from '../middleware/validate'
 import { authLimiter, publicFormLimiter } from '../middleware/rateLimits'
 import { asyncHandler } from '../lib/asyncHandler'
 import { signToken } from '../lib/jwt'
+import { escapeHtml } from '../lib/escapeHtml'
 import { ValidationError, NotFoundError } from '../errors/AppError'
 import {
   registerRules, loginRules, forgotPasswordRules, resetPasswordRules,
@@ -25,7 +26,12 @@ import {
 import { sendEmail, adminNotifyTo } from '../services/emailTransport'
 import {
   registrationEmail, passwordResetEmail, passwordChangedEmail, adminSignupEmail,
+  verifyEmailResendEmail,
 } from '../lib/emailTemplates'
+import {
+  emailVerifyUrl, verifyEmailVerifyToken, extractTeacherIdFromVerifyToken,
+} from '../services/emailVerification'
+import { setEmailVerified } from '../db/queries/teachers'
 import { findValidInviteByToken, markInviteAccepted } from '../db/queries/teacherInvites'
 import { getInstitutionById, findInstitutionByEmailDomain, countInstitutionTeachers } from '../db/queries/institutions'
 import { isInstitutionAdmin, assignDefaultDepartmentIfUnset } from '../db/queries/orgUnits'
@@ -90,11 +96,13 @@ router.post(
     // Plan stays free per product decision; an admin upgrades seats separately.
     let institutionId: string | undefined
     let inviteId: string | undefined
+    let inviteEmail: string | undefined
     if (invite_token) {
       const invite = await findValidInviteByToken(invite_token)
       if (invite) {
         institutionId = invite.institution_id
         inviteId = invite.id
+        inviteEmail = invite.email
       }
       // An invalid/expired token is ignored — registration still succeeds as a normal teacher
     }
@@ -122,11 +130,25 @@ router.post(
 
     if (inviteId) await markInviteAccepted(inviteId)
 
+    // Deferred email verification (migration 076) — never gates signup.
+    // Registering through an admin invite whose email matches already proves
+    // the address (the invite token arrived in that mailbox); everyone else
+    // gets a verify link in the welcome email and an in-app banner.
+    const verifiedViaInvite =
+      !!inviteEmail && inviteEmail.toLowerCase() === teacher.email.toLowerCase()
+    if (verifiedViaInvite) await setEmailVerified(teacher.id)
+
     const token = signToken({ id: teacher.id, email: teacher.email })
 
     // Welcome email — fire-and-forget
     if (name || email) {
-      sendEmail({ ...registrationEmail(name ?? email), to: email })
+      sendEmail({
+        ...registrationEmail(
+          name ?? email,
+          verifiedViaInvite ? undefined : emailVerifyUrl(teacher.id, teacher.email)
+        ),
+        to: email,
+      })
     }
 
     // Owner notification — fire-and-forget
@@ -145,7 +167,13 @@ router.post(
     })
 
     const plan = await buildPlanData(teacher.id, 'free', null)
-    res.status(201).json({ token, teacher, plan })
+    // `teacher` was materialised before setEmailVerified ran — patch the flag
+    // rather than re-fetching the row for one field.
+    res.status(201).json({
+      token,
+      teacher: { ...teacher, email_verified: teacher.email_verified || verifiedViaInvite },
+      plan,
+    })
   })
 )
 
@@ -162,36 +190,147 @@ router.get('/invite/:token', asyncHandler(async (req, res) => {
   })
 }))
 
-// ─── GET /api/auth/nudge-unsubscribe?token=… ──────────────────────────────────
+// ─── Shared HTML for email-link landing pages ─────────────────────────────────
+// (unsubscribe + email verification). Corporate/university mail systems
+// commonly run link-prefetching security scanners that GET every URL in an
+// inbound email before the recipient ever opens it. A GET that mutates state
+// gets silently triggered by the scanner, not the teacher. So GET only ever
+// renders a page; the actual mutation is a same-origin POST the teacher
+// triggers by clicking a button on that page.
+
+function tokenActionResultPage(message: string): string {
+  return `<html lang="ru"><body style="font-family:sans-serif;padding:40px">${escapeHtml(message)}</body></html>`
+}
+
+function tokenActionConfirmPage(params: { token: string; action: string; label: string }): string {
+  return `<html lang="ru"><body style="font-family:sans-serif;padding:40px">
+  <form method="POST" action="${escapeHtml(params.action)}">
+    <input type="hidden" name="token" value="${escapeHtml(params.token)}">
+    <button type="submit" style="font:inherit;padding:10px 20px;cursor:pointer">${escapeHtml(params.label)}</button>
+  </form>
+</body></html>`
+}
+
+// ─── GET/POST /api/auth/nudge-unsubscribe ──────────────────────────────────────
 // Public — target of the «Отписаться» link in activation nudge emails. Token
 // is a stateless HMAC over the teacher id (services/activation.ts), so links
-// keep working indefinitely. Returns a tiny HTML page, not JSON — this opens
-// in the teacher's browser straight from their mail client.
+// keep working indefinitely. GET only renders a confirm button (see comment
+// above on mail-scanner prefetching); the POST it submits to does the mutation.
 router.get('/nudge-unsubscribe', asyncHandler(async (req, res) => {
   const token = String(req.query.token ?? '')
+  if (!verifyNudgeUnsubToken(token)) {
+    res.status(400).send(tokenActionResultPage('Ссылка недействительна.'))
+    return
+  }
+  res.send(tokenActionConfirmPage({
+    token,
+    action: '/api/auth/nudge-unsubscribe',
+    label:  'Отписаться от подсказок по началу работы',
+  }))
+}))
+
+router.post('/nudge-unsubscribe', asyncHandler(async (req, res) => {
+  const token = String(req.body.token ?? '')
   const teacherId = verifyNudgeUnsubToken(token)
   if (!teacherId) {
-    res.status(400).send('<html lang="ru"><body style="font-family:sans-serif;padding:40px">Ссылка недействительна.</body></html>')
+    res.status(400).send(tokenActionResultPage('Ссылка недействительна.'))
     return
   }
   await setNudgeEmailsEnabled(teacherId, false)
-  res.send('<html lang="ru"><body style="font-family:sans-serif;padding:40px">Вы отписаны от подсказок по началу работы. Письма о безопасности аккаунта и оплате продолжат приходить.</body></html>')
+  res.send(tokenActionResultPage('Вы отписаны от подсказок по началу работы. Письма о безопасности аккаунта и оплате продолжат приходить.'))
 }))
 
-// ─── GET /api/auth/marketing-unsubscribe?token=… ──────────────────────────────
+// ─── GET/POST /api/auth/marketing-unsubscribe (token form) ────────────────────
 // Public — target of the «Отписаться» link in one-off feature-announcement
 // broadcasts (sent externally, not through emailTransport.ts). Distinct from
 // nudge-unsubscribe above: a teacher may want onboarding tips but not feature
-// announcements, or vice versa. Same stateless-HMAC token shape.
+// announcements, or vice versa. Same stateless-HMAC token shape and the same
+// GET-renders/POST-mutates split.
 router.get('/marketing-unsubscribe', asyncHandler(async (req, res) => {
   const token = String(req.query.token ?? '')
+  if (!verifyMarketingUnsubToken(token)) {
+    res.status(400).send(tokenActionResultPage('Ссылка недействительна.'))
+    return
+  }
+  res.send(tokenActionConfirmPage({
+    token,
+    action: '/api/auth/marketing-unsubscribe/confirm',
+    label:  'Отписаться от писем о новых функциях',
+  }))
+}))
+
+router.post('/marketing-unsubscribe/confirm', asyncHandler(async (req, res) => {
+  const token = String(req.body.token ?? '')
   const teacherId = verifyMarketingUnsubToken(token)
   if (!teacherId) {
-    res.status(400).send('<html lang="ru"><body style="font-family:sans-serif;padding:40px">Ссылка недействительна.</body></html>')
+    res.status(400).send(tokenActionResultPage('Ссылка недействительна.'))
     return
   }
   await setMarketingEmailsEnabled(teacherId, false)
-  res.send('<html lang="ru"><body style="font-family:sans-serif;padding:40px">Вы отписаны от писем о новых функциях. Письма о безопасности аккаунта и оплате продолжат приходить.</body></html>')
+  res.send(tokenActionResultPage('Вы отписаны от писем о новых функциях. Письма о безопасности аккаунта и оплате продолжат приходить.'))
+}))
+
+// ─── GET/POST /api/auth/verify-email — deferred email verification ────────────
+// Public — target of the «Подтвердить почту» link in the welcome / resend
+// emails. Same GET-renders/POST-mutates split as the unsubscribe routes, and
+// here the scanner concern is sharper: an auto-GET-verify would let a mail
+// scanner "confirm" an account the mailbox owner never registered — exactly
+// the pre-hijack window verification exists to close. The token's HMAC also
+// covers the address, so links sent before an email change stop working.
+
+async function resolveVerifyToken(token: string) {
+  const claimedId = extractTeacherIdFromVerifyToken(token)
+  if (!claimedId) return null
+  const row = await findTeacherRowById(claimedId).catch(() => null)
+  if (!row || !row.is_active) return null
+  return verifyEmailVerifyToken(token, row.email) ? row : null
+}
+
+router.get('/verify-email', asyncHandler(async (req, res) => {
+  const token = String(req.query.token ?? '')
+  const row = await resolveVerifyToken(token)
+  if (!row) {
+    res.status(400).send(tokenActionResultPage('Ссылка недействительна.'))
+    return
+  }
+  if (row.email_verified_at) {
+    res.send(tokenActionResultPage('Адрес эл. почты уже подтверждён. Можно закрыть эту страницу.'))
+    return
+  }
+  res.send(tokenActionConfirmPage({
+    token,
+    action: '/api/auth/verify-email/confirm',
+    label:  'Подтвердить адрес эл. почты',
+  }))
+}))
+
+router.post('/verify-email/confirm', asyncHandler(async (req, res) => {
+  const token = String(req.body.token ?? '')
+  const row = await resolveVerifyToken(token)
+  if (!row) {
+    res.status(400).send(tokenActionResultPage('Ссылка недействительна.'))
+    return
+  }
+  await setEmailVerified(row.id)
+  recordAudit({ institutionId: row.institution_id ?? null, actorTeacherId: row.id,
+    actorEmail: row.email, action: 'auth.email_verified', ...reqMeta(req) })
+  res.send(tokenActionResultPage('Адрес эл. почты подтверждён. Можно закрыть эту страницу и вернуться в ИСПУМ.'))
+}))
+
+// ─── POST /api/auth/resend-verification ───────────────────────────────────────
+// Authenticated — the in-app banner's «Отправить ещё раз» button. Idempotent:
+// already-verified accounts get the same ok response without a send.
+
+router.post('/resend-verification', authenticate, authLimiter, asyncHandler(async (req, res) => {
+  const row = await findTeacherRowById(req.teacher.id)
+  if (!row) throw new NotFoundError('Пользователь')
+  if (!row.email_verified_at) {
+    sendEmail({
+      ...verifyEmailResendEmail(row.name ?? row.email, emailVerifyUrl(row.id, row.email)),
+      to: row.email,
+    })
+  }
+  res.json({ ok: true })
 }))
 
 // ─── POST /api/auth/marketing-unsubscribe — by email ──────────────────────────
@@ -258,6 +397,7 @@ router.post(
         role:                            row.role ?? 'teacher',
         institution_id:                  row.institution_id ?? null,
         institution_shared_rag_enabled:  row.institution_shared_rag_enabled ?? false,
+        email_verified:                  row.email_verified_at != null,
         ...(await adminFlags(row)),
         created_at:                      row.created_at.toISOString(),
       },
@@ -282,6 +422,7 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
     role:                            req.teacher.role,
     institution_id:                  row.institution_id ?? null,
     institution_shared_rag_enabled:  row.institution_shared_rag_enabled ?? false,
+    email_verified:                  row.email_verified_at != null,
     ...(await adminFlags(row)),
     plan,
   })

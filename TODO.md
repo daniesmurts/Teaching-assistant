@@ -57,19 +57,17 @@ endpoint at all — every call had been 404ing silently). `llm/registry.ts:embed
 now routes through Yandex unconditionally, regardless of institution LLM
 preference (CLAUDE.md rule #9). No further action needed here.
 
-### 4. localStorage hardening for the grading persistence layer · Effort: S
+### ~~4. localStorage hardening for the grading persistence layer~~ — already done
 
-The refresh-resilience layer we shipped this session leaves `submission_text`
-(student PII) on disk in plaintext between sessions. A stolen unlocked
-laptop is a real scenario.
-
-- **Why:** 152-ФЗ wouldn't necessarily ding you, but a clean posture is
-  worth a day of work given how prominent the persistence layer became.
-- **Options:**
-  - Switch to `sessionStorage` (loses tab-close survival but cuts surface)
-  - Encrypt with a key derived from the JWT, rotate on logout
-- **Touches:** [hooks/usePersistedState.ts](frontend/src/hooks/usePersistedState.ts)
-  — single file, everything else inherits.
+Shipped: took the "encrypt with a key derived from the JWT" option. New
+[lib/draftCrypto.ts](frontend/src/lib/draftCrypto.ts) — AES-GCM, key is
+SHA-256 of the current JWT (rotates on re-login; old encrypted drafts become
+silently unreadable, which is fine since `clearGradingDrafts()` already wipes
+them on logout — this is defense-in-depth for the window before that runs,
+e.g. a token that expired without an explicit logout). `usePersistedState.ts`
+now encrypts on write and decrypts on read; a leftover plaintext entry from
+before this shipped is treated as undecryptable and dropped, not crash-read.
+No further action needed.
 
 ### ~~5. Document re-ingestion lifecycle~~ — already done
 

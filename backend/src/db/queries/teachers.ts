@@ -27,6 +27,7 @@ export interface TeacherRow {
   renewal_failed_at:   Date | null
   primary_org_unit_id: string | null   // §7 org tree — teacher's primary department
   is_platform_admin:   boolean         // §7 orthogonal platform-owner flag
+  email_verified_at:   Date | null     // NULL = ownership of the address not yet proven
   institution_plan_tier:         string | null   // tier of the teacher's institution (if any)
   institution_shared_rag_enabled: boolean | null // mirror of institutions.shared_rag_enabled
   created_at:          Date
@@ -34,12 +35,13 @@ export interface TeacherRow {
 
 function toTeacher(row: TeacherRow): Teacher {
   return {
-    id:          row.id,
-    email:       row.email,
-    name:        row.name,
-    university:  row.university,
-    phone:       row.phone,
-    created_at:  row.created_at.toISOString(),
+    id:             row.id,
+    email:          row.email,
+    name:           row.name,
+    university:     row.university,
+    phone:          row.phone,
+    email_verified: row.email_verified_at != null,
+    created_at:     row.created_at.toISOString(),
   }
 }
 
@@ -176,6 +178,15 @@ export async function deleteTeacher(teacherId: string): Promise<void> {
   await pool.query('DELETE FROM teachers WHERE id = $1', [teacherId])
 }
 
+// ─── Email verification (deferred — see migration 076) ───────────────────────
+
+export async function setEmailVerified(teacherId: string): Promise<void> {
+  await pool.query(
+    `UPDATE teachers SET email_verified_at = COALESCE(email_verified_at, NOW()) WHERE id = $1`,
+    [teacherId]
+  )
+}
+
 // ─── One-off marketing broadcasts (feature announcements, sent externally) ────
 
 export async function setMarketingEmailsEnabled(teacherId: string, enabled: boolean): Promise<void> {
@@ -185,13 +196,16 @@ export async function setMarketingEmailsEnabled(teacherId: string, enabled: bool
   )
 }
 
-/** Teachers eligible for a mail-merge broadcast — opted in, scoped to given plan tiers. */
+/** Teachers eligible for a mail-merge broadcast — opted in, verified address
+ *  (an unverified address may be a typo or someone else's; sending to it
+ *  risks bounces that damage sender reputation), scoped to given plan tiers. */
 export async function findMarketingOptedInTeachers(
   planTiers: string[]
 ): Promise<Array<{ id: string; email: string; name: string | null }>> {
   const { rows } = await pool.query<{ id: string; email: string; name: string | null }>(
     `SELECT id, email, name FROM teachers
-     WHERE marketing_emails_enabled = TRUE AND is_active = TRUE AND plan_tier = ANY($1)
+     WHERE marketing_emails_enabled = TRUE AND is_active = TRUE
+       AND email_verified_at IS NOT NULL AND plan_tier = ANY($1)
      ORDER BY email`,
     [planTiers]
   )
@@ -309,6 +323,33 @@ export async function createTeacher(
 // ─── SAML SSO — JIT provisioning ──────────────────────────────────────────────
 
 /**
+ * Account pre-hijack guard, shared by both JIT paths below. If an SSO/LTI
+ * launch matches an EXISTING account whose email was never verified, that
+ * account may have been pre-registered by someone else who merely typed this
+ * teacher's address into the signup form — and who still knows its password.
+ * The IdP has just attested the email, so we mark it verified, but first
+ * rotate the password to a random value and stamp password_changed_at:
+ * the authenticate middleware rejects any JWT issued before that stamp, so
+ * every session the pre-registrant holds dies right here. A teacher who
+ * legitimately self-registered and simply never clicked the verify link
+ * loses nothing they can't recover — password reset goes to the email they
+ * demonstrably own.
+ */
+async function neutralizeUnverifiedPreRegistration(row: TeacherRow): Promise<void> {
+  if (row.email_verified_at != null) return
+  const randomPassword = randomBytes(32).toString('hex')
+  const passwordHash   = await bcrypt.hash(randomPassword, 12)
+  await pool.query(
+    `UPDATE teachers SET
+       password_hash       = $2,
+       password_changed_at = NOW(),
+       email_verified_at   = NOW()
+     WHERE id = $1`,
+    [row.id, passwordHash]
+  )
+}
+
+/**
  * Find a teacher by email or create one from a SAML assertion. Called from
  * the ACS handler after the IdP signature is verified.
  *
@@ -331,6 +372,7 @@ export async function findOrCreateSamlTeacher(params: {
 
   const existing = await findTeacherByEmail(email)
   if (existing) {
+    await neutralizeUnverifiedPreRegistration(existing)
     // Backfill SSO fields the first time this teacher logs in via SAML —
     // but never re-attach to a different institution if they already have one.
     await pool.query(
@@ -356,8 +398,8 @@ export async function findOrCreateSamlTeacher(params: {
 
   const { rows } = await pool.query<TeacherRow>(
     `INSERT INTO teachers (email, password_hash, name, institution_id,
-                            saml_subject, saml_provisioned_at)
-     VALUES ($1, $2, $3, $4, $5, NOW())
+                            saml_subject, saml_provisioned_at, email_verified_at)
+     VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
      RETURNING *`,
     [email, passwordHash, params.name, params.institutionId, params.samlSubject]
   )
@@ -389,6 +431,7 @@ export async function findOrCreateLtiTeacher(params: {
 
   const existing = await findTeacherByEmail(email)
   if (existing) {
+    await neutralizeUnverifiedPreRegistration(existing)
     await pool.query(
       `UPDATE teachers SET
          lti_subject        = COALESCE(lti_subject, $2),
@@ -409,8 +452,8 @@ export async function findOrCreateLtiTeacher(params: {
 
   const { rows } = await pool.query<TeacherRow>(
     `INSERT INTO teachers (email, password_hash, name, institution_id,
-                            lti_subject, lti_provisioned_at)
-     VALUES ($1, $2, $3, $4, $5, NOW())
+                            lti_subject, lti_provisioned_at, email_verified_at)
+     VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
      RETURNING *`,
     [email, passwordHash, params.name, params.institutionId, params.ltiSubject]
   )

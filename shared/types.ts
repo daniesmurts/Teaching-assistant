@@ -70,6 +70,10 @@ export interface Teacher {
   name:        string | null
   university:  string | null
   phone:       string | null
+  // Deferred email verification (migration 076) — false until the teacher
+  // confirms via the link in the welcome/resend email. Drives the in-app
+  // banner; never gates login. SSO/LTI/invite accounts are true from birth.
+  email_verified?: boolean
   role?:       TeacherRole
   // §7 org-tree-derived admin signals — authoritative for route gating.
   // `role` is retained as a synced mirror; prefer these for access decisions.

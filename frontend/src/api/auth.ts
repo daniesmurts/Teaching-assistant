@@ -56,6 +56,12 @@ export async function getMe(token?: string): Promise<{ teacher: Teacher; plan: P
   return { teacher, plan }
 }
 
+// Re-send the email-verification link (in-app banner). Idempotent — the
+// server no-ops if the address is already verified.
+export async function resendVerificationEmail(): Promise<void> {
+  await client.post('/api/auth/resend-verification')
+}
+
 export async function forgotPassword(email: string): Promise<void> {
   await client.post('/api/auth/forgot-password', { email }, { skipErrorToast: true })
 }

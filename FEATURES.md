@@ -33,6 +33,7 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 - Legal docs hub (`/legal`) — single entry point listing all legal documents (Пользовательское соглашение, Политика допустимого использования, Публичная оферта incl. Условия оплаты и возврата, Конфиденциальность, Cookie, Этика ИИ); every legal page shows a persistent sidebar (`LegalSidebar`) for cross-navigation instead of routing back through the footer
 - Contact + Research application forms deliver to a real inbox: public `POST /api/contact` → `contact_messages` table + admin-owner email notification (not a `mailto:` or fake local submit)
 - Register (with optional `?invite=` institution invite — prefills + locks email)
+- **Deferred email verification** — signup never gated; welcome email carries a «Подтвердить почту» link (confirm-button page, scanner-safe), in-app banner nags until confirmed with a re-send button. Invite/SSO/LTI accounts are verified from birth (address already attested). Unverified addresses are excluded from marketing/nudge sends; an SSO/LTI launch that lands on an unverified password account rotates its password (pre-hijack guard)
 - Login (password reveal, inline errors)
 - Forgot / reset password (email link, 1-hour token)
 - Yandex Metrica analytics (public pages only; Webvisor never runs on authenticated pages — 152-ФЗ)

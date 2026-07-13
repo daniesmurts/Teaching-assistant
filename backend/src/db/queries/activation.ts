@@ -138,6 +138,9 @@ export async function findNudgeCandidates(
       WHERE COALESCE(t.is_platform_admin, FALSE) = FALSE
         AND t.is_active
         AND t.nudge_emails_enabled
+        -- Unverified address = possible typo or someone else's mailbox;
+        -- nudging it risks bounces (deliverability) at best (migration 076).
+        AND t.email_verified_at IS NOT NULL
         AND t.created_at <  NOW() - make_interval(hours => $2)
         AND t.created_at >= NOW() - make_interval(hours => $3)
         AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.teacher_id = t.id)

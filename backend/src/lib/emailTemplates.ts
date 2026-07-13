@@ -91,14 +91,21 @@ export function subscriptionEndedEmail(name: string): Omit<EmailPayload, 'to'> {
 
 // ─── Registration confirmation ────────────────────────────────────────────────
 
-export function registrationEmail(name: string): Omit<EmailPayload, 'to'> {
+export function registrationEmail(name: string, verifyUrl?: string): Omit<EmailPayload, 'to'> {
   const fn  = firstName(name)
   const url = `${process.env.FRONTEND_URL ?? ''}/dashboard`
+  const verifyBlock = verifyUrl
+    ? `<p>Пожалуйста, подтвердите свой адрес эл. почты — это нужно, чтобы вы
+         могли восстановить доступ к аккаунту, если забудете пароль.</p>
+       ${btn(verifyUrl, 'Подтвердить почту')}`
+    : ''
+  const verifyText = verifyUrl ? `Подтвердите почту: ${verifyUrl}\n\n` : ''
   return {
     subject: 'Добро пожаловать в ИСПУМ',
     html: wrap(`
       <p>Здравствуйте, ${fn}!</p>
       <p>Ваш аккаунт ИСПУМ создан. Вы готовы приступить к работе.</p>
+      ${verifyBlock}
       ${btn(url, 'Перейти в ИСПУМ')}
       <p style="color:#6B6560;font-size:13px">
         Бесплатный план включает 20 проверок работ и 3 презентации в месяц.<br>
@@ -107,7 +114,26 @@ export function registrationEmail(name: string): Omit<EmailPayload, 'to'> {
     `),
     text:
       `Здравствуйте, ${fn}!\n\nВаш аккаунт ИСПУМ создан.\n\n` +
+      verifyText +
       `Перейти в ИСПУМ: ${url}\n\nИСПУМ · ispum.ru`,
+  }
+}
+
+// ─── Email verification (re-send from the in-app banner) ─────────────────────
+
+export function verifyEmailResendEmail(name: string, verifyUrl: string): Omit<EmailPayload, 'to'> {
+  const fn = firstName(name)
+  return {
+    subject: 'Подтвердите адрес эл. почты — ИСПУМ',
+    html: wrap(`
+      <p>Здравствуйте, ${fn}!</p>
+      <p>Нажмите кнопку ниже, чтобы подтвердить, что этот адрес принадлежит вам.
+         Это нужно, чтобы вы могли восстановить доступ к аккаунту ИСПУМ,
+         если забудете пароль.</p>
+      ${btn(verifyUrl, 'Подтвердить почту')}
+    `),
+    text:
+      `Здравствуйте, ${fn}!\n\nПодтвердите адрес эл. почты для аккаунта ИСПУМ:\n${verifyUrl}\n\nИСПУМ · ispum.ru`,
   }
 }
 

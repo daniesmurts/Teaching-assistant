@@ -13,6 +13,7 @@ import {
   consumeRegistrationSession, fetchPlatformOpenIdConfiguration, registerWithPlatform,
 } from '../services/lti'
 import { getLtiConfig, setLtiConfig, findLtiConfigForIssuer, isLtiConfigComplete } from '../db/queries/institutions'
+import { escapeHtml } from '../lib/escapeHtml'
 import { findOrCreateLtiTeacher } from '../db/queries/teachers'
 import { resolveCourseForLtiLaunch, findLtiCourseLinkId, recordNrpsMembershipsUrl } from '../db/queries/ltiCourseLinks'
 import { recordLineItemIfAbsent } from '../db/queries/ltiLineItems'
@@ -338,10 +339,6 @@ router.post('/deep-link/:sessionId/select', authenticate, asyncHandler(async (re
 // into our SPA. The admin gets this URL (with ?session=... already attached)
 // from Settings → Organisation → LTI and pastes the whole thing into Moodle;
 // Moodle appends its own openid_configuration + registration_token params.
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
-}
 
 function registrationResultHtml(ok: boolean, message: string): string {
   return `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
