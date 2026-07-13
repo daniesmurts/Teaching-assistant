@@ -29,6 +29,10 @@ import {
   findWorkingProgrammeForDiscipline, deleteWorkingProgrammeForDiscipline, deletePracticeForType,
 } from '../db/queries/programDocuments'
 import { insertReview, getLatestReviewByDiscipline, getLatestReviewForDiscipline } from '../db/queries/programDocumentReviews'
+import {
+  findCourseByTeacherAndName, findCoursesByTeacher, createCourse, setCourseSyllabusText,
+} from '../db/queries/courses'
+import { getLimits } from '../config/planLimits'
 import { logger } from '../lib/logger'
 import type {
   ProgramDiscipline, ProgramCompetency,
@@ -644,6 +648,60 @@ router.post('/:id/disciplines/:disciplineId/review', aiLimiter, asyncHandler(asy
     result,
   })
   res.status(201).json(review)
+}))
+
+// POST /:id/disciplines/:disciplineId/studio-course — bridge into РПД-студия.
+// The студия works off the teacher's *personal* «Предметы» (courses), not the
+// programme structure, so a РОП who uploaded a discipline's РПД here would
+// otherwise have to re-create the discipline as a предмет by hand. This
+// endpoint finds (by name, case-insensitive) or creates that personal course,
+// seeding syllabus_text from the uploaded РПД's extracted text, and returns
+// its id so the client can navigate to /curriculum?tab=studio&course=<id>.
+// Read access suffices — the created course is the caller's own, the
+// programme itself is untouched.
+router.post('/:id/disciplines/:disciplineId/studio-course', asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+
+  const discipline = detail.disciplines.find((d) => d.id === req.params.disciplineId)
+  if (!discipline) throw new NotFoundError('Дисциплина')
+
+  const found = await findWorkingProgrammeForDiscipline(detail.id, discipline.id!)
+  const rpdText = (found?.extractedText ?? '').trim()
+  if (rpdText.length < 80) {
+    throw new ValidationError('Сначала загрузите рабочую программу для этой дисциплины — студии нужен её текст.')
+  }
+
+  const existing = await findCourseByTeacherAndName(req.teacher.id, discipline.name)
+  if (existing) {
+    // Reuse the предмет; backfill the syllabus only if it's effectively empty —
+    // never clobber text the teacher already maintains there.
+    if ((existing.syllabus_text ?? '').trim().length < 80) {
+      await setCourseSyllabusText(existing.id, rpdText)
+    }
+    res.json({ course_id: existing.id, created: false })
+    return
+  }
+
+  // Same cap the regular POST /api/courses enforces via checkResourceLimit —
+  // applied only on the create branch so reuse keeps working at the limit.
+  const limit = getLimits(req.teacher.plan_tier).maxCourses
+  if (limit !== Infinity) {
+    const count = (await findCoursesByTeacher(req.teacher.id)).length
+    if (count >= limit) {
+      res.status(403).json({
+        error:    `Достигнут лимит предметов для вашего тарифа (${limit}).`,
+        code:     'RESOURCE_LIMIT_REACHED',
+        resource: 'courses',
+        limit,
+        current:  count,
+        upgrade:  true,
+      })
+      return
+    }
+  }
+
+  const course = await createCourse(req.teacher.id, { name: discipline.name, syllabus_text: rpdText })
+  res.status(201).json({ course_id: course.id, created: true })
 }))
 
 // GET /:id/discipline-reviews — latest review per discipline, for the Report tab.

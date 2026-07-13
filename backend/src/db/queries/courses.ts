@@ -41,6 +41,24 @@ export async function findCourseById(id: string, teacherId: string): Promise<Cou
   return rows[0] ? toCourse(rows[0]) : null
 }
 
+/**
+ * Case-insensitive exact-name lookup among a teacher's own courses — used by
+ * the programme → РПД-студия bridge to reuse an existing предмет instead of
+ * creating a duplicate on every «Открыть в РПД-студии» click.
+ */
+export async function findCourseByTeacherAndName(
+  teacherId: string, name: string
+): Promise<Course | null> {
+  const { rows } = await pool.query<CourseRow>(
+    `SELECT * FROM courses
+      WHERE teacher_id = $1 AND lower(name) = lower($2)
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [teacherId, name]
+  )
+  return rows[0] ? toCourse(rows[0]) : null
+}
+
 export async function createCourse(
   teacherId: string,
   data: { name: string; code?: string; level?: string; syllabus_text?: string }

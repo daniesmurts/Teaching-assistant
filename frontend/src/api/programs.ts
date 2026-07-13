@@ -146,6 +146,20 @@ export async function reviewDiscipline(programId: string, disciplineId: string):
   return res.data
 }
 
+/**
+ * Bridge into РПД-студия: find-or-create the caller's personal предмет for
+ * this programme discipline (seeded with the uploaded РПД's text) and return
+ * its id for navigation to /curriculum?tab=studio&course=<id>.
+ */
+export async function openDisciplineInStudio(
+  programId: string, disciplineId: string
+): Promise<{ course_id: string; created: boolean }> {
+  const res = await client.post<{ course_id: string; created: boolean }>(
+    `/api/institution/programs/${programId}/disciplines/${disciplineId}/studio-course`, {}
+  )
+  return res.data
+}
+
 export async function getDisciplineReviews(programId: string): Promise<ProgramDocumentReview[]> {
   const res = await client.get<ProgramDocumentReview[]>(`/api/institution/programs/${programId}/discipline-reviews`)
   return res.data

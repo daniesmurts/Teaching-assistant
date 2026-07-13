@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
@@ -26,7 +27,13 @@ function simColor(sim: number): string {
 type Tab = 'overlap' | 'conformance' | 'studio'
 
 export default function Curriculum() {
-  const [tab, setTab] = useState<Tab>('overlap')
+  // Deep-linkable tab (?tab=studio) — the programme detail page's «Открыть в
+  // РПД-студии» bridge lands here with the студия preselected.
+  const [searchParams] = useSearchParams()
+  const paramTab = searchParams.get('tab')
+  const [tab, setTab] = useState<Tab>(
+    paramTab === 'studio' || paramTab === 'conformance' || paramTab === 'overlap' ? paramTab : 'overlap'
+  )
 
   return (
     <div className="flex flex-col h-full">

@@ -7,7 +7,7 @@ import LoadingSpinner from '../../components/ui/LoadingSpinner'
 import {
   getProgram, getAnalysis, saveDisciplines, saveCompetencies, analyzeProgram, deleteProgram,
   downloadAnalysisPdf, updateProgram, uploadProgramDocument, deleteProgramDocument,
-  downloadProgramDocument, reviewDiscipline, getDisciplineReviews,
+  downloadProgramDocument, reviewDiscipline, getDisciplineReviews, openDisciplineInStudio,
 } from '../../api/programs'
 import { getCourses } from '../../api/courses'
 import { getPickableProgramUnits } from '../../api/programs'
@@ -1418,6 +1418,27 @@ function DisciplineDocumentRow({
   const kb = doc ? Math.round(doc.file_size / 1024) : 0
   const counts = review ? countByStatus(review.result.items) : null
 
+  const navigate    = useNavigate()
+  const queryClient = useQueryClient()
+  const [openingStudio, setOpeningStudio] = useState(false)
+
+  // Bridge into РПД-студия: the студия works off the caller's personal
+  // «Предметы», so the server find-or-creates one seeded with this РПД's
+  // text and we navigate straight to it.
+  async function openInStudio() {
+    if (!doc || !discipline.id) return
+    setOpeningStudio(true)
+    try {
+      const { course_id } = await openDisciplineInStudio(programId, discipline.id)
+      // The sidebar/студия share the 'courses' cache — a just-created предмет
+      // must show up in the студия's picker immediately.
+      await queryClient.invalidateQueries({ queryKey: ['courses'] })
+      navigate(`/curriculum?tab=studio&course=${course_id}`)
+    } catch {
+      setOpeningStudio(false) /* toast handled by interceptor */
+    }
+  }
+
   async function download() {
     if (!doc) return
     try { await downloadProgramDocument(programId, doc) }
@@ -1466,17 +1487,27 @@ function DisciplineDocumentRow({
           )}
         </div>
       </div>
-      {canEdit && doc && (
+      {doc && (
         <div className="mt-2 pl-8 flex items-center gap-3">
+          {canEdit && (
+            <button
+              onClick={onReview}
+              disabled={reviewing || !hasCodes}
+              title={hasCodes ? undefined : 'У дисциплины не указаны компетенции — заполните их в конструкторе плана'}
+              className="text-xs font-sans text-amber hover:underline disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed"
+            >
+              {reviewing ? 'Проверяем…' : review ? 'Перепроверить соответствие' : 'Проверить соответствие компетенциям'}
+            </button>
+          )}
           <button
-            onClick={onReview}
-            disabled={reviewing || !hasCodes}
-            title={hasCodes ? undefined : 'У дисциплины не указаны компетенции — заполните их в конструкторе плана'}
+            onClick={openInStudio}
+            disabled={openingStudio}
+            title="Доработать содержание этой РПД в студии — создаст (или откроет) ваш личный предмет с текстом РПД"
             className="text-xs font-sans text-amber hover:underline disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed"
           >
-            {reviewing ? 'Проверяем…' : review ? 'Перепроверить соответствие' : 'Проверить соответствие компетенциям'}
+            {openingStudio ? 'Открываем…' : 'Открыть в РПД-студии'}
           </button>
-          {review && (
+          {canEdit && review && (
             <button
               onClick={onToggleExpanded}
               className="text-xs font-sans text-ink-secondary hover:text-ink transition-colors"

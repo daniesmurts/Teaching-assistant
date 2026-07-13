@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
@@ -17,7 +18,10 @@ const AUTOSAVE_DEBOUNCE_MS = 1200
 export default function CurriculumStudio() {
   const addToast = useUIStore((s) => s.addToast)
 
-  const [courseId, setCourseId]   = useState('')
+  // Preselect from ?course=<id> — the programme detail page's «Открыть в
+  // РПД-студии» bridge deep-links here with the предмет it just found/created.
+  const [searchParams] = useSearchParams()
+  const [courseId, setCourseId]   = useState(() => searchParams.get('course') ?? '')
   const [sections, setSections]   = useState<SyllabusSection[] | null>(null)
   const [targets, setTargets]     = useState<{ competencies: DraftCompetency[]; goals: string[] }>({ competencies: [], goals: [] })
   const [review, setReview]       = useState<SyllabusReview | null>(null)

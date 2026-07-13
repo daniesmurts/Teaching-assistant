@@ -33,7 +33,9 @@ const NAV_GROUPS: NavGroup[] = [
   ]},
   { label: 'Управление', items: [
     { icon: 'book',         label: 'Предметы',       to: '/courses', essential: true },
-    { icon: 'layers',       label: 'РПД-студия',     to: '/curriculum' },
+    // Essential so fresh accounts (РОП pilot) see the студия without needing
+    // a first grading to unlock the full nav.
+    { icon: 'layers',       label: 'РПД-студия',     to: '/curriculum', essential: true },
     { icon: 'list-checks',  label: 'Критерии',       to: '/criteria' },
     { icon: 'list-checks',  label: 'Рубрики',        to: '/rubrics' },
     { icon: 'sparkle',      label: 'Учебный цикл',   to: '/learning-loop' },
