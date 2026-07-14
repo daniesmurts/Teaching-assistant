@@ -299,6 +299,13 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
 
     setLoading(true)
     setError('')
+    // A fresh submission is about to write grade:pending / review:pending —
+    // close the resume window first. The resume effect depends on those
+    // values (hydration is async), so without this it would treat our own
+    // just-set pending job as a reload leftover: second poll loop, double
+    // onResult delivery, and the «Проверка продолжается» banner on a run
+    // that was never interrupted.
+    resumedRef.current = true
 
     const criterionFields = picked.length > 0
       ? { criterion_ids: picked.map((p) => p.id), weights: picked.map((p) => p.weight) }
@@ -333,6 +340,10 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
     // chain) and show a bogus «Ошибка при проверке» while the backend
     // finished fine. The job also survives a page refresh (see pendingGrade).
     try {
+      // Reset the unmount flag exactly like runReview does — StrictMode's dev
+      // double-mount runs the unmount cleanup once, leaving cancelled.current
+      // true; without this the poll loop below exits before its first tick.
+      cancelled.current = false
       const job = await startGradeJob(payload)
       setPendingGrade({ id: job.id, request: payload })
       await pollGradeJob(job.id, payload)

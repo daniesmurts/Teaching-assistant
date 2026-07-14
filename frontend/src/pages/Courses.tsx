@@ -24,9 +24,9 @@ const LEVELS = [
 ]
 
 interface FormState {
-  name: string; code: string; level: string; syllabus_text: string
+  name: string; code: string; level: string; syllabus_text: string; profession_context: string
 }
-const emptyForm: FormState = { name: '', code: '', level: '', syllabus_text: '' }
+const emptyForm: FormState = { name: '', code: '', level: '', syllabus_text: '', profession_context: '' }
 
 export default function Courses() {
   const qc = useQueryClient()
@@ -67,13 +67,22 @@ export default function Courses() {
 
   function openEdit(c: Course) {
     setEditing(c)
-    setForm({ name: c.name, code: c.code ?? '', level: c.level ?? '', syllabus_text: c.syllabus_text ?? '' })
+    setForm({
+      name: c.name, code: c.code ?? '', level: c.level ?? '', syllabus_text: c.syllabus_text ?? '',
+      profession_context: c.profession_context ?? '',
+    })
     setShowForm(true)
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const payload = { ...form, code: form.code || undefined, level: form.level || undefined, syllabus_text: form.syllabus_text || undefined }
+    const payload = {
+      ...form,
+      code: form.code || undefined,
+      level: form.level || undefined,
+      syllabus_text: form.syllabus_text || undefined,
+      profession_context: form.profession_context || undefined,
+    }
 
     if (editing) { updateMut.mutate({ id: editing.id, data: payload }); return }
 
@@ -159,6 +168,18 @@ export default function Courses() {
                 placeholder="Вставьте текст программы предмета…"
                 rows={4}
               />
+              <div>
+                <Input
+                  label="Профессия выпускников (необязательно)"
+                  value={form.profession_context}
+                  onChange={(e) => setForm((f) => ({ ...f, profession_context: e.target.value }))}
+                  placeholder="Например: юристы, бухгалтеры, инженеры-технологи"
+                />
+                <p className="mt-1.5 flex items-start gap-1.5 text-xs font-sans text-ink-secondary bg-amber-light/50 border border-amber/20 rounded-md px-2.5 py-1.5">
+                  <span className="flex-shrink-0 leading-none">✦</span>
+                  Задания, кейсы и тесты по этому предмету будут привязаны к рабочим ситуациям этой профессии
+                </p>
+              </div>
 
               {/* Syllabus upload — PDF/Word */}
               <div>
@@ -219,9 +240,12 @@ export default function Courses() {
                         </span>
                       )}
                     </div>
-                    {course.level && (
+                    {(course.level || course.profession_context) && (
                       <div className="text-xs font-sans text-ink-tertiary mt-0.5">
-                        {LEVELS.find((l) => l.value === course.level)?.label ?? course.level}
+                        {[
+                          course.level ? (LEVELS.find((l) => l.value === course.level)?.label ?? course.level) : null,
+                          course.profession_context ? `для: ${course.profession_context}` : null,
+                        ].filter(Boolean).join(' · ')}
                       </div>
                     )}
                   </div>

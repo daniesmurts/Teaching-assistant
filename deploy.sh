@@ -19,6 +19,18 @@ APP_DIR="/var/www/gradeassist"
 FRONTEND_BUCKET="gradeassist-frontend"
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Build/deploy identifier — `{date}+{git short SHA}`, e.g. 2026-07-14+a1b2c3d.
+# Distinct from the hand-curated "Версия 1.4" marketing changelog
+# (frontend/src/pages/Changelog.tsx): that one is bumped by hand when we want
+# to announce a release; this one stamps every deploy automatically so
+# /api/health and the sidebar footer always show exactly what's live, with
+# zero chance of forgetting to bump it. Read by vite.config.ts (frontend) and
+# backend/src/lib/version.ts (backend) — both fall back to 'dev' if the
+# VERSION file is absent, which is the normal state outside of a deploy.
+BUILD_VERSION="$(date -u +%Y-%m-%d)+$(git rev-parse --short HEAD)"
+echo "$BUILD_VERSION" > VERSION
+echo "▶ [0/7] Build version: ${BUILD_VERSION}"
+
 echo "▶ [1/7] Building frontend…"
 npm run build --workspace=frontend
 
@@ -52,6 +64,9 @@ rsync -avz --delete \
   backend/ "${VM_HOST}:${APP_DIR}/backend/"
 # shared/ types are imported by the backend at build time
 rsync -avz --delete shared/ "${VM_HOST}:${APP_DIR}/shared/"
+# VERSION lives at the repo root next to .env — backend/src/lib/version.ts reads
+# it as `../VERSION` relative to its cwd (backend/), same convention as .env.
+rsync -avz VERSION "${VM_HOST}:${APP_DIR}/VERSION"
 
 echo "▶ [5/7] Installing, building, migrating on VM…"
 ssh "$VM_HOST" bash -s <<'REMOTE'

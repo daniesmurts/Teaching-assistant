@@ -246,6 +246,9 @@ export default function Sidebar({ onClose }: Props) {
           <Icon name="log-out" className="flex-shrink-0" />
           <span className="text-sm font-sans">Выйти</span>
         </button>
+        <div className="px-1 pt-1 text-[10px] font-sans text-ink-inv-muted/60 truncate" title={`Сборка ${__APP_VERSION__}`}>
+          {__APP_VERSION__}
+        </div>
       </div>
     </aside>
   )

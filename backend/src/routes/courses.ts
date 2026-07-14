@@ -25,7 +25,10 @@ router.post(
   asyncHandler(async (req, res) => {
     const course = await createCourse(
       req.teacher.id,
-      req.body as { name: string; code?: string; level?: string; syllabus_text?: string }
+      req.body as {
+        name: string; code?: string; level?: string; syllabus_text?: string
+        profession_context?: string
+      }
     )
     res.status(201).json(course)
   })
@@ -42,6 +45,7 @@ router.put('/:id', validate(updateCourseRules), asyncHandler(async (req, res) =>
     req.params.id, req.teacher.id,
     req.body as {
       name?: string; code?: string; level?: string; syllabus_text?: string
+      profession_context?: string
       share_rag_with_institution?: boolean
     }
   )

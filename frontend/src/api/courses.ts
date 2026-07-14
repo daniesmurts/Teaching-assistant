@@ -16,6 +16,7 @@ export async function createCourse(data: {
   code?: string
   level?: string
   syllabus_text?: string
+  profession_context?: string
 }): Promise<Course> {
   const res = await client.post<Course>('/api/courses', data)
   return res.data
@@ -28,6 +29,7 @@ export async function updateCourse(
     code?: string
     level?: string
     syllabus_text?: string
+    profession_context?: string
     share_rag_with_institution?: boolean
   }
 ): Promise<Course> {

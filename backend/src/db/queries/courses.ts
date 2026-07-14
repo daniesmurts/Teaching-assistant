@@ -8,6 +8,7 @@ interface CourseRow {
   code: string | null
   level: string | null
   syllabus_text: string | null
+  profession_context: string | null
   share_rag_with_institution: boolean
   created_at: Date
 }
@@ -20,6 +21,7 @@ function toCourse(row: CourseRow): Course {
     code: row.code,
     level: row.level as CourseLevel | null,
     syllabus_text: row.syllabus_text,
+    profession_context: row.profession_context,
     share_rag_with_institution: row.share_rag_with_institution,
     created_at: row.created_at.toISOString(),
   }
@@ -61,13 +63,17 @@ export async function findCourseByTeacherAndName(
 
 export async function createCourse(
   teacherId: string,
-  data: { name: string; code?: string; level?: string; syllabus_text?: string }
+  data: {
+    name: string; code?: string; level?: string; syllabus_text?: string
+    profession_context?: string
+  }
 ): Promise<Course> {
   const { rows } = await pool.query<CourseRow>(
-    `INSERT INTO courses (teacher_id, name, code, level, syllabus_text)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO courses (teacher_id, name, code, level, syllabus_text, profession_context)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
-    [teacherId, data.name, data.code ?? null, data.level ?? null, data.syllabus_text ?? null]
+    [teacherId, data.name, data.code ?? null, data.level ?? null, data.syllabus_text ?? null,
+     data.profession_context ?? null]
   )
   return toCourse(rows[0])
 }
@@ -77,20 +83,22 @@ export async function updateCourse(
   teacherId: string,
   data: {
     name?: string; code?: string; level?: string; syllabus_text?: string
+    profession_context?: string
     share_rag_with_institution?: boolean
   }
 ): Promise<Course | null> {
   const { rows } = await pool.query<CourseRow>(
     `UPDATE courses
-     SET name          = COALESCE($3, name),
-         code          = COALESCE($4, code),
-         level         = COALESCE($5, level),
-         syllabus_text = COALESCE($6, syllabus_text),
-         share_rag_with_institution = CASE WHEN $7::boolean IS NOT NULL THEN $7 ELSE share_rag_with_institution END
+     SET name               = COALESCE($3, name),
+         code               = COALESCE($4, code),
+         level              = COALESCE($5, level),
+         syllabus_text      = COALESCE($6, syllabus_text),
+         profession_context = COALESCE($7, profession_context),
+         share_rag_with_institution = CASE WHEN $8::boolean IS NOT NULL THEN $8 ELSE share_rag_with_institution END
      WHERE id = $1 AND teacher_id = $2
      RETURNING *`,
     [id, teacherId, data.name ?? null, data.code ?? null, data.level ?? null, data.syllabus_text ?? null,
-     data.share_rag_with_institution ?? null]
+     data.profession_context ?? null, data.share_rag_with_institution ?? null]
   )
   return rows[0] ? toCourse(rows[0]) : null
 }

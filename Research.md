@@ -1040,3 +1040,79 @@ Painful to retrofit later; worth doing now.
 - **CLAUDE.md Database Schema section** gains `org_units` and
   `org_unit_roles`.
 - **TODO.md** gains Feature P (org structure tree) at L+ effort.
+
+---
+
+## 8. Profession-Anchored Material Generation
+
+### 8.0 Why — the relevance gap is measured, not hypothetical
+
+Industry survey data (Higher Education and AI, 2026): only **28% of students**
+feel that most or many of their assessments reflect the work, skills, and
+judgement they expect to need in an AI-enabled workplace. 37% say none or
+only a few do. Assessment relevance is a felt, reportable deficit — and
+teachers have no tooling that closes it.
+
+The materials generators (quizzes, задания, кейсы, проекты — `tasks.ts`,
+`quizzes.ts`) currently anchor content to *topic + difficulty + course
+context*. Nothing anchors it to the profession the students are being
+trained for. A кейс is by definition a workplace situation, yet the model
+invents that workplace from nothing.
+
+### 8.1 The design question: teacher-specified vs LLM-inferred profession
+
+**Resolved: hybrid — stored on the course, confirmed once, silently reused.**
+
+- Pure LLM inference fails on service courses, which are a huge share of
+  Russian university teaching: «Экономика» for юристы, «Математика» for
+  biologists. Course name + topic do not identify the cohort's profession;
+  the teacher knows it exactly.
+- Pure per-generation form fields add friction to a flow that must stay
+  fast, and duplicate course-level information into every request.
+- The winning shape:
+  1. **Course-level profession context** — направление подготовки (ФГОС
+     code) + optional free-text «кем работают выпускники». One new column
+     on `courses`.
+  2. **LLM pre-suggests it** from `syllabus_text` (syllabi routinely name
+     the направление and компетенции); teacher confirms or edits once.
+  3. **Generators consume it automatically**; the generation form shows it
+     as an editable chip for the rare different-audience run.
+  4. **Graceful fallback** when unset: soft prompt clause («если
+     профессиональный профиль очевиден из контекста, привязывайте задания
+     к нему») — no fabricated professions.
+
+### 8.2 The профстандарт moat
+
+ФГОС 3++ maps every направление подготовки to профстандарты, and
+профстандарты enumerate трудовые функции — a *state-maintained structured
+vocabulary of what graduates do at work*. Once a course is linked to a РПД
+(§РПД-студия), profession context and target competencies (ПК/ОПК) can be
+derived automatically instead of asked. Western competitors have no
+equivalent registry; this is an ИСПУМ-specific data advantage and a
+plausible patent/grant framing: *"generation of assessment materials
+conditioned on state professional-standard labour functions resolved from
+the course's accreditation documents."*
+
+### 8.3 Prompt changes (cheap, no new infra)
+
+- New prompt section «Профессиональный контекст» injected into both
+  generators when available.
+- Instruction to set statements in **realistic workplace situations** of
+  the profession — weighted by kind and level: strongest for кейсы and
+  проекты, moderate for задания, light for recall-level quizzes (forced
+  professional framing of definition questions reads as contrived).
+- Per-item **relevance line**: one student-visible sentence «где это
+  встретится в работе». `tasks.ts` already emits a `skills` field per item;
+  upgrade it from abstract competencies to job-anchored ones rather than
+  adding a parallel field. Quizzes gain it in the `explanation` guidance.
+- Invisible relevance equals no relevance: the survey measures student
+  *perception*, so the relevance line shown to the student is as important
+  as the professionally-framed statement itself.
+
+### 8.4 Scope and cost
+
+- One `courses` column + confirm-once UI moment at course setup.
+- Prompt edits in `tasks.ts` / `quizzes.ts`; optional later extension to
+  topics and presentations generators.
+- §8.2 (РПД-derived competency conditioning) is a later phase gated on the
+  РПД-студия bridge maturing.

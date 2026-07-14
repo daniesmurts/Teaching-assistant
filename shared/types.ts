@@ -114,6 +114,7 @@ export interface Course {
   code: string | null
   level: CourseLevel | null
   syllabus_text: string | null
+  profession_context: string | null      // направление подготовки / кем работают выпускники — see Research.md §8
   share_rag_with_institution: boolean    // opt-in for the kafedra-wide RAG flywheel
   created_at: string
 }

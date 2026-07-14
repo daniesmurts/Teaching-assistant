@@ -1,8 +1,23 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
+
+// Populated by deploy.sh as `{date}+{git short SHA}` before this build runs
+// (see deploy.sh) — absent locally, hence the 'dev' fallback.
+function readBuildVersion(): string {
+  try {
+    return readFileSync(resolve(__dirname, '../VERSION'), 'utf8').trim()
+  } catch {
+    return 'dev'
+  }
+}
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(readBuildVersion()),
+  },
   plugins: [
     react(),
     VitePWA({

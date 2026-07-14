@@ -3,9 +3,11 @@ import helmet from 'helmet'
 import cors from 'cors'
 import { pool } from './db/connection'
 import { config, validateConfig } from './lib/config'
+import { getBuildVersion } from './lib/version'
 import { errorHandler } from './middleware/errorHandler'
 import { generalLimiter } from './middleware/rateLimits'
 import { auditLog } from './middleware/auditLog'
+import { abortMonitor } from './middleware/abortMonitor'
 import authRouter from './routes/auth'
 import ssoRouter from './routes/sso'
 import ltiRouter from './routes/lti'
@@ -105,6 +107,11 @@ app.use(generalLimiter)
 // that audit themselves set res.locals.selfAudited to opt out (see auditLog).
 app.use(auditLog)
 
+// Surfaces client-aborted slow requests (the calc-grading blind spot — see
+// middleware/abortMonitor.ts). Global with a 10s threshold rather than
+// per-AI-route: cheap endpoints never run long enough to trigger it.
+app.use(abortMonitor)
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 app.get('/api/health', async (_req, res) => {
@@ -114,6 +121,7 @@ app.get('/api/health', async (_req, res) => {
       status:    'ok',
       timestamp: new Date().toISOString(),
       env:       config.nodeEnv,
+      version:   getBuildVersion(),
     })
   } catch {
     res.status(503).json({ status: 'degraded', error: 'database unavailable' })

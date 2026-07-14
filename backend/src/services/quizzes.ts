@@ -181,6 +181,16 @@ function buildPrompt(
       const summary = course.syllabus_text.trim().split(/\s+/).slice(0, 300).join(' ')
       lines.push(`\nАннотация программы:\n${summary}`)
     }
+    // Profession-anchored generation — see Research.md §8. Kept lighter than the
+    // materials generator: forcing a job framing onto every recall-level question
+    // reads as contrived, so this is a nudge rather than a hard instruction.
+    if (course.profession_context) {
+      lines.push(`\nВыпускники этого предмета работают как: ${sanitiseForPrompt(course.profession_context)}.`)
+      lines.push(
+        `Где это уместно (особенно для вопросов на применение), формулируйте вопросы и объяснения ` +
+        `через рабочие ситуации этой профессии, и в "explanation" кратко отмечайте, где это встретится в работе.`
+      )
+    }
     lines.push('')
   }
 
