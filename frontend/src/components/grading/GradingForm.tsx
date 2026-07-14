@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import Button from '../ui/Button'
 import { Textarea } from '../ui/Input'
 import { getCourses } from '../../api/courses'
-import { getStudents, startReview, getReview } from '../../api/grading'
+import { getStudents, startReview, getReview, startGradeJob, getGradeJob } from '../../api/grading'
 import { getCriteria, getCriteriaTemplates } from '../../api/criteria'
 import { getRubrics, getRubricTemplates } from '../../api/rubrics'
 import DocumentUpload from '../ui/DocumentUpload'
@@ -15,8 +15,7 @@ import DrawingsUpload from './DrawingsUpload'
 import Icon from '../ui/Icon'
 import { useUIStore } from '../../store/uiStore'
 import { usePlan } from '../../hooks/usePlan'
-import { usePersistedState } from '../../hooks/usePersistedState'
-import client from '../../api/client'
+import { usePersistedState, clearPersistedState } from '../../hooks/usePersistedState'
 import type { GradeRequest, GradeResponse } from '../../api/grading'
 import { SINGLE_PASS_CHAR_LIMIT } from '../../types'
 import type { LongReview, Assignment } from '../../types'
@@ -113,19 +112,52 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
     'review:pending',
     null,
   )
+  // Same persistence for regular grade jobs — grading is async now (calc mode
+  // can run for minutes), so a refresh mid-check must resume the poll rather
+  // than lose the result.
+  const [pendingGrade, setPendingGrade] = usePersistedState<{ id: string; request: GradeRequest } | null>(
+    'grade:pending',
+    null,
+  )
   const cancelled = useRef(false)
   useEffect(() => () => { cancelled.current = true }, [])
+
+  // Clearing a finished/failed pending job needs two steps and then a yield:
+  // the synchronous removeItem covers the case where onResult/onReview swaps
+  // the parent view and unmounts this form before the setState(null) mirror
+  // effect runs; the `await delay(...)` in the callers then lets that mirror
+  // effect actually run before unmount, which bumps the hook's writeSeq and
+  // invalidates any still-in-flight async encrypt of the old value (which
+  // would otherwise land after our removeItem and resurrect the key — the
+  // finished job would then re-deliver itself on every visit to the page).
+  function clearPendingGrade() {
+    clearPersistedState('grade:pending')
+    setPendingGrade(null)
+  }
+  function clearPendingReview() {
+    clearPersistedState('review:pending')
+    setPendingReview(null)
+  }
 
   // On mount, if there's a pending long review from a previous session, look
   // up its current state and either resume polling, deliver the finished
   // result, or surface the failure. Runs exactly once.
+  // Depends on the pending values (not `[]`): usePersistedState hydrates
+  // asynchronously (Web Crypto decrypt), so on the mount render both are
+  // still null — the effect must re-run when hydration lands. resumedRef
+  // keeps it to a single resume per page load.
   const resumedRef = useRef(false)
   useEffect(() => {
-    if (resumedRef.current || !pendingReview) return
-    resumedRef.current = true
-    void resumeReview(pendingReview.id, pendingReview.request)
+    if (resumedRef.current) return
+    if (pendingReview) {
+      resumedRef.current = true
+      void resumeReview(pendingReview.id, pendingReview.request)
+    } else if (pendingGrade) {
+      resumedRef.current = true
+      void resumeGradeJob(pendingGrade.id, pendingGrade.request)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [pendingReview, pendingGrade])
 
   useEffect(() => {
     if (!revisionOf) {
@@ -287,21 +319,87 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
       return
     }
 
+    const payload: GradeRequest = {
+      submission_text: form.submission_text,
+      ...common,
+      ...(isCalc ? { assignment_type: 'calculation' as const } : {}),
+      ...(form.reference_solution ? { reference_solution: form.reference_solution } : {}),
+      ...(form.assignment_context ? { assignment_context: form.assignment_context } : {}),
+      ...(thorough && can('confidenceCheck') ? { thorough: true } : {}),
+      ...(checkCitations && can('citationCheck') ? { check_citations: true } : {}),
+    }
+    // Grading is asynchronous: enqueue + poll. A synchronous request used to
+    // hit the client's 120s timeout on calc grading (multi-minute reasoner
+    // chain) and show a bogus «Ошибка при проверке» while the backend
+    // finished fine. The job also survives a page refresh (see pendingGrade).
     try {
-      const payload: GradeRequest = {
-        submission_text: form.submission_text,
-        ...common,
-        ...(isCalc ? { assignment_type: 'calculation' as const } : {}),
-        ...(form.reference_solution ? { reference_solution: form.reference_solution } : {}),
-        ...(form.assignment_context ? { assignment_context: form.assignment_context } : {}),
-        ...(thorough && can('confidenceCheck') ? { thorough: true } : {}),
-        ...(checkCitations && can('citationCheck') ? { check_citations: true } : {}),
-      }
-      const res = await client.post<GradeResponse>('/api/grading/grade', payload)
-      onResult(payload, res.data)
+      const job = await startGradeJob(payload)
+      setPendingGrade({ id: job.id, request: payload })
+      await pollGradeJob(job.id, payload)
     } catch (err: unknown) {
       setError(errMsg(err, 'Ошибка при проверке'))
+      setLoading(false)
+      clearPendingGrade()
+    }
+  }
+
+  // Shared poll loop for regular grade jobs — mirrors pollReview below.
+  async function pollGradeJob(jobId: string, request: GradeRequest) {
+    try {
+      for (let i = 0; i < 240 && !cancelled.current; i++) {
+        await delay(2500)
+        const job = await getGradeJob(jobId)
+        if (job.status === 'ready' && job.result) {
+          clearPendingGrade()
+          setWasResumed(false)
+          await delay(50)   // let the null-mirror effect flush (see clearPendingGrade)
+          onResult(request, job.result)
+          break
+        }
+        if (job.status === 'failed') {
+          clearPendingGrade()
+          setWasResumed(false)
+          setError(job.error_message || 'Ошибка при проверке')
+          break
+        }
+      }
     } finally {
+      setLoading(false)
+    }
+  }
+
+  // Resume a grade job after a page refresh — same contract as resumeReview.
+  async function resumeGradeJob(jobId: string, request: GradeRequest) {
+    cancelled.current = false
+    setLoading(true)
+    setWasResumed(true)
+    try {
+      const job = await getGradeJob(jobId)
+      if (job.status === 'ready' && job.result) {
+        clearPendingGrade()
+        setWasResumed(false)
+        setLoading(false)
+        await delay(50)   // let the null-mirror effect flush (see clearPendingGrade)
+        onResult(request, job.result)
+        return
+      }
+      if (job.status === 'failed') {
+        clearPendingGrade()
+        setWasResumed(false)
+        setLoading(false)
+        setError(job.error_message || 'Ошибка при проверке')
+        return
+      }
+      await pollGradeJob(jobId, request)
+    } catch (err: unknown) {
+      // 404 (job gone) → nothing to resume; wipe and let the teacher retry.
+      const status = (err as { response?: { status?: number } }).response?.status
+      if (status === 404) {
+        clearPendingGrade()
+      } else {
+        setError(errMsg(err, 'Не удалось восстановить проверку'))
+      }
+      setWasResumed(false)
       setLoading(false)
     }
   }
@@ -318,7 +416,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
       setError(errMsg(err, 'Не удалось запустить рецензирование'))
       setLoading(false)
       setReviewJob(null)
-      setPendingReview(null)
+      clearPendingReview()
     }
   }
 
@@ -332,14 +430,15 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
       const status = await getReview(jobId)
       setReviewJob(status)
       if (status.status === 'ready') {
-        onReview(status, request)
-        setPendingReview(null)
+        clearPendingReview()
         setWasResumed(false)
+        await delay(50)   // let the null-mirror effect flush (see clearPendingGrade)
+        onReview(status, request)
         return
       }
       if (status.status === 'failed') {
         setError(status.error_message || 'Не удалось выполнить рецензирование')
-        setPendingReview(null)
+        clearPendingReview()
         setWasResumed(false)
         return
       }
@@ -348,7 +447,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
       // Treat 404 (job gone) as "nothing to resume" — wipe and let teacher try again.
       const status = (err as { response?: { status?: number } }).response?.status
       if (status === 404) {
-        setPendingReview(null)
+        clearPendingReview()
       } else {
         setError(errMsg(err, 'Не удалось восстановить рецензирование'))
       }
@@ -367,14 +466,15 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
         const status = await getReview(jobId)
         setReviewJob(status)
         if (status.status === 'ready') {
-          onReview(status, request)
-          setPendingReview(null)
+          clearPendingReview()
           setWasResumed(false)
+          await delay(50)   // let the null-mirror effect flush (see clearPendingGrade)
+          onReview(status, request)
           break
         }
         if (status.status === 'failed') {
           setError(status.error_message || 'Не удалось выполнить рецензирование')
-          setPendingReview(null)
+          clearPendingReview()
           setWasResumed(false)
           break
         }
@@ -714,11 +814,11 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
           </>
         ) : (
           <>
-            {wasResumed && reviewJob && reviewJob.status !== 'ready' && reviewJob.status !== 'failed' && (
+            {wasResumed && (reviewJob ? reviewJob.status !== 'ready' && reviewJob.status !== 'failed' : loading) && (
               <div className="px-3 py-2 bg-amber-light/60 border border-amber/25 rounded-md flex items-start gap-2 text-[12px] font-sans text-ink leading-relaxed">
                 <span className="text-amber flex-shrink-0">↻</span>
                 <span>
-                  <span className="font-medium">Рецензирование продолжается.</span>{' '}
+                  <span className="font-medium">{reviewJob ? 'Рецензирование продолжается.' : 'Проверка продолжается.'}</span>{' '}
                   <span className="text-ink-secondary">
                     Мы восстановили задачу, которую вы запустили до обновления страницы — закрывать вкладку не нужно.
                   </span>
@@ -764,7 +864,8 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
               </p>
             ) : isCalc && (
               <p className="text-[11px] font-sans text-ink-tertiary text-center">
-                Расчётные задачи проверяются тщательнее — это может занять до минуты.
+                Расчётные задачи проверяются тщательнее — это может занять несколько минут.
+                Проверка не прервётся, даже если обновить страницу.
               </p>
             )}
 

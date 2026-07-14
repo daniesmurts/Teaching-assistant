@@ -409,6 +409,11 @@ export const MAX_REVIEW_CHARS = 1_000_000
 
 export type LongReviewStatus = 'pending' | 'analyzing' | 'synthesizing' | 'ready' | 'failed'
 
+// Async single-pass grade jobs (grade_jobs table). Regular grading is
+// enqueued and polled the same way as long reviews — the calc reasoner
+// chain can run for minutes, longer than any sane HTTP timeout.
+export type GradeJobStatus = 'pending' | 'processing' | 'ready' | 'failed'
+
 // Strengths/gaps shape evolved from plain string[] (Tier-0) to BulletItem[]
 // (Tier-1, with verbatim quotes from the section). Older rows still carry
 // strings inside the JSONB result column — the frontend renderer tolerates

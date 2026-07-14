@@ -6,11 +6,13 @@ import { gradeRules, approveRules, reviewRules } from '../validation/gradingVali
 import { asyncHandler } from '../lib/asyncHandler'
 import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
 import { canUseFeature } from '../config/planLimits'
-import { grade, approve } from '../services/grading'
+import { grade, approve, type GradeParams } from '../services/grading'
 import type { RunParams } from '../services/longReview'
 import { LONG_REVIEW_QUEUE } from '../services/longReviewWorker'
+import { GRADE_JOB_QUEUE, type GradeJobPayload } from '../services/gradeJobWorker'
 import { getJobQueue } from '../services/jobQueue'
 import { createLongReview, getLongReviewById, getLongReviewByAssignmentId } from '../db/queries/longReviews'
+import { createGradeJob, getGradeJobById } from '../db/queries/gradeJobs'
 import { generateEmailDraft } from '../services/email'
 import { composeHandout } from '../services/handout'
 import { searchFeedbackLibrary } from '../services/feedbackLibrary'
@@ -24,7 +26,92 @@ import type { GradeLetter, BulletItem } from '../../../shared/types'
 const router = Router()
 router.use(authenticate)
 
-// POST /api/grading/grade
+// POST /api/grading/grade-jobs — async grading (the current client path).
+// Grading (calc grading especially — 2–4 chained reasoner calls) can outlive
+// any HTTP timeout, so the request only enqueues: plan gates and quota are
+// checked here, the pg-boss worker (gradeJobWorker.ts) runs grade(), and the
+// client polls GET /grade-jobs/:id. 202 + job id, like /review.
+router.post(
+  '/grade-jobs',
+  aiLimiter,
+  checkMonthlyLimit('gradesPerMonth'),
+  validate(gradeRules),
+  asyncHandler(async (req, res) => {
+    const {
+      submission_text, criterion_ids, weights, course_id,
+      student_name, student_email, student_group,
+      reference_solution, assignment_context, assignment_type, parent_assignment_id, thorough,
+      check_citations,
+    } = req.body as {
+      submission_text: string
+      criterion_ids?: string[]
+      weights?: number[]
+      course_id?: string
+      student_name?: string
+      student_email?: string
+      student_group?: string
+      reference_solution?: string
+      assignment_context?: string
+      assignment_type?: 'essay' | 'calculation'
+      parent_assignment_id?: string
+      thorough?: boolean
+      check_citations?: boolean
+    }
+    // Same silent plan-downgrade rules as the sync /grade path below.
+    const params: GradeParams = {
+      teacherId:          req.teacher.id,
+      institutionId:      req.teacher.institution_id ?? null,
+      planTier:           req.teacher.plan_tier,
+      submissionText:     submission_text,
+      criterionIds:       criterion_ids,
+      weights,
+      courseId:           course_id,
+      studentName:        student_name,
+      studentEmail:       student_email,
+      studentGroup:       student_group,
+      referenceSolution:  reference_solution,
+      assignmentContext:  assignment_context,
+      assignmentType:     assignment_type === 'calculation' ? 'calculation' : 'essay',
+      parentAssignmentId: parent_assignment_id,
+      thorough:           Boolean(thorough) && canUseFeature(req.teacher.plan_tier, 'confidenceCheck'),
+      checkCitations:     Boolean(check_citations) && canUseFeature(req.teacher.plan_tier, 'citationCheck'),
+    }
+
+    const job = await createGradeJob(req.teacher.id)
+    const payload: GradeJobPayload = { jobId: job.id, params }
+    await getJobQueue().send(GRADE_JOB_QUEUE, payload)
+
+    res.status(202).json({
+      id:            job.id,
+      status:        job.status,
+      assignment_id: null,
+      result:        null,
+      error_message: null,
+      created_at:    job.created_at,
+    })
+  })
+)
+
+// GET /api/grading/grade-jobs/:id — poll job status / fetch the finished grade.
+router.get(
+  '/grade-jobs/:id',
+  asyncHandler(async (req, res) => {
+    const job = await getGradeJobById(req.params.id, req.teacher.id)
+    if (!job) return res.status(404).json({ error: 'Проверка не найдена', code: 'NOT_FOUND' })
+    res.json({
+      id:            job.id,
+      status:        job.status,
+      assignment_id: job.assignment_id,
+      result:        job.result,
+      error_message: job.error_message,
+      created_at:    job.created_at,
+    })
+  })
+)
+
+// POST /api/grading/grade — legacy synchronous path. Kept only so cached
+// frontend bundles from before the async rollout keep working; the current
+// client posts to /grade-jobs. Remove after a deploy cycle or two.
 router.post(
   '/grade',
   aiLimiter,

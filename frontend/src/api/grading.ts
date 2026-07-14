@@ -69,6 +69,31 @@ export async function gradeSubmission(data: GradeRequest): Promise<GradeResponse
   return res.data
 }
 
+// ─── Async grade jobs ─────────────────────────────────────────────────────────
+// Grading (calc mode especially) can run for minutes — longer than any HTTP
+// timeout — so the client enqueues a job and polls, same as long reviews.
+
+export type GradeJobStatus = 'pending' | 'processing' | 'ready' | 'failed'
+
+export interface GradeJob {
+  id:            string
+  status:        GradeJobStatus
+  assignment_id: string | null
+  result:        GradeResponse | null
+  error_message: string | null
+  created_at:    string
+}
+
+export async function startGradeJob(data: GradeRequest): Promise<GradeJob> {
+  const res = await client.post<GradeJob>('/api/grading/grade-jobs', data)
+  return res.data
+}
+
+export async function getGradeJob(id: string): Promise<GradeJob> {
+  const res = await client.get<GradeJob>(`/api/grading/grade-jobs/${id}`)
+  return res.data
+}
+
 export async function approveGrade(
   id: string,
   data: {

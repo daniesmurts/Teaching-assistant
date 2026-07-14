@@ -29,7 +29,7 @@ import type { Assignment, GradeLetter, CriterionScore, CriteriaSnapshotItem, Bul
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface GradeParams {
+export interface GradeParams {
   teacherId:  string
   institutionId?: string | null
   planTier:   string   // 'free' | 'pro' | 'institution'

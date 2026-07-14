@@ -6,6 +6,7 @@ import { startActivationScheduler } from './services/activation'
 import { startActivationDigestScheduler } from './services/activationDigest'
 import { startJobQueue, stopJobQueue } from './services/jobQueue'
 import { registerLongReviewWorker } from './services/longReviewWorker'
+import { registerGradeJobWorker } from './services/gradeJobWorker'
 
 const PORT = config.port
 
@@ -14,6 +15,7 @@ async function main(): Promise<void> {
   // traffic — POST /api/grading/review enqueues onto it immediately.
   const boss = await startJobQueue()
   await registerLongReviewWorker(boss)
+  await registerGradeJobWorker(boss)
 
   app.listen(PORT, () => {
     logger.info({ message: `Backend running on port ${PORT}`, env: process.env.NODE_ENV })

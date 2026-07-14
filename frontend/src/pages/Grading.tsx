@@ -153,6 +153,7 @@ export default function Grading() {
     clearPersistedState('form:draft.fields')
     clearPersistedState('form:draft.criteria')
     clearPersistedState('review:pending')
+    clearPersistedState('grade:pending')
     // Also drop the ?revision_of= param so a fresh round isn't still pre-filled
     if (revisionOfId) clearRevision()
   }
