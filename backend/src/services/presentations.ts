@@ -71,14 +71,26 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
 
   const userPrompt = buildPrompt(params, course, previousTopics, slideTarget, sources)
 
-  // chatJSON handles "respond only with JSON" + a parse-and-retry loop.
+  // chatJSON handles "respond only with JSON" + a parse-and-retry loop, but
+  // the retry re-sends the same prompt — it can't fix a truncation caused by
+  // running out of output tokens. Left unset, providers default to ~4096
+  // tokens (see longReview.ts's synthesis call for the same fix), which a
+  // multi-slide deck (each slide's notes + body easily runs 150-250 tokens)
+  // blows through well before slideTarget=40: JSON.parse then fails mid-array
+  // on both the original and the retry, surfacing as an opaque
+  // "Expected ',' or ']'" 500 (production incident, 2026-07-15). Scale with
+  // slideTarget and cap at the lowest ceiling among the providers this call
+  // can land on (yandex: 8000 — see llm/yandex.ts's CAPABILITIES).
   const raw = await chatJSON<{ slides: unknown[] }>(
     [
       { role: 'system', content: systemPrompt },
       { role: 'user',   content: userPrompt },
     ],
     'slides',
-    { context: { teacherId: params.teacherId, feature: 'presentation' } }
+    {
+      context: { teacherId: params.teacherId, feature: 'presentation' },
+      maxTokens: presentationMaxTokens(slideTarget),
+    }
   )
 
   const validSourceIdx = new Set(sources.map((s) => s.idx))
@@ -625,6 +637,22 @@ async function getPreviousTopics(
 
 function estimateSlideCount(minutes: number): number {
   return Math.max(5, Math.min(30, Math.round(minutes / 2)))
+}
+
+// ~220 tokens/slide (title + 2-4 sentence notes + body — comparison/discussion
+// bodies run higher) plus a fixed buffer for the JSON envelope. Capped at
+// 8192 — deepseek/qwen's maxOutputTokens; yandex clamps this down to its own
+// 8000 internally (see llm/yandex.ts), so passing 8192 is safe everywhere.
+// This ceiling is the hard reason slide_count_target tops out at 30 (see
+// generatePresentationRules) rather than higher — verified empirically
+// (production incident, 2026-07-15): a 38-slide request burned the full
+// requested budget on both the initial call AND chatJSON's built-in retry
+// (usage log showed output_tokens=8000, i.e. hit the ceiling, twice) and
+// still came back truncated — the retry re-sends the same oversized request,
+// so it was always going to fail identically. There is no larger ceiling to
+// raise to; 30 is where estimateSlideCount() below already tops out too.
+export function presentationMaxTokens(slideTarget: number): number {
+  return Math.min(8192, 1500 + slideTarget * 220)
 }
 
 function styleLabel(style: string): string {

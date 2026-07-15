@@ -130,7 +130,7 @@ export default function PresentationForm({ onResult }: Props) {
           label="Кол-во слайдов (авто)"
           type="number"
           min={3}
-          max={40}
+          max={30}
           value={form.slide_count_target}
           onChange={set('slide_count_target')}
           placeholder="Авто"

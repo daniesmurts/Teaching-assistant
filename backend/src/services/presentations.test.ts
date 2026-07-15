@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { filterCitations } from './presentations'
+import { filterCitations, presentationMaxTokens } from './presentations'
 import type { PresentationSource } from '../../../shared/types'
 
 const SOURCES: PresentationSource[] = [
@@ -61,5 +61,23 @@ describe('filterCitations', () => {
     const { used } = filterCitations(content, SOURCES)
     // idx 1 should appear once, idx 2 once
     expect(used.map((s) => s.idx).sort()).toEqual([1, 2])
+  })
+})
+
+describe('presentationMaxTokens', () => {
+  it('stays under the 4096 provider default for small decks (no behaviour change there)', () => {
+    expect(presentationMaxTokens(5)).toBeLessThan(4096)
+  })
+
+  it('scales up for larger decks', () => {
+    expect(presentationMaxTokens(20)).toBeGreaterThan(presentationMaxTokens(10))
+  })
+
+  it('fits the max slide_count_target of 30 comfortably under the 8192 deepseek/qwen ceiling', () => {
+    expect(presentationMaxTokens(30)).toBeLessThanOrEqual(8192)
+  })
+
+  it('caps at 8192 for decks bigger than the validated max (defence in depth)', () => {
+    expect(presentationMaxTokens(38)).toBe(8192)
   })
 })

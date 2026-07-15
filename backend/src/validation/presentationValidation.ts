@@ -18,9 +18,15 @@ export const generatePresentationRules = [
     .optional({ nullable: true, checkFalsy: true })
     .isInt({ min: 1, max: 200 }).withMessage('Номер лекции: от 1 до 200'),
 
+  // Capped at 30, not higher: that's the ceiling presentationMaxTokens()
+  // (services/presentations.ts) can reliably fit in one non-reasoning
+  // completion (deepseek/qwen maxOutputTokens=8192) — a 38-slide request hit
+  // this wall in production (2026-07-15), truncating mid-JSON on both the
+  // initial call and chatJSON's retry. 30 also matches estimateSlideCount()'s
+  // own ceiling for the automatic (no override) path.
   body('slide_count_target')
     .optional({ nullable: true, checkFalsy: true })
-    .isInt({ min: 3, max: 40 }).withMessage('Количество слайдов: от 3 до 40'),
+    .isInt({ min: 3, max: 30 }).withMessage('Количество слайдов: от 3 до 30'),
 
   body('learning_goals')
     .optional()
