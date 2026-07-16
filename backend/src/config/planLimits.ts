@@ -27,6 +27,7 @@ export const PLAN_LIMITS = {
     calcVerification:      false,
     citationCheck:         false,
     challengeFeedback:     false,
+    fosGenerator:          false,
     monthlySpendCapUsd:    3,
   },
   pro: {
@@ -54,6 +55,7 @@ export const PLAN_LIMITS = {
     calcVerification:      true,
     citationCheck:         true,
     challengeFeedback:     true,
+    fosGenerator:          true,
     monthlySpendCapUsd:    30,
   },
   institution: {
@@ -81,6 +83,7 @@ export const PLAN_LIMITS = {
     calcVerification:      true,
     citationCheck:         true,
     challengeFeedback:     true,
+    fosGenerator:          true,
     monthlySpendCapUsd:    150,
   },
 } as const

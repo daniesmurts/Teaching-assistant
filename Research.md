@@ -1116,3 +1116,112 @@ the course's accreditation documents."*
   topics and presentations generators.
 - §8.2 (РПД-derived competency conditioning) is a later phase gated on the
   РПД-студия bridge maturing.
+
+---
+
+## 9. Wow-Feature Slate (2026-07-16 brainstorm)
+
+### 9.0 Why this section exists
+
+The backlog (TODO.md) is heavy on solid utility; this section collects the
+features whose value is the *moment of recognition* — the platform doing
+something the teacher didn't ask for but immediately recognises as their
+actual job done for them. Selection criterion: wow-per-effort, riding on
+already-shipped infrastructure wherever possible. Two of these (§9.2 ФОС
+generator, §9.5 live QR quiz) are promoted to TODO.md as Features X and Y
+with full build plans; the rest wait here for a demand signal.
+
+### 9.1 Photo-stack grading — «сфотографируй и проверь»
+
+Teacher photographs a pile of handwritten exam works with their phone (the
+platform is already an installable PWA), Yandex Vision OCR (already wired
+via `documentExtractor.ts`) extracts each work's text, grading runs per
+work through the existing async pg-boss job machinery, results land in the
+Журнал.
+
+- **Rides on:** OCR pipeline, async grading jobs, bulk grading (TODO
+  Feature A) once that ships — this is effectively Feature A's mobile
+  capture front-end plus a per-work segmentation heuristic (detect the
+  ФИО/группа header of each работа).
+- **Why wow:** paper exams are still the dominant reality in Russian
+  universities and nobody serves that. Pointing a phone at a stack of
+  bluebooks and getting a graded journal is the most visceral demo the
+  product could produce.
+- **New work:** mobile capture UI (multi-shot flow, one work = 1–N photos),
+  name-detection heuristic, batch review screen. No new AI capability.
+- **Sequencing:** after Feature A (bulk grading) — shares the queue,
+  progress UI, and journal-landing semantics.
+
+### 9.2 ФОС generator → **promoted to TODO.md Feature X**
+
+One button on a discipline: «Собрать ФОС» → паспорт ФОС, тестовые задания,
+практические задания/кейсы, экзаменационные билеты, критерии оценивания —
+each mapped to the ОПК/ПК/УК индикаторы the РПД declares, exported as
+editable DOCX. Attacks the most-hated bureaucratic artifact in the
+profession; assembly of existing generators (quizzes, tasks, РПД-студия
+competency model), not new AI capability. Full plan in TODO.md Feature X.
+
+- **Patent/grant framing:** "automatic composition of an assessment-fund
+  document from accreditation-declared competency indicators, with
+  closed-loop coverage verification" — extends the §8.2 профстандарт moat
+  (state-maintained competency registry as generation spec).
+
+### 9.3 «Разбор ошибок» — the self-closing loop
+
+Cohort synthesis (`cohortSynthesis.ts`) already finds recurring gaps across
+a graded group; the presentation/handout generators already exist. Connect
+them: after a graded batch, the platform offers «У группы три системных
+пробела — подготовить разбор?» and generates a targeted mini-lecture +
+practice tasks aimed at exactly those gaps.
+
+- **Why wow:** the moment the product stops being a grading tool and
+  becomes a teaching colleague — it noticed something and *prepared for
+  your next class*.
+- **New work:** almost pure orchestration — a bridge from cohort-synthesis
+  output (gap list with frequencies) into the presentation and tasks
+  generators' input shapes, plus the offer UI on the published-assignment
+  detail page and the Журнал.
+- **Patent framing:** "closed-loop remediation content generation from
+  aggregate assessment feedback" — a lightweight, buildable-now precursor
+  of §3.2's knowledge-graph remediation routing.
+
+### 9.4 Semester attestation report — «Отчёт о методической работе»
+
+Russian teachers must periodically document методическая работа for
+аттестация. The platform already holds the evidence: materials created,
+rubrics authored/shared, grading volume, cohort outcomes, РПД work. One
+click → formatted branded report of the semester's methodological activity
+(reuse the `programReportPdf.ts` pdfkit path).
+
+- **Why wow:** turns platform usage into a career artifact — and makes
+  teachers *want* to do more work inside the platform so the report gets
+  fatter. Standalone version of the аттестация incentive already noted in
+  TODO Feature U (marketplace) — needs no network effect.
+- **New work:** aggregation queries over existing tables + one report
+  layout. Effort S–M; almost no product risk.
+
+### 9.5 Live lecture mode — QR quiz → **promoted to TODO.md Feature Y**
+
+The concrete v1 slice of §3.1's live-lecture engagement layer: teacher
+presents generated slides, a quiz slide shows a QR code, students join
+from phones via a tokenised no-account link (same rail philosophy as
+`/write/:token`), answer, and a live histogram appears on the projector.
+Deliberately cuts §3.1's WebRTC / ASR / confusion-heatmap scope — those
+remain the research-track follow-on. Full plan in TODO.md Feature Y.
+
+- **Why wow:** the only feature on the platform whose wow is *social and
+  visible* — the whole auditorium sees it, and teachers show it to
+  colleagues in the hallway.
+
+### 9.6 РПД year-over-year diff — «что изменилось с прошлого года»
+
+Accreditation prep asks exactly this question. A discipline's РПД library
+already versions uploads implicitly (re-upload replaces); keep the old
+extraction and diff: changed topics, changed competency mappings, changed
+assessment forms — as a structured report, not a text diff.
+
+- **Why:** high utility for УМУ, pairs naturally with the УМЦ dashboard
+  (TODO Feature V). More "relief" than "wow" — sequence with V.
+- **New work:** stop discarding the previous extraction on re-upload
+  (retention column or history table), one comparison prompt, one report
+  view.

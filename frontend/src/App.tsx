@@ -26,6 +26,7 @@ import Presentations from './pages/Presentations'
 import Topics from './pages/Topics'
 import Curriculum from './pages/Curriculum'
 import Quizzes from './pages/Quizzes'
+import FosStudio from './pages/FosStudio'
 import PublishedAssignments from './pages/PublishedAssignments'
 import PublishedAssignmentDetail from './pages/PublishedAssignmentDetail'
 import SubmissionReview from './pages/SubmissionReview'
@@ -278,6 +279,7 @@ export default function App() {
             <Route path="/topics"        element={<Topics />} />
             <Route path="/curriculum"    element={<Curriculum />} />
             <Route path="/quizzes"       element={<Quizzes />} />
+            <Route path="/fos"          element={<FosStudio />} />
             <Route path="/materials/:kind" element={<MaterialGenerator />} />
             <Route path="/billing"       element={<Billing />} />
             <Route path="/leadership"              element={<LeadershipRoute><Leadership /></LeadershipRoute>} />

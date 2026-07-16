@@ -981,6 +981,72 @@ export interface TaskSet {
   created_at: string
 }
 
+// ─── ФОС generator (TODO.md Feature X) ─────────────────────────────────────────
+// Assembles a discipline's фонд оценочных средств from existing generators
+// (quizzes, tasks) plus one new generator (экзаменационные билеты) and a
+// deterministic coverage self-check. v1 is teacher-scoped: topics/competencies
+// come from courses.syllabus_text (ad hoc extraction), not the programme/
+// org-tree competency model — see Research.md §9.2 and TODO.md Feature X for
+// the v2 programme-integrated follow-up.
+
+export type FosStatus = 'pending' | 'processing' | 'ready' | 'failed'
+
+export interface FosTicket {
+  number:            number
+  theory_questions:  string[]   // exactly 2
+  practical_task:    string
+  topics:            string[]   // topic tags this ticket draws on — feeds the coverage check
+}
+
+export interface FosPassportRow {
+  competency:  string | null   // free-text in v1 — no controlled vocabulary without a programme link
+  topic:       string
+  instruments: string[]        // e.g. "Тест", "Практическое задание", "Билет №3"
+}
+
+export interface FosCriterionScale {
+  grade:       GradeLetter
+  description: string
+}
+
+export interface FosCriterion {
+  title: string
+  scale: FosCriterionScale[]
+}
+
+export interface FosSections {
+  passport: {
+    competencies: string[]
+    topics:       string[]
+    rows:         FosPassportRow[]
+  }
+  quiz_ids:     string[]   // existing `quizzes` rows generated for this ФОС (reused as-is)
+  task_set_ids: string[]   // existing `task_sets` rows generated for this ФОС
+  tickets:      FosTicket[]
+  criteria:     FosCriterion[]
+}
+
+export interface FosCoverageReport {
+  topics_covered:          string[]
+  topics_uncovered:        string[]   // topics with zero instruments across quiz/tasks/tickets
+  competencies_uncovered:  string[]
+  balance_warning:         string | null   // e.g. "тема «X» встречается в 6 из 8 билетов"
+}
+
+export interface FosDocument {
+  id:             string
+  course_id:      string
+  teacher_id:     string
+  status:         FosStatus
+  progress_done:  number
+  progress_total: number
+  sections:       FosSections | null
+  coverage:       FosCoverageReport | null
+  error_message:  string | null
+  created_at:     string
+  updated_at:     string
+}
+
 // ─── РПД-студия — AI-assisted syllabus authoring (КНИТУ T5) ─────────────────────
 // AI drafts/updates syllabus content aimed at target ОПК/ПК/УК + goals. Pairs with
 // the SyllabusReview check (above) into a write → check → fix loop. AI drafts, the

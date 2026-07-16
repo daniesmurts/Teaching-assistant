@@ -7,6 +7,7 @@ import { startActivationDigestScheduler } from './services/activationDigest'
 import { startJobQueue, stopJobQueue } from './services/jobQueue'
 import { registerLongReviewWorker } from './services/longReviewWorker'
 import { registerGradeJobWorker } from './services/gradeJobWorker'
+import { registerFosWorker } from './services/fosWorker'
 
 const PORT = config.port
 
@@ -16,6 +17,7 @@ async function main(): Promise<void> {
   const boss = await startJobQueue()
   await registerLongReviewWorker(boss)
   await registerGradeJobWorker(boss)
+  await registerFosWorker(boss)
 
   app.listen(PORT, () => {
     logger.info({ message: `Backend running on port ${PORT}`, env: process.env.NODE_ENV })

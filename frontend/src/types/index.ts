@@ -120,6 +120,14 @@ export type {
   DisciplineCoverageResult,
   ProgramDocumentReview,
   ApiError,
+  FosStatus,
+  FosTicket,
+  FosPassportRow,
+  FosCriterionScale,
+  FosCriterion,
+  FosSections,
+  FosCoverageReport,
+  FosDocument,
 } from '../../../shared/types'
 
 export {

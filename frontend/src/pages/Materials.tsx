@@ -52,6 +52,12 @@ const CARDS: MaterialCard[] = [
     desc: 'Проектные задания: цель, ожидаемый результат и этапы работы.',
     to: '/materials/project',
   },
+  {
+    icon: 'file-check',
+    title: 'ФОС',
+    desc: 'Фонд оценочных средств: тесты, задания, билеты и критерии — по темам курса.',
+    to: '/fos',
+  },
 ]
 
 export default function Materials() {
