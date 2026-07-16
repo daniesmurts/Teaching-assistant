@@ -2,14 +2,16 @@ import { Router } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { asyncHandler } from '../lib/asyncHandler'
-import { NotFoundError, ValidationError } from '../errors/AppError'
+import { NotFoundError, ValidationError, ForbiddenError } from '../errors/AppError'
 import { checkResourceLimit } from '../middleware/checkPlan'
 import { createRubricRules, updateRubricRules } from '../validation/rubricsValidation'
 import {
   findRubricsByTeacher, findRubricByIdForTeacher, createRubric, updateRubric, deleteRubric,
-  findGlobalRubricTemplates, findRubricsByInstitution,
+  findGlobalRubricTemplates, findRubricsSharedWithTeacher, shareRubric, unshareRubric,
 } from '../db/queries/rubrics'
 import { findCriteriaByIds } from '../db/queries/criteria'
+import { canShareToUnit } from '../services/orgScope'
+import { listShareTargetsForTeacher } from '../db/queries/orgUnits'
 import type { Rubric, RubricItem, CriterionSubject } from '../../../shared/types'
 
 const router = Router()
@@ -42,14 +44,11 @@ async function assertItemsValid(
   }
 }
 
-// GET /api/rubrics — personal + institution-shared (members) + global templates
+// GET /api/rubrics — personal + shared via the org tree + global templates
 router.get('/', asyncHandler(async (req, res) => {
   const courseId = req.query.course_id as string | undefined
   const own = await findRubricsByTeacher(req.teacher.id, courseId)
-
-  const shared = req.teacher.institution_id
-    ? await findRubricsByInstitution(req.teacher.institution_id)
-    : []
+  const shared = await findRubricsSharedWithTeacher(req.teacher.id)
 
   const byId = new Map<string, Rubric>()
   for (const r of [...own, ...shared]) byId.set(r.id, r)
@@ -59,6 +58,13 @@ router.get('/', asyncHandler(async (req, res) => {
 // GET /api/rubrics/templates — global, read-only — MUST be before '/:id'
 router.get('/templates', asyncHandler(async (_req, res) => {
   res.json(await findGlobalRubricTemplates())
+}))
+
+// GET /api/rubrics/share-targets — org units the teacher may share into
+// (their own department → faculty → institution), root-first. MUST be
+// before '/:id'.
+router.get('/share-targets', asyncHandler(async (req, res) => {
+  res.json(await listShareTargetsForTeacher(req.teacher.id))
 }))
 
 router.post(
@@ -107,6 +113,26 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   const ok = await deleteRubric(req.params.id, req.teacher.id)
   if (!ok) throw new NotFoundError('Рубрика')
   res.status(204).send()
+}))
+
+// POST /api/rubrics/:id/share — owner shares their rubric with an org unit
+// (their own department/faculty/institution, or a unit they head/administer).
+router.post('/:id/share', asyncHandler(async (req, res) => {
+  const unitId = req.body?.unit_id as string | undefined
+  if (!unitId) throw new ValidationError('Не указано подразделение')
+
+  const allowed = await canShareToUnit(req.teacher.id, unitId)
+  if (!allowed) throw new ForbiddenError('Нельзя поделиться с этим подразделением')
+
+  const rubric = await shareRubric(req.params.id, req.teacher.id, unitId)
+  if (!rubric) throw new NotFoundError('Рубрика')
+  res.json(rubric)
+}))
+
+router.post('/:id/unshare', asyncHandler(async (req, res) => {
+  const rubric = await unshareRubric(req.params.id, req.teacher.id)
+  if (!rubric) throw new NotFoundError('Рубрика')
+  res.json(rubric)
 }))
 
 export default router

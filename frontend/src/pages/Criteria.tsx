@@ -9,16 +9,24 @@ import { Input } from '../components/ui/Input'
 import TemplatePicker from '../components/ui/TemplatePicker'
 import { getCourses } from '../api/courses'
 import {
-  getCriteria, getCriteriaTemplates, createCriterion, updateCriterion, deleteCriterion,
+  getCriteria, getCriteriaTemplates, getCriteriaShareTargets, createCriterion, updateCriterion, deleteCriterion,
+  shareCriterion, unshareCriterion,
   improveCriterionDescription,
   type CriterionPayload,
 } from '../api/criteria'
 import { useUIStore } from '../store/uiStore'
+import { useAuthStore } from '../store/authStore'
 import type { Criterion, CriterionSubject } from '../types'
 
 const SUBJECT_LABEL: Record<string, string> = {
   business: 'Бизнес', economics: 'Экономика', law: 'Право', medicine: 'Медицина',
   engineering: 'Инженерия', humanities: 'Гуманитарные', general: 'Общий',
+}
+
+const UNIT_TYPE_LABEL: Record<string, string> = {
+  institution: 'весь университет', department: 'кафедра', division: 'факультет',
+  cluster: 'полигруппа', program: 'программа', program_direction: 'направление',
+  admin_office: 'подразделение', governance: 'руководство',
 }
 
 const SUBJECTS: CriterionSubject[] = [
@@ -38,6 +46,7 @@ export default function Criteria() {
   const qc = useQueryClient()
   const addToast = useUIStore((s) => s.addToast)
   const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
+  const teacherId = useAuthStore((s) => s.teacher?.id)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<FormState>(emptyForm)
   const [suggestion, setSuggestion] = useState<string | null>(null)
@@ -45,6 +54,7 @@ export default function Criteria() {
   const { data: criteria = [] }  = useQuery({ queryKey: ['criteria-all'], queryFn: () => getCriteria() })
   const { data: courses = [] }   = useQuery({ queryKey: ['courses'], queryFn: getCourses })
   const { data: templates = [] } = useQuery({ queryKey: ['criteria-templates'], queryFn: getCriteriaTemplates })
+  const { data: shareTargets = [] } = useQuery({ queryKey: ['criteria-share-targets'], queryFn: getCriteriaShareTargets })
 
   const courseName = (id: string | null) => courses.find((c) => c.id === id)?.name
 
@@ -74,6 +84,24 @@ export default function Criteria() {
       qc.invalidateQueries({ queryKey: ['criteria'] })
     },
     onError:   () => addToast('Не удалось удалить критерий', 'error'),
+  })
+
+  const shareMut = useMutation({
+    mutationFn: (vars: { id: string; unitId: string }) => shareCriterion(vars.id, vars.unitId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['criteria-all'] })
+      addToast('Критерий открыт для доступа', 'success')
+    },
+    onError: () => addToast('Не удалось поделиться критерием', 'error'),
+  })
+
+  const unshareMut = useMutation({
+    mutationFn: unshareCriterion,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['criteria-all'] })
+      addToast('Доступ к критерию закрыт', 'success')
+    },
+    onError: () => addToast('Не удалось закрыть доступ', 'error'),
   })
 
   const improveMut = useMutation({
@@ -242,26 +270,57 @@ export default function Criteria() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {criteria.map((c) => (
+                  {criteria.map((c) => {
+                    const isOwn = c.teacher_id === teacherId
+                    const sharedTarget = c.shared_unit_id ? shareTargets.find((t) => t.id === c.shared_unit_id) : undefined
+                    return (
                     <div key={c.id} className="bg-surface border border-border rounded-lg p-4 flex flex-col">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-sans text-sm font-medium text-ink">{c.name}</span>
                           {c.subject && <span className="text-[10px] bg-amber-light text-amber px-1.5 py-0.5 rounded-sm">{SUBJECT_LABEL[c.subject] ?? c.subject}</span>}
                           {c.course_id && <span className="text-[10px] bg-surface-warm text-ink-secondary border border-border px-1.5 py-0.5 rounded-sm">{courseName(c.course_id) ?? 'предмет'}</span>}
-                          {c.is_institution_shared && <span className="text-[10px] bg-info-bg text-info px-1.5 py-0.5 rounded-sm">кафедра</span>}
+                          {c.shared_unit_id && (
+                            <span className="text-[10px] bg-info-bg text-info px-1.5 py-0.5 rounded-sm">
+                              {isOwn
+                                ? (sharedTarget ? `открыто: ${UNIT_TYPE_LABEL[sharedTarget.type_code] ?? sharedTarget.name}` : 'открыто')
+                                : 'доступно вам'}
+                            </span>
+                          )}
                         </div>
                         {c.description && (
                           <div className="text-xs font-sans text-ink-tertiary mt-1 leading-relaxed line-clamp-3">{c.description}</div>
                         )}
                       </div>
-                      <div className="flex gap-2 flex-shrink-0 mt-3 pt-2 border-t border-border/60">
-                        <button onClick={() => openEdit(c)} className="text-xs text-ink-secondary hover:text-amber">Изменить</button>
-                        <button onClick={() => { if (confirm(`Удалить критерий «${c.name}»?`)) deleteMut.mutate(c.id) }}
-                          className="text-xs text-ink-tertiary hover:text-danger">Удалить</button>
+                      <div className="flex items-center gap-2 flex-wrap flex-shrink-0 mt-3 pt-2 border-t border-border/60">
+                        {isOwn && (
+                          <button onClick={() => openEdit(c)} className="text-xs text-ink-secondary hover:text-amber">Изменить</button>
+                        )}
+                        {isOwn && (
+                          <button onClick={() => { if (confirm(`Удалить критерий «${c.name}»?`)) deleteMut.mutate(c.id) }}
+                            className="text-xs text-ink-tertiary hover:text-danger">Удалить</button>
+                        )}
+                        {isOwn && shareTargets.length > 0 && (
+                          <select
+                            className="text-xs text-ink-secondary bg-transparent border border-border rounded-md px-1.5 py-0.5"
+                            value={c.shared_unit_id ?? ''}
+                            onChange={(e) => {
+                              const unitId = e.target.value
+                              if (unitId) shareMut.mutate({ id: c.id, unitId })
+                              else unshareMut.mutate(c.id)
+                            }}
+                          >
+                            <option value="">Не делиться</option>
+                            {shareTargets.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                Поделиться: {UNIT_TYPE_LABEL[t.type_code] ?? t.name} «{t.name}»
+                              </option>
+                            ))}
+                          </select>
+                        )}
                       </div>
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
             </>

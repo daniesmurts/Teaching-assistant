@@ -9,12 +9,20 @@ import TemplatePicker from '../components/ui/TemplatePicker'
 import { getCourses } from '../api/courses'
 import { getCriteria, getCriteriaTemplates } from '../api/criteria'
 import {
-  getRubrics, getRubricTemplates, createRubric, updateRubric, deleteRubric,
+  getRubrics, getRubricTemplates, getRubricShareTargets, createRubric, updateRubric, deleteRubric,
+  shareRubric, unshareRubric,
   type RubricPayload,
 } from '../api/rubrics'
 import { evenWeights } from '../components/grading/GradingForm'
 import { useUIStore } from '../store/uiStore'
+import { useAuthStore } from '../store/authStore'
 import type { Rubric, RubricItem, Criterion, CriterionSubject } from '../types'
+
+const UNIT_TYPE_LABEL: Record<string, string> = {
+  institution: 'весь университет', department: 'кафедра', division: 'факультет',
+  cluster: 'полигруппа', program: 'программа', program_direction: 'направление',
+  admin_office: 'подразделение', governance: 'руководство',
+}
 
 const SUBJECT_LABEL: Record<string, string> = {
   business: 'Бизнес', economics: 'Экономика', law: 'Право', medicine: 'Медицина',
@@ -40,11 +48,13 @@ const emptyForm: FormState = { name: '', description: '', course_id: '', subject
 export default function Rubrics() {
   const qc = useQueryClient()
   const addToast = useUIStore((s) => s.addToast)
+  const teacherId = useAuthStore((s) => s.teacher?.id)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<FormState>(emptyForm)
 
   const { data: rubrics = [] }            = useQuery({ queryKey: ['rubrics-all'],         queryFn: () => getRubrics() })
   const { data: templates = [] }          = useQuery({ queryKey: ['rubrics-templates'],   queryFn: getRubricTemplates })
+  const { data: shareTargets = [] }       = useQuery({ queryKey: ['rubrics-share-targets'], queryFn: getRubricShareTargets })
   const { data: courses = [] }            = useQuery({ queryKey: ['courses'],             queryFn: getCourses })
   const { data: personalCriteria = [] }   = useQuery({ queryKey: ['criteria-all'],        queryFn: () => getCriteria() })
   const { data: templateCriteria = [] }   = useQuery({ queryKey: ['criteria-templates'],  queryFn: getCriteriaTemplates })
@@ -92,6 +102,24 @@ export default function Rubrics() {
       qc.invalidateQueries({ queryKey: ['rubrics'] })
     },
     onError: () => addToast('Не удалось удалить рубрику', 'error'),
+  })
+
+  const shareMut = useMutation({
+    mutationFn: (vars: { id: string; unitId: string }) => shareRubric(vars.id, vars.unitId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['rubrics-all'] })
+      addToast('Рубрика открыта для доступа', 'success')
+    },
+    onError: () => addToast('Не удалось поделиться рубрикой', 'error'),
+  })
+
+  const unshareMut = useMutation({
+    mutationFn: unshareRubric,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['rubrics-all'] })
+      addToast('Доступ к рубрике закрыт', 'success')
+    },
+    onError: () => addToast('Не удалось закрыть доступ', 'error'),
   })
 
   function close() { setShowForm(false); setForm(emptyForm) }
@@ -290,14 +318,23 @@ export default function Rubrics() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {rubrics.map((r) => (
+                  {rubrics.map((r) => {
+                    const isOwn = r.teacher_id === teacherId
+                    const sharedTarget = r.shared_unit_id ? shareTargets.find((t) => t.id === r.shared_unit_id) : undefined
+                    return (
                     <div key={r.id} className="bg-surface border border-border rounded-lg p-4 flex flex-col">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-sans text-sm font-medium text-ink">{r.name}</span>
                           {r.subject && <span className="text-[10px] bg-amber-light text-amber px-1.5 py-0.5 rounded-sm">{SUBJECT_LABEL[r.subject] ?? r.subject}</span>}
                           {r.course_id && <span className="text-[10px] bg-surface-warm text-ink-secondary border border-border px-1.5 py-0.5 rounded-sm">{courseName(r.course_id) ?? 'предмет'}</span>}
-                          {r.is_institution_shared && <span className="text-[10px] bg-info-bg text-info px-1.5 py-0.5 rounded-sm">кафедра</span>}
+                          {r.shared_unit_id && (
+                            <span className="text-[10px] bg-info-bg text-info px-1.5 py-0.5 rounded-sm">
+                              {isOwn
+                                ? (sharedTarget ? `открыто: ${UNIT_TYPE_LABEL[sharedTarget.type_code] ?? sharedTarget.name}` : 'открыто')
+                                : 'доступно вам'}
+                            </span>
+                          )}
                           <span className="text-[10px] text-ink-tertiary">{r.items.length} {pluralCriteria(r.items.length)}</span>
                         </div>
                         {r.description && (
@@ -313,13 +350,35 @@ export default function Rubrics() {
                             .join(' · ')}
                         </div>
                       </div>
-                      <div className="flex gap-2 flex-shrink-0 mt-3 pt-2 border-t border-border/60">
-                        <button onClick={() => openEdit(r)} className="text-xs text-ink-secondary hover:text-amber">Изменить</button>
-                        <button onClick={() => { if (confirm(`Удалить рубрику «${r.name}»?`)) deleteMut.mutate(r.id) }}
-                          className="text-xs text-ink-tertiary hover:text-danger">Удалить</button>
+                      <div className="flex items-center gap-2 flex-wrap flex-shrink-0 mt-3 pt-2 border-t border-border/60">
+                        {isOwn && (
+                          <button onClick={() => openEdit(r)} className="text-xs text-ink-secondary hover:text-amber">Изменить</button>
+                        )}
+                        {isOwn && (
+                          <button onClick={() => { if (confirm(`Удалить рубрику «${r.name}»?`)) deleteMut.mutate(r.id) }}
+                            className="text-xs text-ink-tertiary hover:text-danger">Удалить</button>
+                        )}
+                        {isOwn && shareTargets.length > 0 && (
+                          <select
+                            className="text-xs text-ink-secondary bg-transparent border border-border rounded-md px-1.5 py-0.5"
+                            value={r.shared_unit_id ?? ''}
+                            onChange={(e) => {
+                              const unitId = e.target.value
+                              if (unitId) shareMut.mutate({ id: r.id, unitId })
+                              else unshareMut.mutate(r.id)
+                            }}
+                          >
+                            <option value="">Не делиться</option>
+                            {shareTargets.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                Поделиться: {UNIT_TYPE_LABEL[t.type_code] ?? t.name} «{t.name}»
+                              </option>
+                            ))}
+                          </select>
+                        )}
                       </div>
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
             </>

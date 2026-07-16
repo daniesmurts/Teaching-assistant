@@ -202,6 +202,66 @@ export async function teacherCanActOnUnit(
   return rows[0]?.ok ?? false
 }
 
+/**
+ * The teacher's own ancestor-or-self chain — their department, its parent
+ * faculty/cluster, … up to the institution root — root-first. This is the
+ * set of units a teacher may share a rubric/criterion with without needing
+ * any special role (sharing "up" their own chain).
+ */
+export async function listShareTargetsForTeacher(teacherId: string): Promise<OrgUnitRow[]> {
+  const { rows } = await pool.query<OrgUnitRow>(
+    `SELECT a.*
+       FROM teachers t
+       JOIN org_units mine ON mine.id = t.primary_org_unit_id
+       JOIN org_units a ON a.institution_id = mine.institution_id
+                       AND mine.path LIKE a.path || '%'
+      WHERE t.id = $1
+      ORDER BY a.path`,
+    [teacherId]
+  )
+  return rows
+}
+
+/**
+ * May `teacherId` share a rubric/criterion with `targetUnitId`? True when
+ * either:
+ *   - targetUnitId is an ancestor-or-self of the teacher's own primary unit
+ *     (their department, their faculty, or the whole institution) — any
+ *     teacher may share "up" their own chain without needing a role, or
+ *   - the teacher holds head/admin on targetUnitId or an ancestor of it
+ *     (a unit head sharing into a unit they administer, even if it isn't
+ *     on their own personal chain).
+ */
+export async function canTeacherShareToUnit(
+  teacherId: string,
+  targetUnitId: string
+): Promise<boolean> {
+  const { rows } = await pool.query<{ ok: boolean }>(
+    `SELECT (
+       EXISTS (
+         SELECT 1
+           FROM teachers me
+           JOIN org_units target ON target.id = $2
+           LEFT JOIN org_units mine ON mine.id = me.primary_org_unit_id
+          WHERE me.id = $1
+            AND mine.path IS NOT NULL
+            AND mine.path LIKE target.path || '%'
+       )
+       OR EXISTS (
+         SELECT 1
+           FROM org_unit_roles our
+           JOIN org_units holder ON holder.id = our.org_unit_id
+           JOIN org_units target ON target.id = $2
+          WHERE our.teacher_id = $1
+            AND our.role = ANY(ARRAY['head', 'admin'])
+            AND target.path LIKE holder.path || '%'
+       )
+     ) AS ok`,
+    [teacherId, targetUnitId]
+  )
+  return rows[0]?.ok ?? false
+}
+
 // ─── Writes ───────────────────────────────────────────────────────────────────
 
 /** Create a unit, computing its materialised path from the parent atomically.

@@ -153,6 +153,35 @@ cross-teacher union) and not threaded through the eval harness's offline replay,
 matching the calc-verification precedent of documenting a scope cut rather than
 silently expanding it. See CHANGELOG for the full design.
 
+### 10. Don't retry token-truncated LLM responses · Effort: S
+
+`chatJSON`'s parse-and-retry loop (`services/llm/deepseek.ts`, mirrored in
+`qwen.ts`/`yandex.ts`) can't tell "model emitted malformed JSON — retry may
+help" from "output hit the token ceiling — retrying the identical request is
+guaranteed to fail". The presentations incident (2026-07-15, see CHANGELOG)
+burned a full doomed second call (~60s + double token cost) on every
+truncation before failing. The root cause there is fixed at the source
+(`presentationMaxTokens()` + the slide_count_target 40→30 cap), so today this
+is a latency/cost optimization for a now-rare path, not a correctness bug.
+
+- **Why** — a truncated response currently costs one wasted LLM call and
+  ~30–60s of extra user-facing latency before the error surfaces; it also
+  muddies incident forensics (two identical pinned-at-ceiling usage_log rows
+  instead of one clearly-labeled truncation error).
+- **Cheap v1 (recommended)** — in the DeepSeek provider only: check
+  `choices[0].finish_reason === 'length'` and throw a distinct
+  `TruncatedResponseError` immediately instead of returning content that
+  `chatJSON` will parse-fail and retry. ~10 lines, one file, no interface
+  change. Do it opportunistically next time someone's in that file.
+- **Full version (only if truncations recur)** — thread `finish_reason`
+  through the `LLMProvider` interface so the registry and all three providers
+  expose it uniformly. High blast radius: touches every AI feature routing
+  through `llm/registry.ts` (grading, ВКР, quizzes, program analysis, …) —
+  not worth it while the CLIENT_ABORT/INTERNAL_ERROR monitors would flag any
+  new route developing the same pattern within hours.
+- **Touches** — `services/llm/deepseek.ts` (v1); `services/llm/types.ts` +
+  `registry.ts` + `qwen.ts`/`yandex.ts` (full version).
+
 ---
 
 ## Features
@@ -637,10 +666,19 @@ synchronous request, heuristic classification), and 11 unit tests in
 
 ### U. Criteria/rubric marketplace — cross-institution publishing · Effort: L
 
-Extend the existing `is_institution_shared` boolean (criteria + rubrics
+*Superseded premise, 2026-07-15: intra-institution sharing is no longer a
+bare `is_institution_shared` boolean — `shared_unit_id` (migration 079) now
+lets a teacher share to their own department/faculty/institution via the org
+tree, with `is_institution_shared` kept only as a synced legacy mirror. This
+item's `visibility` enum should sit ALONGSIDE `shared_unit_id` (adds the
+`public` rung above it), not replace it — update the touches list below
+accordingly when picked up.*
+
+Extend the existing sharing model (criteria + rubrics
 already have it — [migration 020](backend/migrations/020_criteria_model.sql),
-[migration 029](backend/migrations/029_rubrics.sql)) into a three-level
-`visibility` enum: `private | institution | public`. A teacher can publish a
+[migration 029](backend/migrations/029_rubrics.sql),
+[migration 079](backend/migrations/079_rubric_org_unit_sharing.sql)) into a
+three-level `visibility` enum: `private | institution | public`. A teacher can publish a
 **rubric** (the primary unit — a bare criterion is too thin to be useful;
 rubrics are the coherent, weighted thing teachers actually struggle to
 build) to a cross-institution marketplace; other teachers browse/search and
@@ -687,8 +725,8 @@ add a copy to their own library.
      publishing stays a per-teacher choice, but an institution admin gets a
      master toggle to disable it for their teachers, or enterprise sales
      will hit this as an objection.
-- **Touches:** new `visibility` column replacing/extending
-  `is_institution_shared` on `criteria` + `rubrics`; new
+- **Touches:** new `visibility` column (`private | institution | public`)
+  alongside `shared_unit_id` on `criteria` + `rubrics`; new
   `criterion_publications` / `rubric_publications` moderation-queue table;
   browse/search page reusing
   [TemplatePicker.tsx](frontend/src/components/ui/TemplatePicker.tsx) (already

@@ -137,6 +137,7 @@ export interface Criterion {
   subject:               CriterionSubject | null
   is_global_template:    boolean
   is_institution_shared: boolean
+  shared_unit_id:        string | null   // org unit (department/faculty/institution root) this is shared with
   created_at:            string
 }
 
@@ -172,6 +173,7 @@ export interface Rubric {
   items:                 RubricItem[]
   is_global_template:    boolean
   is_institution_shared: boolean
+  shared_unit_id:        string | null   // org unit (department/faculty/institution root) this is shared with
   created_at:            string
 }
 

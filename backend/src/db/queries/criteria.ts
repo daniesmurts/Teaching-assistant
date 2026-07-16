@@ -10,6 +10,7 @@ interface CriterionRow {
   subject: string | null
   is_global_template: boolean
   is_institution_shared: boolean
+  shared_unit_id: string | null
   created_at: Date
 }
 
@@ -23,6 +24,7 @@ function toCriterion(row: CriterionRow): Criterion {
     subject:               (row.subject ?? null) as CriterionSubject | null,
     is_global_template:    row.is_global_template,
     is_institution_shared: row.is_institution_shared,
+    shared_unit_id:        row.shared_unit_id,
     created_at:            row.created_at.toISOString(),
   }
 }
@@ -63,7 +65,8 @@ export async function findGlobalTemplates(): Promise<Criterion[]> {
   return rows.map(toCriterion)
 }
 
-/** Criteria shared across one institution (visible to all member teachers). */
+/** Institution-admin oversight view: every criterion shared anywhere in the
+ *  institution's org tree, regardless of which unit it's scoped to. */
 export async function findCriteriaByInstitution(
   institutionId: string
 ): Promise<Array<Criterion & { author_name: string | null }>> {
@@ -72,7 +75,7 @@ export async function findCriteriaByInstitution(
        FROM criteria c
        JOIN teachers t ON t.id = c.teacher_id
       WHERE t.institution_id = $1
-        AND c.is_institution_shared = TRUE
+        AND c.shared_unit_id IS NOT NULL
         AND c.is_global_template = FALSE
       ORDER BY c.created_at DESC`,
     [institutionId]
@@ -80,49 +83,80 @@ export async function findCriteriaByInstitution(
   return rows.map((r) => ({ ...toCriterion(r), author_name: r.author_name }))
 }
 
+/**
+ * Criteria shared with `teacherId` via the org tree: any criterion whose
+ * shared_unit_id is an ancestor-or-self of the teacher's own primary org
+ * unit. Mirrors findRubricsSharedWithTeacher.
+ */
+export async function findCriteriaSharedWithTeacher(
+  teacherId: string
+): Promise<Array<Criterion & { author_name: string | null }>> {
+  const { rows } = await pool.query<CriterionRow & { author_name: string | null }>(
+    `SELECT c.*, author.name AS author_name
+       FROM criteria c
+       JOIN teachers author ON author.id = c.teacher_id
+       JOIN org_units shared ON shared.id = c.shared_unit_id
+       JOIN teachers me ON me.id = $1
+       JOIN org_units mine ON mine.id = me.primary_org_unit_id
+      WHERE c.is_global_template = FALSE
+        AND c.teacher_id <> $1
+        AND mine.path LIKE shared.path || '%'
+      ORDER BY c.created_at DESC`,
+    [teacherId]
+  )
+  return rows.map((r) => ({ ...toCriterion(r), author_name: r.author_name }))
+}
+
+/** Resolve a single criterion the teacher is allowed to read (own + global +
+ *  shared via the org tree with the teacher's own primary unit). */
 export async function findCriterionById(
   id: string,
   teacherId: string
 ): Promise<Criterion | null> {
   const { rows } = await pool.query<CriterionRow>(
-    `SELECT * FROM criteria
-      WHERE id = $1
-        AND (teacher_id = $2 OR is_global_template = TRUE
-             OR teacher_id IN (
-               SELECT id FROM teachers
-                WHERE institution_id = (SELECT institution_id FROM teachers WHERE id = $2)
-                  AND $3 IS NOT NULL
-             ))
+    `SELECT c.*
+       FROM criteria c
+       LEFT JOIN teachers me ON me.id = $2
+       LEFT JOIN org_units mine ON mine.id = me.primary_org_unit_id
+       LEFT JOIN org_units shared ON shared.id = c.shared_unit_id
+      WHERE c.id = $1
+        AND (
+          c.teacher_id = $2
+          OR c.is_global_template = TRUE
+          OR (shared.path IS NOT NULL AND mine.path IS NOT NULL
+              AND mine.path LIKE shared.path || '%')
+        )
       LIMIT 1`,
-    [id, teacherId, teacherId]   // last $3 is just a non-null marker
+    [id, teacherId]
   )
   return rows[0] ? toCriterion(rows[0]) : null
 }
 
 /**
  * Load multiple criteria by id, scoped to what the teacher is allowed to use
- * (their own + global templates + institution-shared). Used when building the
- * snapshot at grading time.
+ * (their own + global templates + shared via the org tree). Used when
+ * building the snapshot at grading time.
  */
 export async function findCriteriaByIds(
   ids: string[],
   teacherId: string,
-  institutionId: string | null
+  _institutionId: string | null
 ): Promise<Criterion[]> {
   if (ids.length === 0) return []
   const { rows } = await pool.query<CriterionRow>(
     `SELECT DISTINCT c.*
        FROM criteria c
-       LEFT JOIN teachers t ON t.id = c.teacher_id
+       LEFT JOIN teachers me ON me.id = $2
+       LEFT JOIN org_units mine ON mine.id = me.primary_org_unit_id
+       LEFT JOIN org_units shared ON shared.id = c.shared_unit_id
       WHERE c.id = ANY($1::uuid[])
         AND (
           c.teacher_id = $2
           OR c.is_global_template = TRUE
-          OR ($3::uuid IS NOT NULL
-              AND c.is_institution_shared = TRUE
-              AND t.institution_id = $3::uuid)
+          OR (shared.path IS NOT NULL AND mine.path IS NOT NULL
+              AND mine.path LIKE shared.path || '%')
         )`,
-    [ids, teacherId, institutionId]
+    [ids, teacherId]
   )
   return rows.map(toCriterion)
 }
@@ -193,6 +227,42 @@ export async function deleteCriterion(
     [id, teacherId]
   )
   return (rowCount ?? 0) > 0
+}
+
+/**
+ * Share a criterion with an org unit (department, faculty, or institution
+ * root). Owner-only. is_institution_shared is kept as a synced legacy mirror
+ * — TRUE exactly when the target unit is the institution root.
+ */
+export async function shareCriterion(
+  id: string,
+  teacherId: string,
+  unitId: string
+): Promise<Criterion | null> {
+  const { rows } = await pool.query<CriterionRow>(
+    `UPDATE criteria c
+        SET shared_unit_id = u.id,
+            is_institution_shared = (u.type_code = 'institution' AND u.parent_id IS NULL)
+       FROM org_units u
+      WHERE c.id = $1 AND c.teacher_id = $2 AND u.id = $3
+      RETURNING c.*`,
+    [id, teacherId, unitId]
+  )
+  return rows[0] ? toCriterion(rows[0]) : null
+}
+
+export async function unshareCriterion(
+  id: string,
+  teacherId: string
+): Promise<Criterion | null> {
+  const { rows } = await pool.query<CriterionRow>(
+    `UPDATE criteria
+        SET shared_unit_id = NULL, is_institution_shared = FALSE
+      WHERE id = $1 AND teacher_id = $2
+      RETURNING *`,
+    [id, teacherId]
+  )
+  return rows[0] ? toCriterion(rows[0]) : null
 }
 
 // ─── Admin / institution ──────────────────────────────────────────────────────

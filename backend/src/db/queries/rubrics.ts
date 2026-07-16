@@ -11,6 +11,7 @@ interface RubricRow {
   items:                 RubricItem[]    // pg returns JSONB as parsed JS already
   is_global_template:    boolean
   is_institution_shared: boolean
+  shared_unit_id:        string | null
   created_at:            Date
 }
 
@@ -25,6 +26,7 @@ function toRubric(row: RubricRow): Rubric {
     items:                 Array.isArray(row.items) ? row.items : [],
     is_global_template:    row.is_global_template,
     is_institution_shared: row.is_institution_shared,
+    shared_unit_id:        row.shared_unit_id,
     created_at:            row.created_at.toISOString(),
   }
 }
@@ -63,6 +65,8 @@ export async function findGlobalRubricTemplates(): Promise<Rubric[]> {
   return rows.map(toRubric)
 }
 
+/** Institution-admin oversight view: every rubric shared anywhere in the
+ *  institution's org tree, regardless of which unit it's scoped to. */
 export async function findRubricsByInstitution(
   institutionId: string
 ): Promise<Array<Rubric & { author_name: string | null }>> {
@@ -71,7 +75,7 @@ export async function findRubricsByInstitution(
        FROM rubrics r
        JOIN teachers t ON t.id = r.teacher_id
       WHERE t.institution_id = $1
-        AND r.is_institution_shared = TRUE
+        AND r.shared_unit_id IS NOT NULL
         AND r.is_global_template = FALSE
       ORDER BY r.created_at DESC`,
     [institutionId]
@@ -79,26 +83,53 @@ export async function findRubricsByInstitution(
   return rows.map((r) => ({ ...toRubric(r), author_name: r.author_name }))
 }
 
-/** Resolve a single rubric the teacher is allowed to read (own + global + institution). */
+/**
+ * Rubrics shared with `teacherId` via the org tree: any rubric whose
+ * shared_unit_id is an ancestor-or-self of the teacher's own primary org
+ * unit (their department, their faculty, or the whole institution). Mirrors
+ * the ancestor-or-self path-prefix rule used by requireUnitRole.
+ */
+export async function findRubricsSharedWithTeacher(
+  teacherId: string
+): Promise<Array<Rubric & { author_name: string | null }>> {
+  const { rows } = await pool.query<RubricRow & { author_name: string | null }>(
+    `SELECT r.*, author.name AS author_name
+       FROM rubrics r
+       JOIN teachers author ON author.id = r.teacher_id
+       JOIN org_units shared ON shared.id = r.shared_unit_id
+       JOIN teachers me ON me.id = $1
+       JOIN org_units mine ON mine.id = me.primary_org_unit_id
+      WHERE r.is_global_template = FALSE
+        AND r.teacher_id <> $1
+        AND mine.path LIKE shared.path || '%'
+      ORDER BY r.created_at DESC`,
+    [teacherId]
+  )
+  return rows.map((r) => ({ ...toRubric(r), author_name: r.author_name }))
+}
+
+/** Resolve a single rubric the teacher is allowed to read (own + global +
+ *  shared via the org tree with the teacher's own primary unit). */
 export async function findRubricByIdForTeacher(
   id: string,
   teacherId: string,
-  institutionId: string | null
+  _institutionId: string | null
 ): Promise<Rubric | null> {
   const { rows } = await pool.query<RubricRow>(
     `SELECT r.*
        FROM rubrics r
-       LEFT JOIN teachers t ON t.id = r.teacher_id
+       LEFT JOIN teachers me ON me.id = $2
+       LEFT JOIN org_units mine ON mine.id = me.primary_org_unit_id
+       LEFT JOIN org_units shared ON shared.id = r.shared_unit_id
       WHERE r.id = $1
         AND (
           r.teacher_id = $2
           OR r.is_global_template = TRUE
-          OR ($3::uuid IS NOT NULL
-              AND r.is_institution_shared = TRUE
-              AND t.institution_id = $3::uuid)
+          OR (shared.path IS NOT NULL AND mine.path IS NOT NULL
+              AND mine.path LIKE shared.path || '%')
         )
       LIMIT 1`,
-    [id, teacherId, institutionId]
+    [id, teacherId]
   )
   return rows[0] ? toRubric(rows[0]) : null
 }
@@ -174,6 +205,42 @@ export async function deleteRubric(
     [id, teacherId]
   )
   return (rowCount ?? 0) > 0
+}
+
+/**
+ * Share a rubric with an org unit (department, faculty, or institution root).
+ * Owner-only. is_institution_shared is kept as a synced legacy mirror — TRUE
+ * exactly when the target unit is the institution root.
+ */
+export async function shareRubric(
+  id: string,
+  teacherId: string,
+  unitId: string
+): Promise<Rubric | null> {
+  const { rows } = await pool.query<RubricRow>(
+    `UPDATE rubrics r
+        SET shared_unit_id = u.id,
+            is_institution_shared = (u.type_code = 'institution' AND u.parent_id IS NULL)
+       FROM org_units u
+      WHERE r.id = $1 AND r.teacher_id = $2 AND u.id = $3
+      RETURNING r.*`,
+    [id, teacherId, unitId]
+  )
+  return rows[0] ? toRubric(rows[0]) : null
+}
+
+export async function unshareRubric(
+  id: string,
+  teacherId: string
+): Promise<Rubric | null> {
+  const { rows } = await pool.query<RubricRow>(
+    `UPDATE rubrics
+        SET shared_unit_id = NULL, is_institution_shared = FALSE
+      WHERE id = $1 AND teacher_id = $2
+      RETURNING *`,
+    [id, teacherId]
+  )
+  return rows[0] ? toRubric(rows[0]) : null
 }
 
 // ─── Admin / institution ──────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import {
   teacherCanActOnUnit,
+  canTeacherShareToUnit,
   listRoleScopesForTeacher,
   type TeacherRoleScope,
 } from '../db/queries/orgUnits'
@@ -59,4 +60,10 @@ export async function canActOnUnit(
  *  several access decisions in one request (evaluate with evaluateAccess). */
 export async function loadRoleScopes(teacherId: string): Promise<TeacherRoleScope[]> {
   return listRoleScopesForTeacher(teacherId)
+}
+
+/** May `teacherId` share a rubric/criterion into `targetUnitId`? See
+ *  canTeacherShareToUnit for the exact rule (own chain, or head/admin). */
+export async function canShareToUnit(teacherId: string, targetUnitId: string): Promise<boolean> {
+  return canTeacherShareToUnit(teacherId, targetUnitId)
 }

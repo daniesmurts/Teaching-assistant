@@ -16,8 +16,8 @@ import {
   markInviteEmailStatus,
 } from '../db/queries/teacherInvites'
 import { findTeacherByEmail, findTeacherById } from '../db/queries/teachers'
-import { findCriteriaByInstitution, createCriterion, findCriteriaByIds } from '../db/queries/criteria'
-import { findRubricsByInstitution, createInstitutionRubric } from '../db/queries/rubrics'
+import { findCriteriaByInstitution, createCriterion, findCriteriaByIds, shareCriterion } from '../db/queries/criteria'
+import { findRubricsByInstitution, createInstitutionRubric, shareRubric } from '../db/queries/rubrics'
 import { getSharedRagSummary, setInstitutionSharedRag } from '../db/queries/sharedRag'
 import { invalidateInstitutionProviderCache } from '../services/llm/institutionResolver'
 import { pool } from '../db/connection'
@@ -30,7 +30,7 @@ import axios from 'axios'
 import { getLtiConfig, setLtiConfig, isLtiConfigComplete } from '../db/queries/institutions'
 import { loginInitUrl, launchCallbackUrl, jwksUrl as toolJwksUrl, createRegistrationSession, registrationInitUrl } from '../services/lti'
 import { listLtiCourseLinksForInstitution, setLtiCourseLinkOrgUnit } from '../db/queries/ltiCourseLinks'
-import { getOrgUnitById } from '../db/queries/orgUnits'
+import { getOrgUnitById, getRootUnitForInstitution } from '../db/queries/orgUnits'
 import type { CriterionSubject, RubricItem } from '../../../shared/types'
 
 const router = Router()
@@ -234,12 +234,12 @@ router.post('/criteria', validate(createCriterionRules), asyncHandler(async (req
     name: string; description?: string; course_id?: string; subject?: CriterionSubject
   }
   // Shared across the institution → visible in every member's grading picker.
-  const criterion = await createCriterion(req.teacher.id, {
-    name, description, course_id, subject, is_institution_shared: true,
-  })
+  const criterion = await createCriterion(req.teacher.id, { name, description, course_id, subject })
+  const root = await getRootUnitForInstitution(institutionId(req))
+  const shared = root ? await shareCriterion(criterion.id, req.teacher.id, root.id) : criterion
   recordAudit({ institutionId: req.teacher.institution_id, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
     action: 'criterion.shared_created', target: name })
-  res.status(201).json(criterion)
+  res.status(201).json(shared)
 }))
 
 // ─── Shared rubrics ────────────────────────────────────────────────────────────
@@ -269,9 +269,11 @@ router.post('/rubrics', validate(createRubricRules), asyncHandler(async (req, re
     throw new ValidationError('Один или несколько критериев недоступны')
   }
   const rubric = await createInstitutionRubric(req.teacher.id, { name, description, subject, items })
+  const root = await getRootUnitForInstitution(institutionId(req))
+  const shared = root ? await shareRubric(rubric.id, req.teacher.id, root.id) : rubric
   recordAudit({ institutionId: req.teacher.institution_id, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
     action: 'rubric.shared_created', target: name })
-  res.status(201).json(rubric)
+  res.status(201).json(shared)
 }))
 
 // ─── Shared RAG flywheel (kafedra-wide loop) ──────────────────────────────────
