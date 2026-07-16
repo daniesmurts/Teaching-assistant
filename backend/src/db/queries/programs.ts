@@ -400,9 +400,9 @@ export interface PickableProgramUnit {
   id:         string
   name:       string
   short_name: string | null
-  // Lets the frontend distinguish ОП («program») from Направление подготовки
-  // («program_direction») in the picker so the user knows which level they're
-  // linking at.
+  // Lets the frontend distinguish an ОП/профиль («program») from its parent
+  // Направление подготовки («program_direction») in the picker so the user
+  // knows which level they're linking at.
   type_code:  'program' | 'program_direction'
   // Programme metadata (migration 055) — prefills the import form when the
   // admin recorded the ФГОС header on the unit.
@@ -416,9 +416,10 @@ const PICKABLE_COLS =
   `id, name, short_name, type_code, code, specialty_name, education_level, forms_of_study`
 
 export async function listProgramUnitsForInstitution(institutionId: string): Promise<PickableProgramUnit[]> {
-  // Both `program` (ОП) and `program_direction` (Направление подготовки) are
-  // valid anchors for a programme — narrow ОП link directly at the ОП level,
-  // broad ОП link at their направление children.
+  // Both `program_direction` (Направление подготовки, the ФГОС level) and
+  // `program` (ОП/профиль beneath it) are valid anchors for a programme —
+  // a направление with one ОП links directly, one with several профили
+  // links at the ОП children.
   const { rows } = await pool.query<PickableProgramUnit & { type_code: string }>(
     `SELECT ${PICKABLE_COLS}
        FROM org_units

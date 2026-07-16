@@ -2,7 +2,7 @@ import { body } from 'express-validator'
 
 // Creatable types — 'institution' is excluded: roots come from the migration /
 // institution creation, never from the tree-builder.
-const CREATABLE_TYPES = ['governance', 'admin_office', 'cluster', 'division', 'program', 'program_direction', 'department']
+const CREATABLE_TYPES = ['governance', 'admin_office', 'cluster', 'division', 'ugsn', 'program_direction', 'program', 'department']
 
 // Programme-metadata fields — optional on any unit (the route only persists
 // them for program / program_direction types). Shared by create + update.

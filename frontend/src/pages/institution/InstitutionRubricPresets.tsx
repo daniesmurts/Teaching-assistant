@@ -89,7 +89,8 @@ export default function InstitutionRubricPresets() {
   const weightInputClass = 'w-14 px-1.5 py-1 text-xs font-sans text-ink bg-surface border border-border rounded-md text-center'
 
   return (
-    <div className="px-6 py-6 max-w-3xl">
+    <div className="flex-1 overflow-y-auto">
+    <div className="max-w-3xl mx-auto px-6 py-6">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display text-2xl font-bold text-ink">Рубрики кафедры</h1>
@@ -157,11 +158,13 @@ export default function InstitutionRubricPresets() {
           </div>
         </div>
       ) : rubrics.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="font-sans text-sm text-ink-secondary mb-1">Общих рубрик пока нет.</p>
-          <p className="font-sans text-xs text-ink-tertiary">
-            Создайте рубрику — она появится в библиотеке у всех преподавателей кафедры.
-          </p>
+        <div className="bg-surface border border-border rounded-lg overflow-hidden">
+          <div className="text-center py-12">
+            <p className="font-sans text-sm text-ink-secondary mb-1">Общих рубрик пока нет.</p>
+            <p className="font-sans text-xs text-ink-tertiary">
+              Создайте рубрику — она появится в библиотеке у всех преподавателей кафедры.
+            </p>
+          </div>
         </div>
       ) : (
         <div className="space-y-2">
@@ -180,6 +183,7 @@ export default function InstitutionRubricPresets() {
           ))}
         </div>
       )}
+    </div>
     </div>
   )
 }

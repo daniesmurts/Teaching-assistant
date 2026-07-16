@@ -8,11 +8,15 @@ export const ORG_UNIT_TYPES = [
   'admin_office',
   'cluster',           // displayed as «Полигруппа» — renamed from «Кластер направлений»
   'division',
-  'program',           // «Образовательная программа» — the ОП / УГСН grouping (e.g. 15.00.00 Машиностроение)
-  'program_direction', // «Направление подготовки» — a specific direction within an ОП (e.g. 15.03.02).
-                       // Optional sub-slot: broad ОП host multiple направления with different РОПы;
-                       // narrow ОП (already at direction granularity) can stay a leaf without children.
-                       // РОП head grants + `programs.org_unit_id` can attach at either level.
+  'ugsn',              // «УГСН» — укрупнённая группа, the XX.00.00 grouping (e.g. 09.00.00 Информатика
+                       // и вычислительная техника). Pure grouping tier: NOT a programme anchor,
+                       // carries no ФГОС metadata.
+  'program_direction', // «Направление подготовки / специальность» — the ФГОС level (e.g. 09.03.04
+                       // Программная инженерия). Parent of its ОП/профили.
+  'program',           // «Образовательная программа» — a профиль/направленность under a направление
+                       // (e.g. «Искусственный интеллект и большие данные» under 01.03.02).
+                       // РОП head grants + `programs.org_unit_id` can attach at either programme
+                       // level: a направление with a single ОП can stay a leaf without ОП children.
   'department',
 ] as const
 export type OrgUnitType = (typeof ORG_UNIT_TYPES)[number]

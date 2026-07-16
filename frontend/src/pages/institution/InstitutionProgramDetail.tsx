@@ -544,9 +544,12 @@ function DisciplineRow({ d, maxSemester, courses, knownCodes, onChange, onRemove
 
 // ─── Report ──────────────────────────────────────────────────────────────────
 
+// A true sequential scale (one hue, rising intensity) rather than stapling
+// two amber steps to an unrelated green — coverage depth is "how much
+// success", not a brand/action signal.
 const LEVEL_META: Record<CoverageLevel, { label: string; bg: string }> = {
-  introduce: { label: 'Введение', bg: 'var(--color-amber-light)' },
-  develop:   { label: 'Развитие',  bg: 'var(--color-amber-mid)' },
+  introduce: { label: 'Введение', bg: 'rgb(var(--color-success-rgb) / 0.18)' },
+  develop:   { label: 'Развитие',  bg: 'rgb(var(--color-success-rgb) / 0.45)' },
   master:    { label: 'Владение',  bg: 'var(--color-success)' },
 }
 
@@ -559,7 +562,7 @@ const STATUS_META: Record<CompetencyProgressionRow['status'], { label: string; b
 
 function scoreColor(s: number): string {
   if (s >= 75) return 'var(--color-success)'
-  if (s >= 50) return 'var(--color-amber)'
+  if (s >= 50) return 'var(--color-warning)'
   return 'var(--color-danger)'
 }
 

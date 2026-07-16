@@ -5,6 +5,7 @@ import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
 import CreateButton from '../components/ui/CreateButton'
 import { Input } from '../components/ui/Input'
+import Select from '../components/ui/Select'
 import TemplatePicker from '../components/ui/TemplatePicker'
 import { getCourses } from '../api/courses'
 import { getCriteria, getCriteriaTemplates } from '../api/criteria'
@@ -20,7 +21,7 @@ import type { Rubric, RubricItem, Criterion, CriterionSubject } from '../types'
 
 const UNIT_TYPE_LABEL: Record<string, string> = {
   institution: 'весь университет', department: 'кафедра', division: 'факультет',
-  cluster: 'полигруппа', program: 'программа', program_direction: 'направление',
+  cluster: 'полигруппа', ugsn: 'УГСН', program_direction: 'направление', program: 'программа',
   admin_office: 'подразделение', governance: 'руководство',
 }
 
@@ -350,31 +351,32 @@ export default function Rubrics() {
                             .join(' · ')}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 flex-wrap flex-shrink-0 mt-3 pt-2 border-t border-border/60">
+                      <div className="flex-shrink-0 mt-3 pt-2 border-t border-border/60 space-y-2">
                         {isOwn && (
-                          <button onClick={() => openEdit(r)} className="text-xs text-ink-secondary hover:text-amber">Изменить</button>
-                        )}
-                        {isOwn && (
-                          <button onClick={() => { if (confirm(`Удалить рубрику «${r.name}»?`)) deleteMut.mutate(r.id) }}
-                            className="text-xs text-ink-tertiary hover:text-danger">Удалить</button>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => openEdit(r)} className="text-xs font-medium text-info hover:text-info/80">Изменить</button>
+                            <button onClick={() => { if (confirm(`Удалить рубрику «${r.name}»?`)) deleteMut.mutate(r.id) }}
+                              className="text-xs font-medium text-danger hover:text-danger/80">Удалить</button>
+                          </div>
                         )}
                         {isOwn && shareTargets.length > 0 && (
-                          <select
-                            className="text-xs text-ink-secondary bg-transparent border border-border rounded-md px-1.5 py-0.5"
-                            value={r.shared_unit_id ?? ''}
-                            onChange={(e) => {
-                              const unitId = e.target.value
-                              if (unitId) shareMut.mutate({ id: r.id, unitId })
-                              else unshareMut.mutate(r.id)
-                            }}
-                          >
-                            <option value="">Не делиться</option>
-                            {shareTargets.map((t) => (
-                              <option key={t.id} value={t.id}>
-                                Поделиться: {UNIT_TYPE_LABEL[t.type_code] ?? t.name} «{t.name}»
-                              </option>
-                            ))}
-                          </select>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-ink-tertiary flex-shrink-0">Доступ:</span>
+                            <Select
+                              size="sm"
+                              className="flex-1"
+                              ariaLabel="Поделиться рубрикой"
+                              value={r.shared_unit_id ?? ''}
+                              onChange={(unitId) => unitId ? shareMut.mutate({ id: r.id, unitId }) : unshareMut.mutate(r.id)}
+                              options={[
+                                { value: '', label: 'Не делиться' },
+                                ...shareTargets.map((t) => ({
+                                  value: t.id,
+                                  label: `${UNIT_TYPE_LABEL[t.type_code] ?? t.name}: «${t.name}»`,
+                                })),
+                              ]}
+                            />
+                          </div>
                         )}
                       </div>
                     </div>

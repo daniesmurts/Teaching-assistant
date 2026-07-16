@@ -2,15 +2,16 @@ import client from './client'
 
 // Canonical org-unit taxonomy (Research.md §7.1). 'institution' is the root
 // and is not creatable via the tree-builder. `cluster` is displayed as
-// «Полигруппа»; `program` is «Образовательная программа» (ОП / УГСН, e.g.
-// 15.00.00 Машиностроение); `program_direction` is «Направление подготовки»
-// (e.g. 15.03.02) — an optional sub-slot under an ОП when the ОП encompasses
-// multiple направления with different РОПы. РОП `head` grants and
-// `programs.org_unit_id` can attach at either `program` or `program_direction`
-// depending on whether the ОП is broad or narrow.
+// «Полигруппа»; `ugsn` is «УГСН» — the XX.00.00 укрупнённая группа (pure
+// grouping, no programme semantics); `program_direction` is «Направление
+// подготовки / специальность» — the ФГОС level (e.g. 09.03.04); `program` is
+// «Образовательная программа» — a профиль/направленность nested under its
+// направление. РОП `head` grants and `programs.org_unit_id` can attach at
+// either `program_direction` or `program`, depending on whether the
+// направление has one ОП or several.
 export type OrgUnitType =
   | 'institution' | 'governance' | 'admin_office'
-  | 'cluster' | 'division' | 'program' | 'program_direction' | 'department'
+  | 'cluster' | 'division' | 'ugsn' | 'program_direction' | 'program' | 'department'
 
 export interface OrgUnit {
   id:             string

@@ -559,7 +559,7 @@ function EditReasonPicker({
 
 function scoreColor(score: number): string {
   if (score >= 75) return 'var(--color-success)'
-  if (score >= 55) return 'var(--color-amber)'
+  if (score >= 55) return 'var(--color-warning)'
   return 'var(--color-danger)'
 }
 

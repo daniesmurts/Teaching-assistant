@@ -11,8 +11,9 @@ const TYPE_LABEL: Record<string, string> = {
   admin_office:      'Управление / центр',
   cluster:           'Полигруппа',
   division:          'Институт / факультет',
-  program:           'Образовательная программа',
+  ugsn:              'УГСН',
   program_direction: 'Направление подготовки',
+  program:           'Образовательная программа',
   department:        'Кафедра',
 }
 const ROLE_LABEL: Record<string, string> = {

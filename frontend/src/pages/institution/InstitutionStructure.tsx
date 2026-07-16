@@ -18,20 +18,28 @@ const ROLE_LABEL: Record<UnitRole, string> = {
   viewer: 'Наблюдатель',
 }
 
-// Level accenting. The design system allows amber as the ONLY accent colour, so
-// levels are differentiated by neutral tonal tiers — and amber is reserved for
-// the one tier that actually carries meaning for the reader: programme anchors
-// (they hold the ФГОС data and are the РОП's unit). Root reads as the darkest
-// (authoritative), the management chain mid-neutral, kafedras the quietest.
-type UnitTier = 'root' | 'management' | 'grouping' | 'programme' | 'department'
+// Level accenting. Two colour families, each reserved for one meaning: amber
+// is the brand/action accent (Button.tsx's `primary` variant, the CTA pulse,
+// tab-active indicators) — reserved here for the chain that leads to a real
+// programme anchor, rising in intensity (light fill → full fill) as you reach
+// `program`, the actual leaf a РОП links against. `info` (indigo — already
+// used elsewhere for informational badges, see ui/Badge.tsx) marks УГСН: a
+// real classification level with its own code, but never a РОП anchor and
+// never actionable — informational, not actionable, so it doesn't borrow the
+// action colour. Everything else (root/management/grouping/department) stays
+// on the neutral ink/surface scale, tone-graded from darkest (root,
+// authoritative) to quietest (kafedra). Every tier also keeps its own label
+// text, so nothing is conveyed by colour alone.
+type UnitTier = 'root' | 'management' | 'grouping' | 'ugsn' | 'direction' | 'program' | 'department'
 const TYPE_TIER: Record<OrgUnitType, UnitTier> = {
   institution:       'root',
   governance:        'management',
   admin_office:      'management',
   cluster:           'grouping',
   division:          'grouping',
-  program:           'programme',
-  program_direction: 'programme',
+  ugsn:              'ugsn',
+  program_direction: 'direction',
+  program:           'program',
   department:        'department',
 }
 // Badge fill per tier (label chip on each row).
@@ -39,15 +47,24 @@ const TIER_BADGE: Record<UnitTier, string> = {
   root:       'bg-sidebar text-ink-inverse border-transparent',
   management: 'bg-ink/5 text-ink-secondary border-border-mid',
   grouping:   'bg-surface-warm text-ink-secondary border-border-mid',
-  programme:  'bg-amber-light text-amber border-amber/25',
+  ugsn:       'bg-info-bg text-info border-info/20',
+  direction:  'bg-amber-light/70 text-amber border-amber/20',
+  program:    'bg-amber-light text-amber border-amber/35',
   department: 'bg-surface text-ink-tertiary border-border',
 }
-// Left spine on the row card — a quiet per-level colour cue you can scan down.
+// Left spine on the row card — a quiet per-level colour cue you can scan down;
+// the amber steps (direction → program) intensify together with the badge
+// fill above, so the two cues read as one system. ugsn's info spine is a
+// deliberate colour *change*, not another step in the amber ramp — it marks
+// "you've reached the informational classification level," distinct from
+// "you've reached something actionable."
 const TIER_SPINE: Record<UnitTier, string> = {
   root:       'border-l-ink',
   management: 'border-l-ink-tertiary',
   grouping:   'border-l-border-mid',
-  programme:  'border-l-amber',
+  ugsn:       'border-l-info/40',
+  direction:  'border-l-amber/55',
+  program:    'border-l-amber',
   department: 'border-l-border',
 }
 
@@ -76,12 +93,12 @@ const unitLabel = (u?: OrgUnit) => (u ? (u.short_name || u.name) : '—')
 // Order offered in the "add child" picker — institution excluded (roots are not
 // created here). Flexible depth: any of these may nest under any parent (§7.1).
 const CREATABLE: Exclude<OrgUnitType, 'institution'>[] =
-  ['governance', 'admin_office', 'cluster', 'division', 'program', 'program_direction', 'department']
+  ['governance', 'admin_office', 'cluster', 'division', 'ugsn', 'program_direction', 'program', 'department']
 
 // Default-collapsed types — at the институт level and below, kafedra lists get
 // long fast. Management chain (root / governance / admin_office / cluster)
 // stays open so the overall shape of the org is always visible.
-const DEFAULT_COLLAPSED_TYPES = new Set<OrgUnitType>(['division', 'program', 'program_direction', 'department'])
+const DEFAULT_COLLAPSED_TYPES = new Set<OrgUnitType>(['division', 'ugsn', 'program_direction', 'program', 'department'])
 const EXPANDED_STORAGE_KEY = 'ga_org_expanded_v1'
 
 // Programme-anchor types carry the ФГОС header the РОП import form prefills.

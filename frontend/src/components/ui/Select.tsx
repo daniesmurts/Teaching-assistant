@@ -20,10 +20,12 @@ interface Props {
   /** Accessible label for the trigger button. */
   ariaLabel?:  string
   className?:  string
+  /** 'sm' shrinks the trigger for inline use next to text actions (e.g. a card footer). */
+  size?:       'sm' | 'md'
 }
 
 export default function Select({
-  value, onChange, options, placeholder = 'Выберите…', ariaLabel, className = '',
+  value, onChange, options, placeholder = 'Выберите…', ariaLabel, className = '', size = 'md',
 }: Props) {
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)   // keyboard-focused option index
@@ -81,15 +83,16 @@ export default function Select({
         aria-label={ariaLabel}
         onClick={() => setOpen((o) => !o)}
         onKeyDown={onKeyDown}
-        className={`w-full flex items-center justify-between gap-2 text-sm font-sans bg-surface
-                    border rounded-md px-3 py-2 transition-colors
+        className={`w-full flex items-center justify-between gap-2 font-sans bg-surface
+                    border rounded-md transition-colors
+                    ${size === 'sm' ? 'text-xs px-2 py-1' : 'text-sm px-3 py-2'}
                     ${open ? 'border-border-strong' : 'border-border hover:border-border-mid'}`}
       >
         <span className={selected ? 'text-ink truncate' : 'text-ink-tertiary truncate'}>
           {selected ? selected.label : placeholder}
         </span>
         <svg
-          width="14" height="14" viewBox="0 0 24 24" fill="none"
+          width={size === 'sm' ? 11 : 14} height={size === 'sm' ? 11 : 14} viewBox="0 0 24 24" fill="none"
           className={`flex-shrink-0 text-ink-tertiary transition-transform ${open ? 'rotate-180' : ''}`}
           aria-hidden="true"
         >
@@ -117,8 +120,9 @@ export default function Select({
                 aria-selected={isSelected}
                 onClick={() => choose(o.value)}
                 onMouseEnter={() => setActive(i)}
-                className={`w-full flex items-center justify-between gap-2 text-left text-sm font-sans
+                className={`w-full flex items-center justify-between gap-2 text-left font-sans
                             px-3 py-1.5 transition-colors
+                            ${size === 'sm' ? 'text-xs' : 'text-sm'}
                             ${isActive ? 'bg-surface-warm' : ''}
                             ${isSelected ? 'text-amber font-medium' : 'text-ink'}`}
               >

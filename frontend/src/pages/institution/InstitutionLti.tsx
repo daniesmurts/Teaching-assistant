@@ -72,7 +72,11 @@ export default function InstitutionLti() {
   })
 
   if (isLoading || !data) {
-    return <div className="px-6 py-6 text-sm font-sans text-ink-tertiary">Загрузка…</div>
+    return (
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto px-6 py-6 text-sm font-sans text-ink-tertiary">Загрузка…</div>
+      </div>
+    )
   }
 
   function field<K extends keyof LtiConfigPatch>(key: K, value: LtiConfigPatch[K]) {
@@ -82,7 +86,8 @@ export default function InstitutionLti() {
   const deploymentIdsText = (form.lti_platform_deployment_ids ?? []).join('\n')
 
   return (
-    <div className="px-6 py-6 max-w-3xl">
+    <div className="flex-1 overflow-y-auto">
+    <div className="max-w-3xl mx-auto px-6 py-6">
       <h1 className="font-display text-2xl font-bold text-ink mb-2">LTI / LMS</h1>
       <p className="text-xs font-sans text-ink-tertiary mb-6 max-w-prose leading-relaxed">
         Подключите Moodle (или другую LMS с поддержкой LTI 1.3) — преподаватели смогут открывать
@@ -192,8 +197,8 @@ export default function InstitutionLti() {
       {testMut.data && (
         <div className={`mt-3 text-xs font-sans px-3 py-2 rounded-md border ${
           testMut.data.ok
-            ? 'bg-green-50 border-green-200 text-green-800'
-            : 'bg-red-50 border-red-200 text-red-800'
+            ? 'bg-success-bg border-success/20 text-success'
+            : 'bg-danger-bg border-danger/20 text-danger'
         }`}>
           {testMut.data.message}
         </div>
@@ -212,7 +217,9 @@ export default function InstitutionLti() {
       </p>
 
       {!courseLinks?.length ? (
-        <p className="text-sm font-sans text-ink-tertiary">Пока нет курсов, запущенных из Moodle.</p>
+        <div className="bg-surface border border-border rounded-lg px-3 py-3">
+          <p className="text-sm font-sans text-ink-tertiary">Пока нет курсов, запущенных из Moodle.</p>
+        </div>
       ) : (
         <div className="space-y-1.5">
           {courseLinks.map((l) => (
@@ -245,6 +252,7 @@ export default function InstitutionLti() {
           busy={mapMut.isPending}
         />
       )}
+    </div>
     </div>
   )
 }

@@ -10,8 +10,9 @@ export const TYPE_LABEL: Record<OrgUnitType, string> = {
   admin_office:      'Управление / центр',
   cluster:           'Полигруппа',
   division:          'Институт / факультет',
-  program:           'Образовательная программа',
+  ugsn:              'УГСН',
   program_direction: 'Направление подготовки',
+  program:           'Образовательная программа',
   department:        'Кафедра',
 }
 

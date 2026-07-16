@@ -24,7 +24,7 @@ interface Props {
 const fmt = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
 function scoreColor(s: number): string {
   if (s >= 75) return 'var(--color-success)'
-  if (s >= 55) return 'var(--color-amber)'
+  if (s >= 55) return 'var(--color-warning)'
   return 'var(--color-danger)'
 }
 

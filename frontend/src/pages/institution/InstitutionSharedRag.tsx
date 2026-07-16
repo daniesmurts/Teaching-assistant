@@ -37,11 +37,16 @@ export default function InstitutionSharedRag() {
   })
 
   if (isLoading || !data) {
-    return <div className="px-6 py-6 text-sm font-sans text-ink-tertiary">Загрузка…</div>
+    return (
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto px-6 py-6 text-sm font-sans text-ink-tertiary">Загрузка…</div>
+      </div>
+    )
   }
 
   return (
-    <div className="px-6 py-6 max-w-3xl">
+    <div className="flex-1 overflow-y-auto">
+    <div className="max-w-3xl mx-auto px-6 py-6">
       <h1 className="font-display text-2xl font-bold text-ink mb-2">Общий цикл кафедры</h1>
       <p className="text-xs font-sans text-ink-tertiary mb-6 max-w-prose leading-relaxed">
         Когда включено, преподаватели кафедры могут поделиться своими утверждёнными проверками. ИИ
@@ -80,6 +85,7 @@ export default function InstitutionSharedRag() {
           busy={mut.isPending}
         />
       )}
+    </div>
     </div>
   )
 }

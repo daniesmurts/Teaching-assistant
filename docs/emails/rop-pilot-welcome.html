@@ -1,0 +1,214 @@
+<!--
+  ИСПУМ — РОП pilot kickoff email. One-off send for the July 2026 pilot
+  onboarding РОПы onto «Образовательные программы» + «РПД-студия»
+  (see docs/rop-pilot-onboarding.md for the full admin checklist + test
+  script this email summarizes and links out to).
+
+  Reuses docs/emails/feature-announcement-template.html's visual system —
+  same table layout, colors, single-CTA rule — repurposing the numbered
+  benefit card as onboarding steps instead of feature benefits.
+
+  HOW TO SEND: this is a personal/curated send to a small named cohort, not
+  a broadcast — go through the same admin-invite flow already used to
+  create their accounts (routes/institution.ts teacher-invite), then follow
+  up with this email once accounts + org structure + roles are set up (see
+  the admin checklist in docs/rop-pilot-onboarding.md Part 1). Fill in
+  {{имя}} and {{organization}} per recipient; the CTA already points at
+  the real login flow so no per-recipient link is needed beyond that.
+-->
+<!DOCTYPE html>
+<html lang="ru" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>ИСПУМ — приглашение к тестированию</title>
+  <style>
+    @media only screen and (max-width: 600px) {
+      .ga-container { width: 100% !important; }
+      .ga-px { padding-left: 20px !important; padding-right: 20px !important; }
+      .ga-h1 { font-size: 24px !important; line-height: 1.3 !important; }
+    }
+  </style>
+</head>
+<body style="margin:0;padding:0;background:#F7F5F0;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+
+  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#F7F5F0;">
+    Проверьте вашу ОП и попробуйте РПД-студию — 15–20 минут, ваш отзыв определит, что мы доделаем дальше.
+  </div>
+  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">
+    &#8203;&#847; &#8203;&#847; &#8203;&#847; &#8203;&#847; &#8203;&#847; &#8203;&#847; &#8203;&#847; &#8203;&#847;
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F7F5F0;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+
+        <table role="presentation" class="ga-container" width="600" cellpadding="0" cellspacing="0" border="0"
+               style="width:600px;max-width:600px;background:#FFFFFF;border:1px solid rgba(0,0,0,0.08);border-radius:12px;overflow:hidden;">
+
+          <!-- Header -->
+          <tr>
+            <td class="ga-px" style="padding:24px 32px;border-bottom:1px solid rgba(0,0,0,0.08);">
+              <span style="font-family:Georgia,'Times New Roman',serif;font-size:20px;font-weight:700;color:#1A1A1A;">
+                ИС<span style="color:#C8860A;">ПУМ</span>
+              </span>
+            </td>
+          </tr>
+
+          <!-- Eyebrow + headline -->
+          <tr>
+            <td class="ga-px" style="padding:36px 32px 8px 32px;">
+              <span style="display:inline-block;background:#FDF3DC;color:#C8860A;font-family:Arial,sans-serif;
+                           font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;
+                           padding:5px 12px;border-radius:20px;">
+                ✦ Пилотное тестирование
+              </span>
+            </td>
+          </tr>
+          <tr>
+            <td class="ga-px ga-h1" style="padding:12px 32px 0 32px;font-family:Georgia,'Times New Roman',serif;
+                           font-size:28px;line-height:1.25;font-weight:700;color:#1A1A1A;">
+              Приглашаем вас протестировать анализ образовательной программы
+            </td>
+          </tr>
+
+          <!-- Greeting + lede -->
+          <tr>
+            <td class="ga-px" style="padding:20px 32px 0 32px;font-family:Arial,sans-serif;font-size:15px;
+                           line-height:1.7;color:#1A1A1A;">
+              Здравствуйте, {{name}}!
+              <br><br>
+              Мы приглашаем вас — как руководителя образовательной программы в
+              КНИТУ — одними из первых опробовать два инструмента
+              ИСПУМ, сделанных специально для РОП: анализ учебного плана на
+              полноту и последовательность и «РПД-студию» — помощник в
+              доработке содержания рабочих программ дисциплин.
+              <br><br>
+              Полный доступ уже открыт на вашем аккаунте. Тест займёт
+              15–20 минут, вопросов не так много — но ваш отзыв напрямую
+              определит, что мы доделаем в первую очередь.
+            </td>
+          </tr>
+
+          <!-- Steps card -->
+          <tr>
+            <td class="ga-px" style="padding:24px 32px 0 32px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                     style="background:#FAF8F4;border:1px solid rgba(0,0,0,0.08);border-radius:10px;">
+                <tr>
+                  <td style="padding:22px 24px;font-family:Arial,sans-serif;">
+
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td width="28" valign="top" style="padding-bottom:16px;">
+                          <span style="display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;
+                                       background:#C8860A;color:#FFFFFF;font-size:12px;font-weight:700;border-radius:50%;">1</span>
+                        </td>
+                        <td valign="top" style="padding-bottom:16px;font-size:14px;line-height:1.6;color:#1A1A1A;">
+                          <strong>Войдите и импортируйте вашу программу</strong><br>
+                          <span style="color:#6B6560;">«Образовательные программы» → «Импортировать» — загрузите описание ОП и учебный план (PDF), дисциплины и компетенции извлекутся автоматически.</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td width="28" valign="top" style="padding-bottom:16px;">
+                          <span style="display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;
+                                       background:#C8860A;color:#FFFFFF;font-size:12px;font-weight:700;border-radius:50%;">2</span>
+                        </td>
+                        <td valign="top" style="padding-bottom:16px;font-size:14px;line-height:1.6;color:#1A1A1A;">
+                          <strong>Загрузите РПД нескольких дисциплин</strong><br>
+                          <span style="color:#6B6560;">Вкладка «Документы» — и запустите «Проверить соответствие компетенциям», затем «Анализировать» на всю программу.</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td width="28" valign="top" style="padding-bottom:16px;">
+                          <span style="display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;
+                                       background:#C8860A;color:#FFFFFF;font-size:12px;font-weight:700;border-radius:50%;">3</span>
+                        </td>
+                        <td valign="top" style="padding-bottom:16px;font-size:14px;line-height:1.6;color:#1A1A1A;">
+                          <strong>Попробуйте «Открыть в РПД-студии»</strong><br>
+                          <span style="color:#6B6560;">Прямо на строке с загруженной РПД — студия подготовит черновик содержания под её компетенции и сразу проверит покрытие.</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td width="28" valign="top">
+                          <span style="display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;
+                                       background:#C8860A;color:#FFFFFF;font-size:12px;font-weight:700;border-radius:50%;">4</span>
+                        </td>
+                        <td valign="top" style="font-size:14px;line-height:1.6;color:#1A1A1A;">
+                          <strong>Поделитесь впечатлением</strong><br>
+                          <span style="color:#6B6560;">Через «Обратная связь» в меню платформы — что не совпало с ожиданием, что оказалось полезным.</span>
+                        </td>
+                      </tr>
+                    </table>
+
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Trust / reassurance line -->
+          <tr>
+            <td class="ga-px" style="padding:16px 32px 0 32px;font-family:Arial,sans-serif;font-size:13px;
+                           line-height:1.6;color:#6B6560;">
+              ИСПУМ помогает готовить черновики и проверять покрытие компетенций —
+              ничего не публикуется и не подменяет вашу экспертную оценку.
+              Автором РПД и итоговых решений по программе остаётесь вы.
+            </td>
+          </tr>
+
+          <!-- Primary CTA -->
+          <tr>
+            <td class="ga-px" align="center" style="padding:32px 32px 8px 32px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center" bgcolor="#C8860A" style="border-radius:8px;">
+                    <a href="https://ispum.ru/register"
+                       target="_blank"
+                       style="display:inline-block;padding:14px 32px;font-family:Arial,sans-serif;font-size:15px;
+                              font-weight:700;color:#FFFFFF;text-decoration:none;border-radius:8px;">
+                      Начать тестирование
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td class="ga-px" align="center" style="padding:0 32px 8px 32px;font-family:Arial,sans-serif;
+                           font-size:12.5px;color:#A09890;">
+              Полный доступ открыт на всё время пилота
+            </td>
+          </tr>
+
+          <!-- Sign-off -->
+          <tr>
+            <td class="ga-px" style="padding:28px 32px 0 32px;font-family:Arial,sans-serif;font-size:15px;
+                           color:#1A1A1A;border-top:1px solid rgba(0,0,0,0.08);margin-top:8px;">
+              <div style="padding-top:20px;">
+                Если что-либо будет функционировать нештатно, или у вас возникнут трудности с освоением функционала / появятся предложения по его улучшению — направьте сообщение в наш рабочий чат, разберёмся вместе.
+                <br><br>
+                — Команда ИСПУМ
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td class="ga-px" style="padding:20px 32px 28px 32px;font-family:Arial,sans-serif;font-size:12px;
+                           line-height:1.7;color:#A09890;">
+                           <a href="{{unsubscribe_link}}" style="color:#A09890;">Отписаться</a>
+              ИСПУМ · <a href="https://ispum.ru" style="color:#A09890;">ispum.ru</a>
+            </td>
+          </tr>
+
+        </table>
+        <!-- /ga-container -->
+
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>
