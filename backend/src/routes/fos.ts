@@ -13,6 +13,7 @@ import {
 } from '../db/queries/fosDocuments'
 import { findCourseById } from '../db/queries/courses'
 import { generateFosReportPdf } from '../services/fosReportPdf'
+import { generateFosDocx } from '../services/fosExport'
 import { ValidationError, NotFoundError } from '../errors/AppError'
 
 const router = Router()
@@ -102,6 +103,25 @@ router.get(
     res.setHeader('Content-Disposition', `attachment; filename="${fname}"`)
     res.setHeader('Content-Length', pdf.length)
     res.end(pdf)
+  })
+)
+
+// GET /api/fos/:id/export.docx — editable Word download.
+router.get(
+  '/:id/export.docx',
+  validate(fosIdRules),
+  asyncHandler(async (req, res) => {
+    const doc = await getFosDocumentById(req.params.id, req.teacher.id)
+    if (!doc) throw new NotFoundError('ФОС')
+    if (doc.status !== 'ready' || !doc.sections) throw new ValidationError('ФОС ещё не готов.')
+    const course = await findCourseById(doc.course_id, req.teacher.id)
+
+    const buffer = await generateFosDocx(doc, course?.name ?? 'Дисциплина')
+    const fname = `fos-${(course?.name || 'document').replace(/[^\w.-]/g, '_')}.docx`
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    res.setHeader('Content-Disposition', `attachment; filename="${fname}"`)
+    res.setHeader('Content-Length', buffer.length)
+    res.end(buffer)
   })
 )
 

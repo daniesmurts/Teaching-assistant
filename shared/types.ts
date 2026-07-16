@@ -785,6 +785,42 @@ export interface Quiz {
   created_at:     string
 }
 
+// ─── Live QR quiz (TODO.md Feature Y) ──────────────────────────────────────────
+// A teacher runs an existing quiz live in the lecture hall — students join
+// anonymously via a short join code (QR or typed), answer one question at a
+// time, teacher's projector screen shows a live histogram. v1 slice of the
+// §3.1 live-lecture engagement layer (Research.md) — no WebRTC/ASR/heatmap.
+
+export type LiveSessionStatus = 'lobby' | 'question' | 'reveal' | 'finished'
+
+export interface LiveQuestionResult {
+  question_index: number
+  answer_counts:  number[]   // length 4, indexed by option
+  correct_index:  number
+}
+
+export interface LiveSession {
+  id:                      string
+  teacher_id:              string
+  quiz_id:                 string
+  join_code:               string
+  status:                  LiveSessionStatus
+  current_question_index: number
+  participant_count:       number
+  answer_counts:           number[] | null   // live counts for the CURRENT question; null in lobby/finished
+  results:                 LiveQuestionResult[] | null
+  created_at:              string
+  finished_at:             string | null
+}
+
+export interface LiveJoinState {
+  status:                  LiveSessionStatus
+  current_question_index: number
+  question:                { question: string; options: string[] } | null
+  has_answered:            boolean
+  correct_index:           number | null   // only populated once status === 'reveal'
+}
+
 // ─── Curriculum overlap analysis (Анализ дублирования содержания) ───────────────
 // КНИТУ admin feature A3: detect duplicated/overlapping topics across the
 // disciplines a single student takes. Topics are extracted per discipline,

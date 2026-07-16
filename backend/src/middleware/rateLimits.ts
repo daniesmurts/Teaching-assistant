@@ -70,6 +70,29 @@ export const generalLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Слишком много запросов. Пожалуйста, подождите немного.' },
-  // Skip health check
-  skip: (req) => req.path === '/api/health',
+  // Skip health check + live-quiz routes (they get their own liveLimiter,
+  // sized for sustained ~2s polling for the length of a whole lecture —
+  // 200/15min would throttle a single device within minutes).
+  skip: (req) =>
+    req.path === '/api/health' ||
+    req.path.startsWith('/api/live-sessions') ||
+    req.path.startsWith('/api/live-join'),
+})
+
+// ─── Live QR quiz — polling-shaped, keyed by participant not IP ───────────────
+// Both the host (teacher device) and every joined student poll roughly every
+// 2s for the length of a lecture (up to ~90 min) — an IP-keyed limiter would
+// also let one classroom's shared campus IP collide destructively across all
+// its students (same reasoning as ltiLimiter's campus-IP comment above).
+// Keyed by participant_token when present (unique per student); the
+// token-less join action falls back to IP, which is fine since it's a
+// one-time action per student, not a sustained poll.
+export const liveLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 40,   // comfortably covers ~1 poll/2s (=30/min) with retry headroom
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req: Request) =>
+    (req.body?.participant_token as string) || (req.query?.participant_token as string) || req.ip || 'anonymous',
+  message: { error: 'Слишком много запросов. Подождите немного.' },
 })

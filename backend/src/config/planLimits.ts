@@ -28,6 +28,7 @@ export const PLAN_LIMITS = {
     citationCheck:         false,
     challengeFeedback:     false,
     fosGenerator:          false,
+    liveSessionsPerMonth:  1,
     monthlySpendCapUsd:    3,
   },
   pro: {
@@ -56,6 +57,7 @@ export const PLAN_LIMITS = {
     citationCheck:         true,
     challengeFeedback:     true,
     fosGenerator:          true,
+    liveSessionsPerMonth:  Infinity,
     monthlySpendCapUsd:    30,
   },
   institution: {
@@ -84,6 +86,7 @@ export const PLAN_LIMITS = {
     citationCheck:         true,
     challengeFeedback:     true,
     fosGenerator:          true,
+    liveSessionsPerMonth:  Infinity,
     monthlySpendCapUsd:    150,
   },
 } as const

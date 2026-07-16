@@ -111,3 +111,40 @@ export function checkResourceLimit(
     } catch (err) { next(err) }
   }
 }
+
+// ─── Live QR quiz — monthly session count ─────────────────────────────────────
+// A bespoke monthly-count check rather than an extension of checkMonthlyLimit:
+// that helper's feature union is closed and every new feature costs three
+// separate edits (union type, `used` ternary, error-message ternary) plus a
+// shared Postgres increment_usage function — real cost for what's actually a
+// simple "1 vs unlimited" boundary. Same shape as checkResourceLimit above
+// (a live COUNT(*) against a real table) but scoped to the current month.
+export function checkLiveSessionMonthlyLimit() {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const limit = getLimits(req.teacher.plan_tier).liveSessionsPerMonth
+      if (limit === Infinity) { next(); return }
+
+      const { rows } = await pool.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM live_sessions
+          WHERE teacher_id = $1 AND created_at >= date_trunc('month', NOW())`,
+        [req.teacher.id]
+      )
+      const used = parseInt(rows[0].count, 10)
+
+      if (used >= limit) {
+        res.status(403).json({
+          error:   `Вы использовали лимит живых сессий (${limit} в месяц) на бесплатном тарифе. Перейдите на Pro для безлимита.`,
+          code:    'PLAN_LIMIT_REACHED',
+          feature: 'liveSessionsPerMonth',
+          limit,
+          used,
+          upgrade: true,
+        })
+        return
+      }
+
+      next()
+    } catch (err) { next(err) }
+  }
+}

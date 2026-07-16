@@ -1,4 +1,5 @@
 import { useState, FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
@@ -7,6 +8,7 @@ import { Input } from '../components/ui/Input'
 import { getCourses } from '../api/courses'
 import NoCourseHint from '../components/onboarding/NoCourseHint'
 import { generateQuiz, getQuizzes, deleteQuiz } from '../api/quizzes'
+import { createLiveSession } from '../api/liveSessions'
 import { usePlan } from '../hooks/usePlan'
 import { useUIStore } from '../store/uiStore'
 import type { Quiz, QuizLevel, QuizQuestion, PresentationSource } from '../types'
@@ -184,9 +186,23 @@ export default function Quizzes() {
 // ─── Quiz display ─────────────────────────────────────────────────────────────
 
 function QuizDisplay({ quiz }: { quiz: Quiz }) {
+  const navigate = useNavigate()
+  const addToast = useUIStore((s) => s.addToast)
   const [reveal, setReveal] = useState<Set<number>>(new Set())
   const [openSource, setOpenSource] = useState<PresentationSource | null>(null)
   const [copied, setCopied] = useState(false)
+
+  const launchMut = useMutation({
+    mutationFn: () => createLiveSession(quiz.id),
+    onSuccess: (session) => navigate(`/live/host/${session.id}`),
+    onError: (err: unknown) => {
+      const status = (err as { response?: { status?: number } }).response?.status
+      const message = status === 403
+        ? 'Достигнут лимит живых сессий на бесплатном тарифе в этом месяце.'
+        : 'Не удалось запустить сессию'
+      addToast(message, 'error')
+    },
+  })
 
   function toggle(i: number) {
     setReveal((prev) => {
@@ -223,6 +239,9 @@ function QuizDisplay({ quiz }: { quiz: Quiz }) {
           {quiz.questions.length} вопросов · {quiz.topic}
         </div>
         <div className="flex items-center gap-3">
+          <Button variant="secondary" size="sm" onClick={() => launchMut.mutate()} loading={launchMut.isPending}>
+            Запустить в аудитории
+          </Button>
           <button onClick={revealAll} className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors">
             Показать все ответы
           </button>

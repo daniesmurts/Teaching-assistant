@@ -31,6 +31,8 @@ import PublishedAssignments from './pages/PublishedAssignments'
 import PublishedAssignmentDetail from './pages/PublishedAssignmentDetail'
 import SubmissionReview from './pages/SubmissionReview'
 import StudentWrite from './pages/StudentWrite'
+import LiveSessionHost from './pages/LiveSessionHost'
+import LiveJoin from './pages/LiveJoin'
 import MaterialGenerator from './pages/MaterialGenerator'
 import Materials from './pages/Materials'
 import Billing from './pages/Billing'
@@ -260,6 +262,8 @@ export default function App() {
           <Route path="/lti/callback"     element={<LtiCallback />} />
           <Route path="/lti/deep-link"    element={<LtiDeepLink />} />
           <Route path="/write/:token"     element={<StudentWrite />} />
+          <Route path="/live/:code"       element={<LiveJoin />} />
+          <Route path="/live/host/:sessionId" element={<ProtectedRoute><LiveSessionHost /></ProtectedRoute>} />
           <Route path="/payment/result"   element={<PaymentResult />} />
           <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
             <Route path="/dashboard"     element={<Dashboard />} />

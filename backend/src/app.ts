@@ -32,6 +32,8 @@ import publishedAssignmentsRouter from './routes/publishedAssignments'
 import publicWriteRouter from './routes/publicWrite'
 import quizzesRouter from './routes/quizzes'
 import fosRouter from './routes/fos'
+import liveSessionsRouter from './routes/liveSessions'
+import liveJoinRouter from './routes/liveJoin'
 import paymentsRouter from './routes/payments'
 import accountRouter from './routes/account'
 import contactRouter from './routes/contact'
@@ -145,6 +147,8 @@ app.use('/api/tasks',         tasksRouter)
 app.use('/api/curriculum',    curriculumRouter)
 app.use('/api/quizzes',       quizzesRouter)
 app.use('/api/fos',           fosRouter)
+app.use('/api/live-sessions', liveSessionsRouter)
+app.use('/api/live-join',     liveJoinRouter)   // public — token-authed live-quiz join/answer surface
 app.use('/api/published-assignments', publishedAssignmentsRouter)
 app.use('/api/documents',     documentsRouter)
 app.use('/api/admin/evals',   adminEvalsRouter)   // before /api/admin so /evals isn't shadowed
