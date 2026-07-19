@@ -178,8 +178,56 @@ export default function Landing() {
             </div>
           </div>
 
-          {/* Feature 4 — Analytics */}
+          {/* Feature 3.5 — Live QR quiz */}
           <div className="flex flex-col md:flex-row-reverse items-center gap-12">
+            <div className="flex-1 space-y-4">
+              <div className="text-xs font-bold text-warning uppercase tracking-wider">Живой тест в аудитории</div>
+              <h3 className="font-display text-3xl font-bold">Один клик — и весь поток отвечает со своих устройств</h3>
+              <p className="text-ink-secondary leading-relaxed">
+                Запустите любой сгенерированный тест прямо на паре: чистый экран для проектора с QR-кодом и живой гистограммой ответов, студенты подключаются со смартфона, планшета или ноутбука по ссылке — без регистрации. Выберите темп — в общем ритме под ваш показ или у каждого свой. По итогам сохраните результаты в журнал одним кликом — оценки сразу попадают в успеваемость и траекторию студента.
+              </p>
+            </div>
+            <div className="flex-1 w-full bg-surface border border-border rounded-xl p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-xs font-semibold text-ink-tertiary uppercase tracking-wider">Экран проектора · Вопрос 3 из 10</div>
+                <div className="flex items-center gap-1.5 text-[10px] font-sans font-medium bg-warning-bg text-warning px-1.5 py-0.5 rounded-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse"></span> LIVE
+                </div>
+              </div>
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-border-mid bg-bg mb-4">
+                <div className="w-10 h-10 rounded-md bg-ink flex-shrink-0" style={{
+                  backgroundImage: 'repeating-conic-gradient(rgb(var(--color-bg-rgb)) 0% 25%, rgb(var(--color-ink-rgb)) 0% 50%)',
+                  backgroundSize: '5px 5px',
+                }}></div>
+                <div className="flex-1">
+                  <div className="text-xs font-sans font-medium text-ink">Код подключения: <span className="font-display font-bold">7F3K9</span></div>
+                  <div className="text-[10px] font-sans text-ink-tertiary mt-0.5">27 студентов подключено</div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {[
+                  { label: 'A', pct: 62, correct: true },
+                  { label: 'B', pct: 23, correct: false },
+                  { label: 'C', pct: 10, correct: false },
+                  { label: 'D', pct: 5,  correct: false },
+                ].map((o) => (
+                  <div key={o.label} className="flex items-center gap-2 text-xs">
+                    <span className="font-display font-bold w-4 text-ink-secondary">{o.label}</span>
+                    <div className="flex-1 h-5 bg-bg rounded-sm overflow-hidden border border-border-mid">
+                      <div
+                        className={`h-full ${o.correct ? 'bg-success' : 'bg-border-strong'}`}
+                        style={{ width: `${o.pct}%`, opacity: 0.85 }}
+                      ></div>
+                    </div>
+                    <span className="w-8 text-right text-ink-tertiary">{o.pct}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Feature 4 — Analytics */}
+          <div className="flex flex-col md:flex-row items-center gap-12">
             <div className="flex-1 space-y-4">
               <div className="text-xs font-bold text-success uppercase tracking-wider">Аналитика успеваемости</div>
               <h3 className="font-display text-3xl font-bold">Видно, кто растёт, а кому нужна помощь</h3>
@@ -215,7 +263,7 @@ export default function Landing() {
           </div>
 
           {/* Feature 5 — LTI / Moodle integration */}
-          <div className="flex flex-col md:flex-row items-center gap-12">
+          <div className="flex flex-col md:flex-row-reverse items-center gap-12">
             <div className="flex-1 space-y-4">
               <div className="text-xs font-bold text-amber uppercase tracking-wider">Интеграция с Moodle</div>
               <h3 className="font-display text-3xl font-bold">Прямо из курса — без отдельного входа</h3>
