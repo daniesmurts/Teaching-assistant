@@ -129,7 +129,9 @@ export type {
   FosCoverageReport,
   FosDocument,
   LiveSessionStatus,
+  LiveSessionMode,
   LiveQuestionResult,
+  LiveSessionParticipantProgress,
   LiveSession,
   LiveJoinState,
 } from '../../../shared/types'

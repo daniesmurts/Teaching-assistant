@@ -6,6 +6,7 @@ export interface GenerateQuizRequest {
   question_count: number
   course_id?:     string
   level?:         QuizLevel
+  source_text?:   string
 }
 
 export interface GenerateQuizResponse {

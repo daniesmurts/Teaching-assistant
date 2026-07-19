@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { joinSession, getJoinState, submitAnswer } from '../api/liveJoin'
+import { joinSession, getJoinState, submitAnswer, advanceSelf } from '../api/liveJoin'
 import type { LiveJoinState } from '../types'
 
 // Public student join/answer surface for a live quiz (TODO.md Feature Y).
@@ -27,10 +27,10 @@ export default function LiveJoin() {
   useEffect(() => () => { cancelled.current = true }, [])
 
   async function join() {
-    if (!code) return
+    if (!code || !nickname.trim()) return
     setError(null)
     try {
-      const result = await joinSession(code, nickname.trim() || undefined)
+      const result = await joinSession(code, nickname.trim())
       setToken(result.participant_token)
     } catch {
       setError('Не удалось присоединиться — проверьте код')
@@ -64,8 +64,24 @@ export default function LiveJoin() {
     setAnswering(true)
     try {
       await submitAnswer(code, token, choiceIndex)
-      setState((prev) => prev ? { ...prev, has_answered: true } : prev)
+      // Self-paced reveals immediately on the next poll (server derives
+      // 'reveal' from the answer just recorded) — fetch right away instead
+      // of waiting up to 2s for the loop's own tick.
+      const latest = await getJoinState(code, token)
+      setState(latest)
     } catch { /* 409 (already answered / not accepting) — next poll reconciles state */ }
+    setAnswering(false)
+  }
+
+  // Self-paced only — move on to the next question after seeing the reveal.
+  async function next() {
+    if (!code || !token || answering) return
+    setAnswering(true)
+    try {
+      await advanceSelf(code, token)
+      const latest = await getJoinState(code, token)
+      setState(latest)
+    } catch { /* next poll reconciles state */ }
     setAnswering(false)
   }
 
@@ -74,19 +90,22 @@ export default function LiveJoin() {
   }
 
   if (!token) {
+    const canJoin = nickname.trim().length > 0
     return (
       <Centered>
         <div className="text-2xl font-serif font-bold mb-1">Код: {code}</div>
-        <p className="text-ink-secondary mb-4">Введите имя (необязательно) и присоединитесь</p>
+        <p className="text-ink-secondary mb-4">Введите имя, чтобы преподаватель видел, чей это результат</p>
         <input
           value={nickname}
           onChange={(e) => setNickname(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && canJoin) join() }}
           placeholder="Ваше имя"
           className="w-full max-w-xs px-3 py-2 rounded-md border border-border-mid bg-surface text-sm font-sans text-ink mb-3 focus:outline-none focus:border-border-strong"
         />
         <button
           onClick={join}
-          className="w-full max-w-xs px-4 py-3 rounded-md bg-amber text-white font-sans font-medium hover:opacity-90 transition-opacity"
+          disabled={!canJoin}
+          className="w-full max-w-xs px-4 py-3 rounded-md bg-amber text-white font-sans font-medium hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Присоединиться
         </button>
@@ -103,7 +122,17 @@ export default function LiveJoin() {
   }
 
   if (state.status === 'finished') {
-    return <Centered><p className="text-xl">Спасибо за участие!</p></Centered>
+    const score = state.participant_score
+    return (
+      <Centered>
+        <p className="text-xl mb-2">Спасибо за участие!</p>
+        {score && (
+          <p className="text-4xl font-serif font-bold text-amber">
+            {score.correct} / {score.total}
+          </p>
+        )}
+      </Centered>
+    )
   }
 
   if (state.question) {
@@ -112,17 +141,38 @@ export default function LiveJoin() {
         <Centered>
           <p className="text-lg mb-4">{state.question.question}</p>
           <div className="flex flex-col gap-2 w-full max-w-xs">
-            {state.question.options.map((opt, i) => (
-              <div
-                key={i}
-                className={`px-4 py-3 rounded-md text-left font-sans text-sm ${
-                  i === state.correct_index ? 'bg-success/15 text-success border border-success/30' : 'bg-surface-warm text-ink-secondary'
-                }`}
-              >
-                {OPTION_LABELS[i]}. {opt}
-              </div>
-            ))}
+            {state.question.options.map((opt, i) => {
+              const isCorrect = i === state.correct_index
+              const isMyWrongPick = i === state.my_choice && !isCorrect
+              return (
+                <div
+                  key={i}
+                  className={`px-4 py-3 rounded-md text-left font-sans text-sm border ${
+                    isCorrect
+                      ? 'bg-success/15 text-success border-success/30'
+                      : isMyWrongPick
+                        ? 'bg-danger/10 text-danger border-danger/30'
+                        : 'bg-surface-warm text-ink-secondary border-transparent'
+                  }`}
+                >
+                  {OPTION_LABELS[i]}. {opt}
+                  {isMyWrongPick && <span className="ml-2 text-xs">← ваш ответ</span>}
+                </div>
+              )
+            })}
           </div>
+          {state.question.explanation && (
+            <p className="text-sm text-ink-secondary mt-4 max-w-xs leading-relaxed">{state.question.explanation}</p>
+          )}
+          {state.mode === 'self_paced' && (
+            <button
+              onClick={next}
+              disabled={answering}
+              className="mt-6 w-full max-w-xs px-4 py-3 rounded-md bg-amber text-white font-sans font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              Далее
+            </button>
+          )}
         </Centered>
       )
     }

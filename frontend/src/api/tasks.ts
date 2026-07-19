@@ -17,6 +17,10 @@ export async function getTaskSets(kind?: MaterialKind): Promise<TaskSet[]> {
   return (await client.get<TaskSet[]>('/api/tasks', { params: kind ? { kind } : undefined })).data
 }
 
+export async function getTaskSet(id: string): Promise<TaskSet> {
+  return (await client.get<TaskSet>(`/api/tasks/${id}`)).data
+}
+
 export async function deleteTaskSet(id: string): Promise<void> {
   await client.delete(`/api/tasks/${id}`)
 }

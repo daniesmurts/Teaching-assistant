@@ -17,4 +17,8 @@ export const generateQuizRules = [
   body('level')
     .optional({ nullable: true, checkFalsy: true })
     .isIn(['recall', 'understanding', 'application']).withMessage('Неверный уровень'),
+
+  body('source_text')
+    .optional({ nullable: true, checkFalsy: true })
+    .isLength({ max: 20000 }).withMessage('Конспект слишком длинный (макс. 20000 символов)'),
 ]

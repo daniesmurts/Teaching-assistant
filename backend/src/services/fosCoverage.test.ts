@@ -6,7 +6,7 @@ function sections(overrides: Partial<FosSections> = {}): FosSections {
   return {
     passport: { competencies: [], topics: [], rows: [] },
     quiz_ids: [],
-    task_set_ids: [],
+    task_sets: [],
     tickets: [],
     criteria: [],
     ...overrides,

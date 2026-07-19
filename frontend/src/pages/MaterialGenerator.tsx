@@ -1,13 +1,15 @@
 import { useState, useEffect, FormEvent } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
+import CopyAllButton from '../components/ui/CopyAllButton'
+import BackLink from '../components/ui/BackLink'
 import { Input } from '../components/ui/Input'
 import { getCourses } from '../api/courses'
 import NoCourseHint from '../components/onboarding/NoCourseHint'
-import { generateTasks, getTaskSets, deleteTaskSet } from '../api/tasks'
+import { generateTasks, getTaskSets, getTaskSet, deleteTaskSet } from '../api/tasks'
 import { useUIStore } from '../store/uiStore'
 import type { TaskSet, MaterialKind } from '../types'
 
@@ -55,17 +57,35 @@ export default function MaterialGenerator() {
   const qc = useQueryClient()
   const addToast = useUIStore((s) => s.addToast)
 
+  // Deep link from elsewhere (e.g. the ФОС studio's «Источники» panel) — a
+  // ?id= opens that generated set directly instead of landing on a blank
+  // form. fos_course/fos_doc (also set by that same link) power the "← Назад
+  // к ФОС" back-link below.
+  const [searchParams] = useSearchParams()
+  const linkedId = searchParams.get('id')
+  const fosCourse = searchParams.get('fos_course')
+  const fosDoc = searchParams.get('fos_doc')
+
   const [topic, setTopic]           = useState('')
   const [difficulty, setDifficulty] = useState('intermediate')
   const [courseId, setCourseId]     = useState('')
   const [count, setCount]           = useState(5)
   const [result, setResult]         = useState<TaskSet | null>(null)
 
-  // Reset transient state when switching kind via the hub.
-  useEffect(() => { setTopic(''); setResult(null) }, [kind])
+  // Reset transient state when switching kind via the hub — but not when a
+  // ?id= is present, since that's the case that's about to populate `result`.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!linkedId) { setTopic(''); setResult(null) } }, [kind])
 
   const { data: courses = [] } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
   const { data: history = [] } = useQuery({ queryKey: ['task-sets', kind], queryFn: () => getTaskSets(kind) })
+
+  const { data: linkedSet } = useQuery({
+    queryKey: ['task-set', linkedId],
+    queryFn: () => getTaskSet(linkedId!),
+    enabled: Boolean(linkedId),
+  })
+  useEffect(() => { if (linkedSet) setResult(linkedSet) }, [linkedSet])
 
   const genMut = useMutation({
     mutationFn: () => generateTasks({ kind, topic: topic.trim(), difficulty, course_id: courseId || undefined, count }),
@@ -91,12 +111,16 @@ export default function MaterialGenerator() {
     const text = set.tasks
       .map((t, i) => `${i + 1}. ${t.title}\n${t.statement}`)
       .join('\n\n')
-    navigator.clipboard.writeText(text).then(() => addToast('Скопировано', 'success'))
+    return navigator.clipboard.writeText(text)
   }
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title={ui.title} subtitle={ui.subtitle} />
+      <TopBar
+        title={ui.title}
+        subtitle={ui.subtitle}
+        actions={fosDoc && <BackLink to={`/fos?course=${fosCourse}&doc=${fosDoc}`} label="← Назад к ФОС" />}
+      />
 
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="max-w-[960px] mx-auto page-enter">
@@ -144,7 +168,7 @@ export default function MaterialGenerator() {
                 <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">
                   {result.topic} · {DIFFICULTY_LABEL[result.difficulty] ?? result.difficulty}
                 </div>
-                <Button variant="secondary" size="sm" onClick={() => copyAll(result)}>Скопировать всё</Button>
+                <CopyAllButton onCopy={() => copyAll(result)} />
               </div>
               {result.tasks.map((t, i) => (
                 <div key={i} className="bg-surface border border-border rounded-lg p-4">

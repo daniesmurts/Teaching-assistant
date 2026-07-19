@@ -30,6 +30,7 @@ export type IconName =
   | 'file-check'      // programme conformance
   | 'shield'          // security / compliance / trust
   | 'message-chat'    // grounded document chat ("Спросить документ")
+  | 'copy'            // copy-to-clipboard actions
 
 const PATHS: Record<IconName, JSX.Element> = {
   home: (
@@ -79,7 +80,9 @@ const PATHS: Record<IconName, JSX.Element> = {
     <>
       <rect x="4" y="3" width="16" height="18" rx="2" />
       <path d="M10 9c0-1.5 1-2.5 2-2.5s2 1 2 2c0 1.5-2 1.5-2 3" />
-      <circle cx="12" cy="16" r="0.6" />
+      {/* Filled, not stroked — a hairline-stroked r=0.6 dot is sub-pixel and
+          disappears at small display sizes (16px and below). */}
+      <circle cx="12" cy="16" r="1" fill="currentColor" stroke="none" />
     </>
   ),
 
@@ -185,6 +188,13 @@ const PATHS: Record<IconName, JSX.Element> = {
 
   check: (
     <path d="M5 12.5l4.5 4.5L19 7" />
+  ),
+
+  copy: (
+    <>
+      <rect x="9" y="9" width="12" height="12" rx="1.5" />
+      <path d="M5 15V4.5A1.5 1.5 0 0 1 6.5 3H15" />
+    </>
   ),
 
   scale: (

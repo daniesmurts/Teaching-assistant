@@ -32,11 +32,12 @@ router.post(
       }
     }
 
-    const { topic, question_count, course_id, level } = req.body as {
+    const { topic, question_count, course_id, level, source_text } = req.body as {
       topic:          string
       question_count: number
       course_id?:     string
       level?:         QuizLevel
+      source_text?:   string
     }
 
     const result = await generateQuiz({
@@ -45,6 +46,7 @@ router.post(
       topic,
       questionCount: Number(question_count),
       level,
+      sourceText:    source_text,
     })
     res.status(201).json(result)
   })

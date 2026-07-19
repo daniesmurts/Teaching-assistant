@@ -68,7 +68,7 @@ export async function runFosGeneration(p: RunFosParams): Promise<void> {
   const taskSets: TaskSet[] = []
   let sections: FosSections = {
     passport: { competencies, topics, rows: [] },
-    quiz_ids: [], task_set_ids: [], tickets: [], criteria: [],
+    quiz_ids: [], task_sets: [], tickets: [], criteria: [],
   }
 
   // Step 2 — quiz, grouped ~3 topics per question batch, application level
@@ -98,7 +98,7 @@ export async function runFosGeneration(p: RunFosParams): Promise<void> {
         topic: topics.join(', '), difficulty: 'intermediate', count: 5,
       })
       taskSets.push(taskSet)
-      sections = { ...sections, task_set_ids: taskSets.map((t) => t.id) }
+      sections = { ...sections, task_sets: taskSets.map((t) => ({ id: t.id, kind: t.kind })) }
       await setFosSections(p.fosId, sections)
     } catch (err) {
       logger.warn({ message: `ФОС ${kind} step failed, continuing without it`, fosId: p.fosId, error: (err as Error).message })

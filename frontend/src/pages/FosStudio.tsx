@@ -1,26 +1,49 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
+import Icon, { type IconName } from '../components/ui/Icon'
+import LoadingSpinner from '../components/ui/LoadingSpinner'
 import { getCourses } from '../api/courses'
 import {
   createFosDocument, getFosDocument, listFosDocuments, saveFosSections, downloadFosExport,
 } from '../api/fos'
 import { useUIStore } from '../store/uiStore'
-import type { FosDocument, FosSections, FosTicket, FosCriterion } from '../types'
+import type { FosDocument, FosSections, FosTicket, FosCriterion, MaterialKind } from '../types'
+
+const KIND_LABEL: Record<MaterialKind, string> = { assignment: 'Задания', case: 'Кейсы', project: 'Проекты' }
+const KIND_ICON: Record<MaterialKind, IconName> = { assignment: 'list-checks', case: 'building', project: 'layers' }
 
 const AUTOSAVE_DEBOUNCE_MS = 1200
 const POLL_INTERVAL_MS = 3000
 const MAX_POLLS = 200
 const STEP_LABELS = ['Темы дисциплины', 'Тест', 'Задания', 'Кейсы', 'Проекты', 'Билеты', 'Критерии']
 
+// A few playful lines per step, cycled while that step is active — the same
+// wait either way, but it reads as the system actually doing something
+// rather than a frozen spinner. Purely decorative text, no motion of its own.
+const STEP_QUIPS: string[][] = [
+  ['Читаем программу курса…', 'Ищем ключевые темы дисциплины…'],
+  ['Придумываем вопросы…', 'Подбираем варианты ответов…', 'Расставляем ловушки для невнимательных…'],
+  ['Формулируем практические задания…', 'Подбираем условия позаковыристее…'],
+  ['Придумываем рабочие ситуации…', 'Собираем кейсы из жизни специалиста…'],
+  ['Проектируем этапы работы…', 'Формулируем ожидаемый результат…'],
+  ['Собираем билеты…', 'Балансируем темы по билетам…', 'Проверяем, что билеты не повторяются…'],
+  ['Прописываем критерии оценивания…', 'Сверяем шкалу «5–4–3–2»…'],
+]
+
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export default function FosStudio() {
   const addToast = useUIStore((s) => s.addToast)
 
-  const [courseId, setCourseId] = useState('')
+  // Deep link back into a specific run — set by SourcesPanel's links so
+  // clicking through to a generated test/task, then navigating back, lands
+  // exactly where the teacher left off instead of a blank course picker.
+  const [searchParams] = useSearchParams()
+  const [courseId, setCourseId] = useState(() => searchParams.get('course') ?? '')
   const [doc, setDoc]           = useState<FosDocument | null>(null)
   const [sections, setSections] = useState<FosSections | null>(null)
 
@@ -36,10 +59,44 @@ export default function FosStudio() {
   const cancelled = useRef(false)
   useEffect(() => () => { cancelled.current = true }, [])
 
+  // Which document id is currently being actively polled — guards against
+  // starting a second overlapping poll loop for the same or a different doc.
+  const pollingId = useRef<string | null>(null)
+
   useEffect(() => {
     setDoc(null)
     setSections(null)
+    cancelled.current = true   // stop any poll loop from the previous course
+    pollingId.current = null
   }, [courseId])
+
+  // The pg-boss job keeps running server-side regardless of whether this tab
+  // is open — a page refresh or navigating away never loses generation
+  // progress. What WAS missing is the frontend picking the live view back
+  // up: on load (or whenever the history list changes), a ?doc= deep link
+  // (from SourcesPanel's back-links) opens that exact run; failing that, a
+  // still-running document for this course resumes polling automatically
+  // instead of leaving the teacher looking at a static "собирается" row
+  // they'd have to click to refresh by hand.
+  useEffect(() => {
+    if (!historyQuery.data || doc) return
+
+    const wantedId = searchParams.get('doc')
+    const wanted = wantedId ? historyQuery.data.find((d) => d.id === wantedId) : null
+    if (wanted) {
+      setDoc(wanted)
+      setSections(wanted.sections)
+      if (wanted.status === 'pending' || wanted.status === 'processing') poll(wanted.id)
+      return
+    }
+
+    const inFlight = historyQuery.data.find((d) => d.status === 'pending' || d.status === 'processing')
+    if (inFlight) {
+      setDoc(inFlight)
+      poll(inFlight.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyQuery.data])
 
   const createMut = useMutation({
     mutationFn: () => createFosDocument({ courseId }),
@@ -52,25 +109,31 @@ export default function FosStudio() {
   })
 
   async function poll(id: string) {
-    for (let i = 0; i < MAX_POLLS && !cancelled.current; i++) {
-      await delay(POLL_INTERVAL_MS)
+    cancelled.current = false
+    pollingId.current = id
+    // Fetch immediately on (re)entry — resuming after a refresh shouldn't
+    // wait a full interval to show where the job actually stands.
+    for (let i = 0; i < MAX_POLLS && !cancelled.current && pollingId.current === id; i++) {
       const latest = await getFosDocument(id)
+      if (cancelled.current || pollingId.current !== id) return
       setDoc(latest)
       if (latest.status === 'ready') {
         setSections(latest.sections)
         historyQuery.refetch()
-        break
+        return
       }
       if (latest.status === 'failed') {
         addToast(latest.error_message || 'Не удалось собрать ФОС', 'error')
-        break
+        return
       }
+      await delay(POLL_INTERVAL_MS)
     }
   }
 
   function openHistoryItem(item: FosDocument) {
     setDoc(item)
     setSections(item.sections)
+    if (item.status === 'pending' || item.status === 'processing') poll(item.id)
   }
 
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -153,45 +216,46 @@ export default function FosStudio() {
             <div className="bg-surface border border-border rounded-lg p-4">
               <div className="text-xs font-sans font-medium text-ink-secondary mb-2">История</div>
               <div className="flex flex-col gap-1">
-                {historyQuery.data.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => openHistoryItem(item)}
-                    className="text-left text-xs font-sans text-ink-secondary hover:text-ink px-2 py-1.5 rounded hover:bg-surface-warm transition-colors"
-                  >
-                    {new Date(item.created_at).toLocaleString('ru-RU')} — {statusLabel(item.status)}
-                  </button>
-                ))}
+                {historyQuery.data.map((item) => {
+                  const live = item.status === 'pending' || item.status === 'processing'
+                  const isOpen = doc?.id === item.id
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => openHistoryItem(item)}
+                      className={`flex items-center gap-2 text-left px-2 py-2 rounded transition-colors ${
+                        isOpen ? 'bg-amber-light/60' : 'hover:bg-surface-warm'
+                      }`}
+                    >
+                      {live && <span className="w-1.5 h-1.5 rounded-full bg-amber animate-pulse motion-reduce:animate-none shrink-0" />}
+                      <div className="min-w-0">
+                        <div className="text-xs font-sans font-medium text-ink truncate">{historyTitle(item)}</div>
+                        <div className="text-[11px] font-sans text-ink-tertiary">{new Date(item.created_at).toLocaleString('ru-RU')}</div>
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )}
 
           {isGenerating && doc && (
-            <div className="text-center py-8 text-sm font-sans text-ink-secondary">
-              {STEP_LABELS[Math.min(doc.progress_done, STEP_LABELS.length - 1)] ?? 'Готовим ФОС'}…
-              {doc.progress_total > 0 && ` (${doc.progress_done} из ${doc.progress_total})`}
-            </div>
+            <FosProgressTimeline doc={doc} />
           )}
 
           {sections && doc?.status === 'ready' && (
             <div className="result-appear space-y-4">
               <CoverageBanner doc={doc} />
 
-              <div className="flex items-center justify-end gap-2">
-                <Button variant="secondary" size="sm" onClick={() => downloadFosExport(doc.id, 'docx')}>
-                  Скачать DOCX
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => downloadFosExport(doc.id, 'pdf')}>
-                  Скачать PDF
-                </Button>
-              </div>
+              <ExportButtons docId={doc.id} />
+
+              <SourcesPanel sections={sections} courseId={courseId} docId={doc.id} />
 
               <PassportSection sections={sections} disciplineName={disciplineName} />
               <TicketsSection tickets={sections.tickets} onEdit={editTicket} />
               <CriteriaSection criteria={sections.criteria} onEdit={editCriterion} />
 
               <p className="text-xs font-sans text-ink-tertiary">
-                Тесты и задания сформированы отдельными генераторами и доступны в разделах «Тесты» и «Материалы».
                 ИСПУМ помогает с черновиком — итоговый ФОС утверждает преподаватель.
               </p>
             </div>
@@ -202,8 +266,101 @@ export default function FosStudio() {
   )
 }
 
-function statusLabel(status: FosDocument['status']): string {
-  return { pending: 'ожидает', processing: 'собирается', ready: 'готов', failed: 'ошибка' }[status]
+// A history row used to just say "17.07.2026, 07:21 — готов" for every
+// finished run — indistinguishable from any other run that same day. Once a
+// document is ready, name it by what's actually inside instead of repeating
+// the status word on every row.
+function historyTitle(item: FosDocument): string {
+  if (item.status === 'pending') return 'Ожидает очереди…'
+  if (item.status === 'processing') return `Собирается — ${STEP_LABELS[Math.min(item.progress_done, STEP_LABELS.length - 1)]}…`
+  if (item.status === 'failed') return item.error_message ? `Ошибка: ${item.error_message}` : 'Ошибка сборки'
+
+  const s = item.sections
+  if (!s) return 'Готово'
+  const parts: string[] = []
+  if (s.tickets.length > 0) parts.push(`${s.tickets.length} ${pluralRu(s.tickets.length, 'билет', 'билета', 'билетов')}`)
+  if (s.criteria.length > 0) parts.push(`${s.criteria.length} ${pluralRu(s.criteria.length, 'критерий', 'критерия', 'критериев')}`)
+  return parts.length > 0 ? parts.join(', ') : 'Готово'
+}
+
+function pluralRu(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10, mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return one
+  if ([2, 3, 4].includes(mod10) && ![12, 13, 14].includes(mod100)) return few
+  return many
+}
+
+// Multi-step progress — a filled step timeline instead of a bare spinner +
+// text, plus a rotating status line so a several-minute wait reads as work
+// actually happening rather than a stalled request. Every visible motion
+// (the pulse ring, the connector fill, the quip crossfade) is driven by real
+// state changes on a ~3s poll cadence, not a decorative loop, and everything
+// backs off under prefers-reduced-motion (motion-reduce:).
+function FosProgressTimeline({ doc }: { doc: FosDocument }) {
+  const total = Math.max(doc.progress_total, STEP_LABELS.length)
+  const done = Math.min(doc.progress_done, total)
+  const activeIndex = Math.min(done, STEP_LABELS.length - 1)
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0
+
+  const quips = STEP_QUIPS[activeIndex] ?? ['Готовим ФОС…']
+  const [quipIndex, setQuipIndex] = useState(0)
+
+  useEffect(() => {
+    setQuipIndex(0)
+    if (quips.length <= 1) return
+    const id = setInterval(() => setQuipIndex((i) => (i + 1) % quips.length), 2500)
+    return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndex])
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-6 result-appear">
+      <div className="flex items-baseline justify-between mb-5">
+        <span className="text-sm font-sans font-medium text-ink">Собираем ФОС</span>
+        <span className="text-sm font-serif font-bold text-amber tabular-nums">{pct}%</span>
+      </div>
+
+      {/* Step circles + connectors */}
+      <div className="flex items-center mb-4">
+        {STEP_LABELS.map((label, i) => {
+          const isDone = i < activeIndex
+          const isActive = i === activeIndex
+          return (
+            <div key={label} className="flex items-center flex-1 last:flex-none">
+              <div className="flex flex-col items-center gap-1.5 w-14 shrink-0">
+                <div
+                  className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors duration-300 ${
+                    isDone
+                      ? 'bg-success text-white'
+                      : isActive
+                        ? 'bg-amber text-white ring-4 ring-amber/20 animate-pulse motion-reduce:animate-none'
+                        : 'bg-surface-warm text-ink-tertiary border border-border-mid'
+                  }`}
+                >
+                  {isDone ? <Icon name="check" size={14} /> : <span className="text-[11px] font-sans font-medium">{i + 1}</span>}
+                </div>
+                <span className={`text-[10px] font-sans text-center leading-tight ${isActive ? 'text-ink font-medium' : 'text-ink-tertiary'}`}>
+                  {label}
+                </span>
+              </div>
+              {i < STEP_LABELS.length - 1 && (
+                <div className="flex-1 h-0.5 rounded-full bg-border-mid overflow-hidden -mt-4">
+                  <div
+                    className="h-full bg-success transition-[width] duration-500 ease-out"
+                    style={{ width: isDone ? '100%' : '0%' }}
+                  />
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      <p key={quipIndex} className="text-center text-xs font-sans text-ink-secondary animate-[fadeIn_400ms_ease] motion-reduce:animate-none">
+        {quips[quipIndex]}
+      </p>
+    </div>
+  )
 }
 
 function CoverageBanner({ doc }: { doc: FosDocument }) {
@@ -229,6 +386,101 @@ function CoverageBanner({ doc }: { doc: FosDocument }) {
           <li key={i} className="text-xs font-sans text-ink-secondary">· {w}</li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+const DownloadIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <path d="M7 10l5 5 5-5" /><path d="M12 15V3" />
+  </svg>
+)
+
+// Plain outlined buttons read as a near-transparent ghost pill here — this is
+// the deliverable action for the whole page, so it needs to look like an
+// obvious, clickable download rather than blend into the surrounding cards.
+// Same "solid surface + border + icon + shadow" fix already used for the
+// same complaint on the programme-analysis PDF export
+// (institution/InstitutionProgramDetail.tsx).
+function ExportButtons({ docId }: { docId: string }) {
+  const [downloading, setDownloading] = useState<'docx' | 'pdf' | null>(null)
+
+  async function handleDownload(format: 'docx' | 'pdf') {
+    setDownloading(format)
+    try {
+      await downloadFosExport(docId, format)
+    } finally {
+      setDownloading(null)
+    }
+  }
+
+  const btnClass = 'inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-surface border border-border-mid text-ink text-sm font-sans font-medium shadow-sm hover:border-amber hover:text-amber transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <button className={btnClass} disabled={downloading !== null} onClick={() => handleDownload('docx')}>
+        {downloading === 'docx' ? <LoadingSpinner size={15} /> : <DownloadIcon />}
+        Скачать DOCX
+      </button>
+      <button className={btnClass} disabled={downloading !== null} onClick={() => handleDownload('pdf')}>
+        {downloading === 'pdf' ? <LoadingSpinner size={15} /> : <DownloadIcon />}
+        Скачать PDF
+      </button>
+    </div>
+  )
+}
+
+// Тесты and задания/кейсы/проекты are generated by the existing standalone
+// generators, not stored inline in the ФОС — this used to be a one-line
+// footnote at the very bottom of the page, easy to miss entirely. Promoted
+// to a proper card right under the export buttons, with real links straight
+// to each generated item (?id= deep link, opened by Quizzes.tsx /
+// MaterialGenerator.tsx) instead of just naming the section to go look in.
+//
+// Each link also carries a back-reference (fos_course/fos_doc) so the target
+// page can show a "← Назад к ФОС" link straight back to this exact run —
+// otherwise getting back means sidebar → Материалы → ФОС → re-pick the
+// course → re-pick the run from history, every single time.
+function SourcesPanel({ sections, courseId, docId }: { sections: FosSections; courseId: string; docId: string }) {
+  const back = `fos_course=${courseId}&fos_doc=${docId}`
+  const quizLinks = sections.quiz_ids.map((id, i) => ({
+    key: `quiz-${id}`,
+    to: `/quizzes?id=${id}&${back}`,
+    // Not 'quiz' — that icon's silhouette (a rounded rect containing a
+    // question-mark squiggle) reads as a generic "missing icon" placeholder
+    // at chip size, easily mistaken for a broken render. file-check (a
+    // document + checkmark) is unambiguous at the same size.
+    icon: 'file-check' as IconName,
+    label: sections.quiz_ids.length > 1 ? `Тест ${i + 1}` : 'Тест',
+  }))
+  const taskLinks = sections.task_sets.map((t) => ({
+    key: `task-${t.id}`,
+    to: `/materials/${t.kind}?id=${t.id}&${back}`,
+    icon: KIND_ICON[t.kind],
+    label: KIND_LABEL[t.kind],
+  }))
+  const links = [...quizLinks, ...taskLinks]
+  if (links.length === 0) return null
+
+  return (
+    <div className="bg-amber-light/60 border border-amber-mid/30 rounded-lg p-4">
+      <div className="text-xs font-sans font-medium text-ink mb-2.5">
+        Тесты и задания сформированы отдельно — открыть и отредактировать:
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {links.map((l) => (
+          <Link
+            key={l.key}
+            to={l.to}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-surface border border-border-mid text-xs font-sans font-medium text-ink hover:border-amber hover:text-amber transition-colors"
+          >
+            <Icon name={l.icon} size={16} />
+            {l.label}
+          </Link>
+        ))}
+      </div>
     </div>
   )
 }

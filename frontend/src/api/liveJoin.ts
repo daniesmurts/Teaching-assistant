@@ -33,3 +33,8 @@ export async function submitAnswer(code: string, participantToken: string, choic
     choice_index: choiceIndex,
   })
 }
+
+// Self-paced only — moves the participant on to their own next question.
+export async function advanceSelf(code: string, participantToken: string): Promise<void> {
+  await publicClient.post(`/api/live-join/${code}/advance`, { participant_token: participantToken })
+}

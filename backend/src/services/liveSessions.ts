@@ -1,4 +1,4 @@
-import type { LiveSessionStatus } from '../../../shared/types'
+import type { LiveSessionStatus, GradeLetter, QuizQuestion } from '../../../shared/types'
 
 // Live QR quiz (TODO.md Feature Y) — the session state machine, extracted as
 // a pure function so it's unit-testable without a DB. Everything else in
@@ -29,4 +29,27 @@ export function nextStatus(current: LiveSessionState, totalQuestions: number): L
   }
   // 'finished' — no further transition; idempotent.
   return current
+}
+
+// Scores one participant's raw answers (question_index -> choice_index)
+// against the quiz's own correct_index. Shared by the host poll view
+// (routes/liveSessions.ts's loadSessionView) and the save-to-journal
+// endpoint, so the two never compute a participant's score differently.
+export function scoreParticipant(
+  questions: QuizQuestion[], answers: Record<string, number>
+): { correct: number; total: number } {
+  let correct = 0
+  questions.forEach((q, i) => { if (answers[String(i)] === q.correct_index) correct++ })
+  return { correct, total: questions.length }
+}
+
+// Live-quiz score -> the platform's Russian 5-point scale, so a saved
+// journal entry plugs directly into student trajectory and cohort
+// analytics, both of which are built assuming this scale.
+export function scoreToGrade(correct: number, total: number): { grade: GradeLetter; label: string } {
+  const pct = total > 0 ? (correct / total) * 100 : 0
+  if (pct >= 90) return { grade: '5', label: 'Отлично' }
+  if (pct >= 75) return { grade: '4', label: 'Хорошо' }
+  if (pct >= 60) return { grade: '3', label: 'Удовлетворительно' }
+  return { grade: '2', label: 'Неудовлетворительно' }
 }

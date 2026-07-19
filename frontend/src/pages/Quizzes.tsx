@@ -1,17 +1,20 @@
-import { useState, FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, FormEvent } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
+import CopyAllButton from '../components/ui/CopyAllButton'
+import BackLink from '../components/ui/BackLink'
+import Icon from '../components/ui/Icon'
 import { Input } from '../components/ui/Input'
 import { getCourses } from '../api/courses'
 import NoCourseHint from '../components/onboarding/NoCourseHint'
-import { generateQuiz, getQuizzes, deleteQuiz } from '../api/quizzes'
+import { generateQuiz, getQuizzes, getQuiz, deleteQuiz } from '../api/quizzes'
 import { createLiveSession } from '../api/liveSessions'
 import { usePlan } from '../hooks/usePlan'
 import { useUIStore } from '../store/uiStore'
-import type { Quiz, QuizLevel, QuizQuestion, PresentationSource } from '../types'
+import type { Quiz, QuizLevel, QuizQuestion, PresentationSource, LiveSessionMode } from '../types'
 
 const LEVEL_LABEL: Record<QuizLevel, string> = {
   recall:        'Запоминание',
@@ -29,10 +32,27 @@ export default function Quizzes() {
   const [count, setCount]           = useState(10)
   const [courseId, setCourseId]     = useState('')
   const [level, setLevel]           = useState<QuizLevel | ''>('')
+  const [sourceText, setSourceText] = useState('')
   const [activeQuiz, setActiveQuiz] = useState<Quiz | null>(null)
 
   const { data: courses = [] } = useQuery({ queryKey: ['courses'],   queryFn: getCourses })
   const { data: list = [] }    = useQuery({ queryKey: ['quizzes'],   queryFn: () => getQuizzes() })
+
+  // Deep link from elsewhere (e.g. the ФОС studio's «Источники» panel) — a
+  // ?id= opens that generated quiz directly instead of landing on the form.
+  // fos_course/fos_doc (also set by that same link) power the "← Назад к
+  // ФОС" back-link below, so getting back doesn't mean re-navigating the
+  // whole sidebar → Материалы → ФОС → course → history path by hand.
+  const [searchParams] = useSearchParams()
+  const linkedId = searchParams.get('id')
+  const fosCourse = searchParams.get('fos_course')
+  const fosDoc = searchParams.get('fos_doc')
+  const { data: linkedQuiz } = useQuery({
+    queryKey: ['quiz', linkedId],
+    queryFn: () => getQuiz(linkedId!),
+    enabled: Boolean(linkedId),
+  })
+  useEffect(() => { if (linkedQuiz) setActiveQuiz(linkedQuiz) }, [linkedQuiz])
 
   const generateMut = useMutation({
     mutationFn: () => generateQuiz({
@@ -40,11 +60,13 @@ export default function Quizzes() {
       question_count: count,
       course_id:      courseId || undefined,
       level:          level || undefined,
+      source_text:    sourceText.trim() || undefined,
     }),
     onSuccess: ({ quiz }) => {
       qc.invalidateQueries({ queryKey: ['quizzes'] })
       setActiveQuiz(quiz)
       setTopic('')
+      setSourceText('')
     },
     onError: () => addToast('Не удалось сгенерировать тест', 'error'),
   })
@@ -68,9 +90,12 @@ export default function Quizzes() {
       <TopBar
         title="Тесты — быстрая проверка по материалам"
         actions={activeQuiz && (
-          <Button size="sm" variant="secondary" onClick={() => setActiveQuiz(null)}>
-            ← Новый тест
-          </Button>
+          <div className="flex items-center gap-2">
+            {fosDoc && <BackLink to={`/fos?course=${fosCourse}&doc=${fosDoc}`} label="← Назад к ФОС" />}
+            <Button size="sm" variant="secondary" onClick={() => setActiveQuiz(null)}>
+              ← Новый тест
+            </Button>
+          </div>
         )}
       />
       <div className="flex-1 overflow-y-auto">
@@ -132,6 +157,17 @@ export default function Quizzes() {
                   </select>
                 </div>
 
+                <div>
+                  <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">Конспект лекции (опционально)</label>
+                  <textarea
+                    className={`${selectClass} min-h-[100px] resize-y`}
+                    value={sourceText}
+                    onChange={(e) => setSourceText(e.target.value)}
+                    placeholder="Вставьте текст конспекта — тест будет составлен строго по нему, без привязки к загруженным материалам предмета"
+                    maxLength={20000}
+                  />
+                </div>
+
                 <Button type="submit" className="w-full" loading={generateMut.isPending} disabled={!topic.trim() || atQuizLimit}>
                   {atQuizLimit ? 'Лимит достигнут' : 'Сгенерировать тест'}
                   {!atQuizLimit && quizzesLimit !== null && (
@@ -190,10 +226,10 @@ function QuizDisplay({ quiz }: { quiz: Quiz }) {
   const addToast = useUIStore((s) => s.addToast)
   const [reveal, setReveal] = useState<Set<number>>(new Set())
   const [openSource, setOpenSource] = useState<PresentationSource | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [liveMode, setLiveMode] = useState<LiveSessionMode>('paced')
 
   const launchMut = useMutation({
-    mutationFn: () => createLiveSession(quiz.id),
+    mutationFn: () => createLiveSession(quiz.id, liveMode),
     onSuccess: (session) => navigate(`/live/host/${session.id}`),
     onError: (err: unknown) => {
       const status = (err as { response?: { status?: number } }).response?.status
@@ -223,31 +259,57 @@ function QuizDisplay({ quiz }: { quiz: Quiz }) {
       lines.push(`   Пояснение: ${q.explanation}`)
       lines.push('')
     })
-    navigator.clipboard.writeText(lines.join('\n')).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+    return navigator.clipboard.writeText(lines.join('\n'))
   }
 
   const sources = quiz.sources ?? []
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between">
+      {/* Toolbar — flex-wrap so a long topic label drops the action row to
+          its own line instead of squeezing it into a sliver of width. */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">
           {quiz.questions.length} вопросов · {quiz.topic}
         </div>
-        <div className="flex items-center gap-3">
-          <Button variant="secondary" size="sm" onClick={() => launchMut.mutate()} loading={launchMut.isPending}>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Pacing choice — made once, at launch, since it changes the
+              whole interaction model (shared vs. per-participant question
+              pointer) rather than something togglable mid-session. */}
+          <div className="inline-flex rounded-md border border-border-mid overflow-hidden shrink-0" role="group" aria-label="Темп прохождения">
+            <button
+              onClick={() => setLiveMode('paced')}
+              className={`px-2.5 py-1.5 text-xs font-sans font-medium whitespace-nowrap transition-colors ${
+                liveMode === 'paced' ? 'bg-amber text-white' : 'bg-surface text-ink-secondary hover:bg-surface-warm'
+              }`}
+            >
+              В темпе группы
+            </button>
+            <button
+              onClick={() => setLiveMode('self_paced')}
+              className={`px-2.5 py-1.5 text-xs font-sans font-medium whitespace-nowrap border-l border-border-mid transition-colors ${
+                liveMode === 'self_paced' ? 'bg-amber text-white' : 'bg-surface text-ink-secondary hover:bg-surface-warm'
+              }`}
+            >
+              В своём темпе
+            </button>
+          </div>
+          {/* The standout action gets the primary amber treatment so it
+              actually reads as the headline feature here — it used to sit
+              in the same washed-out grey as the two lightweight utility
+              actions next to it, indistinguishable at a glance. */}
+          <Button variant="primary" size="sm" className="whitespace-nowrap" onClick={() => launchMut.mutate()} loading={launchMut.isPending}>
+            {!launchMut.isPending && <Icon name="play-circle" size={14} />}
             Запустить в аудитории
           </Button>
-          <button onClick={revealAll} className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors">
+          <button
+            onClick={revealAll}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-surface border border-border-mid text-xs font-sans font-medium text-ink-secondary shadow-sm whitespace-nowrap shrink-0 hover:border-amber hover:text-amber transition-colors"
+          >
+            <Icon name="check" size={13} />
             Показать все ответы
           </button>
-          <button onClick={copyAll} className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors">
-            {copied ? '✓ Скопировано' : 'Скопировать всё'}
-          </button>
+          <CopyAllButton onCopy={copyAll} />
         </div>
       </div>
 

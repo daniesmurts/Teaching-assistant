@@ -8,6 +8,7 @@ import SlideImagePicker from './SlideImagePicker'
 import { slidesToText, legacySlidesToText } from './slideText'
 import { slidesToHtml, legacySlidesToHtml } from './slideHtml'
 import { copyRich } from './clipboard'
+import CopyAllButton from '../ui/CopyAllButton'
 
 // ─── RichText ─────────────────────────────────────────────────────────────────
 //
@@ -601,7 +602,6 @@ interface Props {
 export default function SlideContent({
   slides, presentationId, onSlidesChange, content, sources,
 }: Props) {
-  const [copiedAll, setCopiedAll] = useState(false)
   const [openSource, setOpenSource] = useState<PresentationSource | null>(null)
   const sourceList = sources ?? []
 
@@ -617,11 +617,7 @@ export default function SlideContent({
     const text = useTyped
       ? slidesToText(slides!)
       : legacySlidesToText(legacySlides)
-    void copyRich(html, text).then((ok) => {
-      if (!ok) return
-      setCopiedAll(true)
-      setTimeout(() => setCopiedAll(false), 2000)
-    })
+    return copyRich(html, text)
   }
 
   function handleImageChange(slideIdx: number, image: SlideImage | null) {
@@ -650,16 +646,11 @@ export default function SlideContent({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
         <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">
           {totalSlides} слайдов
         </div>
-        <button
-          onClick={copyAll}
-          className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors"
-        >
-          {copiedAll ? '✓ Скопировано' : 'Скопировать всё'}
-        </button>
+        <CopyAllButton onCopy={copyAll} />
       </div>
 
       {useTyped

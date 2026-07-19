@@ -14,6 +14,7 @@ export interface GenerateQuizParams {
   topic:         string
   questionCount: number             // 5–20, clamped server-side
   level?:        QuizLevel
+  sourceText?:   string             // pasted lecture notes — takes priority over RAG retrieval
 }
 
 export interface GenerateQuizResult {
@@ -32,9 +33,11 @@ export async function generateQuiz(params: GenerateQuizParams): Promise<Generate
     ? await findCourseById(params.courseId, params.teacherId)
     : null
 
-  const sources = params.courseId
-    ? await retrieveSources(params)
-    : []
+  const sources = params.sourceText
+    ? []
+    : params.courseId
+      ? await retrieveSources(params)
+      : []
 
   const count = clampCount(params.questionCount)
 
@@ -191,6 +194,12 @@ function buildPrompt(
         `через рабочие ситуации этой профессии, и в "explanation" кратко отмечайте, где это встретится в работе.`
       )
     }
+    lines.push('')
+  }
+
+  if (params.sourceText) {
+    lines.push(`## Конспект лекции (составляйте вопросы строго по этому материалу)`)
+    lines.push(sanitiseForPrompt(params.sourceText))
     lines.push('')
   }
 

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
+import CopyAllButton from '../components/ui/CopyAllButton'
 import { getCourses } from '../api/courses'
 import NoCourseHint from '../components/onboarding/NoCourseHint'
 import { getStudents } from '../api/grading'
@@ -230,19 +231,18 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function TopicResult({ set }: { set: TopicSet }) {
-  const addToast = useUIStore((s) => s.addToast)
   function copyAll() {
     const text = set.topics.map((t, i) => `${i + 1}. ${t.title}\n${t.rationale}\n${t.scope}`).join('\n\n')
-    navigator.clipboard.writeText(text).then(() => addToast('Скопировано', 'success'))
+    return navigator.clipboard.writeText(text)
   }
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="text-sm font-sans text-ink-secondary">
           {set.topics.length} тем
           {set.used_search && <span className="ml-2 text-[10px] font-medium bg-amber-light text-amber px-1.5 py-0.5 rounded-sm">✦ с поиском</span>}
         </div>
-        <button onClick={copyAll} className="text-xs font-sans text-amber hover:underline">Скопировать все</button>
+        <CopyAllButton onCopy={copyAll} label="Скопировать все" />
       </div>
       {set.topics.map((t, i) => <TopicCard key={i} topic={t} index={i} />)}
     </div>

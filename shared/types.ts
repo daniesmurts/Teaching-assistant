@@ -793,10 +793,27 @@ export interface Quiz {
 
 export type LiveSessionStatus = 'lobby' | 'question' | 'reveal' | 'finished'
 
+// 'paced' — the original teacher-driven mode: the whole room is locked to
+// whatever question the teacher is currently showing.
+// 'self_paced' — each participant moves through the quiz at their own
+// speed; live_sessions.status/current_question_index only track a coarse
+// session-level open/closed marker (lobby -> question -> finished), the
+// real per-student progress lives on live_participants.
+export type LiveSessionMode = 'paced' | 'self_paced'
+
 export interface LiveQuestionResult {
   question_index: number
   answer_counts:  number[]   // length 4, indexed by option
   correct_index:  number
+}
+
+export interface LiveSessionParticipantProgress {
+  id:                      string
+  nickname:                string | null
+  current_question_index: number
+  finished_at:             string | null
+  score:                   { correct: number; total: number }   // "who got what points" — computed against the quiz's own correct_index, present regardless of mode or whether they've finished yet
+  already_saved:           boolean   // true once this participant's result has been saved to the grading journal (assignments table) — idempotency signal for the save-to-journal review screen
 }
 
 export interface LiveSession {
@@ -804,21 +821,26 @@ export interface LiveSession {
   teacher_id:              string
   quiz_id:                 string
   join_code:               string
+  mode:                    LiveSessionMode
   status:                  LiveSessionStatus
   current_question_index: number
   participant_count:       number
-  answer_counts:           number[] | null   // live counts for the CURRENT question; null in lobby/finished
-  results:                 LiveQuestionResult[] | null
+  answer_counts:           number[] | null   // live counts for the CURRENT question; null in lobby/finished — 'paced' only
+  results:                 LiveQuestionResult[] | null   // 'paced' only
+  participants:            LiveSessionParticipantProgress[] | null   // host roster / leaderboard view — both modes
   created_at:              string
   finished_at:             string | null
 }
 
 export interface LiveJoinState {
+  mode:                    LiveSessionMode
   status:                  LiveSessionStatus
   current_question_index: number
-  question:                { question: string; options: string[] } | null
+  question:                { question: string; options: string[]; explanation?: string } | null
   has_answered:            boolean
+  my_choice:               number | null   // this participant's own pick for the current question, if answered
   correct_index:           number | null   // only populated once status === 'reveal'
+  participant_score:       { correct: number; total: number } | null   // only populated once status === 'finished'
 }
 
 // ─── Curriculum overlap analysis (Анализ дублирования содержания) ───────────────
@@ -1056,8 +1078,8 @@ export interface FosSections {
     topics:       string[]
     rows:         FosPassportRow[]
   }
-  quiz_ids:     string[]   // existing `quizzes` rows generated for this ФОС (reused as-is)
-  task_set_ids: string[]   // existing `task_sets` rows generated for this ФОС
+  quiz_ids:  string[]   // existing `quizzes` rows generated for this ФОС (reused as-is)
+  task_sets: { id: string; kind: MaterialKind }[]   // existing `task_sets` rows — kind kept alongside id so the UI can link to the right generator page (/materials/:kind)
   tickets:      FosTicket[]
   criteria:     FosCriterion[]
 }

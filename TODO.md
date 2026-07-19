@@ -964,6 +964,44 @@ per-question live results don't yet feed cohort analytics or auto-generate a
 «разбор ошибок» (Research.md §9.3) — a natural fast-follow once usage data
 exists.
 
+**Update (2026-07-17) — first real classroom use surfaced a genuine gap and
+several bugs, both now fixed:**
+- **Self-paced mode added**, chosen at launch alongside the original
+  teacher-paced one — students were stuck waiting for the whole room on
+  every question, which both rushed slow students and opened a
+  "watch your neighbour's timing" risk on tests without discussion.
+  `live_participants` gained its own `current_question_index`/`finished_at`
+  (migration `082_live_session_mode.sql`); a self-paced participant's
+  `lobby|question|reveal|finished` status is derived per-participant
+  server-side, reusing `LiveJoin.tsx`'s existing render logic unchanged — only
+  a new «Далее» button (`POST /api/live-join/:code/advance`) drives their own
+  progression. Host projector shows a live roster (`RosterView`) instead of a
+  shared histogram for this mode.
+- **Fixed:** the "Сессия недоступна" bug — `/state` polling 404'd once a
+  session finished (the query excluded finished sessions; that exclusion
+  should only ever have gated *joining*), so students saw an error instead of
+  their results.
+- **Fixed:** the host projector screen rendered no question/answer text at
+  all, only letter badges and counts — it never fetched the quiz.
+- **Fixed:** reveal never showed the student's own (possibly wrong) pick or
+  the question's explanation, both already generated and shown in the
+  regular quiz-card view.
+- **Fixed:** nickname was optional, making results unattributable to a
+  specific student — now required.
+- **Fixed:** students never saw their own final score, only "Спасибо за
+  участие!" — now shown once their attempt reaches `finished`.
+- **New: «Сохранить в журнал»** — the teacher asked how a live-quiz score
+  factors into a student's semester grade, since results previously lived
+  only in `live_sessions`/`live_participants`, isolated from `assignments`
+  (История, student trajectory, cohort analytics). A review screen on the
+  finished view maps each participant's nickname to a real student (name +
+  group, same autocomplete as `GradingForm.tsx`), converts score to 5/4/3/2
+  (`scoreToGrade()`), and writes it through the same create→approve pipeline
+  every other grade uses — not automatic; the teacher confirms first, same
+  posture as every other AI/automated output on this platform.
+  `live_participants.assignment_id` (migration
+  `083_live_session_journal_link.sql`) makes re-saving idempotent.
+
 Original design notes below.
 
 From the 2026-07-16 wow-feature slate ([Research.md](Research.md) §9.5);
