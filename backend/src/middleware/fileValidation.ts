@@ -98,9 +98,18 @@ const MAGIC_BYTES: Record<string, string> = {
   '89504e47': 'image/png',
 }
 
+// Detect a file's real MIME type from its leading magic bytes, or null when
+// the signature isn't one we recognise. Exported so the URL-fetch path
+// (services/documentFetch.ts) can validate a downloaded buffer the same way
+// uploads are validated — a server that lies in its Content-Type header
+// shouldn't get a disguised file past us.
+export function detectMimeFromBuffer(buffer: Buffer): string | null {
+  const header = buffer.subarray(0, 4).toString('hex').toLowerCase()
+  return MAGIC_BYTES[header] ?? null
+}
+
 function contentMatchesDeclaredType(file: Express.Multer.File): boolean {
-  const header       = file.buffer.subarray(0, 4).toString('hex').toLowerCase()
-  const detectedMime = MAGIC_BYTES[header]
+  const detectedMime = detectMimeFromBuffer(file.buffer)
   return !detectedMime || detectedMime === file.mimetype
 }
 

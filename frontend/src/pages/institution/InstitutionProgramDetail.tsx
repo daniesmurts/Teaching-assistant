@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Button from '../../components/ui/Button'
 import Select from '../../components/ui/Select'
 import LoadingSpinner from '../../components/ui/LoadingSpinner'
+import UrlUploadField from '../../components/ui/UrlUploadField'
 import {
   getProgram, getAnalysis, saveDisciplines, saveCompetencies, analyzeProgram, deleteProgram,
   downloadAnalysisPdf, updateProgram, uploadProgramDocument, deleteProgramDocument,
@@ -1286,7 +1287,10 @@ function DocumentsPanel({
     list.sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime())
   }
 
-  async function attachOne(input: { file: File; kind: 'working_programme' | 'practice'; practiceType?: ProgramPracticeType | null; disciplineId?: string | null }) {
+  async function attachOne(
+    input: { kind: 'working_programme' | 'practice'; practiceType?: ProgramPracticeType | null; disciplineId?: string | null }
+      & ({ file: File } | { fileUrl: string })
+  ) {
     setUploading(true)
     try {
       const res = await uploadProgramDocument(programId, input)
@@ -1409,6 +1413,7 @@ function DocumentsPanel({
                 uploading={uploading}
                 reviewing={reviewingId === d.id}
                 onUpload={(file) => attachOne({ file, kind: 'working_programme', disciplineId: d.id })}
+                onUploadUrl={(fileUrl) => attachOne({ fileUrl, kind: 'working_programme', disciplineId: d.id })}
                 onRemove={(doc) => removeOne(doc)}
                 onReview={() => runReview(d)}
               />
@@ -1436,7 +1441,11 @@ function DocumentsPanel({
             <AddPractice
               disabled={uploading}
               usedTypes={practices.map((d) => d.practice_type).filter(Boolean) as ProgramPracticeType[]}
-              onSubmit={(input) => attachOne({ file: input.file, kind: 'practice', practiceType: input.type })}
+              onSubmit={(input) =>
+                'file' in input
+                  ? attachOne({ file: input.file, kind: 'practice', practiceType: input.type })
+                  : attachOne({ fileUrl: input.fileUrl, kind: 'practice', practiceType: input.type })
+              }
             />
           </div>
         )}
@@ -1483,6 +1492,46 @@ function DocumentRow({
   )
 }
 
+// A discrete action in a discipline's action row. Rendered as a bordered chip
+// (not a bare text link) so a row of actions reads as separate buttons rather
+// than a run-on sentence, and so toggles clearly look clickable. `variant`
+// gives the primary action emphasis; `expanded` (when defined) marks a
+// show/hide toggle and renders a rotating chevron.
+function RowActionChip({
+  onClick, disabled, title, variant = 'neutral', expanded, children,
+}: {
+  onClick:   () => void
+  disabled?: boolean
+  title?:    string
+  variant?:  'primary' | 'neutral'
+  expanded?: boolean
+  children:  ReactNode
+}) {
+  const styles = variant === 'primary'
+    ? 'border-amber/50 bg-amber-light/60 text-amber font-medium hover:bg-amber-light'
+    : 'border-border-mid text-ink-secondary hover:border-amber/60 hover:text-amber'
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`inline-flex items-center gap-1.5 text-xs font-sans px-2.5 py-1 rounded-md border transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-border-mid disabled:hover:text-ink-secondary ${styles}`}
+    >
+      {children}
+      {expanded !== undefined && (
+        <svg
+          width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          className={`flex-shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      )}
+    </button>
+  )
+}
+
 // One discipline's РПД slot: upload affordance if empty, otherwise the file
 // plus a "Проверить соответствие" trigger that scores it against the
 // discipline's declared competency_codes (disabled with an explanatory
@@ -1490,7 +1539,7 @@ function DocumentRow({
 function DisciplineDocumentRow({
   discipline, doc, review, expanded, onToggleExpanded,
   versionCount, diff, diffExpanded, onToggleDiffExpanded, diffing, onDiff,
-  programId, canEdit, uploading, reviewing, onUpload, onRemove, onReview,
+  programId, canEdit, uploading, reviewing, onUpload, onUploadUrl, onRemove, onReview,
 }: {
   discipline:            ProgramDiscipline
   doc:                   ProgramDocument | null
@@ -1510,6 +1559,7 @@ function DisciplineDocumentRow({
   uploading:             boolean
   reviewing:             boolean
   onUpload:              (file: File) => void
+  onUploadUrl:           (url: string) => void
   onRemove:              (doc: ProgramDocument) => void
   onReview:              () => void
 }) {
@@ -1586,43 +1636,49 @@ function DisciplineDocumentRow({
           )}
         </div>
       </div>
+      {canEdit && (
+        <div className="mt-2 pl-8">
+          <UrlUploadField
+            onSubmit={onUploadUrl}
+            busy={uploading}
+            label={doc ? 'заменить по ссылке' : 'или загрузить по ссылке'}
+          />
+        </div>
+      )}
       {doc && (
-        <div className="mt-2 pl-8 flex items-center gap-3">
+        <div className="mt-2.5 pl-8 flex flex-wrap items-center gap-2">
           {canEdit && (
-            <button
+            <RowActionChip
               onClick={onReview}
               disabled={reviewing || !hasCodes}
+              // Emphasise while unchecked; calm to neutral once a review exists.
+              variant={review ? 'neutral' : 'primary'}
               title={hasCodes ? undefined : 'У дисциплины не указаны компетенции — заполните их в конструкторе плана'}
-              className="text-xs font-sans text-amber hover:underline disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed"
             >
               {reviewing ? 'Проверяем…' : review ? 'Перепроверить соответствие' : 'Проверить соответствие компетенциям'}
-            </button>
+            </RowActionChip>
           )}
-          <button
+          <RowActionChip
             onClick={openInStudio}
             disabled={openingStudio}
             title="Доработать содержание этой РПД в студии — создаст (или откроет) ваш личный предмет с текстом РПД"
-            className="text-xs font-sans text-amber hover:underline disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed"
           >
             {openingStudio ? 'Открываем…' : 'Открыть в РПД-студии'}
-          </button>
+          </RowActionChip>
           {canEdit && review && (
-            <button
-              onClick={onToggleExpanded}
-              className="text-xs font-sans text-ink-secondary hover:text-ink transition-colors"
-            >
+            <RowActionChip onClick={onToggleExpanded} expanded={expanded}>
               {expanded ? 'Скрыть разбор' : 'Показать разбор'}
-            </button>
+            </RowActionChip>
           )}
           {canEdit && (
-            <button
+            <RowActionChip
               onClick={diff ? onToggleDiffExpanded : onDiff}
               disabled={diffing || versionCount < 2}
               title={versionCount < 2 ? 'Появится после повторной загрузки обновлённого файла для этой дисциплины' : undefined}
-              className="text-xs font-sans text-amber hover:underline disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed"
+              expanded={diff ? diffExpanded : undefined}
             >
               {diffing ? 'Сравниваем…' : diff ? (diffExpanded ? 'Скрыть изменения' : 'Показать изменения') : 'Что изменилось с прошлого года'}
-            </button>
+            </RowActionChip>
           )}
         </div>
       )}
@@ -1818,7 +1874,7 @@ function AddPractice({
 }: {
   disabled:  boolean
   usedTypes: ProgramPracticeType[]
-  onSubmit:  (input: { file: File; type: ProgramPracticeType }) => void
+  onSubmit:  (input: { type: ProgramPracticeType } & ({ file: File } | { fileUrl: string })) => void
 }) {
   const [type, setType] = useState<ProgramPracticeType | ''>('')
   const ref = useMemo(() => ({ current: null as HTMLInputElement | null }), [])
@@ -1826,6 +1882,12 @@ function AddPractice({
   function handlePick(f: File) {
     if (!type) return
     onSubmit({ file: f, type })
+    setType('')
+  }
+
+  function handleUrl(url: string) {
+    if (!type) return
+    onSubmit({ fileUrl: url, type })
     setType('')
   }
 
@@ -1860,6 +1922,8 @@ function AddPractice({
       >
         Выбрать файл
       </button>
+      {/* Выбор типа обязателен и для ссылки — держим поле неактивным до выбора. */}
+      {type && <UrlUploadField onSubmit={handleUrl} busy={disabled} />}
     </div>
   )
 }

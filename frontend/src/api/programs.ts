@@ -35,8 +35,10 @@ export interface ImportProgramInput {
   profile?: string
   forms_of_study?: string
   name?: string                 // falls back to specialty_name server-side
-  description?: File | null      // описание ОП (PDF)
-  plan: File                     // учебный план (PDF) — required
+  description?: File | null      // описание ОП (PDF) — or descriptionUrl
+  descriptionUrl?: string        // link to описание ОП in the university system
+  plan?: File | null             // учебный план (PDF) — this OR planUrl required
+  planUrl?: string               // link to учебный план in the university system
   // Required when the caller is `specific` scope (РОП). Optional for `all-rw`
   // (they may link later via the detail page's structure select).
   org_unit_id?: string | null
@@ -81,9 +83,13 @@ export async function importProgram(input: ImportProgramInput): Promise<ImportPr
   if (input.education_level) fd.append('education_level', input.education_level)
   if (input.profile) fd.append('profile', input.profile)
   if (input.forms_of_study) fd.append('forms_of_study', input.forms_of_study)
+  // Описание ОП: an uploaded file OR a university-system link.
   if (input.description) fd.append('description', input.description)
+  else if (input.descriptionUrl) fd.append('description_url', input.descriptionUrl)
   if (input.org_unit_id) fd.append('org_unit_id', input.org_unit_id)
-  fd.append('plan', input.plan)
+  // Учебный план: an uploaded file OR a university-system link.
+  if (input.plan) fd.append('plan', input.plan)
+  else if (input.planUrl) fd.append('plan_url', input.planUrl)
 
   // Migration 050 attachment — практики.
   if (input.practices) {
@@ -103,17 +109,22 @@ export async function importProgram(input: ImportProgramInput): Promise<ImportPr
 export async function uploadProgramDocument(
   programId: string,
   input: {
-    file: File
     kind: ProgramDocumentKind
     practiceType?: ProgramPracticeType | null
     // Required when kind === 'working_programme' (migration 051) — which
     // discipline this РПД belongs to. A re-upload for the same discipline
     // replaces the previous file server-side.
     disciplineId?: string | null
-  }
+  } & (
+    // Either an uploaded file OR a link to the university's document system —
+    // the server fetches the latter (restricted to the institution's domains).
+    | { file: File; fileUrl?: never }
+    | { fileUrl: string; file?: never }
+  )
 ): Promise<{ id: string; detected_competency_codes: string[]; replaced_review: boolean }> {
   const fd = new FormData()
-  fd.append('file', input.file)
+  if ('file' in input && input.file) fd.append('file', input.file)
+  else if ('fileUrl' in input && input.fileUrl) fd.append('file_url', input.fileUrl)
   fd.append('kind', input.kind)
   if (input.practiceType) fd.append('practice_type', input.practiceType)
   if (input.disciplineId) fd.append('discipline_id', input.disciplineId)

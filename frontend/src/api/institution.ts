@@ -143,6 +143,16 @@ export async function setSharedRagEnabled(enabled: boolean): Promise<SharedRagSu
   return (await client.patch<SharedRagSummary>('/api/institution/shared-rag', { enabled })).data
 }
 
+// ─── Document-URL fetch allowlist (migration 085) ─────────────────────────────
+
+export async function getDocumentDomains(): Promise<string[]> {
+  return (await client.get<{ domains: string[] }>('/api/institution/document-domains')).data.domains
+}
+
+export async function setDocumentDomains(domains: string[]): Promise<string[]> {
+  return (await client.patch<{ domains: string[] }>('/api/institution/document-domains', { domains })).data.domains
+}
+
 // ─── Shared rubrics ────────────────────────────────────────────────────────────
 
 import type { Rubric, RubricItem } from '../types'

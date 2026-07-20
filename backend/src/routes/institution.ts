@@ -10,7 +10,9 @@ import { createRubricRules } from '../validation/rubricsValidation'
 import {
   getInstitutionById, getInstitutionOverview, getInstitutionDailyUsage,
   listInstitutionTeachers, setInstitutionTeacherActive, countInstitutionTeachers,
+  getInstitutionDocumentFetchDomains, setInstitutionDocumentFetchDomains,
 } from '../db/queries/institutions'
+import { normalizeDomain } from '../services/documentFetch'
 import {
   createInvite, listPendingInvites, deleteInvite, findActiveInviteForEmail,
   markInviteEmailStatus,
@@ -353,6 +355,49 @@ router.patch('/shared-rag', asyncHandler(async (req, res) => {
     target:           '',
   })
   res.json(await getSharedRagSummary(id))
+}))
+
+// ─── Document-URL fetch allowlist (migration 085) ─────────────────────────────
+//
+// Governs the "upload document by pasting a link" feature: the server only
+// fetches from these domains (subdomains allowed). Managed here by the
+// institution admin — deliberately decoupled from email_domain (auto-join).
+// The effective allowlist at fetch time also folds in DOCUMENT_FETCH_ALLOWED_
+// DOMAINS (a platform-wide env supplement) — that's not shown/editable here.
+
+const MAX_DOCUMENT_DOMAINS = 25
+
+router.get('/document-domains', asyncHandler(async (req, res) => {
+  res.json({ domains: await getInstitutionDocumentFetchDomains(institutionId(req)) })
+}))
+
+router.patch('/document-domains', asyncHandler(async (req, res) => {
+  const id = institutionId(req)
+  const raw = (req.body as { domains?: unknown }).domains
+  if (!Array.isArray(raw)) throw new ValidationError('domains должен быть массивом строк')
+  if (raw.length > MAX_DOCUMENT_DOMAINS) {
+    throw new ValidationError(`Слишком много доменов (максимум ${MAX_DOCUMENT_DOMAINS}).`)
+  }
+
+  // Normalise each entry to a bare hostname; reject anything that isn't a
+  // plausible domain so a typo doesn't silently disappear.
+  const seen = new Set<string>()
+  const domains: string[] = []
+  for (const entry of raw) {
+    const norm = normalizeDomain(String(entry ?? ''))
+    if (!norm) throw new ValidationError(`Некорректный домен: «${String(entry).slice(0, 60)}». Укажите домен вида kstu.ru.`)
+    if (!seen.has(norm)) { seen.add(norm); domains.push(norm) }
+  }
+
+  await setInstitutionDocumentFetchDomains(id, domains)
+  recordAudit({
+    institutionId:  id,
+    actorTeacherId: req.teacher.id,
+    actorEmail:     req.teacher.email,
+    action:         'document_domains.updated',
+    target:         domains.join(', '),
+  })
+  res.json({ domains })
 }))
 
 // ─── LTI 1.3 platform registration (Settings → Organisation → LTI) ────────────

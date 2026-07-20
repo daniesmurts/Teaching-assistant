@@ -12,6 +12,7 @@ import { useAuthStore } from '../store/authStore'
 import { getGradingStats, getGradingHistory } from '../api/grading'
 import { getCourses } from '../api/courses'
 import Badge from '../components/ui/Badge'
+import Icon from '../components/ui/Icon'
 import type { Assignment, AssignmentStatus } from '../types'
 
 // ─── Stat card ────────────────────────────────────────────────────────────────
@@ -260,6 +261,7 @@ export default function Dashboard() {
                 {[
                   { to: '/grading',       icon: '✦', label: 'Проверить работу',    sub: 'ИИ + рубрика' },
                   { to: '/presentations', icon: '▤', label: 'Создать презентацию', sub: 'По теме лекции' },
+                  { to: '/quizzes',       icon: null, label: 'Тест в аудитории',   sub: 'QR-сессия в реальном времени' },
                   { to: '/courses',       icon: '◫', label: 'Управление предметами', sub: `${courses.length} предмет${courses.length === 1 ? '' : courses.length < 5 ? 'а' : 'ов'}` },
                 ].map((item) => (
                   <Link
@@ -267,8 +269,8 @@ export default function Dashboard() {
                     to={item.to}
                     className="flex items-center gap-3 px-3 py-2.5 bg-surface border border-border rounded-lg hover:border-amber/40 hover:bg-amber-light transition-colors group"
                   >
-                    <span className="text-base text-ink-tertiary group-hover:text-amber transition-colors select-none w-5 text-center">
-                      {item.icon}
+                    <span className="flex items-center justify-center w-5 text-base text-ink-tertiary group-hover:text-amber transition-colors select-none">
+                      {item.icon ?? <Icon name="play-circle" className="w-4 h-4" />}
                     </span>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-sans font-medium text-ink group-hover:text-amber transition-colors">

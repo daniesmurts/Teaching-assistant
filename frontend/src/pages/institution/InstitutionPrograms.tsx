@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import FeatureIntro from '../../components/ui/FeatureIntro'
 import Button from '../../components/ui/Button'
+import UrlUploadField from '../../components/ui/UrlUploadField'
 import { listPrograms, importProgram, getPickableProgramUnits } from '../../api/programs'
 import { PROGRAM_PRACTICE_LABEL, PROGRAM_PRACTICE_TYPES, EDUCATION_LEVELS, STUDY_FORMS, type ProgramPracticeType } from '../../types'
 import { useUIStore } from '../../store/uiStore'
@@ -40,6 +41,10 @@ export default function InstitutionPrograms() {
   const [orgUnitId, setOrgUnitId] = useState<string>('')
   const [descFile, setDescFile] = useState<File | null>(null)
   const [planFile, setPlanFile] = useState<File | null>(null)
+  // Alternative to uploading: a link to the file in the university's system
+  // (server fetches it). A field holds a file OR a url, never both.
+  const [descUrl, setDescUrl] = useState<string | null>(null)
+  const [planUrl, setPlanUrl] = useState<string | null>(null)
   const [practices, setPractices] = useState<{ file: File | null; type: ProgramPracticeType | '' }[]>([])
   const descRef = useRef<HTMLInputElement>(null)
   const planRef = useRef<HTMLInputElement>(null)
@@ -98,7 +103,9 @@ export default function InstitutionPrograms() {
       profile: profile.trim(),
       forms_of_study: forms.trim(),
       description: descFile,
-      plan: planFile as File,
+      descriptionUrl: descUrl ?? undefined,
+      plan: planFile,
+      planUrl: planUrl ?? undefined,
       org_unit_id: orgUnitId || null,
       // Only pass practices that have BOTH a file and a type set — half-filled
       // rows are dropped silently. Backend enforces the parallel-length rule.
@@ -116,7 +123,7 @@ export default function InstitutionPrograms() {
 
   function submit() {
     if (specialtyName.trim().length < 2) { addToast('Укажите наименование специальности/направления', 'error'); return }
-    if (!planFile) { addToast('Загрузите файл учебного плана (PDF)', 'error'); return }
+    if (!planFile && !planUrl) { addToast('Загрузите учебный план (PDF) или вставьте ссылку на него', 'error'); return }
     // Scoped callers (РОП, polygroup / institute heads) must link to a program
     // unit before importing — the backend enforces this too but a client-side
     // check gives a clearer error.
@@ -298,12 +305,16 @@ export default function InstitutionPrograms() {
                 <FileField
                   label="Описание образовательной программы (PDF)"
                   file={descFile} inputRef={descRef}
-                  onPick={(f) => setDescFile(f)}
+                  onPick={(f) => { setDescFile(f); if (f) setDescUrl(null) }}
+                  url={descUrl}
+                  onPickUrl={(u) => { setDescUrl(u); if (u) setDescFile(null) }}
                 />
                 <FileField
                   label="Учебный план (PDF) — обязательно"
                   file={planFile} inputRef={planRef}
-                  onPick={(f) => setPlanFile(f)}
+                  onPick={(f) => { setPlanFile(f); if (f) setPlanUrl(null) }}
+                  url={planUrl}
+                  onPickUrl={(u) => { setPlanUrl(u); if (u) setPlanFile(null) }}
                   required
                 />
               </div>
@@ -513,9 +524,12 @@ function Field({ label, value, onChange, placeholder, mono = false }: {
   )
 }
 
-function FileField({ label, file, onPick, inputRef, required = false }: {
+function FileField({ label, file, onPick, inputRef, required = false, url, onPickUrl }: {
   label: string; file: File | null; onPick: (f: File | null) => void
   inputRef: React.RefObject<HTMLInputElement>; required?: boolean
+  // When provided, the field also offers "or paste a link"; a field holds a
+  // file OR a url, never both (the parent clears the other on set).
+  url?: string | null; onPickUrl?: (url: string | null) => void
 }) {
   const [dragOver, setDragOver] = useState(false)
 
@@ -563,6 +577,20 @@ function FileField({ label, file, onPick, inputRef, required = false }: {
             ×
           </button>
         </div>
+      ) : url ? (
+        // A link was pasted instead of a file — the server will fetch it.
+        <div className="flex items-center gap-2 border border-amber/40 bg-amber-light/40 rounded-md px-3 py-2">
+          <span className="text-base leading-none">🔗</span>
+          <span className="text-sm font-sans text-ink truncate flex-1" title={url}>{url}</span>
+          <button
+            type="button"
+            onClick={() => onPickUrl?.(null)}
+            className="text-ink-tertiary hover:text-danger transition-colors text-lg leading-none flex-shrink-0"
+            aria-label="Убрать ссылку"
+          >
+            ×
+          </button>
+        </div>
       ) : (
         // Idle — proper drop zone matching the grading uploader's vocabulary.
         <div
@@ -592,6 +620,11 @@ function FileField({ label, file, onPick, inputRef, required = false }: {
           <span className="text-[11px] font-sans text-ink-tertiary">
             PDF{required ? ' · обязательно' : ' · необязательно'}
           </span>
+        </div>
+      )}
+      {onPickUrl && !file && !url && (
+        <div className="mt-1.5">
+          <UrlUploadField onSubmit={(u) => onPickUrl(u)} />
         </div>
       )}
     </div>

@@ -35,6 +35,8 @@ import { insertDiff, findDiff } from '../db/queries/programDocumentDiffs'
 import {
   findCourseByTeacherAndName, findCoursesByTeacher, createCourse, setCourseSyllabusText,
 } from '../db/queries/courses'
+import { getInstitutionById } from '../db/queries/institutions'
+import { fetchDocumentFromUrl, resolveAllowedDomains, type FetchedFile } from '../services/documentFetch'
 import { getLimits } from '../config/planLimits'
 import { logger } from '../lib/logger'
 import type {
@@ -63,7 +65,10 @@ async function attachProgramDocument(params: {
   practiceType:  ProgramPracticeType | null
   disciplineId?: string | null
   extractedText?: string | null
-  file:          Express.Multer.File
+  // FetchedFile is a structural subset of Express.Multer.File (buffer /
+  // originalname / mimetype / size) — a real upload is assignable to it, so
+  // both the multipart and URL-fetch paths flow through here unchanged.
+  file:          FetchedFile
   uploadedBy:    string
 }): Promise<string> {
   // Pre-generate an id so the storage key can include it before the row exists.
@@ -124,6 +129,24 @@ function assertEdit(req: Request, programOrgUnitId: string | null): void {
   if (!canEditProgram(req.programAccessScope!, programOrgUnitId)) {
     throw new ForbiddenError('Только для чтения — редактирование недоступно')
   }
+}
+
+// Resolve a single document from EITHER a multipart upload OR a pasted URL.
+// Lets a user paste a link to their university's document system instead of
+// downloading + re-uploading; the fetch is restricted to the institution's
+// allowlisted domains (services/documentFetch.ts). Returns undefined when
+// neither an upload nor a URL is present, so callers keep their own
+// "file required" messaging.
+async function resolveUploadOrUrl(
+  req: Request,
+  uploaded: Express.Multer.File | undefined,
+  urlValue: unknown,
+): Promise<FetchedFile | undefined> {
+  if (uploaded) return uploaded
+  const url = typeof urlValue === 'string' ? urlValue.trim() : ''
+  if (!url) return undefined
+  const institution = req.teacher.institution_id ? await getInstitutionById(req.teacher.institution_id) : null
+  return fetchDocumentFromUrl(url, resolveAllowedDomains(institution))
 }
 
 // ── Pickable program units — for the import form + detail linker ────────────
@@ -205,10 +228,13 @@ router.post(
     }
     const inst = institutionId(req)
     const files = req.files as Record<string, Express.Multer.File[]> | undefined
-    const planFile = files?.plan?.[0]
-    const descFile = files?.description?.[0]
+    // Учебный план + описание ОП can each be an upload or a pasted link to the
+    // university's document system. (Практики at intake stay upload-only — they
+    // get link support via the per-programme document library instead.)
+    const planFile = await resolveUploadOrUrl(req, files?.plan?.[0], req.body.plan_url)
+    const descFile = await resolveUploadOrUrl(req, files?.description?.[0], req.body.description_url)
 
-    if (!planFile) throw new ValidationError('Загрузите файл учебного плана (PDF).')
+    if (!planFile) throw new ValidationError('Загрузите файл учебного плана (PDF) или вставьте ссылку на него.')
 
     const name = String(req.body.name ?? req.body.specialty_name ?? '').trim()
     if (name.length < 2) throw new ValidationError('Укажите наименование программы.')
@@ -494,7 +520,8 @@ router.post(
     assertEdit(req, detail.org_unit_id)
 
     const files = req.files as Record<string, Express.Multer.File[]> | undefined
-    const file  = files?.file?.[0]
+    // Either an uploaded file or a pasted university-system link.
+    const file  = await resolveUploadOrUrl(req, files?.file?.[0], req.body.file_url)
     if (!file) throw new ValidationError('Файл не загружен')
 
     const kind         = String(req.body.kind ?? '') as ProgramDocumentKind

@@ -6,7 +6,30 @@ export interface InstitutionRow {
   plan_tier:    string
   max_teachers: number | null
   email_domain: string | null
+  // Migration 085 — allowlist for "upload document by URL". Bare hostnames;
+  // a subdomain of a listed host is allowed too. Defaults to '{}'.
+  document_fetch_domains: string[]
   created_at:   string
+}
+
+/** Read just the URL-fetch allowlist for an institution. */
+export async function getInstitutionDocumentFetchDomains(institutionId: string): Promise<string[]> {
+  const { rows } = await pool.query<{ document_fetch_domains: string[] }>(
+    `SELECT document_fetch_domains FROM institutions WHERE id = $1`,
+    [institutionId]
+  )
+  return rows[0]?.document_fetch_domains ?? []
+}
+
+/** Replace the URL-fetch allowlist (already normalised/validated by the caller). */
+export async function setInstitutionDocumentFetchDomains(
+  institutionId: string,
+  domains: string[],
+): Promise<void> {
+  await pool.query(
+    `UPDATE institutions SET document_fetch_domains = $2 WHERE id = $1`,
+    [institutionId, domains]
+  )
 }
 
 // SAML config — separate from InstitutionRow so callers can hold it
