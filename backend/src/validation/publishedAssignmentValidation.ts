@@ -28,11 +28,19 @@ export const addInviteRules = [
 // ─── Public writing surface (token-authed) ────────────────────────────────────
 
 // draft_content is a TipTap JSON document; cap the serialised size to bound
-// storage and reject abuse. telemetry is an aggregates object (§5.1.2).
+// storage and reject abuse. telemetry is an aggregates object (§5.1.2) —
+// the platform promises teachers only ever see aggregate process metrics,
+// never raw keystroke/paste content, so the allowed keys are enforced here
+// rather than trusted from the client.
+const TELEMETRY_KEYS = new Set([
+  'total_chars', 'pasted_chars', 'active_ms', 'revision_count', 'largest_paste', 'started_at', 'last_edit_at',
+])
+
 export const saveDraftRules = [
   body('draft_content').exists().withMessage('Нет содержимого')
     .custom((v) => JSON.stringify(v).length <= 2_000_000).withMessage('Документ слишком большой'),
-  body('telemetry').optional({ nullable: true }).isObject(),
+  body('telemetry').optional({ nullable: true }).isObject()
+    .custom((v) => Object.keys(v).every((k) => TELEMETRY_KEYS.has(k))).withMessage('Недопустимые поля телеметрии'),
   body('snapshot').optional().isBoolean(),
 ]
 

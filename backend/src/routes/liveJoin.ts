@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { validate } from '../middleware/validate'
-import { liveLimiter } from '../middleware/rateLimits'
+import { liveLimiter, liveJoinLimiter } from '../middleware/rateLimits'
 import { asyncHandler } from '../lib/asyncHandler'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import { joinSessionRules, joinCodeRules, answerRules, advanceRules } from '../validation/liveSessionValidation'
@@ -21,6 +21,7 @@ router.use(liveLimiter)
 // POST /api/live-join/:code/join — anonymous join, issues a participant token.
 router.post(
   '/:code/join',
+  liveJoinLimiter,
   validate(joinSessionRules),
   asyncHandler(async (req, res) => {
     const session = await getLiveSessionByCode(req.params.code)

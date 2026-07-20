@@ -96,3 +96,18 @@ export const liveLimiter = rateLimit({
     (req.body?.participant_token as string) || (req.query?.participant_token as string) || req.ip || 'anonymous',
   message: { error: 'Слишком много запросов. Подождите немного.' },
 })
+
+// ─── Live QR quiz join — IP-keyed, tighter than liveLimiter ──────────────────
+// /join is the one action on the token-less side of liveLimiter's fallback:
+// no participant_token exists yet, so it's keyed by IP like a brute-force
+// guard against the 6-char join code (32^6 ≈ 1.07B space) rather than a
+// polling budget. A real student joins once; 8/min per IP is generous
+// headroom for retries/typos while keeping a sustained-guessing attacker
+// under a few thousand attempts across a lecture's lifetime.
+export const liveJoinLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 8,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Слишком много попыток присоединения. Подождите немного.' },
+})
