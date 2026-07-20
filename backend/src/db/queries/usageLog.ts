@@ -3,7 +3,7 @@ import { pool } from '../connection'
 export interface CreateUsageLogParams {
   teacherId:      string
   institutionId?: string
-  feature:        'grading' | 'presentation' | 'feedback_email' | 'embedding' | 'criteria_assist'
+  feature:        'grading' | 'presentation' | 'feedback_email' | 'embedding' | 'criteria_assist' | 'rpd_reminder'
   model:          string
   inputTokens:    number
   outputTokens:   number

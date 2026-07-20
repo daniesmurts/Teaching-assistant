@@ -27,6 +27,7 @@
     "cors": "^2.8.5",
     "docx": "^9.7.1",
     "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.1",
     "express-validator": "^7.3.2",
@@ -42,7 +43,8 @@
     "pdfkit": "^0.15.2",
     "pg": "^8.12.0",
     "pg-boss": "^10.4.2",
-    "pino": "^10.3.1"
+    "pino": "^10.3.1",
+    "word-extractor": "^1.0.4"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

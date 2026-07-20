@@ -182,6 +182,38 @@ is a latency/cost optimization for a now-rare path, not a correctness bug.
 - **Touches** — `services/llm/deepseek.ts` (v1); `services/llm/types.ts` +
   `registry.ts` + `qwen.ts`/`yandex.ts` (full version).
 
+### 11. Мониторинг РПД — email the reminder letters, don't just download them · Effort: S
+
+v1 (see CHANGELOG) generates per-institute reminder letters (.docx + copy-text)
+but the head of УМЦ still has to send them herself. `services/emailTransport.ts`
++ `lib/emailTemplates.ts` already exist for exactly this (teacher invites use
+the same shape) — wiring a «Отправить» button just needs institute-contact
+emails somewhere (not currently modelled; org_units has no contact-email
+field) and a confirmation step before anything goes out, per the
+explicit-permission rule for outbound messages.
+
+- **Why** — closes the loop v1 deliberately left open (user chose "letters,
+  not send" for the first cut); the marginal engineering cost is low since
+  the drafting/table logic is already built.
+- **Touches** — `services/rpdReminders.ts` (add a send path), `routes/rpdMonitor.ts`,
+  `rpd_dept_groups` (contact email column), `RpdMonitor.tsx`.
+
+### 12. Мониторинг РПД — auto-fetch from АСУ Университет instead of manual upload · Effort: L (needs АСУ API access)
+
+v1 requires the weekly manual download-then-upload because there's no known
+programmatic access to АСУ Университет from outside. If the university's IT
+department can provide an API or a scheduled-export mechanism, the upload
+step could become a nightly `services/renewals.ts`-style cron job
+(`startRenewalScheduler` is the existing precedent for this kind of
+scheduler) — dropping the "download from АСУ" step out of her workflow
+entirely, not just the "rebuild in Excel" step v1 already removed.
+
+- **Why** — the biggest remaining manual step; blocked on an external
+  integration point that doesn't exist yet, not on anything in this codebase.
+- **Touches** — new `services/asuSync.ts`, a scheduler registration in
+  `backend/src/index.ts`, `rpd_snapshots.source_filename` becomes nullable
+  (no upload) or gets a `source: 'upload' | 'auto'` discriminator.
+
 ---
 
 ## Features

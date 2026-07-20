@@ -68,6 +68,7 @@ import InstitutionAudit from './pages/institution/InstitutionAudit'
 import InstitutionPrograms from './pages/institution/InstitutionPrograms'
 import InstitutionProgramDetail from './pages/institution/InstitutionProgramDetail'
 import InstitutionStructure from './pages/institution/InstitutionStructure'
+import RpdMonitor from './pages/institution/RpdMonitor'
 import NewVersionToast from './components/NewVersionToast'
 import LoadingSpinner from './components/ui/LoadingSpinner'
 
@@ -315,6 +316,7 @@ export default function App() {
           <Route path="/institution" element={<InstitutionRoute><InstitutionLayout /></InstitutionRoute>}>
             <Route index           element={<InstitutionOverview />} />
             <Route path="structure" element={<InstitutionStructure />} />
+            <Route path="rpd"       element={<RpdMonitor />} />
             <Route path="usage"    element={<InstitutionUsage />} />
             <Route path="teachers" element={<InstitutionTeachers />} />
             <Route path="rubrics"  element={<InstitutionRubrics />} />

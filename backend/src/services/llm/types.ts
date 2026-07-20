@@ -17,7 +17,7 @@ export interface ChatMessage {
   content: string
 }
 
-export type Feature = 'grading' | 'presentation' | 'feedback_email' | 'embedding' | 'criteria_assist'
+export type Feature = 'grading' | 'presentation' | 'feedback_email' | 'embedding' | 'criteria_assist' | 'rpd_reminder'
 
 export interface CallContext {
   teacherId:      string

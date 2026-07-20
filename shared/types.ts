@@ -61,6 +61,7 @@ export interface PlanState {
     calcVerification:      boolean
     citationCheck:         boolean
     challengeFeedback:     boolean
+    rpdMonitor:             boolean
   }
 }
 

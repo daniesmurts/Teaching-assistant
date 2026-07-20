@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/authStore'
 const NAV = [
   { to: '/institution',           label: 'Обзор',         end: true },
   { to: '/institution/structure', label: 'Структура',     end: false },
+  { to: '/institution/rpd',       label: 'Мониторинг РПД', end: false },
   { to: '/institution/usage',     label: 'Использование', end: false },
   { to: '/institution/teachers', label: 'Преподаватели', end: false },
   { to: '/institution/rubrics',  label: 'Критерии',      end: false },

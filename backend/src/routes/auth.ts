@@ -557,6 +557,7 @@ async function buildPlanData(
       calcVerification:      canUseFeature(tier, 'calcVerification'),
       citationCheck:         canUseFeature(tier, 'citationCheck'),
       challengeFeedback:     canUseFeature(tier, 'challengeFeedback'),
+      rpdMonitor:            canUseFeature(tier, 'rpdMonitor'),
     },
   }
 }
