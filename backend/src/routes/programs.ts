@@ -18,6 +18,7 @@ import { canEditProgram, canReadProgram } from '../services/programAccess'
 import { listAncestorsOfUnit } from '../db/queries/orgUnits'
 import { analyzeProgram } from '../services/programAnalysis'
 import { reviewDocumentCoverage, detectDeclaredCompetencyCodes } from '../services/documentReview'
+import { diffWorkingProgrammes } from '../services/programDiff'
 import { generateProgramReportPdf } from '../services/programReportPdf'
 import { uploadFields, verifyFileContent } from '../middleware/fileValidation'
 import { extractText } from '../services/documentExtractor'
@@ -26,9 +27,11 @@ import { setProgramDocs, setReportedSemesterTotals } from '../db/queries/program
 import { uploadObject, downloadObject, deleteObject } from '../services/objectStorage'
 import {
   insertProgramDocument, listProgramDocuments, findProgramDocument, deleteProgramDocument,
-  findWorkingProgrammeForDiscipline, deleteWorkingProgrammeForDiscipline, deletePracticeForType,
+  findWorkingProgrammeForDiscipline, supersedeWorkingProgrammeForDiscipline, deletePracticeForType,
+  listWorkingProgrammeVersions,
 } from '../db/queries/programDocuments'
 import { insertReview, getLatestReviewByDiscipline, getLatestReviewForDiscipline } from '../db/queries/programDocumentReviews'
+import { insertDiff, findDiff } from '../db/queries/programDocumentDiffs'
 import {
   findCourseByTeacherAndName, findCoursesByTeacher, createCourse, setCourseSyllabusText,
 } from '../db/queries/courses'
@@ -517,12 +520,16 @@ router.post(
     }
 
     // Migration 051 — рабочая программа belongs to a specific discipline.
-    // One current file per discipline: a re-upload replaces the previous row
-    // (best-effort object cleanup, same convention as DELETE below).
+    // One CURRENT file per discipline: a re-upload supersedes the previous
+    // row rather than deleting it (migration 084) — the old extraction is
+    // kept so the discipline's «Что изменилось с прошлого года» diff has
+    // something to compare against. Object storage is untouched too; only
+    // the DB pointer moves.
     let disciplineId: string | null = null
-    // Was there a coverage review for this discipline before the replace? The
-    // review CASCADEs off the document row, so a re-upload silently drops it —
-    // the caller needs to know so they can re-run «Проверить соответствие».
+    // Was there a coverage review for the version we're about to supersede?
+    // That review isn't deleted anymore, but it now describes a file that's
+    // no longer current — the caller needs to know so it can prompt
+    // «Проверить соответствие» again rather than showing a stale result.
     let replacedReview = false
     if (kind === 'working_programme') {
       disciplineId = String(req.body.discipline_id ?? '')
@@ -538,16 +545,9 @@ router.post(
           'Дисциплина не найдена — возможно, учебный план был изменён. Обновите страницу и загрузите файл заново.'
         )
       }
-      // Check for an existing review BEFORE removing the doc (the CASCADE would
-      // erase the row and we'd never know one existed).
       const priorReview = await getLatestReviewForDiscipline(disciplineId)
       replacedReview = !!priorReview
-      const existing = await deleteWorkingProgrammeForDiscipline(detail.id, disciplineId)
-      if (existing) {
-        await deleteObject(existing.storagePath).catch((err) =>
-          logger.warn({ message: 'Failed to delete replaced program document object', error: (err as Error).message })
-        )
-      }
+      await supersedeWorkingProgrammeForDiscipline(detail.id, disciplineId)
     }
 
     // Extraction is best-effort — a failed parse doesn't block the attach,
@@ -648,6 +648,57 @@ router.post('/:id/disciplines/:disciplineId/review', aiLimiter, asyncHandler(asy
     result,
   })
   res.status(201).json(review)
+}))
+
+// POST /:id/disciplines/:disciplineId/diff — «Что изменилось с прошлого
+// года» (Research.md §9.6): compares the discipline's current РПД against
+// the version it superseded (migration 084). Cached per (old, new) document
+// pair so reopening the panel doesn't re-run the comparison.
+router.post('/:id/disciplines/:disciplineId/diff', aiLimiter, asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  assertEdit(req, detail.org_unit_id)   // runs an AI call + writes a row — treat as edit
+
+  const discipline = detail.disciplines.find((d) => d.id === req.params.disciplineId)
+  if (!discipline) throw new NotFoundError('Дисциплина')
+
+  const versions = await listWorkingProgrammeVersions(detail.id, discipline.id!)
+  if (versions.length < 2) {
+    throw new ValidationError(
+      'Нет предыдущей версии РПД для этой дисциплины — сравнение появится после повторной загрузки обновлённого файла.'
+    )
+  }
+  const [current, previous] = versions
+  if (!current.extractedText || !previous.extractedText) {
+    throw new ValidationError('Не удалось извлечь текст одной из версий — перезагрузите документ.')
+  }
+
+  const cached = await findDiff(previous.id, current.id)
+  if (cached) {
+    res.json(cached)
+    return
+  }
+
+  const competencies = detail.competencies.filter(
+    (c) => c.code != null && discipline.competency_codes.includes(c.code)
+  )
+
+  const result = await diffWorkingProgrammes({
+    teacherId:     req.teacher.id,
+    institutionId: req.teacher.institution_id ?? undefined,
+    oldText:       previous.extractedText,
+    newText:       current.extractedText,
+    competencies,
+    label:         discipline.name,
+  })
+
+  const diff = await insertDiff({
+    programId:     detail.id,
+    disciplineId:  discipline.id!,
+    oldDocumentId: previous.id,
+    newDocumentId: current.id,
+    result,
+  })
+  res.status(201).json(diff)
 }))
 
 // POST /:id/disciplines/:disciplineId/studio-course — bridge into РПД-студия.

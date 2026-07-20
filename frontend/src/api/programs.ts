@@ -2,6 +2,7 @@ import client from './client'
 import type {
   Program, ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramAnalysis,
   ProgramPracticeType, ProgramDocumentKind, ProgramDocument, ProgramDocumentReview,
+  ProgramDocumentDiff,
 } from '../types'
 
 // Academic programs (учебные планы) — institution-admin feature.
@@ -162,6 +163,16 @@ export async function openDisciplineInStudio(
 
 export async function getDisciplineReviews(programId: string): Promise<ProgramDocumentReview[]> {
   const res = await client.get<ProgramDocumentReview[]>(`/api/institution/programs/${programId}/discipline-reviews`)
+  return res.data
+}
+
+// ─── Year-over-year РПД diff (migration 084, Research.md §9.6) ────────────────
+
+/** «Что изменилось с прошлого года» — compares the discipline's current РПД against the version it superseded. Cached server-side per document pair. */
+export async function diffDiscipline(programId: string, disciplineId: string): Promise<ProgramDocumentDiff> {
+  const res = await client.post<ProgramDocumentDiff>(
+    `/api/institution/programs/${programId}/disciplines/${disciplineId}/diff`, {}, { timeout: 120_000 }
+  )
   return res.data
 }
 

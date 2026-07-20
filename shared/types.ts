@@ -1234,6 +1234,11 @@ export interface ProgramDocument {
   file_size:     number
   mime_type:     string
   uploaded_at:   string
+  // Migration 084 — set when a later upload superseded this one (only ever
+  // non-null for kind === 'working_programme'; practices still hard-replace).
+  // The Documents tab's "current" file per discipline is the one row per
+  // discipline_id with superseded_at === null.
+  superseded_at: string | null
 }
 
 // Migration 051 — result of checking an uploaded РПД against the
@@ -1283,6 +1288,56 @@ export interface ProgramDocumentReview {
   document_id:   string
   result:        DisciplineCoverageResult
   created_at:    string
+}
+
+// Migration 084 — «Что изменилось с прошлого года» (Research.md §9.6):
+// compares a discipline's current РПД against the version it superseded.
+// Produced by services/programDiff.ts.
+
+export type DiffChangeKind = 'added' | 'removed' | 'changed'
+
+export interface DocumentDiffTopicChange {
+  kind:     DiffChangeKind
+  topic:    string   // new wording if added/changed, old wording if removed
+  detail:   string   // 1 sentence on what changed; '' for a pure add/remove
+  // Verbatim quote validated against the NEW text (added/changed) or the OLD
+  // text (removed) — same evidence contract as DisciplineCoverageItem.
+  evidence: string | null
+}
+
+export interface DocumentDiffCompetencyChange {
+  kind:  DiffChangeKind
+  code:  string | null   // 'УК-1' / 'ОПК-2' / 'ПК-3'
+  title: string
+  detail: string
+}
+
+export interface DocumentDiffAssessmentChange {
+  kind:   DiffChangeKind
+  form:   string   // e.g. 'экзамен', 'курсовая работа'
+  detail: string
+}
+
+export interface DocumentDiffResult {
+  summary:      string
+  // True when the model found no material differences between the two
+  // versions — paraphrase/formatting-only changes don't count as findings.
+  unchanged:    boolean
+  topics:       DocumentDiffTopicChange[]
+  competencies: DocumentDiffCompetencyChange[]
+  assessment:   DocumentDiffAssessmentChange[]
+}
+
+// One row per (old_document_id, new_document_id) pair — cached so reopening
+// the diff panel doesn't re-run the LLM comparison.
+export interface ProgramDocumentDiff {
+  id:              string
+  program_id:      string
+  discipline_id:   string
+  old_document_id: string
+  new_document_id: string
+  result:          DocumentDiffResult
+  created_at:      string
 }
 
 export interface ProgramDetail extends Program {

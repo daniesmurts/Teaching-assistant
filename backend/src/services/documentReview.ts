@@ -297,8 +297,13 @@ export function selectRelevantSections(fullText: string, budget: number): string
     .join('\n\n[...]\n\n')
 }
 
-/** A quote survives only if it appears verbatim (case/whitespace-insensitive) in the document — same contract as grading.ts's citation validation. */
-function validateEvidence(raw: string | null | undefined, haystack: string): string | null {
+/**
+ * A quote survives only if it appears verbatim (case/whitespace-insensitive)
+ * in the document — same contract as grading.ts's citation validation.
+ * Exported for reuse by services/programDiff.ts, which validates evidence
+ * against two documents (old/new) instead of one.
+ */
+export function validateEvidence(raw: string | null | undefined, haystack: string): string | null {
   if (typeof raw !== 'string') return null
   const trimmed = raw.trim()
   if (!trimmed) return null

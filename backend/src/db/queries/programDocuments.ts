@@ -14,6 +14,7 @@ interface ProgramDocumentRow {
   extracted_text: string | null
   uploaded_by:    string | null
   uploaded_at:    Date
+  superseded_at:  Date | null
 }
 
 function toDocument(r: ProgramDocumentRow): ProgramDocument {
@@ -27,6 +28,7 @@ function toDocument(r: ProgramDocumentRow): ProgramDocument {
     file_size:     r.file_size,
     mime_type:     r.mime_type,
     uploaded_at:   r.uploaded_at.toISOString(),
+    superseded_at: r.superseded_at ? r.superseded_at.toISOString() : null,
   }
 }
 
@@ -54,6 +56,13 @@ export async function insertProgramDocument(data: {
   return toDocument(rows[0])
 }
 
+/**
+ * All documents attached to a programme, INCLUDING superseded
+ * working_programme rows (migration 084) — the caller distinguishes current
+ * vs. history via `superseded_at`. This is deliberate: the frontend groups
+ * working_programme rows by discipline_id to build the version list/count
+ * that gates the year-over-year diff button, without a separate round trip.
+ */
 export async function listProgramDocuments(programId: string): Promise<ProgramDocument[]> {
   const { rows } = await pool.query<ProgramDocumentRow>(
     `SELECT * FROM program_documents
@@ -93,7 +102,8 @@ export async function listWorkingProgrammesByDiscipline(
       WHERE program_id = $1
         AND kind = 'working_programme'
         AND discipline_id IS NOT NULL
-        AND extracted_text IS NOT NULL`,
+        AND extracted_text IS NOT NULL
+        AND superseded_at IS NULL`,
     [programId]
   )
   const out = new Map<string, string>()
@@ -104,6 +114,7 @@ export async function listWorkingProgrammesByDiscipline(
 /**
  * The current working_programme document for a discipline (if any), with its
  * extracted text — the input for services/documentReview.ts. Migration 051.
+ * "Current" = not yet superseded by a later re-upload (migration 084).
  */
 export async function findWorkingProgrammeForDiscipline(
   programId: string, disciplineId: string
@@ -111,6 +122,7 @@ export async function findWorkingProgrammeForDiscipline(
   const { rows } = await pool.query<ProgramDocumentRow>(
     `SELECT * FROM program_documents
       WHERE program_id = $1 AND discipline_id = $2 AND kind = 'working_programme'
+        AND superseded_at IS NULL
       LIMIT 1`,
     [programId, disciplineId]
   )
@@ -119,21 +131,50 @@ export async function findWorkingProgrammeForDiscipline(
 }
 
 /**
- * Deletes the existing working_programme row for a discipline, if any, so a
- * re-upload replaces rather than accumulates. Returns the deleted row's
- * storage path so the caller can best-effort clean up the object — mirrors
- * the cleanup pattern in routes/programs.ts's DELETE /:id/documents/:docId.
+ * Marks the current working_programme row for a discipline as superseded (if
+ * any), so a re-upload replaces the "current" pointer without discarding the
+ * previous extraction — migration 084, Research.md §9.6 (РПД year-over-year
+ * diff needs the old version to compare against). Unlike the hard-delete
+ * this replaces, the row and its object-storage file are kept; only
+ * kind='working_programme' is versioned this way (practices still hard-
+ * replace via deletePracticeForType).
  */
-export async function deleteWorkingProgrammeForDiscipline(
+export async function supersedeWorkingProgrammeForDiscipline(
   programId: string, disciplineId: string
-): Promise<{ storagePath: string } | null> {
-  const { rows } = await pool.query<{ storage_path: string }>(
-    `DELETE FROM program_documents
+): Promise<{ id: string } | null> {
+  const { rows } = await pool.query<{ id: string }>(
+    `UPDATE program_documents
+        SET superseded_at = NOW()
       WHERE program_id = $1 AND discipline_id = $2 AND kind = 'working_programme'
-      RETURNING storage_path`,
+        AND superseded_at IS NULL
+      RETURNING id`,
     [programId, disciplineId]
   )
-  return rows[0] ? { storagePath: rows[0].storage_path } : null
+  return rows[0] ? { id: rows[0].id } : null
+}
+
+/**
+ * All working_programme versions for one discipline (current + superseded),
+ * newest upload first, each with its extracted text — the input for the
+ * year-over-year diff route: versions[0] is current, versions[1] is what it
+ * superseded.
+ */
+export async function listWorkingProgrammeVersions(
+  programId: string, disciplineId: string
+): Promise<{ id: string; fileName: string; uploadedAt: string; extractedText: string | null }[]> {
+  const { rows } = await pool.query<{ id: string; file_name: string; uploaded_at: Date; extracted_text: string | null }>(
+    `SELECT id, file_name, uploaded_at, extracted_text
+       FROM program_documents
+      WHERE program_id = $1 AND discipline_id = $2 AND kind = 'working_programme'
+      ORDER BY uploaded_at DESC`,
+    [programId, disciplineId]
+  )
+  return rows.map((r) => ({
+    id:            r.id,
+    fileName:      r.file_name,
+    uploadedAt:    r.uploaded_at.toISOString(),
+    extractedText: r.extracted_text,
+  }))
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   getProgram, getAnalysis, saveDisciplines, saveCompetencies, analyzeProgram, deleteProgram,
   downloadAnalysisPdf, updateProgram, uploadProgramDocument, deleteProgramDocument,
   downloadProgramDocument, reviewDiscipline, getDisciplineReviews, openDisciplineInStudio,
+  diffDiscipline,
 } from '../../api/programs'
 import { getCourses } from '../../api/courses'
 import { getPickableProgramUnits } from '../../api/programs'
@@ -15,7 +16,7 @@ import {
   PROGRAM_PRACTICE_LABEL, PROGRAM_PRACTICE_TYPES,
   type ProgramDocument, type ProgramPracticeType, type ProgramDocumentReview,
   type DisciplineCoverageItem, type IndicatorDimension, type SequencingStructure,
-  type OutcomeDelivery,
+  type OutcomeDelivery, type ProgramDocumentDiff, type DiffChangeKind,
 } from '../../types'
 import { useAuthStore } from '../../store/authStore'
 import { EXAMPLE_PROGRAM } from '../../lib/programExample'
@@ -341,7 +342,11 @@ export default function InstitutionProgramDetail() {
                       whole section vanished whenever `analysis` was empty —
                       that coupling was the bug, not its position). */}
                   {program && program.disciplines.length > 0 && (
-                    <DisciplineCoverageSection disciplines={program.disciplines} reviews={disciplineReviews} />
+                    <DisciplineCoverageSection
+                      disciplines={program.disciplines}
+                      reviews={disciplineReviews}
+                      documents={program.documents ?? []}
+                    />
                   )}
                 </>
               )
@@ -791,7 +796,11 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
           independent of this plan-level analysis; shown here so it sits with
           the rest of the report once one exists. */}
       {program && program.disciplines.length > 0 && (
-        <DisciplineCoverageSection disciplines={program.disciplines} reviews={reviews} />
+        <DisciplineCoverageSection
+          disciplines={program.disciplines}
+          reviews={reviews}
+          documents={program.documents ?? []}
+        />
       )}
 
       {/* Relatedness & load */}
@@ -1106,17 +1115,48 @@ const COVERAGE_STATUS_META: Record<'covered' | 'partial' | 'missing', { label: s
   missing: { label: 'не раскрыта', color: 'var(--color-danger)' },
 }
 
+// Migration 084 — a discipline's CURRENT working_programme document (the
+// row with superseded_at === null). Documents lists now include history, so
+// every "what's the file on record for this discipline" lookup goes through
+// this instead of assuming one row per discipline.
+function currentWorkingProgrammeMap(documents: ProgramDocument[]): Map<string, ProgramDocument> {
+  return new Map(
+    documents.filter((d) => d.kind === 'working_programme' && d.discipline_id && !d.superseded_at)
+      .map((d) => [d.discipline_id as string, d])
+  )
+}
+
+// A review only reflects the file it was run against. Re-upload no longer
+// deletes the previous review (migration 084 stopped cascading it away with
+// the document row), so a review whose document_id points at a now-
+// superseded upload must not be shown as if it checked today's file —
+// callers treat a stale match the same as "not reviewed yet".
+function currentReviewFor(
+  disciplineId:           string | null | undefined,
+  reviewByDiscipline:     Map<string | null, ProgramDocumentReview>,
+  currentDocByDiscipline: Map<string, ProgramDocument>,
+): ProgramDocumentReview | null {
+  if (!disciplineId) return null
+  const review = reviewByDiscipline.get(disciplineId)
+  const doc = currentDocByDiscipline.get(disciplineId)
+  return review && doc && review.document_id === doc.id ? review : null
+}
+
 function DisciplineCoverageSection({
-  disciplines, reviews,
+  disciplines, reviews, documents,
 }: {
   disciplines: ProgramDiscipline[]
   reviews:     ProgramDocumentReview[]
+  documents:   ProgramDocument[]
 }) {
   const reviewByDiscipline = new Map(reviews.map((r) => [r.discipline_id, r]))
+  const currentDocByDiscipline = currentWorkingProgrammeMap(documents)
+  const currentReview = (disciplineId: string | null | undefined) =>
+    currentReviewFor(disciplineId, reviewByDiscipline, currentDocByDiscipline)
   const sorted = [...disciplines].sort((a, b) => a.semester - b.semester || a.sort_order - b.sort_order)
   if (reviews.length === 0) return null   // nothing checked yet — no point rendering an all-empty table
 
-  const checkedCount = reviews.length
+  const checkedCount = disciplines.filter((d) => currentReview(d.id)).length
   const totalCount = disciplines.length
 
   return (
@@ -1125,7 +1165,7 @@ function DisciplineCoverageSection({
       <div className="flex flex-col lg:flex-row gap-4 items-start">
         <div className="flex-1 min-w-0 w-full bg-surface border border-border rounded-lg divide-y divide-border">
           {sorted.map((d) => {
-            const review = d.id ? reviewByDiscipline.get(d.id) : null
+            const review = currentReview(d.id)
             return (
               <details key={d.id ?? d.name} className="group">
                 <summary className="px-4 py-2.5 flex items-center justify-between gap-3 cursor-pointer list-none">
@@ -1222,12 +1262,29 @@ function DocumentsPanel({
   // user just clicked «Проверить» — the answer should be visible immediately,
   // not one more click away). Toggled by the user thereafter.
   const [expandedReviews, setExpandedReviews] = useState<Set<string>>(new Set())
+  // Year-over-year diff (migration 084) — mirrors the review state above:
+  // per-discipline in-flight flag, fetched result cache, and which rows have
+  // their diff panel open.
+  const [diffingId, setDiffingId] = useState<string | null>(null)
+  const [diffByDiscipline, setDiffByDiscipline] = useState<Map<string, ProgramDocumentDiff>>(new Map())
+  const [expandedDiffs, setExpandedDiffs] = useState<Set<string>>(new Set())
 
-  const workingProgrammeByDiscipline = new Map(
-    documents.filter((d) => d.kind === 'working_programme' && d.discipline_id).map((d) => [d.discipline_id as string, d])
-  )
+  const workingProgrammeByDiscipline = currentWorkingProgrammeMap(documents)
   const reviewByDiscipline = new Map(reviews.map((r) => [r.discipline_id, r]))
   const practices = documents.filter((d) => d.kind === 'practice')
+  // All working_programme versions (current + superseded) per discipline,
+  // newest first — powers the «Что изменилось с прошлого года» button's
+  // enabled state (needs ≥2) without a separate round trip.
+  const versionsByDiscipline = new Map<string, ProgramDocument[]>()
+  for (const d of documents) {
+    if (d.kind !== 'working_programme' || !d.discipline_id) continue
+    const list = versionsByDiscipline.get(d.discipline_id) ?? []
+    list.push(d)
+    versionsByDiscipline.set(d.discipline_id, list)
+  }
+  for (const list of versionsByDiscipline.values()) {
+    list.sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime())
+  }
 
   async function attachOne(input: { file: File; kind: 'working_programme' | 'practice'; practiceType?: ProgramPracticeType | null; disciplineId?: string | null }) {
     setUploading(true)
@@ -1241,12 +1298,12 @@ function DocumentsPanel({
       } else {
         addToast('Документ добавлен', 'success')
       }
-      // A re-upload replaces the previous file, which cascade-drops the coverage
-      // review — tell the user so they don't miss that the check now shows
-      // stale/empty results until re-run.
+      // A re-upload supersedes the previous file (migration 084 keeps the old
+      // extraction instead of deleting it) — any existing coverage review now
+      // refers to that older version, not the one just uploaded.
       if (res.replaced_review) {
         addToast(
-          'Предыдущая проверка соответствия сброшена — запустите её повторно, чтобы обновить результат.',
+          'Предыдущая проверка относится к прежней версии файла — запустите её повторно, чтобы обновить результат.',
           'info',
         )
       }
@@ -1298,6 +1355,30 @@ function DocumentsPanel({
     })
   }
 
+  async function runDiff(discipline: ProgramDiscipline) {
+    if (!discipline.id) return
+    const disciplineId = discipline.id
+    setDiffingId(disciplineId)
+    try {
+      const diff = await diffDiscipline(programId, disciplineId)
+      setDiffByDiscipline((prev) => new Map(prev).set(disciplineId, diff))
+      setExpandedDiffs((prev) => new Set(prev).add(disciplineId))
+    } catch {
+      // handled by interceptor (e.g. "нет предыдущей версии")
+    } finally {
+      setDiffingId(null)
+    }
+  }
+
+  function toggleDiffExpanded(disciplineId: string) {
+    setExpandedDiffs((prev) => {
+      const next = new Set(prev)
+      if (next.has(disciplineId)) next.delete(disciplineId)
+      else next.add(disciplineId)
+      return next
+    })
+  }
+
   return (
     <div className="space-y-8">
       {/* Working programmes — one per discipline */}
@@ -1314,9 +1395,15 @@ function DocumentsPanel({
                 key={d.id}
                 discipline={d}
                 doc={d.id ? workingProgrammeByDiscipline.get(d.id) ?? null : null}
-                review={d.id ? reviewByDiscipline.get(d.id) ?? null : null}
+                review={currentReviewFor(d.id, reviewByDiscipline, workingProgrammeByDiscipline)}
                 expanded={d.id ? expandedReviews.has(d.id) : false}
                 onToggleExpanded={() => d.id && toggleExpanded(d.id)}
+                versionCount={d.id ? versionsByDiscipline.get(d.id)?.length ?? 0 : 0}
+                diff={d.id ? diffByDiscipline.get(d.id) ?? null : null}
+                diffExpanded={d.id ? expandedDiffs.has(d.id) : false}
+                onToggleDiffExpanded={() => d.id && toggleDiffExpanded(d.id)}
+                diffing={diffingId === d.id}
+                onDiff={() => runDiff(d)}
                 programId={programId}
                 canEdit={canEdit}
                 uploading={uploading}
@@ -1402,20 +1489,29 @@ function DocumentRow({
 // tooltip if none are declared — nothing to check against).
 function DisciplineDocumentRow({
   discipline, doc, review, expanded, onToggleExpanded,
+  versionCount, diff, diffExpanded, onToggleDiffExpanded, diffing, onDiff,
   programId, canEdit, uploading, reviewing, onUpload, onRemove, onReview,
 }: {
-  discipline:        ProgramDiscipline
-  doc:               ProgramDocument | null
-  review:            ProgramDocumentReview | null
-  expanded:          boolean
-  onToggleExpanded:  () => void
-  programId:         string
-  canEdit:           boolean
-  uploading:         boolean
-  reviewing:         boolean
-  onUpload:          (file: File) => void
-  onRemove:          (doc: ProgramDocument) => void
-  onReview:          () => void
+  discipline:            ProgramDiscipline
+  doc:                   ProgramDocument | null
+  review:                ProgramDocumentReview | null
+  expanded:              boolean
+  onToggleExpanded:      () => void
+  // Year-over-year diff (migration 084) — versionCount counts ALL uploads
+  // for this discipline (current + superseded); the button needs ≥2.
+  versionCount:          number
+  diff:                  ProgramDocumentDiff | null
+  diffExpanded:          boolean
+  onToggleDiffExpanded:  () => void
+  diffing:               boolean
+  onDiff:                () => void
+  programId:             string
+  canEdit:               boolean
+  uploading:             boolean
+  reviewing:             boolean
+  onUpload:              (file: File) => void
+  onRemove:              (doc: ProgramDocument) => void
+  onReview:              () => void
 }) {
   const hasCodes = discipline.competency_codes.length > 0
   const kb = doc ? Math.round(doc.file_size / 1024) : 0
@@ -1518,6 +1614,16 @@ function DisciplineDocumentRow({
               {expanded ? 'Скрыть разбор' : 'Показать разбор'}
             </button>
           )}
+          {canEdit && (
+            <button
+              onClick={diff ? onToggleDiffExpanded : onDiff}
+              disabled={diffing || versionCount < 2}
+              title={versionCount < 2 ? 'Появится после повторной загрузки обновлённого файла для этой дисциплины' : undefined}
+              className="text-xs font-sans text-amber hover:underline disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed"
+            >
+              {diffing ? 'Сравниваем…' : diff ? (diffExpanded ? 'Скрыть изменения' : 'Показать изменения') : 'Что изменилось с прошлого года'}
+            </button>
+          )}
         </div>
       )}
       {review && expanded && (
@@ -1526,6 +1632,11 @@ function DisciplineDocumentRow({
             <p className="text-xs font-sans text-ink-secondary leading-relaxed">{review.result.summary}</p>
           )}
           {review.result.items.map((it, i) => <CoverageItemRow key={i} it={it} />)}
+        </div>
+      )}
+      {diff && diffExpanded && (
+        <div className="mt-3 pl-8 pr-1 border-t border-border pt-3">
+          <DocumentDiffPanel diff={diff} />
         </div>
       )}
     </div>
@@ -1596,6 +1707,78 @@ function CoverageChip({ label, value, status }: { label: string; value: number; 
       <span className="font-medium">{value}</span>
       <span>{label}</span>
     </span>
+  )
+}
+
+const DIFF_KIND_META: Record<DiffChangeKind, { label: string; color: string }> = {
+  added:   { label: 'добавлено', color: 'var(--color-success)' },
+  removed: { label: 'убрано',    color: 'var(--color-danger)' },
+  changed: { label: 'изменено',  color: 'var(--color-warning)' },
+}
+
+// «Что изменилось с прошлого года» (migration 084, Research.md §9.6) — a
+// structured report, not a text diff: three groups (темы / компетенции /
+// формы контроля), each entry colored by DiffChangeKind. Same visual
+// language as CoverageItemRow (border-l + status color + evidence quote).
+function DocumentDiffPanel({ diff }: { diff: ProgramDocumentDiff }) {
+  const { result } = diff
+  if (result.unchanged) {
+    return (
+      <p className="text-xs font-sans text-ink-secondary leading-relaxed">
+        {result.summary || 'Существенных изменений с прошлой версии не обнаружено.'}
+      </p>
+    )
+  }
+  return (
+    <div className="space-y-3">
+      {result.summary && (
+        <p className="text-xs font-sans text-ink-secondary leading-relaxed">{result.summary}</p>
+      )}
+      <DiffGroup title="Темы">
+        {result.topics.map((t, i) => (
+          <div key={i} className="text-xs font-sans border-l-2 pl-2.5" style={{ borderColor: DIFF_KIND_META[t.kind].color }}>
+            <div className="flex items-center gap-2">
+              <span className="text-ink font-medium">{t.topic}</span>
+              <span style={{ color: DIFF_KIND_META[t.kind].color }}>{DIFF_KIND_META[t.kind].label}</span>
+            </div>
+            {t.detail && <div className="text-ink-secondary mt-0.5">{t.detail}</div>}
+            {t.evidence && <div className="text-ink-tertiary italic mt-0.5">«{t.evidence}»</div>}
+          </div>
+        ))}
+      </DiffGroup>
+      <DiffGroup title="Компетенции">
+        {result.competencies.map((c, i) => (
+          <div key={i} className="text-xs font-sans border-l-2 pl-2.5" style={{ borderColor: DIFF_KIND_META[c.kind].color }}>
+            <div className="flex items-center gap-2">
+              <span className="text-ink font-medium">{c.code ? `${c.code} — ${c.title}` : c.title}</span>
+              <span style={{ color: DIFF_KIND_META[c.kind].color }}>{DIFF_KIND_META[c.kind].label}</span>
+            </div>
+            {c.detail && <div className="text-ink-secondary mt-0.5">{c.detail}</div>}
+          </div>
+        ))}
+      </DiffGroup>
+      <DiffGroup title="Формы контроля">
+        {result.assessment.map((a, i) => (
+          <div key={i} className="text-xs font-sans border-l-2 pl-2.5" style={{ borderColor: DIFF_KIND_META[a.kind].color }}>
+            <div className="flex items-center gap-2">
+              <span className="text-ink font-medium">{a.form}</span>
+              <span style={{ color: DIFF_KIND_META[a.kind].color }}>{DIFF_KIND_META[a.kind].label}</span>
+            </div>
+            {a.detail && <div className="text-ink-secondary mt-0.5">{a.detail}</div>}
+          </div>
+        ))}
+      </DiffGroup>
+    </div>
+  )
+}
+
+function DiffGroup({ title, children }: { title: string; children: ReactNode[] }) {
+  if (children.length === 0) return null
+  return (
+    <div>
+      <div className="text-[11px] font-sans font-semibold text-ink-tertiary uppercase tracking-wide mb-1.5">{title}</div>
+      <div className="space-y-2">{children}</div>
+    </div>
   )
 }
 
