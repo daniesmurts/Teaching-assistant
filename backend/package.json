@@ -17,6 +17,7 @@
     "test:yandex-images": "node --env-file=../.env $(npm root)/.bin/tsx scripts/testYandexImages.ts",
     "repair:filenames": "node --env-file=../.env $(npm root)/.bin/tsx scripts/repairFilenames.ts",
     "repair:role-tree": "node --env-file=../.env $(npm root)/.bin/tsx scripts/repairRoleTreeSync.ts",
+    "repair:rpd-dept-mapping": "node --env-file=../.env $(npm root)/.bin/tsx scripts/fixRpdDeptMapping.ts",
     "backup:db": "node --env-file=../.env $(npm root)/.bin/tsx scripts/backupDatabase.ts",
     "marketing:merge-list": "node --env-file=../.env $(npm root)/.bin/tsx scripts/generateMarketingMergeList.ts"
   },
