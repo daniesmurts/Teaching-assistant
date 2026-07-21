@@ -6,17 +6,28 @@
 import ExcelJS from 'exceljs'
 import type { RpdSnapshotRecord, RpdSnapshotRowRecord, RpdDeptGroupRecord } from '../db/queries/rpdMonitor'
 import type { RpdOverview } from './rpdMonitor'
+import { pctStatus, STATUS_FILL_HEX, type RpdStatus } from './rpdMonitor'
 
 const HEADER_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } }
 const HEADER_FONT: Partial<ExcelJS.Font> = { color: { argb: 'FFFFFFFF' }, bold: true }
-const GREEN_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC6E6C6' } }
-const RED_FILL:   ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4C7C3' } }
+// Same three tiers as the web pills and the reminder-letter table — a row's colour
+// always means the same thing everywhere. Anomalies (data inconsistency, not
+// performance) override the tier colour since they're the more urgent signal.
+const STATUS_FILLS: Record<RpdStatus, ExcelJS.Fill> = {
+  danger:  { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${STATUS_FILL_HEX.danger}` } },
+  warning: { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${STATUS_FILL_HEX.warning}` } },
+  success: { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${STATUS_FILL_HEX.success}` } },
+}
 const YELLOW_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3B0' } }
 
+// Mirrors every column in her source (Кафедра through % долга ФОС) plus
+// «Институт» (our own addition, not in the raw export) — the earlier version
+// silently dropped ФОС на проверке / Долг по ФОС even after the parser
+// started capturing them.
 const ROW_HEADERS = [
   'Кафедра', 'Форма обучения', 'Уровень образования', 'Институт',
   'План', 'Сделано РПД', '% РПД', 'На проверке', 'Долг РПД', '% долга',
-  'Сделано ФОС', '% ФОС',
+  'Сделано ФОС', '% ФОС', 'ФОС на проверке', '% ФОС на проверке', 'Долг ФОС', '% долга ФОС',
 ]
 
 function pct(count: number, plan: number): number {
@@ -31,20 +42,17 @@ function writeDataRow(
   ws: ExcelJS.Worksheet,
   r: RpdSnapshotRowRecord,
   groupName: string,
-  prev: RpdSnapshotRowRecord | undefined,
 ): void {
   const row = ws.addRow([
     r.dept_code, r.edu_form, r.edu_level, groupName,
     r.plan_count, r.rpd_done, pct(r.rpd_done, r.plan_count), r.rpd_review, r.rpd_debt, pct(r.rpd_debt, r.plan_count),
-    r.fos_done, pct(r.fos_done, r.plan_count),
+    r.fos_done, pct(r.fos_done, r.plan_count), r.fos_review, pct(r.fos_review, r.plan_count),
+    r.fos_debt, pct(r.fos_debt, r.plan_count),
   ])
-  if (rowIsAnomalous(r)) {
-    row.eachCell((c) => { c.fill = YELLOW_FILL })
-  } else if (prev && r.rpd_done > prev.rpd_done) {
-    row.eachCell((c) => { c.fill = GREEN_FILL })
-  } else if (r.rpd_debt > 0 && prev && r.rpd_done <= prev.rpd_done) {
-    row.eachCell((c) => { c.fill = RED_FILL })
-  }
+  // Anomalies (data inconsistency, not performance) override the readiness-tier
+  // colour since they're the more urgent signal — matches the reminder-letter table.
+  const fill = rowIsAnomalous(r) ? YELLOW_FILL : STATUS_FILLS[pctStatus(pct(r.rpd_done, r.plan_count))]
+  row.eachCell((c) => { c.fill = fill })
 }
 
 function styleHeaderRow(row: ExcelJS.Row): void {
@@ -88,6 +96,8 @@ export async function generateRpdMasterWorkbook(
   summary.addRow(['На проверке', t.rpdReview, ''])
   summary.addRow(['Долг по РПД', t.rpdDebt, pt ? t.rpdDebt - pt.rpdDebt : ''])
   summary.addRow(['Сделано ФОС', t.fosDone, pt ? t.fosDone - pt.fosDone : ''])
+  summary.addRow(['ФОС на проверке', t.fosReview, ''])
+  summary.addRow(['Долг по ФОС', t.fosDebt, pt ? t.fosDebt - pt.fosDebt : ''])
   summary.addRow([])
 
   const groupsHeader = summary.addRow(['Институт', 'План', 'Сделано РПД', '% РПД', 'Долг РПД', 'Δ сделано с прошлого снимка'])
@@ -113,7 +123,7 @@ export async function generateRpdMasterWorkbook(
   const header = all.addRow(ROW_HEADERS)
   styleHeaderRow(header)
   for (const r of rows) {
-    writeDataRow(all, r, groupMap.get(r.dept_code)?.groupName ?? '—', undefined)
+    writeDataRow(all, r, groupMap.get(r.dept_code)?.groupName ?? '—')
   }
   autoWidth(all)
 
@@ -129,7 +139,7 @@ export async function generateRpdMasterWorkbook(
     const ws = wb.addWorksheet(groupName.slice(0, 31))
     const h = ws.addRow(ROW_HEADERS)
     styleHeaderRow(h)
-    for (const r of groupRows) writeDataRow(ws, r, groupName, undefined)
+    for (const r of groupRows) writeDataRow(ws, r, groupName)
     autoWidth(ws)
   }
 
@@ -140,7 +150,6 @@ export async function generateRpdGroupWorkbook(
   snapshot: RpdSnapshotRecord,
   group: RpdDeptGroupRecord,
   allRows: RpdSnapshotRowRecord[],
-  previousRows: RpdSnapshotRowRecord[],
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook()
   wb.creator = 'ИСПУМ'
@@ -148,7 +157,6 @@ export async function generateRpdGroupWorkbook(
 
   const deptSet = new Set(group.dept_codes)
   const rows = allRows.filter((r) => deptSet.has(r.dept_code))
-  const prevByKey = new Map(previousRows.map((r) => [`${r.dept_code} ${r.edu_form} ${r.edu_level}`, r]))
 
   const ws = wb.addWorksheet(group.name.slice(0, 31))
   ws.addRow([group.name])
@@ -157,13 +165,20 @@ export async function generateRpdGroupWorkbook(
   const header = ws.addRow(ROW_HEADERS)
   styleHeaderRow(header)
   for (const r of rows) {
-    writeDataRow(ws, r, group.name, prevByKey.get(`${r.dept_code} ${r.edu_form} ${r.edu_level}`))
+    writeDataRow(ws, r, group.name)
   }
 
   const totalPlan = rows.reduce((s, r) => s + r.plan_count, 0)
   const totalDone = rows.reduce((s, r) => s + r.rpd_done, 0)
   const totalDebt = rows.reduce((s, r) => s + r.rpd_debt, 0)
-  const totalsRow = ws.addRow(['Итого', '', '', '', totalPlan, totalDone, pct(totalDone, totalPlan), '', totalDebt, pct(totalDebt, totalPlan), '', ''])
+  const totalFosDone = rows.reduce((s, r) => s + r.fos_done, 0)
+  const totalFosReview = rows.reduce((s, r) => s + r.fos_review, 0)
+  const totalFosDebt = rows.reduce((s, r) => s + r.fos_debt, 0)
+  const totalsRow = ws.addRow([
+    'Итого', '', '', '', totalPlan, totalDone, pct(totalDone, totalPlan), '', totalDebt, pct(totalDebt, totalPlan),
+    totalFosDone, pct(totalFosDone, totalPlan), totalFosReview, pct(totalFosReview, totalPlan),
+    totalFosDebt, pct(totalFosDebt, totalPlan),
+  ])
   totalsRow.font = { bold: true }
   autoWidth(ws)
 

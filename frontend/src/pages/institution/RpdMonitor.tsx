@@ -10,6 +10,7 @@ import {
   createRpdGroup, assignRpdDepts, learnRpdMapping, updateRpdSnapshotDate, deleteRpdSnapshot,
   downloadRpdMaster, downloadRpdGroup, downloadRpdReminder, getRpdReminderText,
   type RpdOverview, type RpdSnapshot, type RpdDeptGroup, type RpdLeaderDept, type RpdReminderPreview, type RpdAllDept,
+  type RpdRegressedDept,
   type RpdGroupOverview,
 } from '../../api/rpdMonitor'
 
@@ -43,12 +44,15 @@ function DownloadIcon() {
   )
 }
 
-function DeltaBadge({ value, suffix = '' }: { value: number | null; suffix?: string }) {
+/** `invert` is for metrics where less is better (долг): the displayed number always
+    matches the real, signed change (e.g. debt +79 really did go up) — only the
+    color polarity flips, so the sign shown is never at odds with what happened. */
+function DeltaBadge({ value, suffix = '', invert = false }: { value: number | null; suffix?: string; invert?: boolean }) {
   if (value === null || value === 0) return null
-  const positive = value > 0
+  const good = invert ? value < 0 : value > 0
   return (
-    <span className={`text-xs font-sans font-medium ml-1.5 ${positive ? 'text-success' : 'text-danger'}`}>
-      {positive ? '+' : ''}{value}{suffix}
+    <span className={`text-xs font-sans font-medium ml-1.5 ${good ? 'text-success' : 'text-danger'}`}>
+      {value > 0 ? '+' : ''}{value}{suffix}
     </span>
   )
 }
@@ -398,6 +402,7 @@ export default function RpdMonitor() {
             )}
 
             <Totals overview={overview} />
+            <FosTotals overview={overview} />
 
             <CompletionForecast overview={overview} />
 
@@ -430,6 +435,8 @@ export default function RpdMonitor() {
             {overview.leaderDepts.length > 0 && <LeaderDepts overview={overview} />}
 
             {overview.problemDepts.length > 0 && <ProblemDepts overview={overview} />}
+
+            {overview.regressedDepts.length > 0 && <RegressedDepts overview={overview} />}
 
             <AllDeptsPanel overview={overview} />
 
@@ -486,9 +493,42 @@ function Totals({ overview }: { overview: RpdOverview }) {
         <div className="text-xs font-sans text-ink-tertiary">Долг по РПД</div>
         <div className="text-2xl font-display font-bold text-danger">
           {t.rpdDebt}
-          <DeltaBadge value={pt ? -(t.rpdDebt - pt.rpdDebt) : null} />
+          <DeltaBadge value={pt ? t.rpdDebt - pt.rpdDebt : null} invert />
         </div>
       </CardBody></Card>
+    </div>
+  )
+}
+
+/** ФОС mirrors the same three figures as РПД (Сделано / на проверке / Долг) — a
+    secondary row, since Мониторинг РПД's primary metric is РПД, but the columns
+    exist in her source export and shouldn't be invisible on the platform. */
+function FosTotals({ overview }: { overview: RpdOverview }) {
+  const t = overview.totals
+  const pt = overview.previousTotals
+  return (
+    <div className="mb-6">
+      <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">ФОС</div>
+      <div className="grid grid-cols-3 gap-3">
+        <Card><CardBody>
+          <div className="text-xs font-sans text-ink-tertiary">Сделано ФОС</div>
+          <div className="text-xl font-display font-bold text-ink">
+            {t.fosDone} <span className="text-sm font-sans text-ink-tertiary">({t.fosPct}%)</span>
+            <DeltaBadge value={pt ? t.fosDone - pt.fosDone : null} />
+          </div>
+        </CardBody></Card>
+        <Card><CardBody>
+          <div className="text-xs font-sans text-ink-tertiary">ФОС на проверке</div>
+          <div className="text-xl font-display font-bold text-ink">{t.fosReview}</div>
+        </CardBody></Card>
+        <Card><CardBody>
+          <div className="text-xs font-sans text-ink-tertiary">Долг по ФОС</div>
+          <div className="text-xl font-display font-bold text-danger">
+            {t.fosDebt}
+            <DeltaBadge value={pt ? t.fosDebt - pt.fosDebt : null} invert />
+          </div>
+        </CardBody></Card>
+      </div>
     </div>
   )
 }
@@ -851,6 +891,48 @@ function LeaderDepts({ overview }: { overview: RpdOverview }) {
   )
 }
 
+// Explains cases where Сделано and Долг both rose in the same period: they're not
+// each other's mirror, на проверке is — this shows exactly which кафедры lost
+// ground there (rejected/returned faster than они could be approved).
+function RegressedDepts({ overview }: { overview: RpdOverview }) {
+  return (
+    <Card className="mb-6 border-danger/30">
+      <CardHeader>
+        <h2 className="font-sans font-semibold text-sm text-ink">Долг вырос с прошлого снимка</h2>
+        <p className="text-xs font-sans text-ink-tertiary mt-0.5">
+          Обычно потому, что «на проверке» уменьшилось быстрее, чем выросло «сделано» — часть работ вернули или отклонили.
+        </p>
+      </CardHeader>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm font-sans">
+          <thead>
+            <tr className="text-left text-xs text-ink-tertiary border-b border-border">
+              <th className="px-4 py-2">Кафедра</th>
+              <th className="px-4 py-2">Институт</th>
+              <th className="px-4 py-2">Форма / уровень</th>
+              <th className="px-4 py-2">Долг было → стало</th>
+              <th className="px-4 py-2">Δ долг</th>
+              <th className="px-4 py-2">Δ на проверке</th>
+            </tr>
+          </thead>
+          <tbody>
+            {overview.regressedDepts.slice(0, 20).map((d: RpdRegressedDept, i) => (
+              <tr key={i} className="border-b border-border last:border-0">
+                <td className="px-4 py-2 font-medium text-ink">{d.deptCode}</td>
+                <td className="px-4 py-2 text-ink-secondary">{d.groupName ?? '—'}</td>
+                <td className="px-4 py-2 text-ink-secondary">{d.eduForm}, {d.eduLevel}</td>
+                <td className="px-4 py-2 text-ink-secondary">{d.previousDebt} → {d.currentDebt}</td>
+                <td className="px-4 py-2 font-semibold text-danger">+{d.deltaDebt}</td>
+                <td className="px-4 py-2 text-ink-secondary">{d.deltaReview > 0 ? '+' : ''}{d.deltaReview}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  )
+}
+
 function ProblemDepts({ overview }: { overview: RpdOverview }) {
   return (
     <Card className="mb-6">
@@ -945,12 +1027,16 @@ function AllDeptsPanel({ overview }: { overview: RpdOverview }) {
               <th className="px-4 py-2">Форма / уровень</th>
               <th className="px-4 py-2">Сделано / план</th>
               <th className="px-4 py-2">Готовность</th>
-              <th className="px-4 py-2">Долг</th>
+              <th className="px-4 py-2">Долг РПД</th>
+              <th className="px-4 py-2 border-l border-border">Сделано ФОС</th>
+              <th className="px-4 py-2">ФОС на проверке</th>
+              <th className="px-4 py-2">Долг ФОС</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((d, i) => {
               const status = pctStatus(d.rpdPct)
+              const fosStatus = pctStatus(d.fosPct)
               return (
                 <tr key={i} className={`border-b border-border last:border-0 ${statusRowClass(d.rpdPct)}`}>
                   <td className="px-4 py-1.5 font-medium text-ink whitespace-nowrap">{d.deptCode}</td>
@@ -962,11 +1048,14 @@ function AllDeptsPanel({ overview }: { overview: RpdOverview }) {
                   </td>
                   <td className="px-4 py-1.5"><ReadinessBadge pct={d.rpdPct} /></td>
                   <td className={`px-4 py-1.5 font-semibold ${d.rpdDebt > 0 ? STATUS_TEXT[status] : 'text-ink-tertiary'}`}>{d.rpdDebt}</td>
+                  <td className="px-4 py-1.5 text-ink-secondary whitespace-nowrap border-l border-border">{d.fosDone} / {d.planCount}</td>
+                  <td className="px-4 py-1.5 text-ink-secondary whitespace-nowrap">{d.fosReview}</td>
+                  <td className={`px-4 py-1.5 font-semibold ${d.fosDebt > 0 ? STATUS_TEXT[fosStatus] : 'text-ink-tertiary'}`}>{d.fosDebt}</td>
                 </tr>
               )
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-ink-tertiary">Ничего не найдено</td></tr>
+              <tr><td colSpan={9} className="px-4 py-6 text-center text-ink-tertiary">Ничего не найдено</td></tr>
             )}
           </tbody>
         </table>

@@ -6,6 +6,7 @@
 
 import type { RpdSnapshotRecord, RpdSnapshotRowRecord, RpdDeptGroupRecord } from '../db/queries/rpdMonitor'
 import { chat } from './llm/registry'
+import { pctStatus, STATUS_FILL_HEX } from './rpdMonitor'
 
 interface ProblemRow {
   deptCode:  string
@@ -94,18 +95,22 @@ export async function generateRpdReminderDocx(
   const cellBorder = { style: BorderStyle.SINGLE, size: 1, color: 'D8D2C6' }
   const borders = { top: cellBorder, bottom: cellBorder, left: cellBorder, right: cellBorder }
   const headCell = (text: string) => new TableCell({ borders, children: [new Paragraph({ children: [new TextRun({ text, bold: true })] })] })
-  const cell = (text: string) => new TableCell({ borders, children: [new Paragraph({ children: [new TextRun(text)] })] })
+  const cell = (text: string, fill?: string) =>
+    new TableCell({ borders, shading: fill ? { fill } : undefined, children: [new Paragraph({ children: [new TextRun(text)] })] })
 
   const table = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     rows: [
       new TableRow({ children: [headCell('Кафедра'), headCell('Форма'), headCell('Уровень'), headCell('Сделано / План'), headCell('% готовности'), headCell('Долг')] }),
-      ...problems.map((r) => new TableRow({
-        children: [
-          cell(r.deptCode), cell(r.eduForm), cell(r.eduLevel),
-          cell(`${r.rpdDone} / ${r.planCount}`), cell(`${r.rpdPct}%`), cell(String(r.rpdDebt)),
-        ],
-      })),
+      ...problems.map((r) => {
+        const fill = STATUS_FILL_HEX[pctStatus(r.rpdPct)]
+        return new TableRow({
+          children: [
+            cell(r.deptCode, fill), cell(r.eduForm, fill), cell(r.eduLevel, fill),
+            cell(`${r.rpdDone} / ${r.planCount}`, fill), cell(`${r.rpdPct}%`, fill), cell(String(r.rpdDebt), fill),
+          ],
+        })
+      }),
     ],
   })
 

@@ -176,14 +176,8 @@ router.get('/export/group/:groupId', asyncHandler(async (req, res) => {
   const group = await getDeptGroup(req.params.groupId, instId)
   if (!group) throw new NotFoundError('Группа')
 
-  const [rows, previousRows] = await Promise.all([
-    getSnapshotRows(snapshotId),
-    (async () => {
-      const overview = await computeOverview(instId, snapshotId)
-      return overview.previousSnapshot ? getSnapshotRows(overview.previousSnapshot.id) : []
-    })(),
-  ])
-  const buffer = await generateRpdGroupWorkbook(snapshot, group, rows, previousRows)
+  const rows = await getSnapshotRows(snapshotId)
+  const buffer = await generateRpdGroupWorkbook(snapshot, group, rows)
   const fname = `РПД_${group.name}_${snapshot.captured_at.toString().slice(0, 10)}.xlsx`
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fname)}"`)

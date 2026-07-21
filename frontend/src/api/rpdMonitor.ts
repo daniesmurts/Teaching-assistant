@@ -25,6 +25,8 @@ export interface RpdTotals {
   rpdDebt:   number
   rpdPct:    number
   fosDone:   number
+  fosReview: number
+  fosDebt:   number
   fosPct:    number
 }
 
@@ -58,6 +60,18 @@ export interface RpdLeaderDept {
   improved:  boolean
 }
 
+export interface RpdRegressedDept {
+  deptCode:     string
+  eduForm:      string
+  eduLevel:     string
+  groupName:    string | null
+  planCount:    number
+  previousDebt: number
+  currentDebt:  number
+  deltaDebt:    number
+  deltaReview:  number
+}
+
 export interface RpdAllDept {
   deptCode:  string
   eduForm:   string
@@ -68,6 +82,10 @@ export interface RpdAllDept {
   rpdReview: number
   rpdDebt:   number
   rpdPct:    number
+  fosDone:   number
+  fosReview: number
+  fosDebt:   number
+  fosPct:    number
   deltaRpdDone: number | null
 }
 
@@ -80,6 +98,7 @@ export interface RpdOverview {
   ungroupedDeptCodes: string[]
   problemDepts: RpdProblemDept[]
   leaderDepts: RpdLeaderDept[]
+  regressedDepts: RpdRegressedDept[]
   allDepts: RpdAllDept[]
   timeSeries: Array<{ snapshotId: string; capturedAt: string; planCount: number; rpdDone: number; rpdPct: number }>
 }

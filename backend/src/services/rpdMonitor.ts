@@ -100,15 +100,23 @@ async function parseXlsx(buffer: Buffer): Promise<RpdParseResult> {
   const sheet = wb.getWorksheet('сводка') ?? wb.worksheets[0]
   if (!sheet) throw new RpdParseError('В файле не найдено листов')
 
+  // Column positions are located by header TEXT, not fixed offsets from
+  // «Уровень образования» — АСУ ships at least two layouts (an 11-column
+  // variant with no ФОС на проверке/Долг по ФОС/«% РПД на проверке», and a
+  // full 17-column one matching the .doc export exactly). A fixed-offset
+  // scheme silently misreads columns when the layout has an extra % column
+  // it doesn't expect — confirmed against a real full-width header sample.
+  // Кафедра/Форма обучения have no header text at all in any sample (blank
+  // cells above «Уровень образования»), so those two stay positional.
   let headerRow = -1
   let levelCol = -1
+  const colByLabel = new Map<string, number>()
   for (let r = 1; r <= Math.min(sheet.rowCount, 20); r++) {
-    for (let c = 1; c <= sheet.getRow(r).cellCount; c++) {
-      if (String(sheet.getCell(r, c).value ?? '').trim() === 'Уровень образования') {
-        headerRow = r
-        levelCol = c
-        break
-      }
+    const row = sheet.getRow(r)
+    for (let c = 1; c <= row.cellCount; c++) {
+      const label = String(sheet.getCell(r, c).value ?? '').trim()
+      if (label === 'Уровень образования') { headerRow = r; levelCol = c }
+      if (headerRow === r || label === 'Уровень образования') colByLabel.set(label, c)
     }
     if (headerRow > 0) break
   }
@@ -116,13 +124,21 @@ async function parseXlsx(buffer: Buffer): Promise<RpdParseResult> {
     throw new RpdParseError('Не найден заголовок «Уровень образования» — проверьте, что это выгрузка АСУ Университет')
   }
 
+  const col = (label: string): number => colByLabel.get(label) ?? -1
+
   const deptCol = levelCol - 2
   const formCol = levelCol - 1
-  const planCol = levelCol + 1
-  const doneCol = levelCol + 2
-  const reviewCol = levelCol + 4
-  const debtCol = levelCol + 5
-  const fosDoneCol = levelCol + 7
+  const planCol = col('Дисциплин по плану')
+  const doneCol = col('Сделано РПД')
+  const reviewCol = col('РПД на проверке')
+  const debtCol = col('Долг по РПД')
+  const fosDoneCol = col('Сделано ФОС')
+  const fosReviewCol = col('ФОС на проверке')   // -1 on the 11-column variant — defaults to 0 below
+  const fosDebtCol = col('Долг по ФОС')         // -1 on the 11-column variant — defaults to 0 below
+
+  if (planCol < 0 || doneCol < 0 || reviewCol < 0 || debtCol < 0 || fosDoneCol < 0) {
+    throw new RpdParseError('Не найдены ожидаемые заголовки колонок — проверьте, что это выгрузка «Заполнение РПД и ФОС»')
+  }
 
   let capturedAt: Date | null = null
   let periodLabel: string | null = null
@@ -150,8 +166,8 @@ async function parseXlsx(buffer: Buffer): Promise<RpdParseResult> {
       rpdReview: Number(sheet.getCell(r, reviewCol).value ?? 0),
       rpdDebt:   Number(sheet.getCell(r, debtCol).value ?? 0),
       fosDone:   Number(sheet.getCell(r, fosDoneCol).value ?? 0),
-      fosReview: 0,
-      fosDebt:   0,
+      fosReview: fosReviewCol > 0 ? Number(sheet.getCell(r, fosReviewCol).value ?? 0) : 0,
+      fosDebt:   fosDebtCol > 0 ? Number(sheet.getCell(r, fosDebtCol).value ?? 0) : 0,
     }
     validateRow(row, flags)
     rows.push(row)
@@ -353,6 +369,8 @@ export interface RpdTotals {
   rpdDebt:   number
   rpdPct:    number
   fosDone:   number
+  fosReview: number
+  fosDebt:   number
   fosPct:    number
 }
 
@@ -386,6 +404,18 @@ export interface RpdLeaderDept {
   improved:  boolean // rpd_done increased since the previous snapshot
 }
 
+export interface RpdRegressedDept {
+  deptCode:     string
+  eduForm:      string
+  eduLevel:     string
+  groupName:    string | null
+  planCount:    number
+  previousDebt: number
+  currentDebt:  number
+  deltaDebt:    number  // > 0 — долг got worse since the previous snapshot
+  deltaReview:  number  // usually negative here — на проверке drained without becoming сделано
+}
+
 export interface RpdAllDept {
   deptCode:  string
   eduForm:   string
@@ -396,6 +426,10 @@ export interface RpdAllDept {
   rpdReview: number
   rpdDebt:   number
   rpdPct:    number
+  fosDone:   number
+  fosReview: number
+  fosDebt:   number
+  fosPct:    number
   deltaRpdDone: number | null
 }
 
@@ -408,11 +442,34 @@ export interface RpdOverview {
   ungroupedDeptCodes: string[]
   problemDepts: RpdProblemDept[]
   leaderDepts: RpdLeaderDept[]
+  /** Кафедры whose долг got worse since the previous snapshot — usually because
+      на проверке drained (rejected/returned) faster than it converted to сделано.
+      Explains cases where both Сделано and Долг rise in the same period: they're
+      not each other's mirror, на проверке is — this is that regression made visible. */
+  regressedDepts: RpdRegressedDept[]
   /** Every кафедра/форма/уровень row in the snapshot — problemDepts/leaderDepts are curated
       top-N views of this same data, capped for the at-a-glance panels; this is the complete list
       so no department is ever invisible on the platform. */
   allDepts: RpdAllDept[]
   timeSeries: Array<{ snapshotId: string; capturedAt: string; planCount: number; rpdDone: number; rpdPct: number }>
+}
+
+// Same three tiers as the frontend's readiness pills/bar chart — shared here so the
+// Excel and Word exports can colour-code by the same thresholds, not just the UI.
+export type RpdStatus = 'danger' | 'warning' | 'success'
+
+export function pctStatus(pct: number): RpdStatus {
+  if (pct < 33) return 'danger'
+  if (pct < 67) return 'warning'
+  return 'success'
+}
+
+/** Pastel tints (6-hex, no #/alpha prefix) for cell shading in the Excel/Word
+    exports — same three tiers as the web pills, just light enough for black text. */
+export const STATUS_FILL_HEX: Record<RpdStatus, string> = {
+  danger:  'F4C7C3',
+  warning: 'FBE0C4',
+  success: 'C6E6C6',
 }
 
 // Mirrors the status-color thresholds on the frontend (pctStatus 'success' tier) —
@@ -426,7 +483,9 @@ function sumTotals(rows: RpdSnapshotRowRecord[]): RpdTotals {
     rpdReview: acc.rpdReview + r.rpd_review,
     rpdDebt:   acc.rpdDebt + r.rpd_debt,
     fosDone:   acc.fosDone + r.fos_done,
-  }), { planCount: 0, rpdDone: 0, rpdReview: 0, rpdDebt: 0, fosDone: 0 })
+    fosReview: acc.fosReview + r.fos_review,
+    fosDebt:   acc.fosDebt + r.fos_debt,
+  }), { planCount: 0, rpdDone: 0, rpdReview: 0, rpdDebt: 0, fosDone: 0, fosReview: 0, fosDebt: 0 })
   return {
     ...t,
     rpdPct: t.planCount > 0 ? round1((t.rpdDone / t.planCount) * 100) : 0,
@@ -525,6 +584,29 @@ export async function computeOverview(institutionId: string, snapshotId: string)
     .sort((a, b) => b.planCount - a.planCount || b.rpdPct - a.rpdPct)
     .slice(0, 50)
 
+  // Regressions: долг got worse since the previous snapshot. Needs a previous
+  // snapshot AND a matching previous row (a кафедра that only just appeared has
+  // no meaningful "regression", it's new — not covered here).
+  const regressedDepts: RpdRegressedDept[] = previousSnapshot
+    ? rows
+        .map((r) => {
+          const prev = previousByKey.get(rowKey(r))
+          if (!prev) return null
+          const deltaDebt = r.rpd_debt - prev.rpd_debt
+          if (deltaDebt <= 0) return null
+          return {
+            deptCode: r.dept_code, eduForm: r.edu_form, eduLevel: r.edu_level,
+            groupName: groupMap.get(r.dept_code)?.groupName ?? null,
+            planCount: r.plan_count,
+            previousDebt: prev.rpd_debt, currentDebt: r.rpd_debt, deltaDebt,
+            deltaReview: r.rpd_review - prev.rpd_review,
+          }
+        })
+        .filter((x): x is RpdRegressedDept => x !== null)
+        .sort((a, b) => b.deltaDebt - a.deltaDebt)
+        .slice(0, 50)
+    : []
+
   // Complete list — every row, uncapped. problemDepts/leaderDepts above are curated
   // top-N subsets of exactly this data for the at-a-glance panels; this is what
   // guarantees no department is ever invisible on the platform.
@@ -536,6 +618,8 @@ export async function computeOverview(institutionId: string, snapshotId: string)
         groupName: groupMap.get(r.dept_code)?.groupName ?? null,
         planCount: r.plan_count, rpdDone: r.rpd_done, rpdReview: r.rpd_review, rpdDebt: r.rpd_debt,
         rpdPct: r.plan_count > 0 ? round1((r.rpd_done / r.plan_count) * 100) : 0,
+        fosDone: r.fos_done, fosReview: r.fos_review, fosDebt: r.fos_debt,
+        fosPct: r.plan_count > 0 ? round1((r.fos_done / r.plan_count) * 100) : 0,
         deltaRpdDone: prev ? r.rpd_done - prev.rpd_done : null,
       }
     })
@@ -552,6 +636,7 @@ export async function computeOverview(institutionId: string, snapshotId: string)
     ungroupedDeptCodes: Array.from(ungrouped).sort(),
     problemDepts,
     leaderDepts,
+    regressedDepts,
     allDepts,
     timeSeries: series.map((s) => ({
       snapshotId: s.snapshot_id, capturedAt: s.captured_at, planCount: s.plan_count,

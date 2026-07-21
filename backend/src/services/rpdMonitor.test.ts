@@ -67,4 +67,22 @@ describe('parseAsuExport — real АСУ Университет exports', () => 
   it('rejects unsupported file types', async () => {
     await expect(parseAsuExport(Buffer.from('x'), 'report.pdf')).rejects.toThrow()
   })
+
+  it('parses the full 17-column layout by header text, not fixed offsets (полная-раскладка.xlsx)', async () => {
+    // This layout inserts «% РПД на проверке» between «РПД на проверке» and «Долг
+    // по РПД» — a column the 11-column samples don't have. A fixed-offset reader
+    // (levelCol+5 for долг) lands one column early and silently reads the percent
+    // instead of the count. Confirmed this fixture actually breaks under the old
+    // positional code (debt read as 20 instead of 40) before switching to header-
+    // text lookup.
+    const buffer = await readFile(path.join(FIXTURES, 'полная-раскладка.xlsx'))
+    const result = await parseAsuExport(buffer, 'полная-раскладка.xlsx')
+
+    expect(result.rows).toHaveLength(1)
+    expect(result.rows[0]).toMatchObject({
+      deptCode: 'ТЕСТ', eduForm: 'очная', eduLevel: 'бакалавриат',
+      planCount: 100, rpdDone: 40, rpdReview: 20, rpdDebt: 40,
+      fosDone: 35, fosReview: 15, fosDebt: 50,
+    })
+  })
 })
