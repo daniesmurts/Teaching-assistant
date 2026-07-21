@@ -283,6 +283,120 @@ export function deriveFilename(
   return `документ.${MIME_EXTENSION[mimetype] ?? 'pdf'}`
 }
 
+// HTML pages (the /sveden/education discovery flow) are capped separately
+// from documents. Real университет disclosure pages (verified against
+// kstu.ru's, one of our pilot universities) run to 13+ MB in a single
+// response with no pagination — 24MB leaves real headroom above that,
+// still bounded against genuine abuse.
+const MAX_HTML_SIZE = 24 * 1024 * 1024
+// The same real page took 2+ minutes to generate server-side (its own
+// on-page banner warns "считывается большой объём информации за 6 лет,
+// подождите") — this is normal for these sites, not a hang. A separate,
+// longer timeout from the (fast) per-document fetch.
+const PAGE_FETCH_TIMEOUT_MS = 240_000
+
+/**
+ * Best-effort charset from a Content-Type header's `charset=` parameter.
+ * Exported for unit testing.
+ */
+export function charsetFromContentType(contentType: string | undefined): string | null {
+  const m = /charset\s*=\s*"?([\w-]+)"?/i.exec(contentType ?? '')
+  return m ? m[1].toLowerCase() : null
+}
+
+/**
+ * Best-effort charset from a `<meta charset=…>` or `<meta http-equiv=
+ * "Content-Type" content="…charset=…">` tag. The tag itself is always
+ * ASCII-safe regardless of the body's real encoding, so a naive latin1
+ * decode of just the head is enough to find it. Exported for unit testing.
+ */
+export function charsetFromMetaTag(buffer: Buffer): string | null {
+  // The declaration is always near the top; scanning the whole multi-MB
+  // buffer for it would be wasted work.
+  const head = buffer.subarray(0, 4096).toString('latin1')
+  const meta = /<meta[^>]+charset\s*=\s*"?([\w-]+)"?/i.exec(head)
+  return meta ? meta[1].toLowerCase() : null
+}
+
+/**
+ * Decode an HTML response body using its declared charset (header, else
+ * meta tag, else UTF-8) instead of assuming UTF-8 — a real pilot
+ * university's sveden page turned out to be windows-1251, which would
+ * silently mangle every Cyrillic string in the parser if decoded blindly.
+ * `TextDecoder` falls back to UTF-8 for any charset label it doesn't
+ * recognise rather than throwing, so an unusual/legacy label degrades to
+ * the previous behaviour instead of failing the whole fetch.
+ */
+export function decodeHtml(buffer: Buffer, contentTypeHeader: string | undefined): string {
+  const charset = charsetFromContentType(contentTypeHeader) ?? charsetFromMetaTag(buffer) ?? 'utf-8'
+  try {
+    return new TextDecoder(charset).decode(buffer)
+  } catch {
+    return new TextDecoder('utf-8').decode(buffer)
+  }
+}
+
+/**
+ * Fetch an HTML page from an allowlisted URL (same SSRF/allowlist/redirect
+ * discipline as fetchDocumentFromUrl) and return its markup. Used by the
+ * sveden.education bulk-РПД discovery — the *page* is fetched here; each
+ * individual document the user then confirms goes through fetchDocumentFromUrl.
+ */
+export async function fetchPageHtml(rawUrl: string, allowedDomains: string[]): Promise<{ html: string; finalUrl: string }> {
+  let current = validateUrl(rawUrl, allowedDomains)
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    let resp: AxiosResponse<ArrayBuffer>
+    try {
+      resp = await axios.get<ArrayBuffer>(current.toString(), {
+        responseType:     'arraybuffer',
+        timeout:          PAGE_FETCH_TIMEOUT_MS,
+        maxContentLength: MAX_HTML_SIZE,
+        maxBodyLength:    MAX_HTML_SIZE,
+        maxRedirects:     0,
+        headers:          { 'User-Agent': USER_AGENT },
+        httpsAgent:       ssrfSafeHttpsAgent,
+        validateStatus:   (s) => (s >= 200 && s < 300) || (s >= 300 && s < 400),
+      })
+    } catch (err) {
+      const ax = err as AxiosError
+      const chain = `${ax.message ?? ''} ${((ax.cause as Error | undefined)?.message) ?? ''}`
+      if (chain.includes(SSRF_MARK)) {
+        throw new ValidationError('Ссылка ведёт на внутренний или зарезервированный адрес — загрузка запрещена в целях безопасности.')
+      }
+      if (ax.code === 'ERR_FR_MAX_BODY_LENGTH_EXCEEDED' || ax.code === 'ERR_FR_MAX_CONTENT_LENGTH_EXCEEDED') {
+        throw new DocumentProcessingError('Страница слишком большая для обработки.')
+      }
+      if (ax.code === 'ECONNABORTED') {
+        throw new DocumentProcessingError('Страница слишком долго генерировалась на сайте вуза — попробуйте ещё раз позже.')
+      }
+      logger.warn({ message: 'Page fetch failed', url: current.hostname, error: ax.message, code: ax.code })
+      throw new DocumentProcessingError('Не удалось открыть страницу по ссылке — проверьте, что она доступна.')
+    }
+
+    if (resp.status >= 300 && resp.status < 400) {
+      const location = resp.headers['location'] as string | undefined
+      if (!location) throw new DocumentProcessingError('Сервер вернул перенаправление без адреса.')
+      if (hop === MAX_REDIRECTS) throw new DocumentProcessingError('Слишком много перенаправлений.')
+      let next: URL
+      try { next = new URL(location, current) } catch { throw new DocumentProcessingError('Страница перенаправляет на некорректный адрес.') }
+      current = validateUrl(next.toString(), allowedDomains)
+      continue
+    }
+
+    const contentTypeHeader = resp.headers['content-type'] as string | undefined
+    const headerType = String(contentTypeHeader ?? '').split(';')[0].trim().toLowerCase()
+    if (headerType && headerType !== 'text/html' && headerType !== 'application/xhtml+xml') {
+      throw new DocumentProcessingError(
+        'Ссылка ведёт на файл, а не на страницу. Вставьте адрес страницы «Сведения об образовательной организации → Образование».'
+      )
+    }
+    const buffer = Buffer.from(resp.data as ArrayBuffer)
+    return { html: decodeHtml(buffer, contentTypeHeader), finalUrl: current.toString() }
+  }
+  throw new DocumentProcessingError('Не удалось открыть страницу по ссылке.')
+}
+
 /**
  * Fetch a document from an allowlisted URL and return it in multer-file shape.
  * Throws ValidationError (400) for bad/blocked URLs and DocumentProcessingError

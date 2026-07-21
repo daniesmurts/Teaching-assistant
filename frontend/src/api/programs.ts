@@ -148,6 +148,58 @@ export async function deleteProgramDocument(programId: string, docId: string): P
   await client.delete(`/api/institution/programs/${programId}/documents/${docId}`)
 }
 
+// ─── Bulk РПД discovery from the /sveden/education disclosure page ────────────
+
+export interface SvedenDiscoveredItem {
+  url:              string
+  text:             string
+  kind:             'working_programme' | 'practice'
+  practice_type:    ProgramPracticeType | null
+  discipline_id:    string | null
+  match_confidence: 'exact' | 'fuzzy' | null
+  /** РПД: the matched discipline already has a current file (import would supersede it). Practice: that type is already uploaded (import replaces). */
+  has_current_doc:  boolean
+}
+
+export interface SvedenDiscoverResult {
+  matched:    { code: string | null; name: string | null; profile: string | null } | null
+  /** Populated instead of items when the programme row couldn't be identified —
+   *  either no row matched, or (verified against a real pilot university)
+   *  the code matched several rows across different профили with no way to
+   *  tell them apart from the programme's own name. `profile` distinguishes
+   *  those candidates, which otherwise look identical (same code + name). */
+  candidates: { code: string | null; name: string | null; profile: string | null; doc_count: number }[]
+  items:      SvedenDiscoveredItem[]
+  /** Counts of links found but not importable here (план/описание/график/аннотации). */
+  skipped:    Record<string, number>
+  /** Years found as separate tabs on a multi-year page (verified against a
+   *  real pilot university, which bundles ALL years into one response
+   *  behind client-side tabs), newest first. Empty for a single-year page. */
+  available_years: string[]
+  /** Which year's tab was actually parsed — the page's own default/active
+   *  tab unless a different `year` was requested. Null on a single-year page. */
+  selected_year: string | null
+}
+
+/** Fetch + parse the university's «Сведения → Образование» page and return the
+ *  importable-document checklist for this programme. The import itself then
+ *  runs client-side through uploadProgramDocument per confirmed item.
+ *  Real disclosure pages can be huge (a pilot university's ran 13+ MB and
+ *  took 2+ minutes server-side, per its own on-page "please wait" banner) —
+ *  timeout here must clear the backend's own PAGE_FETCH_TIMEOUT_MS (240s).
+ *  `year` re-runs against a specific tab on a multi-year page (see
+ *  available_years/selected_year on the result). */
+export async function discoverProgramDocuments(
+  programId: string, pageUrl: string, year?: string
+): Promise<SvedenDiscoverResult> {
+  const res = await client.post<SvedenDiscoverResult>(
+    `/api/institution/programs/${programId}/documents/discover`,
+    { page_url: pageUrl, year },
+    { timeout: 260_000 }
+  )
+  return res.data
+}
+
 // ─── Discipline document review (migration 051 — Feature K scoped to a discipline) ──
 
 export async function reviewDiscipline(programId: string, disciplineId: string): Promise<ProgramDocumentReview> {

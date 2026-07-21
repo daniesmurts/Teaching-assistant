@@ -210,6 +210,10 @@ entirely, not just the "rebuild in Excel" step v1 already removed.
 
 - **Why** — the biggest remaining manual step; blocked on an external
   integration point that doesn't exist yet, not on anything in this codebase.
+- **Update (2026-07-21):** superseded-in-scope by **Feature AC** — the same
+  АСУ access wall now covers a two-way story (this read leg + the
+  parse-and-push leg). An IT meeting is being arranged (AC v0); take this
+  item's read-direction ask into that same conversation.
 - **Touches** — new `services/asuSync.ts`, a scheduler registration in
   `backend/src/index.ts`, `rpd_snapshots.source_filename` becomes nullable
   (no upload) or gets a `source: 'upload' | 'auto'` discriminator.
@@ -1115,6 +1119,657 @@ grounded in the teacher's own generated materials.
   extensions (comprehension pings, slide-aligned questions, ASR) build on
   this session/participant substrate later.
 
+### Z. Market-evidence layer + РОП-студия — defensible labor-market justification at design time · Effort: pilot S–M, full track L+ (phased)
+
+From the 2026-07-21 discussions with the head metodist at the test university.
+Her ask started as "add РосНавык-like features"; the distilled need is
+narrower and better: **defensible market evidence at the moment of designing
+a programme, a ФОС, or a topic list** — plus a **РОП-студия** (programme-level
+sibling of РПД-студия) as the surface where that evidence lives.
+
+**Her verbatim request (2026-07-21), preserved because it defines the real
+flagship artifact — «Студия РОП … для обоснования открытия новой ОП»:**
+средняя зарплата на рынке · компетенции · вакансии и востребованность ·
+стратегия развития промпартнера (указан в ООП) · его кадровая ёмкость и
+средняя зарплата (возможно Росстат знает) · особенности отрасли ·
+нацпроекты · федеральные проекты · стратегия развития университета (файл
+на сайте) — «что-то вроде rosnavyk.ru».
+
+**Design consequence — her nine data points split into TWO planes, and only
+one is market data:**
+
+- **Plane 1 — structured market data** (the pull-based design below):
+  вакансии/востребованность, компетенции (via профстандарты/AA),
+  **зарплаты** — salary ranges ride free on the same vacancy snapshots
+  (aggregate per profession × region), cross-checkable against **Росстат
+  open data** (official avg salary by industry × region — citable in an
+  official dossier in a way job-board numbers aren't; add as a second
+  provider behind the same `labourMarket` interface).
+- **Plane 2 — grounded document evidence** — стратегия промпартнера,
+  стратегия университета, нацпроекты/федпроекты, особенности отрасли.
+  These are *documents, not feeds* — and grounded generation over uploaded
+  documents with verbatim citations is machinery the platform **already
+  has** (documentExtractor → chunker → embeddings → `docChat`-style
+  retrieval, `validateCitation`). What's new is only **scoping tiers** for
+  reference documents: *platform-shared* (паспорта нацпроектов/федпроектов
+  — public PDFs, curate once like AA's registry), *institution*
+  (стратегия развития университета — the "файл на сайте"), *programme*
+  (промпартнер strategy docs, uploaded by the РОП). Each dossier section
+  cites its source class verbatim.
+- **Honest limit — кадровая ёмкость промпартнера:** no reliable open
+  per-company source (Росстат is industry/region-level, not per-company).
+  v1 proxy: the partner's *live vacancy count* from Plane 1 + whatever
+  their own uploaded strategy doc claims (cited as the partner's claim,
+  not as fact). Set this expectation with her explicitly rather than
+  over-promising.
+
+**The flagship artifact this defines: the «обоснование открытия новой ОП»
+dossier** — one generated, citation-grounded document assembling both
+planes: market demand + salaries (Plane 1, dated snapshots) · компетенции
+chain (AA/Z) · industry context + нацпроект alignment + partner and
+university strategy fit (Plane 2, verbatim quotes). Higher-stakes and
+better-defined than a generic «обоснование актуальности» — this is what
+goes to the учёный совет / КЦП process when opening a programme. РосНавык
+can supply Plane 1 only; Plane 2 + the assembled dossier is exactly the
+inside-the-workflow ground they can't reach.
+
+**Explicitly NOT the goal:** replicating РосНавык (rosnavyk.ru, ТГУ) — their
+1.5M-vacancies/day monitoring pipeline, 3-year retrospective, and 90-expert
+taxonomy are a data-platform business we have neither the team nor the
+resources to build, and don't need to. See the new line under *Intentionally
+NOT building*.
+
+- **The reframe that makes this buildable — pull, not push.** Market evidence
+  is needed at a *design moment* (a specific направление, region, and
+  профиль), a few dozen times a year per institution — not continuously.
+  So: fetch on demand — a few hundred targeted vacancy queries per design
+  session, cached per (направление, region), every vacancy **snapshotted with
+  date + source and archived**. A service module in the existing stack, not a
+  data platform. The archive is the long game: for the направления our users
+  actually design, we accumulate our own retrospective as a free usage
+  byproduct.
+- **Data sources (in trust order):**
+  1. **Профстандарты (Минтруд)** — the legal spine. ФГОС 3++ *requires*
+     programme alignment with профстандарты; they're free, structured
+     (трудовые функции → трудовые действия → умения → знания), and carry
+     legal force. This is the taxonomy — we don't hand-build one, and LLM
+     skill extraction anchors to профстандарт vocabulary instead of
+     free-forming labels.
+  2. **Работа в России (trudvsem.ru) open API** — free, legal, official
+     state portal; arguably *more* citable in accreditation documents than
+     commercial boards.
+  3. **HH open API** — supplementary breadth. **Check ToS for analytical
+     reuse before depending on it.**
+- **The artifact, not a dashboard.** Output is a citable evidence chain
+  embedded in the document itself: профстандарт clause (legal anchor) →
+  dated vacancy snapshots (market confirmation: "N работодателей региона
+  называют навык X") → ОПОП competency → course → ФОС item. Every claim
+  traceable to a verbatim, dated source — `validateCitation` philosophy
+  (rule #2) applied to market evidence. A skill claim must trace to BOTH a
+  профстандарт node AND verbatim vacancy text, which makes LLM extraction
+  errors survivable. РосНавык gives a dashboard you screenshot; we generate
+  the «обоснование актуальности» section itself.
+- **The compounding moat — the crosswalk, not the vacancies.** Vacancy data
+  is a commodity (РосНавык, HH, ВНИИ труда all have it). What accumulates
+  only inside a design workflow is the mapping профстандарт ↔ ФГОС
+  компетенция ↔ программа ↔ курс ↔ РПД ↔ ФОС item ↔ (post-LTI) student
+  outcomes. Every programme designed here densifies that graph; РосНавык
+  structurally can't build it — they're absent at the design moment and
+  never see the ФОС or the student. Long-term this makes us a *partner or
+  customer* for their breadth, not a competitor.
+
+**Pilot slice (phase 0) — validate before building anything general:**
+ONE направление at the test university. Ingest the relevant профстандарт(ы)
++ a trudvsem/HH pull for the matching profession profiles in the region →
+generate one «обоснование актуальности» section with full citations → put
+it in the metodist's hands. Cheap, high-impact pilot extension now that her
+verbatim ask is known: include ONE Plane-2 document — the university's own
+стратегия развития (a single public file) — so the pilot artifact
+demonstrates both planes and previews the dossier, at the cost of one
+document upload through existing machinery. **Success test:** "I would put
+this in front of the учёный совет." If instead it's "nice, but I still need the РосНавык
+dashboard," the dashboard IS her product — license, don't build. Three weeks
+of learning vs. two quarters of the wrong platform.
+
+- **Phases (each gated on the previous one's validation):**
+  - **0. Pilot slice** (above) · S–M. Hardcoded направление is fine;
+    the only deliverable is the artifact + her verdict.
+  - **1. `labourMarket` service behind an interface** — mirror the
+    `llm/registry.ts` provider-abstraction pattern so the source is
+    swappable (trudvsem/HH today, licensed РосНавык/other feed later
+    without touching consumers). Snapshot store (`vacancy_snapshots` +
+    `profstandard_nodes` tables), per-(направление, region) caching,
+    profession-profile → query mapping, **salary aggregates from the same
+    snapshots + a Росстат open-data provider** (official avg salary by
+    industry × region) behind the same interface.
+  - **1b. Reference-document tiers (Plane 2)** — extend the existing
+    document pipeline with a scoping tier (`platform | institution |
+    programme`) for evidence docs: curate паспорта нацпроектов/федпроектов
+    once platform-wide; institution admins upload the university strategy;
+    РОПы attach промпартнер docs to a programme. No new extraction/RAG
+    machinery — reuse documentExtractor/chunker/embeddings + verbatim
+    citation validation.
+  - **2. Wire into existing surfaces:** «Обоснование актуальности» block in
+    РПД-студия (L) / syllabusReview (K); demanded-skills cross-reference in
+    the ФОС generator's coverage check (X) — "навык востребован, но не
+    оценивается ни одним средством"; market-aware research-topic generation
+    in Topics.
+  - **3. РОП-студия + the «обоснование открытия новой ОП» dossier** —
+    programme-level studio above РПД-студия: учебный план structure,
+    competency matrix (builds on the `program_disciplines.competency_codes`
+    model from K/X-v2), and the **dossier generator as the flagship
+    artifact** — sections assembled from both planes (market demand +
+    salaries with dated snapshots; компетенции chain; отрасль/нацпроект/
+    partner/university-strategy fit with verbatim quotes), editable like
+    every studio (AI drafts, РОП is author of record), DOCX export (the
+    учёный совет lives in Word — reuse X's `docx` path). This is also the
+    natural home of the crosswalk graph — relations tables first, same v1
+    posture as Feature O.
+  - **4. Student-facing** (post-LTI, much later): transcript vs. skill
+    profile of a target profession — the thing РосНавык can never do
+    because they don't have the student's academic record. Do not design
+    this before phases 0–3 prove out.
+- **Touches (phases 0–2):** new `services/labourMarket/` (interface +
+  trudvsem/HH/Росстат providers + snapshot archiving + salary aggregates),
+  new `services/profstandards.ts` (ingest/parse), migration
+  (`vacancy_snapshots`, `profstandard_nodes`, evidence-link table, document
+  scope tier for Plane-2 reference docs), new evidence-section generator
+  reusing the `chatJSON` + citation-validation patterns, blocks in
+  `RpdStudio`/`FosStudio`/`Topics`, routes + plan flag.
+- **Gating:** new `marketEvidence` plan flag — Institution tier (the buyer
+  is the УМУ/проректор, same as V/X-v2); possibly Pro for the Topics slice.
+- **Risks / open questions:** trudvsem API coverage/quality for specific
+  regions (validate in phase 0 before promising anything); HH ToS on
+  analytical reuse; профстандарт parsing (PDF/XML variance across
+  standards); LLM skill-extraction precision — mitigated by the dual-anchor
+  rule but needs a small eval set in phase 0; freshness expectations
+  (snapshots are point-in-time by design — the artifact says "по состоянию
+  на дату", which is exactly what an accreditation document wants).
+- **Sequencing:** phase 0 is independent and can start now — but **do
+  Feature AA's v1 slice (one-направление ФГОС ingestion) inside it**: the
+  pilot needs to know which профстандарты apply to the направление, and the
+  ФГОС appendix is the legally correct, minimal way to know (vs. guessing
+  the mapping ourselves). Phase 2's ФОС wiring pairs naturally with X-v2
+  (programme-integrated ФОС); phase 3 builds on K's competency model and
+  should follow, not precede, real РОП demand from the pilot university.
+  Related: O (knowledge graph) — the crosswalk here is the
+  institutional-scale sibling of O's per-course concept graph; keep the
+  relations-table schemas compatible.
+
+### AA. ФГОС 3++ registry — normative reference layer + ПК-конструктор · Effort: v1 S (inside Z's pilot), full M
+
+Follow-on from the Feature Z design discussion (2026-07-21). One ФГОС ВО per
+(направление, level), published by Минобрнауки on fgosvo.ru. Today the
+platform has no ФГОС representation at all — `program_competencies` /
+`program_disciplines.competency_codes` are **hand-typed per programme** by
+the admin, so every downstream consumer (K's conformance check, X-v2's
+паспорт ФОС, L's generation spec, Z's planned РОП-студия matrix) checks
+against *whatever was typed*, not against the standard. A typo'd or stale
+competency list silently corrupts every check built on it.
+
+**Depends on / pairs with Z:** Z's evidence chain actually starts here —
+the ФГОС is the document that *legally names which профстандарты apply* to
+a направление (its appendix), and under 3++ the ПК are not in the ФГОС at
+all: the university derives them from those профстандарты. Without this
+layer, Z's профстандарт selection is our guess; with it, the full chain
+**ФГОС → профстандарт → рынок труда → ОПОП → РПД → ФОС → оценка** is
+anchored in the top-level normative document end-to-end. Z phase 0 should
+ingest its pilot направление's ФГОС as step one (see Z's sequencing note).
+
+- **What a ФГОС decomposes into (all machine-usable):**
+  1. **УК** — fixed list, uniform across all ФГОС of the same level.
+  2. **ОПК** — fixed list per ФГОС; closed, citable verbatim.
+  3. **Structural requirements** — объёмы in з.е. per block (Блок 1/2/3),
+     total volume, ЭИОС and other numeric/checkable constraints.
+  4. **Профстандарт appendix** — the legal join point to Feature Z.
+- **Shape: shared reference data, admin-curated.** ФГОС is federal law, not
+  institution data — one registry shared by every institution on the
+  platform, ingested/reviewed by a platform admin, slowly-changing
+  (updates only on a Минобрнауки приказ). A few dozen направления covers
+  the realistic customer base; not all ~500 on day one.
+- **Ingestion:** upload the ФГОС PDF/DOCX → existing `documentExtractor` →
+  one structured `chatJSON` extraction → **admin review screen → publish**.
+  Unusually safe LLM territory: competency codes follow a rigid grammar
+  (`УК-1`, `ОПК-3`…), formulations must validate **verbatim against source
+  text** (rule #2, `validateCitation` philosophy), numeric requirements
+  are exact matches. Never auto-publish — same AI-never-final posture as
+  everything else.
+- **Schema:** `fgos_standards` (направление code, level, title, generation,
+  приказ №/date, source URL, effective date) · `fgos_competencies`
+  (type `УК`/`ОПК`, code, verbatim formulation) ·
+  `fgos_structure_requirements` (block volumes + numeric constraints) ·
+  `fgos_profstandard_refs` (appendix → joins to Z's `profstandard_nodes`).
+- **Consumers, in payoff order:**
+  1. **Programme creation auto-populate** — admin picks направление →
+     УК/ОПК flow into `program_competencies` verbatim from the registry
+     instead of hand-typing. Cheapest win; upgrades every existing check
+     from "vs. what we entered" to "vs. приказ №N" (accreditation-grade
+     citation for free).
+  2. **ПК-конструктор** — the genuinely 3++-native feature: derive ПК
+     candidates + indicators from the профстандарты the ФГОС names
+     (трудовые функции → suggested formulations), admin edits and
+     approves. Reuses Z's профстандарт ingestion; automates the step
+     РОПы do painfully by hand today.
+  3. **Учебный план structural check** — programme block volumes vs.
+     `fgos_structure_requirements`. Deterministic, **no LLM**, extends
+     `programAnalysis` («Блок 2: 21 з.е., ФГОС требует ≥ 30»). Very
+     demo-able.
+  4. **Silent upgrade of K / L / X-v2 / РОП-студия** — their competency
+     source becomes registry-fed rather than manual; no UX change needed
+     beyond a "источник: ФГОС 09.03.03 (приказ №N)" badge.
+- **Touches:** migration (4 tables above), `services/fgosRegistry.ts`
+  (ingest/extract/validate), platform-admin review page under
+  `pages/admin/`, направление picker + auto-populate hook in the programme
+  creation flow, `programAnalysis` extension for the structural check,
+  registry-sourcing switch in `documentReview.ts` (K) with manual entry
+  kept as fallback for programmes without a registry match.
+- **Gating:** the registry itself is platform infrastructure (no flag);
+  consumers keep their existing gates (K/X-v2/РОП-студия are
+  Institution-tier surfaces). ПК-конструктор rides Z's `marketEvidence`
+  flag or Institution tier directly — decide when Z phase 1 lands.
+- **Phasing:**
+  - **v1 (inside Z phase 0):** ingest ONE направление's ФГОС — standards
+    row + УК/ОПК + профстандарт refs. No admin UI yet (seed script is
+    fine); exists to anchor Z's pilot artifact.
+  - **v2:** admin review/ingestion UI + programme-creation auto-populate
+    (consumer 1) + structural check (consumer 3).
+  - **v3:** ПК-конструктор (consumer 2, needs Z phase 1's профстандарт
+    ingestion) + registry-sourcing in K/X-v2 (consumer 4).
+- **Risks / open questions:** fgosvo.ru document formats vary by
+  generation/year (extraction prompt needs the eval-set treatment on 3–5
+  real ФГОС before trusting it); amendment tracking (a приказ can amend an
+  existing ФГОС — `effective_date` + keep superseded rows, append-only like
+  rule #5, so old programme checks stay reproducible); ФГОС 4 is
+  periodically announced — the registry schema should tolerate a new
+  generation as new rows, not a migration.
+- **Sequencing:** v1 lands inside Z phase 0 (three-week pilot unchanged).
+  v2/v3 are independent of Z's later phases and can proceed on their own
+  demand signal — v2's auto-populate is worth shipping early since it
+  de-corrupts existing consumers regardless of what happens with Z.
+
+### AB. Early-warning учебная аналитика — risk flags for сохранность контингента · Effort: v1 M, full track L+
+
+From the 2026-07-21 metodist discussions (same thread as Z/AA). Her verbatim
+framing: «В перспективе создание раздела предиктивной учебной аналитики для
+прогнозирования отрицательной динамики успеваемости студента на основе его
+результатов и реакции на обратную связь преподавателя. Эта информация может
+быть у предметника, студента (общая картина успеваемости по всем предметам),
+РОП и в дирекции (так как они отвечают за сохранность контингента)».
+
+**Why:** сохранность контингента is a budget-line KPI under подушевое
+финансирование — every отчисленный студент is lost funding, and дирекция
+answers for the number personally. This sells to a third distinct
+institutional buyer (V → УМЦ, W → HR, AB → дирекция/деканат), arguably the
+one with the most acute pain. And it's an **evolution of shipped features,
+not greenfield**: cohort analytics' «Требуют внимания» (Feature C) is
+already a naive early-warning rule (last-2 avg dropped ≥8), and the
+trajectory panel (Feature B) already does per-criterion movement matching.
+
+- **The differentiated signal — реакция на обратную связь.** Classic EWS
+  products run on LMS logins and gradebook averages. Nobody else has
+  per-criterion grades over time *plus the feedback text given* — so we can
+  compute whether a flagged weakness improved, stagnated, or **repeated
+  with no uptake** on subsequent works ("критерий «Аргументация»:
+  72 → 65 → 58 за три работы; замечание повторяется"). Post-Q, published-
+  assignment telemetry adds a second novel layer (declining active time,
+  rising paste ratio). Lead with this signal; grade-average trends are the
+  commodity part.
+- **NOT predictive ML — transparent evidence-backed rules.** «Предиктивная»
+  is her word and fine for marketing; the mechanism is not. Per-student
+  data volumes (a handful of works per subject per semester) make trained
+  prediction statistically indefensible — confident nonsense with a
+  liability attached. Ship **versioned, rule-based risk indicators where
+  every flag carries citable evidence** (the `validateCitation` philosophy
+  applied to risk): auditable, contestable, more trusted by teachers than
+  a black-box score, and defensible under 152-ФЗ scrutiny. **Backtest
+  before anyone sees it**: replay rules against existing grading history
+  (eval-harness culture — measure how often the rule would have flagged
+  students who actually declined) and tune thresholds on that, not on
+  intuition. ML becomes a later calibration layer, only at real scale.
+- **Ethics framing — locked upfront, non-negotiable (stricter than W).**
+  W risks teachers seeing ИСПУМ as HR's ranking tool; this risks students
+  being pre-labeled as отчисление candidates — stigmatizing and
+  potentially self-fulfilling. Same neutral-process posture as §5/W:
+  - The artifact is a **support signal, never a verdict** — «рекомендуемые
+    меры поддержки», never «прогноз отчисления». No ranked "worst
+    students" leaderboard for anyone.
+  - **Tiered access via the org tree** (Feature P): предметник — own
+    subjects only; РОП — programme scope; дирекция — aggregates + flagged
+    cases with evidence; student — self only (see delivery constraint
+    below).
+  - Every flag shows its evidence and rule version — auditable end-to-end.
+- **Data-coverage honesty — her «общая картина по всем предметам» is
+  gated on adoption, not code.** ИСПУМ sees only what's graded through it;
+  a cross-subject picture needs most of the student's teachers on the
+  platform or gradebook import from the LMS/АСУ. Frame that tier as the
+  institution-wide-adoption reward — which turns AB into an **adoption
+  flywheel for the sale**: "the retention dashboard gets better with every
+  кафедра you onboard" is the проректор's internal argument, made for us.
+- **Student-facing view — LTI only.** "Full student portal" is in
+  *Intentionally NOT building* and stays there. The student's own picture
+  is delivered via LTI launch from inside the LMS (Feature R, shipped):
+  identity sourced from Moodle, no ИСПУМ student accounts. Only endorsed
+  delivery path; naturally last in sequence.
+- **The closing loop (what no EWS competitor can do):** a flag isn't just
+  "поговорите со студентом" — it can generate a remedial задание on the
+  failing criterion (existing `tasks.ts`/Materials engines) and, once
+  Feature O exists, name *which concept* is failing. Flag → diagnose →
+  generate intervention → measure the delta on the next work — the same
+  closed loop as W's teacher-development version, applied to students.
+  Design the schema so flag → intervention → outcome is linkable from v1
+  even though the generate-intervention button ships later.
+
+- **Phasing:**
+  - **v1 — per-teacher risk panel (own courses, no new permissions):**
+    upgrade «Требуют внимания» into a real risk surface — add the
+    feedback-reaction rules (repeated criterion failure + no improvement
+    after feedback, reusing trajectory's criterion matching), evidence on
+    every flag, rule versioning, and the **historical backtest as a ship
+    gate**. New `services/riskSignals.ts` (pure, unit-tested, mirroring
+    `cohortAnalytics.ts`), panel on Students.tsx / teacher drill.
+  - **v2 — РОП/дирекция rollup:** programme- and subtree-level views
+    through org-tree roles; pairs with Leadership V2 and shares Feature
+    V's aggregation layer. This is where tiered access + the political
+    framing land; do V first (lower-risk proof of institution-facing
+    analytics, same precedent logic as V-before-W).
+  - **v3 — whole picture + student self-view:** LMS gradebook import for
+    cross-subject coverage (АСУ/Moodle — pairs with improvement #12's
+    АСУ-integration groundwork); student view via LTI launch. Both gated
+    on real institutional adoption signals, not built speculatively.
+  - **v4 (only at scale):** ML calibration over the rule outputs, trained
+    and validated on accumulated backtest data. Not before.
+- **Touches (v1):** new `services/riskSignals.ts` + rule-version constant,
+  new risk queries in `db/queries/` (extend the cohort/trajectory query
+  family), backtest script riding `evalHarness.ts` patterns, panel in
+  `Students.tsx` + `LeadershipTeacher.tsx`, FEATURES/CHANGELOG same-commit.
+  (v2+: `routes/leadership.ts` extension, V's aggregation layer,
+  `org_unit_roles` scoping; v3: gradebook-import service + LTI student
+  view.)
+- **Gating:** v1 rides Pro (it's a teacher-value feature at that tier);
+  v2+ is Institution-tier (the дирекция surface is the paid story).
+- **Risks / open questions:** false-positive cost is human, not technical
+  — a wrongly flagged student wastes a куратор's meeting and can colour
+  perception; backtest precision threshold must be agreed before v1 ships
+  (propose: don't ship rules below ~70% backtested precision). Semester
+  boundaries (a "decline" across the exam session boundary may be normal
+  variance — rules need semester awareness). Small-N noise: min-sample
+  gates like C's ≥3/≥4-submission thresholds, kept strict. Who acts on a
+  flag at each tier (предметник vs куратор vs РОП) is an institutional
+  process question — ask the metodist's university how they'd route it
+  before designing v2's UI.
+- **Sequencing:** v1 is independent and could follow Z's pilot; it needs
+  no new data sources, only shipped tables. v2 after V (shared aggregation
+  layer + precedent). v3 after real LTI/АСУ adoption at a pilot
+  institution. Related: W (same trust architecture, teacher-side twin),
+  O (concept-level diagnosis upgrade), Q (telemetry signals), Z/AA
+  (unrelated data planes — no dependency either way).
+
+### AC. АСУ «Университет» (Кошка) integration — file-in → structured РПД → проверка УМЦ → push to АСУ · Effort: core M, sink adapter unknown (gated on IT)
+
+From the 2026-07-21 metodist discussions (same thread as Z/AA/AB). Her
+verbatim ask: «Интеграция с АСУ Университет (Кошка). Для упрощения работы
+преподавателей, чтобы они загружали в Кошку файл, а система сама
+раскладывала все по пунктам — далее проверка УМЦ». The pain is
+double-entry: the teacher writes the РПД as a document, then manually
+re-keys it into Кошка's section-by-section forms before УМЦ review.
+
+**Status (2026-07-21):** a meeting with the university's IT department is
+being arranged (awaiting department-head greenlight). **The IT meeting is
+the actual next step — no code before its outcome**, since the write-back
+half is decided there, not in this codebase. This entry generalises
+improvement **#12** (АСУ auto-fetch for РПД Monitor): same system, same
+access wall, now a two-way integration story — resolve both in the same
+IT conversation.
+
+- **Architecture — flip her flow.** As stated, ИСПУМ is an invisible
+  parsing engine behind Кошка. Build it the other way:
+  **teacher uploads to ИСПУМ → structured decomposition into Кошка's
+  пункты → conformance check (K) runs → УМЦ reviews in the V dashboard →
+  the approved, validated record exports/pushes to Кошка.** Same teacher
+  outcome, but ИСПУМ is the front door and the review workflow; quality
+  checks run *before* data enters the system of record; Кошка is the
+  downstream sink. Critically, it **degrades gracefully**: with zero API
+  access, "upload → parsed → checked → clean export file the УМЦ batch-
+  imports or re-keys from" still kills most of the pain, whereas the
+  as-stated version is 100% blocked without Кошка-side access.
+- **The parse half is ~80% shipped.** `documentExtractor` (incl. OCR) for
+  file intake; РПД Monitor + `documentReview.ts` (K) already parse and
+  reason over РПД structure; РПД-студия owns the section model in the
+  generate direction; «проверка УМЦ» is literally K + V. New work is one
+  structured-extraction pass targeting Кошка's field model — same
+  safe-LLM-territory argument as AA's ФГОС ingestion (rigid known
+  template, verbatim validation of extracted content against the source
+  document, human review before anything is final).
+- **The IT meeting — concrete asks (bring this list):**
+  1. Does their АСУ «Университет» license include any write API, batch
+     import format (XML/Excel), or integration bus? (Also covers #12's
+     read direction — ask for both at once.)
+  2. Кошка's РПД field model / template spec — the exact пункты the
+     decomposition must target.
+  3. 5–10 real (source файл → filled Кошка record) pairs as ground truth
+     for extraction validation.
+  4. Who owns the vendor relationship — if there's no import module,
+     what would the vendor quote to enable one?
+- **Expectation setting:** АСУ «Университет» is a closed vendor product;
+  outcomes range from "an import module nobody turned on" to "six-figure
+  vendor quote." Do not promise the push leg to the university until IT
+  answers; the export-file fallback is the promise-safe version.
+- **Generalisation flag:** other universities run 1С:Университет,
+  Галактика, Tandem, etc. The parse + check core is universal; the sink is
+  a per-АСУ **adapter** — design the export layer as a pluggable interface
+  (same posture as `labourMarket`/`llm` registries) and price adapter work
+  into institution-tier deals rather than absorbing it.
+- **Phasing:**
+  - **v0 — the IT meeting** (in motion). Outcome determines the sink leg.
+  - **v1 — parse + review core (buildable regardless of v0's outcome):**
+    upload → structured decomposition into the Кошка field model (from
+    ask 2) → K conformance check → УМЦ review queue surface (extends V's
+    dashboard scope) → export file in whatever format ask 1 yields (or
+    clean DOCX/XLSX if nothing).
+  - **v2 — push leg:** only if v0 surfaces a real write path; pg-boss job
+    + status tracking, mirroring #12's read-side design
+    (`services/asuSync.ts` becomes bidirectional).
+- **Touches (v1):** new structured-extraction pass in a
+  `services/asuExport.ts` (or extend `services/documents.ts`), Кошка
+  field-model config (per-institution JSON, not hardcoded — feeds the
+  adapter interface), УМЦ review queue page (shared surface with V —
+  build V first or co-scope), export endpoint. (v2: `services/asuSync.ts`
+  write path per #12's touches.)
+- **Gating:** Institution tier — this is an УМЦ/institution workflow
+  end-to-end; no per-teacher plan story.
+- **Sequencing:** v0 now (awaiting greenlight). v1 after the field-model
+  spec exists (ask 2 is a hard prerequisite — don't guess the template)
+  and ideally alongside/after V, which owns the УМЦ review surface it
+  needs. #12's auto-fetch rides the same v0 outcome and should ship
+  under whatever access mechanism this negotiates.
+
+### ~~AD. Bulk РПД discovery from /sveden/education — one paste instead of 44~~ — already done
+
+**Shipped 2026-07-21** (same day it was scoped — РОПы are testing now). See
+CHANGELOG for the full design. Landed as designed with one deliberate
+deviation: the bulk import is **client-driven** (the confirmed checklist
+feeds each item sequentially through the existing
+`POST /:id/documents` + `file_url` endpoint — per-item progress and retry
+for free), not a pg-boss job as the sketch below suggested; closing the
+modal mid-run leaves already-imported documents in place and re-running
+discovery is idempotent. New: `services/svedenParser.ts` (dependency-free,
+19 unit tests), `fetchPageHtml` in `services/documentFetch.ts`,
+`POST /:id/documents/discover`, `SvedenImportModal.tsx` + «Импортировать со
+страницы сведений» on the Документы tab. Not built (documented scope cuts):
+форма-обучения row scoping (first code-matching row wins — revisit with a
+real multi-form counterexample), plan/description/график import (не
+importable via this endpoint; listed as skipped counts in the UI), Z Plane-2
+reuse of the discovery service. Original design notes below.
+
+From the 2026-07-21 discussions; РОПы are actively starting to test the
+platform. The shipped paste-a-link document pull works
+per document — but a programme's disclosure row lists one Описание ООП +
+one учебный план + **~40+ individual РПД links** + графики + практики, so
+the РОП still pastes dozens of links one at a time.
+
+**The regulatory gift that makes this reliable:** the «Сведения об
+образовательной организации → Образование» page is federally mandated
+(Рособрнадзор Приказ № 831 + methodology) to be machine-readable:
+- **Standardized path** — `<university-site>/sveden/education` on
+  essentially every Russian university site (derivable from the
+  institution's known website — no URL paste needed at all in the best
+  case).
+- **Standardized markup** — required `itemprop` microdata attributes on
+  exactly these elements (РПД links, учебный план, описание ОП,
+  календарный график, практики; programme rows carry направление code +
+  name), designed so Рособрнадзор's own crawler can parse them.
+  Universities are audited on this markup being present and correct.
+
+- **Flow:** РОП pastes ONE URL (or ИСПУМ derives `/sveden/education`) →
+  backend fetches + parses itemprop rows → scopes to the programme by
+  направление code + name match against the programme being worked on →
+  **discovery checklist** («Найдено: Описание ООП · Учебный план · 44 РПД ·
+  2 графика · 4 практики», РПД titles from link text — which IS the
+  discipline name on these pages) → РОП confirms → bulk fetch through the
+  **existing** pull-by-link pipeline, one pg-boss job per document with
+  pollable progress → each РПД auto-associates to `program_disciplines` by
+  name matching, with a review screen for fuzzy cases (human-confirms
+  posture, as everywhere).
+- **Parser tiers (degrade gracefully):**
+  1. `itemprop` microdata (the mandated format — primary).
+  2. DOM heuristics — links within the matched programme's table
+     row/section, classified by link text + filename patterns (for sites
+     with imperfect markup).
+  3. Manual per-link paste (today's shipped behavior — always available).
+  JS-rendered tables: do NOT chase with headless browsers in v1 — tier 3
+  covers them, and the markup requirement pushes sites server-rendered
+  anyway.
+- **Security — deliberate pass required:** bulk server-side fetching of
+  user-supplied URLs is SSRF surface. Inherit/verify the single-link
+  pull's protections (scheme allowlist, block private/internal address
+  ranges, no redirects to internal hosts) and add: per-host rate limiting
+  / politeness, sane timeouts, per-file size caps, total-documents cap
+  per discovery run.
+- **Touches:** new `services/svedenDiscovery.ts` (fetch → itemprop parse →
+  tier-2 heuristics → classify → discipline name-match), discovery
+  checklist step in the programme import/documents UI in front of the
+  existing pull flow, bulk-fetch pg-boss job (reuse the per-document pull
+  as the job body), review screen for unmatched РПД↔discipline pairs,
+  FEATURES/CHANGELOG same-commit.
+- **Gating:** rides the existing programme/document-import gates — no new
+  plan flag; it's UX leverage on shipped functionality.
+- **Risks / open questions:** markup quality varies (tier 2 exists for
+  this — collect real counterexamples from pilot universities rather than
+  speculating); signed-PDF wrappers and экзотика formats (documentExtractor
+  handles the common cases); discipline-name matching against
+  `program_disciplines` needs the same fuzzy-match + review treatment as
+  AC's field mapping; multi-form pages (очная/заочная rows for the same
+  направление) — scope by форма обучения too, not just code.
+- **Sequencing:** ⏭️ **next to build** — РОПы are testing now and this
+  removes their worst manual step (44 download-upload cycles → one paste +
+  one confirm). Independent of Z/AA/AB/AC. Related: AC shares the
+  "external document intake at scale" theme but nothing structural; Z's
+  Plane-2 document intake could later reuse the same discovery service for
+  university strategy docs (they live on the same disclosure sites).
+
+### AE. БРС engine + native interactive activities — the semester ledger governed by the РПД · Effort: v1 M, full track L
+
+From the 2026-07-21 metodist discussions (last of the five-idea session:
+Z/AA/AB/AC/AD/AE). She saw the live-quiz feature (Y), got as excited as we
+are, and — being a teacher herself who has tried this via Moodle —
+suggested: «Интеграция интерактивных платформ (типа Квизлет, игры, Mind
+карты...) для автоматической оценки преподавателя и анализа результатов
+согласно балльно-рейтинговой системе (она есть в РПД, если это тест)».
+
+**Her ask bundles three different things with three different answers —
+one is a trap, one is a pragmatic adapter, one is the sleeper product
+idea of the whole session.**
+
+- **1. Direct integration with Quizlet/Kahoot-type platforms — DON'T.**
+  (a) The APIs mostly don't exist: Quizlet killed its public API years
+  ago; Kahoot results live in manual XLSX exports; LearningApps/Wordwall
+  offer little — per-platform adapters are a maintenance treadmill against
+  surfaces that were never built for it. (b) 152-ФЗ + positioning: routing
+  student activity data through foreign consumer platforms undermines the
+  Russia-resident/Yandex-Cloud pitch that sells the institution tier, and
+  sanctions/payment friction makes them unreliable institutional
+  dependencies anyway. (c) The live-session substrate (Y) already owns the
+  hard parts (session/participant/answer schema, anonymous phone join,
+  self-paced mode, answer-once constraints, «Сохранить в журнал») — most
+  of what those platforms do is a question-type/mode extension of it.
+  **Reframe for her: we don't integrate Quizlet — we make Quizlet
+  unnecessary, and everything lands in the БРС automatically.**
+- **2. The sleeper — «БРС … она есть в РПД».** The балльно-рейтинговая
+  система is IN the РПД, and ИСПУМ already holds the РПД (uploaded,
+  monitored, authored in РПД-студия). So: **extract the БРС scheme from
+  the РПД and become the semester scoring ledger.** Structured extraction
+  of the БРС table — контрольные точки, max баллы per activity, оценка
+  thresholds (61–75 → «удовлетворительно» etc.) — same safe-extraction
+  pattern as AA/AC (rigid known structure, verbatim validation, teacher
+  confirms; manual БРС builder as the no-РПД fallback). Then every
+  scoring event the platform already produces — live sessions, published
+  assignments, regular graded work, imported external results — maps to a
+  контрольная точка and accrues into a per-student running semester score,
+  converted to итоговая оценка by the РПД's own thresholds. Upgrades the
+  журнал from "a list of grades" to **the teacher's semester gradebook,
+  governed by the document the university already approved** (today's
+  live-quiz save does a crude score→5/4/3/2; with БРС it becomes «тест =
+  КТ-2, до 5 баллов из 100»).
+- **3. The pragmatic adapter — universal results import.** CSV/XLSX
+  upload → column mapping (student, score) with the same name-matching +
+  review posture as AD/AC → into the ledger against a chosen контрольная
+  точка. Kahoot exports XLSX; so does everything else — one importer
+  covers every external tool ever, zero API dependencies, honors her
+  existing Moodle/Quizlet habits without marrying a vendor.
+
+- **What the БРС engine connects to (why it's the prize):**
+  - **AB (early warning):** running БРС total vs. expected semester pace
+    is a cleaner, evidence-backed-by-construction risk signal («набрал 12
+    из 40 возможных к 8-й неделе») — feed it into AB's rule set when both
+    exist.
+  - **LTI AGS (shipped, R):** БРС totals write back to the Moodle
+    gradebook — her Moodle habit served properly.
+  - **K / УМЦ:** "assessments actually run this semester vs. the БРС the
+    РПД declares" is a new conformance check that falls out nearly free —
+    very V-dashboard flavored.
+  - **Дирекция (AB's buyer):** БРС контрольные точки are precisely the
+    instrument дирекция monitors for retention — same sale, second
+    surface.
+- **Phasing:**
+  - **v1 — БРС engine:** extraction from РПД (+ manual scheme builder
+    fallback), `brs_schemes`/`brs_checkpoints` (+ per-student accrual
+    linkable to existing `assignments`/live results), semester ledger view
+    on журнал/Students, checkpoint mapping on existing grade-save flows,
+    threshold-based итоговая. Teacher-confirms everywhere; the РПД's
+    scheme is the source of truth, never invented.
+  - **v2 — universal results import** (CSV/XLSX → mapping → ledger).
+  - **v3 — native activity types on the Y substrate:** flashcards /
+    self-study mode first (the actual Quizlet core, generated from course
+    materials via existing engines), then game modes as question-type
+    extensions (matching pairs, true/false sprint, ordering, word cloud) —
+    each auto-mapping to контрольные точки.
+  - **Mind maps: parked with Feature O explicitly** — assessing a
+    student-built concept map against the course concept graph is
+    research-track, not an activity-type extension.
+- **Touches (v1):** new `services/brsScheme.ts` (extraction + validation +
+  accrual math, pure/unit-tested), migration (`brs_schemes`,
+  `brs_checkpoints`, checkpoint link column on grade-producing rows),
+  ledger UI on `Students.tsx`/журнал, checkpoint picker on the existing
+  save/approve flows (grading, live «Сохранить в журнал», published
+  assignments), FEATURES/CHANGELOG same-commit. (v2: import endpoint +
+  mapping UI; v3: `liveSessions` question-type extensions + generators.)
+- **Gating:** v1 Pro (teacher semester-ledger value); the K/V conformance
+  check and дирекция surfaces are Institution-tier. v3 activity types ride
+  Y's existing `liveSessions` gating.
+- **Risks / open questions:** БРС formats vary by institution (and some
+  РПД lack a proper БРС table — hence the manual builder fallback, which
+  also doubles as the review UI for extraction); mid-semester scheme
+  changes (version the scheme, append-only, rule #5 posture — old accruals
+  stay reproducible); партиальная посещаемость-type checkpoints (не всё —
+  оценки; посещение/активность need manual entry paths in the ledger);
+  whether итоговая по БРС may conflict with what the teacher enters in
+  the официальная ведомость — ИСПУМ advises, teacher decides (AI/automation
+  never final, as always).
+- **Sequencing:** after AD (which is ⏭️ next to build). v1 is independent
+  of Z/AA/AB/AC; AB v1 should consume БРС signals if AE v1 lands first —
+  coordinate whichever ships second. v3 is demand-driven fast-follow
+  material once РОПы/teachers are using the ledger.
+
 ---
 
 ## Build order — locked design (§5–§7)
@@ -1153,6 +1808,13 @@ Keeping these here so they don't get re-proposed.
 - **Full student portal / LMS.** Out of scope. The public-link feature (E)
   covers the "feedback delivery" need without owning the student
   relationship.
+- **A РосНавык-style labor-market monitoring platform.** No continuous
+  mass-ingestion pipeline (1.5M vacancies/day), no all-professions
+  dashboard, no hand-built expert skill taxonomy. Feature Z deliberately
+  inverts all three: pull-based fetching at design moments, citable
+  evidence artifacts instead of dashboards, and профстандарты as the
+  taxonomy. If a user's real need turns out to be the monitoring dashboard
+  itself, license/integrate РосНавык's data — don't rebuild their business.
 
 ---
 

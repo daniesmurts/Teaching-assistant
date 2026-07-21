@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { isHostAllowed, resolveAllowedDomains, deriveFilename, fetchDocumentFromUrl, normalizeDomain, isBlockedIp } from './documentFetch'
+import {
+  isHostAllowed, resolveAllowedDomains, deriveFilename, fetchDocumentFromUrl, normalizeDomain, isBlockedIp,
+  charsetFromContentType, charsetFromMetaTag, decodeHtml,
+} from './documentFetch'
 import { detectMimeFromBuffer } from '../middleware/fileValidation'
 
 // ── Host allowlist — the security boundary ────────────────────────────────────
@@ -177,5 +180,57 @@ describe('fetchDocumentFromUrl — pre-flight validation', () => {
   it('rejects when the allowlist is empty (feature not configured)', async () => {
     await expect(fetchDocumentFromUrl('https://www.kstu.ru/x.pdf', []))
       .rejects.toThrow(/не настроил|недоступна/i)
+  })
+})
+
+// ── Charset detection + decoding — sveden.education discovery ──────────────────
+// A real pilot university (kstu.ru) serves its disclosure page as
+// windows-1251, not UTF-8; decoding it blindly would silently mangle every
+// Cyrillic string the parser then tries to classify.
+describe('charsetFromContentType', () => {
+  it('reads a quoted or unquoted charset parameter, case-insensitively', () => {
+    expect(charsetFromContentType('text/html; charset=windows-1251')).toBe('windows-1251')
+    expect(charsetFromContentType('text/html; charset="UTF-8"')).toBe('utf-8')
+    expect(charsetFromContentType('text/html;CHARSET=koi8-r')).toBe('koi8-r')
+  })
+  it('returns null when absent', () => {
+    expect(charsetFromContentType('text/html')).toBeNull()
+    expect(charsetFromContentType(undefined)).toBeNull()
+  })
+})
+
+describe('charsetFromMetaTag', () => {
+  it('reads the legacy http-equiv Content-Type meta tag (real kstu.ru markup)', () => {
+    const head = Buffer.from('<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1251"></head>', 'latin1')
+    expect(charsetFromMetaTag(head)).toBe('windows-1251')
+  })
+  it('reads a bare HTML5 <meta charset> tag', () => {
+    const head = Buffer.from('<html><head><meta charset="utf-8">', 'latin1')
+    expect(charsetFromMetaTag(head)).toBe('utf-8')
+  })
+  it('returns null when no declaration is present in the scanned head', () => {
+    expect(charsetFromMetaTag(Buffer.from('<html><head><title>x</title>', 'latin1'))).toBeNull()
+  })
+})
+
+describe('decodeHtml', () => {
+  it('decodes windows-1251 bytes correctly when the header declares it (real pilot-university encoding)', () => {
+    // "Тест" hand-encoded as windows-1251 bytes (Т=0xD2 е=0xE5 с=0xF1 т=0xF2)
+    // — decoding these as UTF-8 instead would produce mojibake, not 'Тест'.
+    const bytes = Buffer.from([0xd2, 0xe5, 0xf1, 0xf2])
+    expect(decodeHtml(bytes, 'text/html; charset=windows-1251')).toBe('Тест')
+  })
+  it('decodes plain UTF-8 correctly when the header declares it', () => {
+    const cyrillic = 'Прикладная математика и информатика'
+    expect(decodeHtml(Buffer.from(cyrillic, 'utf8'), 'text/html; charset=utf-8')).toBe(cyrillic)
+  })
+  it('falls back to a meta-tag charset when the header has none', () => {
+    const cyrillic = 'Тест'
+    const html = `<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"></head><body>${cyrillic}</body></html>`
+    expect(decodeHtml(Buffer.from(html, 'utf8'), undefined)).toContain(cyrillic)
+  })
+  it('falls back to utf-8 for an unrecognised charset label instead of throwing', () => {
+    const html = '<html><body>hello</body></html>'
+    expect(decodeHtml(Buffer.from(html, 'utf8'), 'text/html; charset=not-a-real-charset')).toContain('hello')
   })
 })

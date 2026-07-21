@@ -36,7 +36,8 @@ import {
   findCourseByTeacherAndName, findCoursesByTeacher, createCourse, setCourseSyllabusText,
 } from '../db/queries/courses'
 import { getInstitutionById } from '../db/queries/institutions'
-import { fetchDocumentFromUrl, resolveAllowedDomains, type FetchedFile } from '../services/documentFetch'
+import { fetchDocumentFromUrl, fetchPageHtml, resolveAllowedDomains, type FetchedFile } from '../services/documentFetch'
+import { parseSvedenPage, selectProgramRow, matchDiscipline } from '../services/svedenParser'
 import { getLimits } from '../config/planLimits'
 import { logger } from '../lib/logger'
 import type {
@@ -631,6 +632,111 @@ router.post(
     res.status(201).json({ id, detected_competency_codes: detectedCodes, replaced_review: replacedReview })
   })
 )
+
+// POST /:id/documents/discover — bulk РПД discovery from the university's
+// mandated /sveden/education disclosure page. Fetches the page (same
+// allowlist + SSRF discipline as single-document pull), parses the microdata
+// table, scopes to this programme's row, and returns a checklist manifest.
+// Import itself stays client-driven: the frontend confirms the checklist and
+// feeds each item through the existing POST /:id/documents with file_url —
+// per-item progress/retry for free, no new job infrastructure.
+router.post('/:id/documents/discover', asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  assertEdit(req, detail.org_unit_id)
+
+  const pageUrl = String(req.body.page_url ?? '').trim()
+  if (!pageUrl) throw new ValidationError('Вставьте ссылку на страницу «Сведения об образовательной организации → Образование».')
+  // Optional re-run against a specific year tab (см. availableYears/selectedYear
+  // in the response) — some universities (verified: kstu.ru) bundle several
+  // years' programmes into one page behind client-side tabs.
+  const requestedYear = req.body.year ? String(req.body.year) : undefined
+
+  const institution = req.teacher.institution_id ? await getInstitutionById(req.teacher.institution_id) : null
+  const { html, finalUrl } = await fetchPageHtml(pageUrl, resolveAllowedDomains(institution))
+
+  const { rows, availableYears, selectedYear } = parseSvedenPage(html, finalUrl, requestedYear)
+  if (rows.length === 0) {
+    throw new ValidationError(
+      'На странице не найдено таблицы с документами программ. Проверьте, что это страница раздела «Образование» (обычно /sveden/education).'
+    )
+  }
+
+  const row = selectProgramRow(rows, { code: detail.code, name: detail.name })
+  if (!row) {
+    // Ambiguous — either no row matched, or (verified against kstu.ru) the
+    // code matched several rows sharing one code+name across different
+    // профили with no way to tell them apart from the programme's own name.
+    // `profile` is included specifically so those candidates render
+    // distinguishably instead of as identical-looking duplicates.
+    res.json({
+      matched:         null,
+      candidates:      rows.filter((r) => r.docs.length > 0).map((r) => ({ code: r.code, name: r.name, profile: r.profile, doc_count: r.docs.length })),
+      items:           [],
+      skipped:         {},
+      available_years: availableYears,
+      selected_year:   selectedYear,
+    })
+    return
+  }
+
+  const currentDocs   = await listProgramDocuments(detail.id)
+  const rpdByDiscipline = new Set(
+    currentDocs.filter((d) => d.kind === 'working_programme' && !d.superseded_at && d.discipline_id).map((d) => d.discipline_id as string)
+  )
+  const usedPracticeTypes = new Set(
+    currentDocs.filter((d) => d.kind === 'practice' && d.practice_type).map((d) => d.practice_type as ProgramPracticeType)
+  )
+
+  const disciplineRefs = detail.disciplines
+    .filter((d): d is ProgramDiscipline & { id: string } => !!d.id)
+    .map((d) => ({ id: d.id, name: d.name }))
+
+  const skipped: Record<string, number> = {}
+  const items: Array<{
+    url: string; text: string; kind: 'working_programme' | 'practice'
+    practice_type: ProgramPracticeType | null
+    discipline_id: string | null; match_confidence: 'exact' | 'fuzzy' | null
+    has_current_doc: boolean
+  }> = []
+  const seenUrls = new Set<string>()
+
+  for (const doc of row.docs) {
+    if (doc.kind !== 'working_programme' && doc.kind !== 'practice') {
+      skipped[doc.kind] = (skipped[doc.kind] ?? 0) + 1
+      continue
+    }
+    if (seenUrls.has(doc.url)) continue
+    seenUrls.add(doc.url)
+
+    if (doc.kind === 'working_programme') {
+      const match = matchDiscipline(doc.text, disciplineRefs)
+      items.push({
+        url: doc.url, text: doc.text, kind: 'working_programme',
+        practice_type:    null,
+        discipline_id:    match?.id ?? null,
+        match_confidence: match?.confidence ?? null,
+        has_current_doc:  match ? rpdByDiscipline.has(match.id) : false,
+      })
+    } else {
+      items.push({
+        url: doc.url, text: doc.text, kind: 'practice',
+        practice_type:    doc.practice_type,
+        discipline_id:    null,
+        match_confidence: null,
+        has_current_doc:  doc.practice_type ? usedPracticeTypes.has(doc.practice_type) : false,
+      })
+    }
+  }
+
+  res.json({
+    matched:         { code: row.code, name: row.name, profile: row.profile },
+    candidates:      [],
+    items,
+    skipped,
+    available_years: availableYears,
+    selected_year:   selectedYear,
+  })
+}))
 
 // POST /:id/disciplines/:disciplineId/review — Feature K scoped to a
 // programme discipline: checks the discipline's uploaded рабочая программа

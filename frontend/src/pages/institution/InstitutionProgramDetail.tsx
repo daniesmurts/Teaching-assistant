@@ -5,6 +5,8 @@ import Button from '../../components/ui/Button'
 import Select from '../../components/ui/Select'
 import LoadingSpinner from '../../components/ui/LoadingSpinner'
 import UrlUploadField from '../../components/ui/UrlUploadField'
+import SvedenImportModal from '../../components/programs/SvedenImportModal'
+import Icon from '../../components/ui/Icon'
 import {
   getProgram, getAnalysis, saveDisciplines, saveCompetencies, analyzeProgram, deleteProgram,
   downloadAnalysisPdf, updateProgram, uploadProgramDocument, deleteProgramDocument,
@@ -1258,6 +1260,8 @@ function DocumentsPanel({
   const addToast = useUIStore((s) => s.addToast)
   const [uploading, setUploading] = useState(false)
   const [reviewingId, setReviewingId] = useState<string | null>(null)
+  // Bulk РПД import from the /sveden/education disclosure page (Feature AD).
+  const [svedenOpen, setSvedenOpen] = useState(false)
   // Which discipline rows have their inline coverage breakdown open. On a
   // freshly completed review we auto-open the row that was just checked (the
   // user just clicked «Проверить» — the answer should be visible immediately,
@@ -1387,7 +1391,27 @@ function DocumentsPanel({
     <div className="space-y-8">
       {/* Working programmes — one per discipline */}
       <div>
-        <SectionLabel>Рабочие программы дисциплин</SectionLabel>
+        <div className="flex items-center justify-between mb-3">
+          <SectionLabel>Рабочие программы дисциплин</SectionLabel>
+          {canEdit && disciplines.length > 0 && (
+            <button
+              onClick={() => setSvedenOpen(true)}
+              className="inline-flex items-center gap-1.5 text-xs font-sans font-medium px-2.5 py-1.5 rounded-md border border-amber/50 bg-amber-light/60 text-amber hover:bg-amber-light transition-colors"
+              title="Вставьте ссылку на страницу «Сведения → Образование» сайта вуза — ИСПУМ найдёт и загрузит все РПД и практики программы разом"
+            >
+              <Icon name="import" size={14} />
+              Импортировать со страницы сведений
+            </button>
+          )}
+        </div>
+        {svedenOpen && (
+          <SvedenImportModal
+            programId={programId}
+            disciplines={disciplines}
+            onClose={() => setSvedenOpen(false)}
+            onImported={onChanged}
+          />
+        )}
         {disciplines.length === 0 ? (
           <p className="text-sm font-sans text-ink-secondary bg-surface border border-border rounded-lg px-4 py-3">
             Сначала добавьте дисциплины в конструкторе плана.

@@ -113,6 +113,18 @@ body {
   .cta-pulse { animation: none; }
 }
 
+/* Indeterminate progress bar — a sliding segment, for waits with no real
+   percentage to report (e.g. the /sveden/education discovery fetch, which
+   can take minutes on one big request). Communicates "still working", not
+   completion progress. */
+@keyframes svedenIndeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[svedenIndeterminate_1\.4s_ease-in-out_infinite\] { animation: none; opacity: 0.6; }
+}
+
 /* ── Print: PDF export of the program-analysis report ──────────────────────────
    The "Экспорт в PDF" button calls window.print(). App chrome is tagged
    print:hidden / .no-print; here we let the report flow across pages, keep the
