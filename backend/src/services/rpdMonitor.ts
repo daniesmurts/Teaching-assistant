@@ -464,12 +464,13 @@ export function pctStatus(pct: number): RpdStatus {
   return 'success'
 }
 
-/** Pastel tints (6-hex, no #/alpha prefix) for cell shading in the Excel/Word
-    exports — same three tiers as the web pills, just light enough for black text. */
+/** Cell-shading tints (6-hex, no #/alpha prefix) for the Excel/Word exports — same
+    three tiers as the web pills. Saturated enough to read as a clear colour at a
+    glance (the first pass was too washed-out), still light enough for black text. */
 export const STATUS_FILL_HEX: Record<RpdStatus, string> = {
-  danger:  'F4C7C3',
-  warning: 'FBE0C4',
-  success: 'C6E6C6',
+  danger:  'EF9A9A',
+  warning: 'FFCC80',
+  success: 'A5D6A7',
 }
 
 // Mirrors the status-color thresholds on the frontend (pctStatus 'success' tier) —
