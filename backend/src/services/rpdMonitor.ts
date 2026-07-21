@@ -400,6 +400,7 @@ export interface RpdLeaderDept {
   groupName: string | null
   planCount: number
   rpdDone:   number
+  rpdDebt:   number
   rpdPct:    number
   improved:  boolean // rpd_done increased since the previous snapshot
 }
@@ -454,14 +455,17 @@ export interface RpdOverview {
   timeSeries: Array<{ snapshotId: string; capturedAt: string; planCount: number; rpdDone: number; rpdPct: number }>
 }
 
-// Same three tiers as the frontend's readiness pills/bar chart — shared here so the
+// Same three tiers as the frontend's status pills/bar chart — shared here so the
 // Excel and Word exports can colour-code by the same thresholds, not just the UI.
+// Driven by % долга (debt as a share of план), not readiness: 0% долга is the
+// good case (success), > 50% is the bad one (danger) — the opposite direction
+// from a readiness percentage, hence the <= comparisons rather than <.
 export type RpdStatus = 'danger' | 'warning' | 'success'
 
-export function pctStatus(pct: number): RpdStatus {
-  if (pct < 33) return 'danger'
-  if (pct < 67) return 'warning'
-  return 'success'
+export function pctStatus(debtPct: number): RpdStatus {
+  if (debtPct <= 0) return 'success'
+  if (debtPct <= 50) return 'warning'
+  return 'danger'
 }
 
 /** Cell-shading tints (6-hex, no #/alpha prefix) for the Excel/Word exports — same
@@ -472,10 +476,6 @@ export const STATUS_FILL_HEX: Record<RpdStatus, string> = {
   warning: 'FFCC80',
   success: 'A5D6A7',
 }
-
-// Mirrors the status-color thresholds on the frontend (pctStatus 'success' tier) —
-// «doing well» means the same thing here as the green pill it renders as there.
-const LEADER_PCT_THRESHOLD = 67
 
 function sumTotals(rows: RpdSnapshotRowRecord[]): RpdTotals {
   const t = rows.reduce((acc, r) => ({
@@ -551,7 +551,10 @@ export async function computeOverview(institutionId: string, snapshotId: string)
     }
   }).sort((a, b) => b.rpdDebt - a.rpdDebt)
 
-  // Problem кафедры: meaningful debt outstanding, sorted by debt desc; flag ones with zero progress since last snapshot.
+  // Problem кафедры: meaningful debt outstanding. Ranked by % долга (proportionally
+  // worst first), not raw count — a tiny кафедра owing 100% of its plan now
+  // outranks a big one owing 60% of a much larger plan, matching the same
+  // percentage the status colour uses. Flags ones with zero progress since last snapshot.
   const problemDepts: RpdProblemDept[] = rows
     .filter((r) => r.rpd_debt > 0)
     .map((r) => {
@@ -564,21 +567,22 @@ export async function computeOverview(institutionId: string, snapshotId: string)
         stalled: Boolean(prev) && r.rpd_done <= prev!.rpd_done,
       }
     })
-    .sort((a, b) => b.rpdDebt - a.rpdDebt)
+    .sort((a, b) => (b.rpdDebt / b.planCount) - (a.rpdDebt / a.planCount) || b.rpdDebt - a.rpdDebt)
     .slice(0, 50)
 
-  // Well-performing кафедры: the positive mirror of «Проблемные» — high readiness,
-  // biggest workloads first so a substantial completion outranks a trivial
-  // one-discipline 100%. Flags an «improved» badge for ones that moved since last snapshot.
+  // Well-performing кафедры: the positive mirror of «Проблемные» — zero долг
+  // (debt-free, including the rare negative-долг anomaly rows), biggest
+  // workloads first so a substantial completion outranks a trivial one-discipline
+  // case. Flags an «improved» badge for ones that moved since last snapshot.
   const leaderDepts: RpdLeaderDept[] = rows
-    .filter((r) => r.plan_count > 0 && (r.rpd_done / r.plan_count) * 100 >= LEADER_PCT_THRESHOLD)
+    .filter((r) => r.rpd_debt <= 0)
     .map((r) => {
       const prev = previousByKey.get(rowKey(r))
       return {
         deptCode: r.dept_code, eduForm: r.edu_form, eduLevel: r.edu_level,
         groupName: groupMap.get(r.dept_code)?.groupName ?? null,
-        planCount: r.plan_count, rpdDone: r.rpd_done,
-        rpdPct: round1((r.rpd_done / r.plan_count) * 100),
+        planCount: r.plan_count, rpdDone: r.rpd_done, rpdDebt: r.rpd_debt,
+        rpdPct: r.plan_count > 0 ? round1((r.rpd_done / r.plan_count) * 100) : 0,
         improved: Boolean(prev) && r.rpd_done > prev!.rpd_done,
       }
     })

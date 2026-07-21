@@ -49,9 +49,9 @@ function writeDataRow(
     r.fos_done, pct(r.fos_done, r.plan_count), r.fos_review, pct(r.fos_review, r.plan_count),
     r.fos_debt, pct(r.fos_debt, r.plan_count),
   ])
-  // Anomalies (data inconsistency, not performance) override the readiness-tier
+  // Anomalies (data inconsistency, not performance) override the % долга tier
   // colour since they're the more urgent signal — matches the reminder-letter table.
-  const fill = rowIsAnomalous(r) ? YELLOW_FILL : STATUS_FILLS[pctStatus(pct(r.rpd_done, r.plan_count))]
+  const fill = rowIsAnomalous(r) ? YELLOW_FILL : STATUS_FILLS[pctStatus(pct(r.rpd_debt, r.plan_count))]
   row.eachCell((c) => { c.fill = fill })
 }
 

@@ -57,18 +57,24 @@ function DeltaBadge({ value, suffix = '', invert = false }: { value: number | nu
   )
 }
 
-// ─── Готовность status system ──────────────────────────────────────────────
-// One severity axis (% готовности) drives every visual signal on a row — the
-// progress pill, the долг figure, and the row's accent stripe — so «this row
-// needs attention» reads as one coherent signal instead of two competing
-// color languages. Thresholds mirror the traffic-light convention she used in
-// her own manual Excel highlighting (Research: red/green/yellow rows).
+// ─── % долга РПД status system ─────────────────────────────────────────────
+// One severity axis (% долга — debt as a share of план) drives every visual
+// signal on a row — the pill, the долг figure, and the row's accent stripe —
+// so «this row needs attention» reads as one coherent signal instead of two
+// competing color languages. 0% долга is the good case; > 50% is the bad
+// one — the opposite direction from a readiness percentage, hence <= rather
+// than < in the comparisons below.
 type RpdStatus = 'danger' | 'warning' | 'success'
 
-function pctStatus(pct: number): RpdStatus {
-  if (pct < 33) return 'danger'
-  if (pct < 67) return 'warning'
-  return 'success'
+function pctStatus(debtPct: number): RpdStatus {
+  if (debtPct <= 0) return 'success'
+  if (debtPct <= 50) return 'warning'
+  return 'danger'
+}
+
+/** % долга РПД for a row — debt as a share of план, 0 when there's no plan to divide by. */
+function debtPctOf(rpdDebt: number, planCount: number): number {
+  return planCount > 0 ? Math.round((rpdDebt / planCount) * 1000) / 10 : 0
 }
 
 // The shared `warning` token (index.css --color-warning) is a muted mustard-brown,
@@ -113,8 +119,8 @@ const STATUS_HEX: Record<RpdStatus, string> = {
   success: 'var(--color-success)',
 }
 
-/** A compact readiness pill: percentage + a filled progress track, colour-coded by status. */
-function ReadinessBadge({ pct }: { pct: number }) {
+/** A compact % долга pill: percentage + a filled track, colour-coded by status. */
+function DebtBadge({ pct }: { pct: number }) {
   const status = pctStatus(pct)
   const clamped = Math.max(0, Math.min(100, pct))
   return (
@@ -127,7 +133,7 @@ function ReadinessBadge({ pct }: { pct: number }) {
   )
 }
 
-/** Left accent stripe on a table row, matching the readiness status — an at-a-glance
+/** Left accent stripe on a table row, matching the % долга status — an at-a-glance
     severity scan down the whole column, echoing her manual row-highlighting. */
 function statusRowClass(pct: number): string {
   return `border-l-[3px] ${STATUS_BORDER[pctStatus(pct)]}`
@@ -755,7 +761,7 @@ function RpdTrendChart({ series, granularity }: { series: RpdTimeSeriesPoint[]; 
 }
 
 /** Horizontal bar comparison — same row order as the table beneath it (server-sorted by
-    долг desc), bar length = готовность %, coloured by the same status tiers as everywhere
+    долг desc), bar length = % долга РПД, coloured by the same status tiers as everywhere
     else on the page. Status colour here is reinforced by the direct % label and the
     institute name, never color-alone. */
 function InstituteBarChart({ groups }: { groups: RpdGroupOverview[] }) {
@@ -770,8 +776,9 @@ function InstituteBarChart({ groups }: { groups: RpdGroupOverview[] }) {
     <div className="px-5 pt-4">
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto">
         {groups.map((g, i) => {
-          const status = pctStatus(g.rpdPct)
-          const barW = Math.max(2, (g.rpdPct / 100) * barAreaW)
+          const debtPct = debtPctOf(g.rpdDebt, g.planCount)
+          const status = pctStatus(debtPct)
+          const barW = Math.max(2, (Math.min(100, Math.max(0, debtPct)) / 100) * barAreaW)
           const cy = i * (rowH + gap)
           return (
             <g key={g.groupId}>
@@ -780,19 +787,19 @@ function InstituteBarChart({ groups }: { groups: RpdGroupOverview[] }) {
               </text>
               <rect x={labelW} y={cy} width={barAreaW} height={rowH} rx={4} fill="var(--color-border)" opacity={0.4} />
               <rect x={labelW} y={cy} width={barW} height={rowH} rx={4} fill={STATUS_HEX[status]}>
-                <title>{`${g.groupName}: ${g.rpdDone} из ${g.planCount} (${g.rpdPct}%), долг ${g.rpdDebt}`}</title>
+                <title>{`${g.groupName}: ${g.rpdDone} из ${g.planCount} готово, долг ${g.rpdDebt} (${debtPct}%)`}</title>
               </rect>
               <text x={labelW + barAreaW + 8} y={cy + rowH / 2 + 4} textAnchor="start" className="fill-ink-secondary text-xs font-sans font-semibold">
-                {g.rpdPct}%
+                {debtPct}%
               </text>
             </g>
           )
         })}
       </svg>
       <div className="flex items-center gap-3 text-[11px] font-sans text-ink-tertiary pb-1">
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-danger inline-block" /> &lt;33%</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#F97316] inline-block" /> 33–66%</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-success inline-block" /> ≥67%</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-success inline-block" /> 0%</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#F97316] inline-block" /> ≤50%</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-danger inline-block" /> &gt;50%</span>
       </div>
     </div>
   )
@@ -817,23 +824,24 @@ function GroupsTable({ overview, onDownload, onReminder, onPreviewReminder }: {
               <th className="px-4 py-2">Институт</th>
               <th className="px-4 py-2">План</th>
               <th className="px-4 py-2">Сделано РПД</th>
-              <th className="px-4 py-2">Готовность</th>
+              <th className="px-4 py-2">% долга РПД</th>
               <th className="px-4 py-2">Долг</th>
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
           <tbody>
             {overview.groups.map((g) => {
-              const status = pctStatus(g.rpdPct)
+              const debtPct = debtPctOf(g.rpdDebt, g.planCount)
+              const status = pctStatus(debtPct)
               return (
-                <tr key={g.groupId} className={`border-b border-border last:border-0 ${statusRowClass(g.rpdPct)}`}>
+                <tr key={g.groupId} className={`border-b border-border last:border-0 ${statusRowClass(debtPct)}`}>
                   <td className="px-4 py-2 font-medium text-ink">{g.groupName}</td>
                   <td className="px-4 py-2 text-ink-secondary">{g.planCount}</td>
                   <td className="px-4 py-2 text-ink-secondary">
                     {g.rpdDone}
                     <DeltaBadge value={g.deltaRpdDone} />
                   </td>
-                  <td className="px-4 py-2"><ReadinessBadge pct={g.rpdPct} /></td>
+                  <td className="px-4 py-2"><DebtBadge pct={debtPct} /></td>
                   <td className={`px-4 py-2 font-semibold ${g.rpdDebt > 0 ? STATUS_TEXT[status] : 'text-ink-tertiary'}`}>{g.rpdDebt}</td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
                     <button onClick={() => onDownload(g.groupId)} className="text-xs font-sans text-amber-mid hover:underline mr-3">Отчёт</button>
@@ -863,27 +871,30 @@ function LeaderDepts({ overview }: { overview: RpdOverview }) {
               <th className="px-4 py-2">Кафедра</th>
               <th className="px-4 py-2">Институт</th>
               <th className="px-4 py-2">Форма / уровень</th>
-              <th className="px-4 py-2">Готовность</th>
+              <th className="px-4 py-2">% долга РПД</th>
               <th className="px-4 py-2">Сделано / план</th>
             </tr>
           </thead>
           <tbody>
-            {overview.leaderDepts.slice(0, 20).map((d: RpdLeaderDept, i) => (
-              <tr key={i} className={`border-b border-border last:border-0 ${statusRowClass(d.rpdPct)}`}>
-                <td className="px-4 py-2 font-medium text-ink">{d.deptCode}</td>
-                <td className="px-4 py-2 text-ink-secondary">{d.groupName ?? '—'}</td>
-                <td className="px-4 py-2 text-ink-secondary">{d.eduForm}, {d.eduLevel}</td>
-                <td className="px-4 py-2"><ReadinessBadge pct={d.rpdPct} /></td>
-                <td className="px-4 py-2">
-                  <span className="text-ink-secondary">{d.rpdDone} / {d.planCount}</span>
-                  {d.improved && (
-                    <span className="text-xs font-sans font-medium bg-success-bg text-success rounded px-1.5 py-0.5 ml-2">
-                      прогресс
-                    </span>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {overview.leaderDepts.slice(0, 20).map((d: RpdLeaderDept, i) => {
+              const debtPct = debtPctOf(d.rpdDebt, d.planCount)
+              return (
+                <tr key={i} className={`border-b border-border last:border-0 ${statusRowClass(debtPct)}`}>
+                  <td className="px-4 py-2 font-medium text-ink">{d.deptCode}</td>
+                  <td className="px-4 py-2 text-ink-secondary">{d.groupName ?? '—'}</td>
+                  <td className="px-4 py-2 text-ink-secondary">{d.eduForm}, {d.eduLevel}</td>
+                  <td className="px-4 py-2"><DebtBadge pct={debtPct} /></td>
+                  <td className="px-4 py-2">
+                    <span className="text-ink-secondary">{d.rpdDone} / {d.planCount}</span>
+                    {d.improved && (
+                      <span className="text-xs font-sans font-medium bg-success-bg text-success rounded px-1.5 py-0.5 ml-2">
+                        прогресс
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -946,19 +957,20 @@ function ProblemDepts({ overview }: { overview: RpdOverview }) {
               <th className="px-4 py-2">Кафедра</th>
               <th className="px-4 py-2">Институт</th>
               <th className="px-4 py-2">Форма / уровень</th>
-              <th className="px-4 py-2">Готовность</th>
+              <th className="px-4 py-2">% долга РПД</th>
               <th className="px-4 py-2">Долг</th>
             </tr>
           </thead>
           <tbody>
             {overview.problemDepts.slice(0, 20).map((d, i) => {
-              const status = pctStatus(d.rpdPct)
+              const debtPct = debtPctOf(d.rpdDebt, d.planCount)
+              const status = pctStatus(debtPct)
               return (
-                <tr key={i} className={`border-b border-border last:border-0 ${statusRowClass(d.rpdPct)}`}>
+                <tr key={i} className={`border-b border-border last:border-0 ${statusRowClass(debtPct)}`}>
                   <td className="px-4 py-2 font-medium text-ink">{d.deptCode}</td>
                   <td className="px-4 py-2 text-ink-secondary">{d.groupName ?? '—'}</td>
                   <td className="px-4 py-2 text-ink-secondary">{d.eduForm}, {d.eduLevel}</td>
-                  <td className="px-4 py-2"><ReadinessBadge pct={d.rpdPct} /></td>
+                  <td className="px-4 py-2"><DebtBadge pct={debtPct} /></td>
                   <td className="px-4 py-2">
                     <span className={`font-semibold ${STATUS_TEXT[status]}`}>{d.rpdDebt}</span>
                     {d.stalled && (
@@ -1026,7 +1038,7 @@ function AllDeptsPanel({ overview }: { overview: RpdOverview }) {
               <th className="px-4 py-2">Институт</th>
               <th className="px-4 py-2">Форма / уровень</th>
               <th className="px-4 py-2">Сделано / план</th>
-              <th className="px-4 py-2">Готовность</th>
+              <th className="px-4 py-2">% долга РПД</th>
               <th className="px-4 py-2">Долг РПД</th>
               <th className="px-4 py-2 border-l border-border">Сделано ФОС</th>
               <th className="px-4 py-2">ФОС на проверке</th>
@@ -1035,10 +1047,12 @@ function AllDeptsPanel({ overview }: { overview: RpdOverview }) {
           </thead>
           <tbody>
             {filtered.map((d, i) => {
-              const status = pctStatus(d.rpdPct)
-              const fosStatus = pctStatus(d.fosPct)
+              const debtPct = debtPctOf(d.rpdDebt, d.planCount)
+              const status = pctStatus(debtPct)
+              const fosDebtPct = debtPctOf(d.fosDebt, d.planCount)
+              const fosStatus = pctStatus(fosDebtPct)
               return (
-                <tr key={i} className={`border-b border-border last:border-0 ${statusRowClass(d.rpdPct)}`}>
+                <tr key={i} className={`border-b border-border last:border-0 ${statusRowClass(debtPct)}`}>
                   <td className="px-4 py-1.5 font-medium text-ink whitespace-nowrap">{d.deptCode}</td>
                   <td className="px-4 py-1.5 text-ink-secondary whitespace-nowrap">{d.groupName ?? '—'}</td>
                   <td className="px-4 py-1.5 text-ink-secondary whitespace-nowrap">{d.eduForm}, {d.eduLevel}</td>
@@ -1046,7 +1060,7 @@ function AllDeptsPanel({ overview }: { overview: RpdOverview }) {
                     {d.rpdDone} / {d.planCount}
                     <DeltaBadge value={d.deltaRpdDone} />
                   </td>
-                  <td className="px-4 py-1.5"><ReadinessBadge pct={d.rpdPct} /></td>
+                  <td className="px-4 py-1.5"><DebtBadge pct={debtPct} /></td>
                   <td className={`px-4 py-1.5 font-semibold ${d.rpdDebt > 0 ? STATUS_TEXT[status] : 'text-ink-tertiary'}`}>{d.rpdDebt}</td>
                   <td className="px-4 py-1.5 text-ink-secondary whitespace-nowrap border-l border-border">{d.fosDone} / {d.planCount}</td>
                   <td className="px-4 py-1.5 text-ink-secondary whitespace-nowrap">{d.fosReview}</td>
@@ -1185,19 +1199,20 @@ function ReminderModal({ preview, onClose, onCopy }: { preview: RpdReminderPrevi
                   <th className="px-3 py-2">Кафедра</th>
                   <th className="px-3 py-2">Форма / уровень</th>
                   <th className="px-3 py-2">Сделано / план</th>
-                  <th className="px-3 py-2">Готовность</th>
+                  <th className="px-3 py-2">% долга РПД</th>
                   <th className="px-3 py-2">Долг</th>
                 </tr>
               </thead>
               <tbody>
                 {preview.rows.map((r, i) => {
-                  const status = pctStatus(r.rpdPct)
+                  const debtPct = debtPctOf(r.rpdDebt, r.planCount)
+                  const status = pctStatus(debtPct)
                   return (
-                    <tr key={i} className={`border-b border-border last:border-0 ${statusRowClass(r.rpdPct)}`}>
+                    <tr key={i} className={`border-b border-border last:border-0 ${statusRowClass(debtPct)}`}>
                       <td className="px-3 py-1.5 font-medium text-ink whitespace-nowrap">{r.deptCode}</td>
                       <td className="px-3 py-1.5 text-ink-secondary whitespace-nowrap">{r.eduForm}, {r.eduLevel}</td>
                       <td className="px-3 py-1.5 text-ink-secondary whitespace-nowrap">{r.rpdDone} / {r.planCount}</td>
-                      <td className="px-3 py-1.5"><ReadinessBadge pct={r.rpdPct} /></td>
+                      <td className="px-3 py-1.5"><DebtBadge pct={debtPct} /></td>
                       <td className={`px-3 py-1.5 font-semibold ${STATUS_TEXT[status]}`}>{r.rpdDebt}</td>
                     </tr>
                   )

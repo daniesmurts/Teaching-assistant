@@ -56,6 +56,7 @@ export interface RpdLeaderDept {
   groupName: string | null
   planCount: number
   rpdDone:   number
+  rpdDebt:   number
   rpdPct:    number
   improved:  boolean
 }

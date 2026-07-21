@@ -16,6 +16,7 @@ interface ProblemRow {
   rpdDone:   number
   rpdDebt:   number
   rpdPct:    number
+  debtPct:   number
 }
 
 export interface RpdReminderPreview {
@@ -35,8 +36,10 @@ function problemRows(group: RpdDeptGroupRecord, rows: RpdSnapshotRowRecord[]): P
       deptCode: r.dept_code, eduForm: r.edu_form, eduLevel: r.edu_level,
       planCount: r.plan_count, rpdDone: r.rpd_done, rpdDebt: r.rpd_debt,
       rpdPct: r.plan_count > 0 ? Math.round((r.rpd_done / r.plan_count) * 1000) / 10 : 0,
+      debtPct: r.plan_count > 0 ? Math.round((r.rpd_debt / r.plan_count) * 1000) / 10 : 0,
     }))
-    .sort((a, b) => b.rpdDebt - a.rpdDebt)
+    // Proportionally worst first — matches the web dashboard's ranking, not raw count.
+    .sort((a, b) => b.debtPct - a.debtPct || b.rpdDebt - a.rpdDebt)
 }
 
 async function draftNarrative(teacherId: string, group: RpdDeptGroupRecord, problems: ProblemRow[], periodLabel: string | null): Promise<string> {
@@ -71,8 +74,8 @@ export async function generateRpdReminderText(
     '',
     narrative,
     '',
-    'Кафедра\tФорма обучения\tУровень образования\tСделано\tПлан\t% готовности\tДолг',
-    ...problems.map((r) => `${r.deptCode}\t${r.eduForm}\t${r.eduLevel}\t${r.rpdDone}\t${r.planCount}\t${r.rpdPct}%\t${r.rpdDebt}`),
+    'Кафедра\tФорма обучения\tУровень образования\tСделано\tПлан\t% долга РПД\tДолг',
+    ...problems.map((r) => `${r.deptCode}\t${r.eduForm}\t${r.eduLevel}\t${r.rpdDone}\t${r.planCount}\t${r.debtPct}%\t${r.rpdDebt}`),
   ]
   return { groupName: group.name, dateStr, narrative, rows: problems, text: lines.join('\n') }
 }
@@ -101,13 +104,13 @@ export async function generateRpdReminderDocx(
   const table = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     rows: [
-      new TableRow({ children: [headCell('Кафедра'), headCell('Форма'), headCell('Уровень'), headCell('Сделано / План'), headCell('% готовности'), headCell('Долг')] }),
+      new TableRow({ children: [headCell('Кафедра'), headCell('Форма'), headCell('Уровень'), headCell('Сделано / План'), headCell('% долга РПД'), headCell('Долг')] }),
       ...problems.map((r) => {
-        const fill = STATUS_FILL_HEX[pctStatus(r.rpdPct)]
+        const fill = STATUS_FILL_HEX[pctStatus(r.debtPct)]
         return new TableRow({
           children: [
             cell(r.deptCode, fill), cell(r.eduForm, fill), cell(r.eduLevel, fill),
-            cell(`${r.rpdDone} / ${r.planCount}`, fill), cell(`${r.rpdPct}%`, fill), cell(String(r.rpdDebt), fill),
+            cell(`${r.rpdDone} / ${r.planCount}`, fill), cell(`${r.debtPct}%`, fill), cell(String(r.rpdDebt), fill),
           ],
         })
       }),
