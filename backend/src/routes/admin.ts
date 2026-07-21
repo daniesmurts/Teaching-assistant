@@ -403,7 +403,8 @@ router.patch('/teachers/:id', asyncHandler(async (req, res) => {
   // granting leadership/programme visibility there, and the stale primary
   // department would keep them drillable by the old org's heads. Clear before
   // syncRoleToTree so a role sync re-grants admin-on-root in the NEW tree only.
-  if (hasInstitution && prevInstitutionId !== rows[0].institution_id) {
+  const institutionMoved = hasInstitution && prevInstitutionId !== rows[0].institution_id
+  if (institutionMoved) {
     await clearOrgTiesOutsideInstitution(rows[0].id, rows[0].institution_id)
     // Moved into an institution → land in its default kafedra (same rule as
     // registration) so the teacher is immediately visible in the new tree.
@@ -414,9 +415,14 @@ router.patch('/teachers/:id', asyncHandler(async (req, res) => {
 
   // Keep the §7 org tree authoritative: when the role changes, mirror it into
   // is_platform_admin + admin-on-root so the (tree-based) guards stay correct.
-  // Only when role was actually part of this PATCH — plan/active-only edits
-  // must not touch authorisation.
-  if (role !== undefined) {
+  // Also re-run on an institution move even if `role` wasn't part of this PATCH —
+  // clearOrgTiesOutsideInstitution just wiped any admin-on-root grant the teacher
+  // held in the old tree, and skipping this left a teacher.role of
+  // 'institution_admin' (badge still shows «админ») with no matching grant in
+  // the new institution: is_institution_admin comes back false, «Организация»
+  // and every /institution route stay blocked until someone happens to also
+  // touch role in a later PATCH. Confirmed against a real support report.
+  if (role !== undefined || institutionMoved) {
     await syncRoleToTree(rows[0].id, rows[0].role, rows[0].institution_id)
   }
 

@@ -16,6 +16,7 @@
     "eval:confidence": "node --env-file=../.env $(npm root)/.bin/tsx scripts/runConfidenceEval.ts",
     "test:yandex-images": "node --env-file=../.env $(npm root)/.bin/tsx scripts/testYandexImages.ts",
     "repair:filenames": "node --env-file=../.env $(npm root)/.bin/tsx scripts/repairFilenames.ts",
+    "repair:role-tree": "node --env-file=../.env $(npm root)/.bin/tsx scripts/repairRoleTreeSync.ts",
     "backup:db": "node --env-file=../.env $(npm root)/.bin/tsx scripts/backupDatabase.ts",
     "marketing:merge-list": "node --env-file=../.env $(npm root)/.bin/tsx scripts/generateMarketingMergeList.ts"
   },
