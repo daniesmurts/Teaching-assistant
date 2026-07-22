@@ -454,3 +454,32 @@ export async function publishFgosStandard(id: string, payload: FgosDraft): Promi
 export async function deleteFgosStandard(id: string): Promise<void> {
   await client.delete(`/api/admin/fgos/${id}`)
 }
+
+// ─── Bulk import from fgosvo.ru ────────────────────────────────────────────
+
+export interface FgosvoDiscoverItem {
+  code:             string | null
+  name:             string | null
+  level:            string | null
+  pdf_url:          string
+  order_date:       string | null
+  category:         string
+  already_imported: boolean
+}
+export interface FgosvoDiscoverResult {
+  level:              string | null
+  items:              FgosvoDiscoverItem[]
+  categories_scanned: number
+  categories_failed:  { title: string; url: string; error: string }[]
+}
+
+export async function discoverFgosvo(url: string): Promise<FgosvoDiscoverResult> {
+  const res = await client.post<FgosvoDiscoverResult>('/api/admin/fgos/discover', { url })
+  return res.data
+}
+export async function importFgosvoItem(item: { code: string; name: string; level: string; pdfUrl: string }): Promise<FgosStandard> {
+  const res = await client.post<FgosStandard>('/api/admin/fgos/import-one', {
+    code: item.code, name: item.name, level: item.level, pdf_url: item.pdfUrl,
+  })
+  return res.data
+}

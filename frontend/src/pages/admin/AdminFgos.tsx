@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  getFgosStandards, extractFgosDraft, createFgosDraft, publishFgosStandard, deleteFgosStandard,
+  getFgosStandards, getFgosStandard, extractFgosDraft, createFgosDraft, publishFgosStandard, deleteFgosStandard,
 } from '../../api/admin'
 import Button from '../../components/ui/Button'
 import CreateButton from '../../components/ui/CreateButton'
 import { Input } from '../../components/ui/Input'
+import LoadingSpinner from '../../components/ui/LoadingSpinner'
 import { useUIStore } from '../../store/uiStore'
-import type { FgosDraft, FgosStandard, FgosCompetency, FgosStructureRequirement, FgosProfstandardRef } from '../../types'
+import FgosvoImportModal from './FgosvoImportModal'
+import type { FgosDraft, FgosStandard, FgosStandardWithChildren, FgosCompetency, FgosStructureRequirement, FgosProfstandardRef } from '../../types'
 
 const LEVEL_LABEL: Record<string, string> = {
   бакалавриат: 'Бакалавриат', магистратура: 'Магистратура', специалитет: 'Специалитет', аспирантура: 'Аспирантура',
@@ -30,6 +32,8 @@ export default function AdminFgos() {
   const [draft, setDraft] = useState<FgosDraft>(emptyDraft)
   const [standardId, setStandardId] = useState<string | null>(null)
   const [extracting, setExtracting] = useState(false)
+  const [opening, setOpening] = useState<string | null>(null)
+  const [showFgosvoImport, setShowFgosvoImport] = useState(false)
 
   const { data: standards = [], isLoading } = useQuery({ queryKey: ['admin-fgos'], queryFn: getFgosStandards })
 
@@ -47,6 +51,32 @@ export default function AdminFgos() {
       addToast('Не удалось разобрать файл ФГОС', 'error')
     } finally {
       setExtracting(false)
+    }
+  }
+
+  function toDraft(s: FgosStandardWithChildren): FgosDraft {
+    return {
+      standard: {
+        direction_code: s.direction_code, level: s.level, title: s.title,
+        generation: s.generation, order_number: s.order_number, order_date: s.order_date, effective_date: s.effective_date,
+      },
+      competencies: s.competencies,
+      structureRequirements: s.structure_requirements,
+      profstandardRefs: s.profstandard_refs,
+    }
+  }
+
+  async function openStandard(id: string) {
+    setOpening(id)
+    try {
+      const full = await getFgosStandard(id)
+      setDraft(toDraft(full))
+      setStandardId(id)
+      setMode('review')
+    } catch {
+      addToast('Не удалось открыть запись', 'error')
+    } finally {
+      setOpening(null)
     }
   }
 
@@ -104,7 +134,13 @@ export default function AdminFgos() {
 
   const canPublish = !!draft.standard.direction_code?.trim() && !!draft.standard.level?.trim() && !!draft.standard.title?.trim()
 
-  const inputCls = 'w-full px-2 py-1.5 text-sm font-sans bg-surface border border-border rounded-md focus:outline-none focus:border-border-strong'
+  // No `w-full` here on purpose: Tailwind's generated stylesheet orders the
+  // width-scale utilities (w-20, w-24, ...) before `w-full`, so appending
+  // `w-full` to this shared class and then a narrower `w-XX` at each call
+  // site doesn't reliably narrow the field — `w-full` wins and the narrow
+  // sibling (e.g. the competency code input) gets squeezed to near-zero
+  // width instead. Callers that want full width add `w-full` themselves.
+  const inputCls = 'px-2 py-1.5 text-sm font-sans bg-surface border border-border rounded-md focus:outline-none focus:border-border-strong'
 
   if (mode === 'review') {
     return (
@@ -124,7 +160,7 @@ export default function AdminFgos() {
                 onChange={(e) => updateStandard({ direction_code: e.target.value })} placeholder="09.03.04" />
               <label className="block">
                 <span className="block text-xs font-sans font-medium text-ink-secondary mb-1">Уровень</span>
-                <select className={inputCls + ' py-2'} value={draft.standard.level ?? ''}
+                <select className={inputCls + ' w-full py-2'} value={draft.standard.level ?? ''}
                   onChange={(e) => updateStandard({ level: e.target.value })}>
                   {Object.entries(LEVEL_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
@@ -225,7 +261,10 @@ export default function AdminFgos() {
               Реестр федеральных образовательных стандартов — общие данные для всех организаций.
             </p>
           </div>
-          <div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => setShowFgosvoImport(true)}>
+              Импорт с fgosvo.ru
+            </Button>
             <CreateButton loading={extracting} onClick={() => document.getElementById('fgos-file-input')?.click()}>
               Импортировать ФГОС
             </CreateButton>
@@ -233,6 +272,13 @@ export default function AdminFgos() {
               disabled={extracting} onChange={onFilePicked} />
           </div>
         </div>
+
+        {showFgosvoImport && (
+          <FgosvoImportModal
+            onClose={() => setShowFgosvoImport(false)}
+            onImported={() => qc.invalidateQueries({ queryKey: ['admin-fgos'] })}
+          />
+        )}
 
         {isLoading ? (
           <p className="text-sm font-sans text-ink-tertiary">Загрузка…</p>
@@ -244,7 +290,9 @@ export default function AdminFgos() {
         ) : (
           <div className="space-y-2">
             {standards.map((s: FgosStandard) => (
-              <div key={s.id} className="bg-surface border border-border rounded-lg p-4 flex items-start justify-between">
+              <div key={s.id}
+                onClick={() => opening === null && void openStandard(s.id)}
+                className="bg-surface border border-border rounded-lg p-4 flex items-start justify-between cursor-pointer hover:border-amber/40 transition-colors">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-sans text-sm font-medium text-ink">{s.direction_code} {s.title}</span>
@@ -252,9 +300,10 @@ export default function AdminFgos() {
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-sm ${s.status === 'published' ? 'bg-success-bg text-success' : 'bg-surface-warm text-ink-tertiary'}`}>
                       {s.status === 'published' ? 'Опубликован' : 'Черновик'}
                     </span>
+                    {opening === s.id && <LoadingSpinner size={12} />}
                   </div>
                 </div>
-                <button onClick={() => { if (confirm(`Удалить «${s.title}»?`)) deleteMut.mutate(s.id) }}
+                <button onClick={(e) => { e.stopPropagation(); if (confirm(`Удалить «${s.title}»?`)) deleteMut.mutate(s.id) }}
                   className="text-xs text-ink-tertiary hover:text-danger flex-shrink-0 ml-3">Удалить</button>
               </div>
             ))}

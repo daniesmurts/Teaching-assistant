@@ -23,6 +23,35 @@ vi.mock('../services/fgosExtractor', () => ({
   }),
 }))
 
+const TOP_PAGE_HTML = `
+<title>ФГОС ВО (3++) по направлениям бакалавриата</title>
+<div class="item d-flex" data-key="29"><div class="w112 text-green align-middle"><span class="icons openbook align-middle me-2"></span>020000</div>
+<div>
+    <a class="item-link" href="/fgosvo/index/24/29" data-pjax="0">КОМПЬЮТЕРНЫЕ И ИНФОРМАЦИОННЫЕ НАУКИ</a></div>
+</div>`
+
+const CATEGORY_PAGE_HTML = `
+<div class="item d-flex" data-key="1583">    <div class="d-flex">
+        <div class="w80 me-2">02.03.01</div>
+        <div>
+            <div><span class="icons googledocs align-middle"></span>Математика и компьютерные науки</div>
+                            <div class="text-darkgrey">
+                    <a class="text-darkgrey" href="/fgosvo/downloads?f=%2Fuploadfiles%2FFGOS+VO+3%2B%2B%2FBak%2F020301_B_3_15062021.pdf&amp;id=1583" data-pjax="0" target="_blank">PDF, 176.57 КБ</a><span>, 15.01.2022</span>
+                                    </div>
+                                </div>
+    </div>
+</div>`
+
+vi.mock('../services/documentFetch', () => ({
+  fetchPageHtml: vi.fn(async (url: string) => {
+    if (url.includes('/index/24/29')) return { html: CATEGORY_PAGE_HTML, finalUrl: url }
+    return { html: TOP_PAGE_HTML, finalUrl: url }
+  }),
+  fetchDocumentFromUrl: vi.fn().mockResolvedValue({
+    buffer: Buffer.from('stub pdf bytes'), originalname: 'fgos.pdf', mimetype: 'application/pdf', size: 14,
+  }),
+}))
+
 beforeEach(async () => { await pool.query('BEGIN') })
 afterEach(async () => { await pool.query('ROLLBACK') })
 
@@ -132,5 +161,64 @@ describe('ФГОС registry — extract → create → publish round trip', () =
 
     const get = await request(app).get(`/api/admin/fgos/${id}`).set('Authorization', `Bearer ${token}`)
     expect(get.status).toBe(404)
+  })
+})
+
+describe('ФГОС registry — bulk import from fgosvo.ru', () => {
+  it('requireAdmin gate: an institution admin is refused on /discover', async () => {
+    const token = await institutionAdminToken()
+    const res = await request(app).post('/api/admin/fgos/discover').set('Authorization', `Bearer ${token}`)
+      .send({ url: 'https://fgosvo.ru/fgosvo/index/24' })
+    expect(res.status).toBe(403)
+  })
+
+  it('discover crawls the top page and every category, returning a combined checklist', async () => {
+    const { token } = await platformAdminToken()
+    const res = await request(app).post('/api/admin/fgos/discover').set('Authorization', `Bearer ${token}`)
+      .send({ url: 'https://fgosvo.ru/fgosvo/index/24' })
+
+    expect(res.status).toBe(200)
+    expect(res.body.level).toBe('бакалавриат')
+    expect(res.body.categories_scanned).toBe(1)
+    expect(res.body.categories_failed).toEqual([])
+    expect(res.body.items).toHaveLength(1)
+    expect(res.body.items[0]).toMatchObject({
+      code: '02.03.01', name: 'Математика и компьютерные науки', level: 'бакалавриат',
+      category: 'КОМПЬЮТЕРНЫЕ И ИНФОРМАЦИОННЫЕ НАУКИ', already_imported: false,
+    })
+  })
+
+  it('discover marks an already-registered direction_code+level as already_imported', async () => {
+    const { token } = await platformAdminToken()
+    await request(app).post('/api/admin/fgos').set('Authorization', `Bearer ${token}`).send({
+      ...VALID_PAYLOAD,
+      standard: { ...VALID_PAYLOAD.standard, direction_code: '02.03.01', level: 'бакалавриат' },
+    })
+
+    const res = await request(app).post('/api/admin/fgos/discover').set('Authorization', `Bearer ${token}`)
+      .send({ url: 'https://fgosvo.ru/fgosvo/index/24' })
+    expect(res.body.items[0].already_imported).toBe(true)
+  })
+
+  it('import-one fetches, extracts, and lands the standard as a draft (never published)', async () => {
+    const { token } = await platformAdminToken()
+    const res = await request(app).post('/api/admin/fgos/import-one').set('Authorization', `Bearer ${token}`).send({
+      code: '02.03.01', name: 'Математика и компьютерные науки', level: 'бакалавриат',
+      pdf_url: 'https://fgosvo.ru/fgosvo/downloads?f=x&id=1583',
+    })
+    expect(res.status).toBe(201)
+    expect(res.body.status).toBe('draft')
+    expect(res.body.direction_code).toBe('02.03.01')
+    expect(res.body.source_url).toBe('https://fgosvo.ru/fgosvo/downloads?f=x&id=1583')
+
+    const get = await request(app).get(`/api/admin/fgos/${res.body.id}`).set('Authorization', `Bearer ${token}`)
+    expect(get.body.competencies).toHaveLength(1)
+  })
+
+  it('import-one rejects a request missing required fields', async () => {
+    const { token } = await platformAdminToken()
+    const res = await request(app).post('/api/admin/fgos/import-one').set('Authorization', `Bearer ${token}`)
+      .send({ code: '02.03.01' })
+    expect(res.status).toBe(400)
   })
 })

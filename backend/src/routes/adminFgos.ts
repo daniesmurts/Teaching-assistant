@@ -6,11 +6,14 @@ import { asyncHandler } from '../lib/asyncHandler'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import { extractText } from '../services/documentExtractor'
 import { extractFgosDraft, type FgosDraft } from '../services/fgosExtractor'
+import { fetchPageHtml, fetchDocumentFromUrl } from '../services/documentFetch'
+import { parseCategoryLinks, parsePageLevel, parseDirectionRows } from '../services/fgosvoParser'
 import {
   listFgosStandards, getFgosStandardById, createFgosStandardDraft, publishFgosStandard, deleteFgosStandard,
   type FgosStandardPayload,
 } from '../db/queries/fgos'
 import { recordAudit } from '../db/queries/audit'
+import { logger } from '../lib/logger'
 
 // Feature AA v1 (TODO.md "### AA") — ФГОС 3++ registry. Platform-wide
 // reference data (a ФГОС is federal law, identical across every
@@ -71,6 +74,117 @@ router.post('/extract', uploadFields([{ name: 'file', maxCount: 1 }]), verifyFil
     const draft = await extractFgosDraft(text)
     res.json(draft)
   }))
+
+// ─── Bulk import from fgosvo.ru ─────────────────────────────────────────────
+// fgosvo.ru is a single, fixed, platform-controlled source (unlike the
+// per-institution document links elsewhere in the app) — the allowlist is
+// hardcoded, not admin-configurable.
+
+const FGOSVO_ALLOWED_DOMAINS = ['fgosvo.ru']
+
+interface FgosvoDiscoverItem {
+  code:            string | null
+  name:            string | null
+  level:           string | null
+  pdf_url:         string
+  order_date:      string | null
+  category:        string
+  already_imported: boolean
+}
+
+// POST /discover — two-level crawl: the top listing page (e.g.
+// https://fgosvo.ru/fgosvo/index/24) links every subject-area category page,
+// each of which lists individual направления with a direct PDF link. One
+// paste returns a combined checklist across every category. A category page
+// that fails to fetch/parse doesn't abort the whole discovery — it's
+// reported in `categories_failed` so the admin can retry just that one.
+router.post('/discover', asyncHandler(async (req, res) => {
+  const url = String(req.body.url ?? '').trim()
+  if (!url) throw new ValidationError('Вставьте ссылку на страницу списка ФГОС (fgosvo.ru).')
+
+  const { html: topHtml, finalUrl } = await fetchPageHtml(url, FGOSVO_ALLOWED_DOMAINS)
+  const categories = parseCategoryLinks(topHtml, finalUrl)
+  if (categories.length === 0) {
+    throw new ValidationError('На странице не найдено списка категорий. Проверьте, что это страница списка ФГОС на fgosvo.ru.')
+  }
+  const level = parsePageLevel(topHtml)
+
+  const existing = await listFgosStandards()
+  const existingKeys = new Set(existing.map((s) => `${s.direction_code}::${s.level}`))
+
+  const items: FgosvoDiscoverItem[] = []
+  const categoriesFailed: { title: string; url: string; error: string }[] = []
+
+  for (const category of categories) {
+    try {
+      const { html: catHtml, finalUrl: catFinalUrl } = await fetchPageHtml(category.url, FGOSVO_ALLOWED_DOMAINS)
+      const rows = parseDirectionRows(catHtml, catFinalUrl)
+      for (const row of rows) {
+        const key = row.code && level ? `${row.code}::${level}` : null
+        items.push({
+          code:             row.code,
+          name:             row.name,
+          level,
+          pdf_url:          row.pdf_url,
+          order_date:       row.order_date,
+          category:         category.title,
+          already_imported: key ? existingKeys.has(key) : false,
+        })
+      }
+    } catch (err) {
+      logger.warn({ message: 'fgosvo.ru category fetch failed', category: category.title, error: (err as Error).message })
+      categoriesFailed.push({ title: category.title, url: category.url, error: (err as Error).message })
+    }
+  }
+
+  res.json({
+    level,
+    items,
+    categories_scanned: categories.length,
+    categories_failed:  categoriesFailed,
+  })
+}))
+
+// POST /import-one — fetch one PDF by URL, extract, and land it as a draft
+// (never auto-published — rule #3). Kept single-item so a bulk run of
+// hundreds of standards is many small requests, not one that could time out
+// mid-way through hundreds of sequential LLM calls. No aiLimiter here,
+// matching /extract above — a 30/hour cap would make bulk-importing more
+// than 30 standards impossible.
+router.post('/import-one', asyncHandler(async (req, res) => {
+  const code  = String(req.body.code ?? '').trim()
+  const name  = String(req.body.name ?? '').trim()
+  const level = String(req.body.level ?? '').trim()
+  const pdfUrl = String(req.body.pdf_url ?? '').trim()
+  if (!code || !name || !level || !pdfUrl) {
+    throw new ValidationError('Не хватает данных для импорта (код, название, уровень или ссылка на файл).')
+  }
+
+  const file = await fetchDocumentFromUrl(pdfUrl, FGOSVO_ALLOWED_DOMAINS)
+  const { text } = await extractText(file.buffer, file.mimetype)
+  const draft = await extractFgosDraft(text)
+
+  const standard = await createFgosStandardDraft({
+    standard: {
+      direction_code: code,
+      level,
+      title:          draft.standard.title ?? name,
+      generation:     draft.standard.generation ?? '3++',
+      order_number:   draft.standard.order_number ?? null,
+      order_date:     draft.standard.order_date ?? null,
+      source_url:     pdfUrl,
+      effective_date: draft.standard.effective_date ?? null,
+    },
+    competencies:          draft.competencies,
+    structureRequirements: draft.structureRequirements,
+    profstandardRefs:      draft.profstandardRefs,
+  }, req.teacher.id)
+
+  recordAudit({ institutionId: null, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
+    action: 'fgos_standard.bulk_imported', target: standard.title, metadata: { standardId: standard.id, sourceUrl: pdfUrl } })
+
+  res.status(201).json(standard)
+}))
 
 // ─── Create draft / publish / delete ───────────────────────────────────────
 

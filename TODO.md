@@ -1420,6 +1420,82 @@ trip, and that extract alone never writes to the DB). Verified live against
 a real synthetic ФГОС document end-to-end (real `chatJSON` call, both
 competencies correctly extracted and verbatim-verified).
 
+**Bulk import from fgosvo.ru — 🟢 SHIPPED (2026-07-22):** seeding the
+registry standard-by-standard doesn't scale to the ~700 ФГОС 3++ documents
+fgosvo.ru publishes, so this extends v1 with the same "paste a link, get a
+checklist" pattern already shipped for РОПы' bulk РПД import (Feature AD,
+`SvedenImportModal.tsx`). Two-level auto-crawl: the admin pastes one top
+listing URL (e.g. `https://fgosvo.ru/fgosvo/index/24` for bachelor's) →
+new `services/fgosvoParser.ts` (pure, dependency-free, verified against real
+fetched markup — fgosvo.ru renders every row, at both the category-listing
+and direction-listing level, as a non-nesting `<div class="item d-flex">`
+block, which is what makes tag-level regex parsing safe here without a real
+DOM) → the backend follows every category link and returns one combined
+checklist across all ~50 categories (`POST /discover`) → admin reviews/
+unchecks/adjusts level per item → each checked item is fetched, extracted,
+and landed as a **draft** one at a time (`POST /import-one`, client-driven
+loop — same reasoning as Feature AD: hundreds of sequential LLM calls in one
+HTTP request would risk timeouts). `already_imported` cross-references each
+`(direction_code, level)` against the existing registry so re-running
+discovery doesn't re-suggest what's already there. fgosvo.ru is a single,
+fixed, platform-controlled source, so its domain allowlist is hardcoded
+(`fgosvo.ru`) rather than reusing the per-institution
+`document_fetch_domains` allowlist the sveden importer needs.
+
+Since bulk-imported drafts are too numerous to hand-review at import time
+(rule #3 still holds — nothing publishes without a human confirm, it just
+happens later), `AdminFgos.tsx` gained a second capability it was missing
+even for v1: **clicking an existing registry row now opens it into the
+review screen** (`getFgosStandard` → maps to `FgosDraft` shape → the
+existing `publishMut` already branched on `standardId`, so no mutation
+changes were needed, just the load-and-open wiring). Without this, a
+bulk-imported draft would have been permanently unreachable.
+
+8 new unit tests (`fgosvoParser.test.ts`, against real fetched HTML
+excerpts) + 5 new integration tests (`adminFgos.integration.test.ts`,
+mocking `documentFetch`/`chatJSON`: requireAdmin gate, multi-category crawl
+aggregation, `already_imported` dedup, single-item import lands as draft,
+missing-field validation). Verified live in the browser against the real
+fgosvo.ru site: one paste discovered 188 направления across 51 categories
+correctly grouped and coded; imported two real standards end-to-end (real
+PDF fetch → real `chatJSON` extraction → landed as drafts); opened one from
+the list and published it through the existing review screen.
+
+**Follow-up found while reviewing real imported data (2026-07-22):** two
+issues, one real and fixed, one investigated and not a bug.
+- **Review-screen layout bug — fixed.** `AdminFgos.tsx`'s shared `inputCls`
+  baked in `w-full`; every field appending a narrower `w-XX` class on top
+  (competency code, min/max credits, профстандарт code) lost that fight —
+  Tailwind's generated stylesheet orders `w-full` after the numeric width
+  scale, so it silently won every time, squeezing the sibling field (often
+  the formulation textarea) down to a near-zero-width sliver that wrapped
+  text letter-by-letter. Looked like missing/truncated data; wasn't — the DB
+  already held full 17-competency, multi-block records. Fixed by dropping
+  `w-full` from the shared class and adding it explicitly only at the one
+  call site that needs it.
+- **Empty профстандарты — investigated, mostly not a bug.** Suspected the
+  48000-char `MAX_TEXT_CHARS` truncation cutoff (`fgosExtractor.ts`) was
+  cutting off the appendix, which sits near the end of the document. Checked
+  two real documents directly (54.03.04 «Реставрация»: 3 профстандарты
+  correctly extracted; 58.03.01 «Востоковедение и африканистика»: 0) — both
+  fully extracted at 32-36k chars, well inside the old budget, and the
+  58.03.01 PDF genuinely has no «Перечень профессиональных стандартов»
+  appendix section in its text at all (confirmed by searching the extracted
+  text directly). Across 20 already-imported standards, only 2 came back
+  with 0 профстандарты — consistent with "some directions really don't have
+  one," not systematic truncation. Still raised `MAX_TEXT_CHARS` from 48000
+  to 120000 as a safety margin for actual 40-page documents (a 12-page
+  document already ran to ~33-36k chars, ~2.7-3k chars/page — 48000 left
+  almost no headroom for the format's documented page-count range).
+- **OCR for scanned PDFs — already wired up, no new code needed.** Asked
+  about connecting Yandex OCR the way grading does; `services/documentExtractor.ts`'s
+  `extractText()` (shared by grading, program import, and ФГОС ingestion
+  alike) already falls back to `yandexVisionOCR()` whenever `pdf-parse`
+  extracts fewer than 50 words, chunking through Yandex's 8-page-per-call
+  cap via `pdf-lib`. ФГОС ingestion already calls this same shared function,
+  so scanned ФГОС PDFs already OCR automatically — confirmed
+  `YANDEX_VISION_API_KEY`/`YANDEX_FOLDER_ID` are configured.
+
 **Test-infrastructure finding surfaced while verifying — 🟢 FIXED (2026-07-22):**
 the integration test harness's per-test `BEGIN`/`ROLLBACK` isolation
 (`vitest.setup.integration.ts` + `DB_POOL_MAX=1`) didn't correctly nest

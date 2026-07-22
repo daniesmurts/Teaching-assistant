@@ -9,7 +9,14 @@ import { validateQuoteAgainstSource } from '../lib/citation'
 // source text (rule #2) so the review screen can flag anything the LLM may
 // have paraphrased instead of quoted.
 
-const MAX_TEXT_CHARS = 48000 // a ФГОС runs 20-40 pages; mirrors programImport.ts's MAX_PLAN_CHARS headroom
+// A real 12-page ФГОС extracts to ~33-36k chars (~2.7-3k chars/page,
+// verified against fgosvo.ru documents) — the old 48000 (copied from
+// programImport.ts's MAX_PLAN_CHARS, a different document type) left almost
+// no headroom for the 20-40 page documents this format actually runs to,
+// so the профстандарты appendix (near the end of the document) risked being
+// truncated away before the LLM ever saw it. 120000 covers a full 40-page
+// document with room to spare, still far inside the model's context window.
+const MAX_TEXT_CHARS = 120000
 
 export interface FgosDraftStandard {
   direction_code?:  string | null
