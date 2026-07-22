@@ -1,4 +1,5 @@
 import { body } from 'express-validator'
+import { GRANT_DOMAINS } from '../db/queries/orgUnits'
 
 // Creatable types — 'institution' is excluded: roots come from the migration /
 // institution creation, never from the tree-builder.
@@ -62,12 +63,25 @@ export const bulkCreateOrgUnitsRules = [
     .isLength({ max: 50 }).withMessage('Сокращение не длиннее 50 символов'),
 ]
 
-const UNIT_ROLES = ['admin', 'head', 'viewer']
+const UNIT_ROLES = ['admin', 'edit', 'view']
 
 export const grantRoleRules = [
   body('teacherId').isUUID().withMessage('Некорректный идентификатор преподавателя'),
   body('unitId').isUUID().withMessage('Некорректный идентификатор подразделения'),
   body('role').isIn(UNIT_ROLES).withMessage('Недопустимая роль'),
+  body('domain').optional().isIn(GRANT_DOMAINS).withMessage('Недопустимая область доступа')
+    // Research.md §7.10 — 'admin' is always full-scope in this model (IT /
+    // institution admin). A domain-scoped admin grant would be indistinguishable
+    // from true institution admin to isInstitutionAdmin's belt-and-suspenders
+    // domain='all' filter anyway, so refuse it explicitly here with a clear
+    // message rather than silently accepting a grant that can never do what
+    // its author intended.
+    .custom((value, { req }) => {
+      if (req.body.role === 'admin' && value && value !== 'all') {
+        throw new Error('Роль «Администратор» выдаётся без ограничения по области — используйте «Редактор» или «Наблюдатель» для области-ограниченного доступа')
+      }
+      return true
+    }),
 ]
 
 export const setPrimaryRules = [

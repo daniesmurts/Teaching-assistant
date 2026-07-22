@@ -527,17 +527,40 @@ for pre-upgrade sessions. See CHANGELOG.
 
 **Done:** (a) prod migration, (b) frontend gate coherence.
 
-**Deferred — (c) true per-subtree admin scoping.** A division/department head
-limited to their own subtree. NOT a small tail: every institution route would
-need its query scope reworked, plus product decisions on what each role level
-sees. **No current demand** — every admin today is an institution-root admin
-(from the backfill); there are no sub-unit admins to scope. Current state is
-coherent and fail-closed: per-unit `head`/`viewer` and sub-unit `admin` grants
-from the 1b UI are *recorded but inert* — nothing consumes them yet; only
-admin-on-root grants institution access. Build (c) when a real institutional
-customer needs scoped sub-unit access, so requirements are concrete rather than
-speculative. Pairs with the deferred read-only dashboards (viewer role) and
-the §2.x analytics features that would consume `head`/`viewer`.
+**(c) Domain-scoped grants — two-axis authorisation**
+([Research.md](Research.md) §7.10). Re-scoped from "per-subtree admin
+scoping": the original framing (subtree containment only) cannot express
+functional authority — the УМЦ head had to hold root admin just to reach
+РПД monitoring, and every future admin department (other проректоры, отделы)
+would repeat the problem. New model: a grant is **(level: admin/edit/view) ×
+(domain: platform/curriculum/teaching/…) × (unit subtree)**. Functional staff
+get domain-narrow grants at root (УМЦ: `edit × curriculum × root`; ПР УР:
+`view × teaching,curriculum × root`); line managers get grants at their unit
+(institute director, kafedra head); IT holds `admin × * × root` — the real
+org-admin.
+
+- **Phase 1 — `curriculum` domain · 🟢 SHIPPED (2026-07-22).** Migration 087
+  adds `org_unit_roles.domain` (default `'all'`, pure-widening — every
+  existing institution-root admin is untouched) and renames the level values
+  `head`→`edit`, `viewer`→`view` in the same migration (§7.10.3). New
+  `services/accessScope.ts` (`getAccessScope`) + `middleware/requireDomain.ts`
+  gate РПД monitor and institution criteria/rubrics on `curriculum` domain
+  instead of institution-root admin; `orgUnits.ts` role-grant endpoints accept
+  an optional `domain` (validation refuses `role='admin'` paired with a
+  non-`'all'` domain — belt-and-suspenders against a domain-scoped admin grant
+  being mistaken for true root admin, which `isInstitutionAdmin` now also
+  explicitly guards against via `domain='all'`). Frontend: role-assignment UI
+  gained a domain picker; Sidebar/`InstitutionLayout`/`InstitutionRoute` gate
+  on `teacher.curriculum_access` so a curriculum-only grant sees only the tabs
+  its level reaches (and is redirected away from admin-only sub-routes rather
+  than hitting a 403 wall). See CHANGELOG.
+- **Phase 2 — `teaching` + `view`:** ПР УР read-only width; unlocks the
+  deferred viewer dashboards and §2.x analytics consumers.
+- **Phase 3 — `platform` narrowing + per-subtree query scoping:** IT becomes
+  sole root admin; the recorded-but-inert 1b sub-unit `admin` grants start
+  being consumed (the original (c) work lands here — institution route
+  queries take path-prefix filters, consuming the `pathPrefixes` already
+  carried by `AccessScope` since Phase 1).
 
 **Tail (d) — Leadership dashboard V2 · Effort: S.**
 

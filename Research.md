@@ -1041,6 +1041,138 @@ Painful to retrofit later; worth doing now.
   `org_unit_roles`.
 - **TODO.md** gains Feature P (org structure tree) at L+ effort.
 
+### 7.10 Domain-scoped grants — the second authorisation axis (2026-07-22)
+
+#### 7.10.1 The gap the shipped model cannot express
+
+The shipped §7.3 model answers one question: *where in the tree are you, and
+how high?* Access = role level (`admin`/`head`/`viewer`) × subtree
+containment. That is exactly right for the **line-management** hierarchy —
+институт director → their кафедры → kafedra head → their teachers — and the
+leadership dashboard already consumes it that way.
+
+It cannot express **functional (staff) authority**, and three real cases at
+the pilot institution already collide with that limit:
+
+- **УМЦ head** — sits as a small `admin_office` leaf, but their remit
+  (РПД/curriculum) spans the whole institution. Subtree containment grants
+  them nothing; admin-on-root grants them everything (LTI, LLM model,
+  structure, invites). Today they are over-privileged root admins out of
+  necessity.
+- **ПР УР** (проректор по учебной работе) — needs *wide read-only* reach,
+  but only over учебная-работа surfaces. When other proректоры onboard
+  (наука, воспитательная работа…), each needs the same width over a
+  *different* slice. `viewer` on root cannot distinguish slices.
+- **IT department** — the only actor whose remit genuinely is "everything":
+  platform settings, integrations, tree, role grants. This is the *real*
+  org-admin of §7.4, and should eventually be the only holder of it.
+
+The code already contains the tell: `services/programAccess.ts` hardcodes
+"any head/admin on a `governance`/`admin_office` unit → all programmes rw".
+That is the functional axis, implemented implicitly for one feature. Every
+new feature would need its own hardcoded exception — the anti-pattern this
+section removes.
+
+#### 7.10.2 Model — a grant becomes three-dimensional
+
+> **(teacher)** holds **(level: `admin` | `edit` | `view`)** over
+> **(domain)** within **(the subtree of a unit)**.
+
+The two org patterns compose through the same mechanism:
+
+- *Functional staff* → domain-narrow grants **anchored at the root**
+  (УМЦ: `edit × curriculum × root`).
+- *Line managers* → domain-wide grants **anchored at their unit**
+  (institute director: `edit × teaching × their division`).
+
+**Domain taxonomy** — small, closed, extended as data when new admin
+departments onboard (not per-university free text; cross-institution
+comparability mirrors the §7.1 `type_code` argument):
+
+| Domain | Surfaces (current route inventory) |
+|---|---|
+| `platform` | Org tree CRUD, role grants, invites, roster edit, LLM model, shared-RAG, LTI, document domains, audit log |
+| `curriculum` | Programmes (`/api/programs`), РПД monitor, syllabus/curriculum tools, institution rubric/criteria presets |
+| `teaching` | Usage analytics, grading activity, leadership dashboards, roster read |
+| *(future)* `research`, `finance`, … | added when a real department needs them |
+
+**Canonical cast** (КНИТУ mapping):
+
+| Person | Grants |
+|---|---|
+| IT department | `admin × * × root` — the real org-admin |
+| УМЦ head | `edit × curriculum × root` |
+| ПР УР | `view × {teaching, curriculum} × root` |
+| Institute director | `edit × teaching × their division` (+ `curriculum` if desired) |
+| Kafedra head | same shape, their department |
+| Teacher | no grants |
+
+#### 7.10.3 Schema and resolution
+
+`org_unit_roles` gains a `domain TEXT NOT NULL DEFAULT 'all'` column and the
+uniqueness key becomes `(teacher_id, org_unit_id, role, domain)`. Existing
+rows keep `'all'` — today's root admins are untouched, and the migration is
+pure widening.
+
+**Rename (decided 2026-07-22): `head` → `edit`, `viewer` → `view`; `admin`
+unchanged.** "Head" is a job title, not a permission level — it made sense
+when the grant *was* the job, but in the two-axis model the УМЦ head, a РОП,
+and an institute director all hold the same level over different
+domains/subtrees, and `edit × curriculum × root` describes no unit anyone
+"heads". Levels become capabilities (admin/edit/view — the Drive/GitHub
+convention); titles live in the «должности» profiles where they belong.
+`viewer` → `view` is cosmetic parallelism. Ship the value rewrite **inside
+the Phase 1 migration** — the same migration already touches the table for
+`domain`, and the codebase never holds the new semantics under the old name.
+Touches: the data rewrite (`UPDATE … SET role='edit' WHERE role='head'`),
+every `allowedRoles` array (`canActOnUnit(…, ['head','admin'])`,
+`programAccess.ts`, leadership routes), and the 1b role-assignment UI labels
+— one commit, mechanical grep.
+
+Resolution generalises `getProgramAccessScope` into one per-request
+resolver:
+
+```
+getAccessScope(teacher) → { [domain]: { level, pathPrefixes[] } }
+```
+
+- Resolved once in middleware, attached to `req` (same pattern as
+  `req.programAccessScope`).
+- Routers declare their surface once: `requireDomain('curriculum', 'view')`.
+- List queries take the resolved `pathPrefixes` filter (materialised-path
+  `LIKE` — the §7.3 walk, reused).
+- `programAccess.ts`'s hardcoded unit-type rules become **default seed
+  grants** written at tree-build time for those `type_code`s, not logic:
+  creating an `admin_office` unit offers "grant `edit × curriculum` at root
+  to its head". Data, not code.
+- Fail-closed: unknown domain → no access; settings surfaces additionally
+  require `admin × platform` anchored at root, so a subtree `platform`
+  grant can never reach institution-wide settings.
+
+UX layer: named **role profiles** («должности» — "ПР УР", "Начальник УМЦ",
+"Директор института") that expand to grant bundles, so whoever assigns
+roles picks a position, not a matrix cell. Profiles are presentation only;
+the grant rows remain the authority.
+
+#### 7.10.4 Rollout phases
+
+1. **Phase 1 — `curriculum` domain.** Fixes the live УМЦ over-privilege:
+   migration, resolver, `requireDomain` on programs + РПД monitor +
+   institution rubric presets, sidebar shows only granted sections.
+   Existing programAccess unit-type rules become seeds.
+2. **Phase 2 — `teaching` + `view` level.** ПР УР read-only width; unlocks
+   the deferred viewer dashboards and §2.x analytics consumers.
+3. **Phase 3 — `platform` narrowing.** IT becomes the sole root admin;
+   subtree `admin` grants (recorded-but-inert since increment 1b) start
+   being consumed with per-subtree query scoping (TODO P(c)).
+4. **Defer:** custom domains per institution, AD-synced profile mapping.
+
+#### 7.10.5 Documentation impact
+
+- TODO.md Feature P (c) is re-scoped from "per-subtree admin scoping" to
+  this two-axis model — subtree scoping is Phase 3 of it, not the whole.
+- CLAUDE.md org-tree invariant gains the domain axis once Phase 1 ships.
+
 ---
 
 ## 8. Profession-Anchored Material Generation

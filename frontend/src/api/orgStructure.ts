@@ -88,14 +88,27 @@ export async function moveOrgUnit(unitId: string, newParentId: string): Promise<
 
 // ─── Members & roles (slice 1b) ───────────────────────────────────────────────
 
-export type UnitRole = 'admin' | 'head' | 'viewer'
+export type UnitRole = 'admin' | 'edit' | 'view'
+
+// Research.md §7.10 Phase 1 — the functional-authority axis. 'all' is a
+// grant-time wildcard ("full access", today's institution-root admins); the
+// concrete domains are the surfaces a grant can be narrowed to. 'admin' role
+// is always paired with domain 'all' (enforced server-side).
+export type GrantDomain = 'all' | 'platform' | 'curriculum' | 'teaching'
+
+export const DOMAIN_LABEL: Record<GrantDomain, string> = {
+  all:        'Все области',
+  platform:   'Платформа (устройство организации)',
+  curriculum: 'Учебно-методическая работа',
+  teaching:   'Учебный процесс',
+}
 
 export interface InstitutionMember {
   id:                  string
   email:               string
   name:                string | null
   primary_org_unit_id: string | null
-  roles:               { org_unit_id: string; role: UnitRole }[]
+  roles:               { org_unit_id: string; role: UnitRole; domain: GrantDomain }[]
 }
 
 export async function getMembers(): Promise<InstitutionMember[]> {
@@ -106,10 +119,14 @@ export async function setPrimaryUnit(teacherId: string, unitId: string): Promise
   await client.put(`/api/institution/structure/members/${teacherId}/primary`, { unitId }, { skipErrorToast: true })
 }
 
-export async function grantRole(teacherId: string, unitId: string, role: UnitRole): Promise<void> {
-  await client.post('/api/institution/structure/roles', { teacherId, unitId, role }, { skipErrorToast: true })
+export async function grantRole(
+  teacherId: string, unitId: string, role: UnitRole, domain: GrantDomain = 'all'
+): Promise<void> {
+  await client.post('/api/institution/structure/roles', { teacherId, unitId, role, domain }, { skipErrorToast: true })
 }
 
-export async function revokeRole(teacherId: string, unitId: string, role: UnitRole): Promise<void> {
-  await client.delete('/api/institution/structure/roles', { data: { teacherId, unitId, role }, skipErrorToast: true })
+export async function revokeRole(
+  teacherId: string, unitId: string, role: UnitRole, domain: GrantDomain = 'all'
+): Promise<void> {
+  await client.delete('/api/institution/structure/roles', { data: { teacherId, unitId, role, domain }, skipErrorToast: true })
 }

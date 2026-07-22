@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import multer from 'multer'
 import { authenticate } from '../middleware/authenticate'
-import { requireInstitutionAdmin } from '../middleware/requireRole'
+import { requireDomain } from '../middleware/requireDomain'
 import { checkFeatureAccess } from '../middleware/checkPlan'
 import { asyncHandler } from '../lib/asyncHandler'
 import { ValidationError, NotFoundError, DocumentProcessingError } from '../errors/AppError'
@@ -20,7 +20,9 @@ import {
 
 const router = Router()
 router.use(authenticate)
-router.use(requireInstitutionAdmin)
+// Research.md §7.10 Phase 1 — 'curriculum' domain, not institution-root admin.
+// An institution admin's domain='all' grant still satisfies this.
+router.use(requireDomain('curriculum', 'edit'))
 router.use(checkFeatureAccess('rpdMonitor'))
 
 const upload = multer({

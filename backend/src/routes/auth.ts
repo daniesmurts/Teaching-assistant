@@ -41,6 +41,7 @@ import { verifyMarketingUnsubToken } from '../services/marketingEmails'
 import { setMarketingEmailsEnabled } from '../db/queries/teachers'
 import { hasLeadershipRole } from '../db/queries/leadership'
 import { getProgramAccessScope } from '../services/programAccess'
+import { getAccessScope } from '../services/accessScope'
 import { recordAudit } from '../db/queries/audit'
 
 // Client metadata for auth audit rows. Auth routes are unauthenticated, so the
@@ -60,18 +61,23 @@ function reqMeta(req: Request): { ipAddress: string | null; userAgent: string | 
 // sidebar visibility without an extra round trip on every page load.
 // program_access = scope class for «Образовательные программы» (Feature P
 // role-driven feature access).
+// curriculum_access = Research.md §7.10 Phase 1 — the 'curriculum' domain
+// level ('admin'/'edit'/'view'/'none'), independent of is_institution_admin:
+// a УМЦ head can hold curriculum access without being a root admin.
 async function adminFlags(row: { id: string; institution_id: string | null; is_platform_admin: boolean }) {
   const is_platform_admin = row.is_platform_admin ?? false
-  const [is_institution_admin, has_role, program_scope] = await Promise.all([
+  const [is_institution_admin, has_role, program_scope, access_scope] = await Promise.all([
     row.institution_id ? isInstitutionAdmin(row.id, row.institution_id) : Promise.resolve(false),
     hasLeadershipRole(row.id, row.institution_id),
     getProgramAccessScope({ id: row.id, is_platform_admin, institution_id: row.institution_id }),
+    getAccessScope({ id: row.id, is_platform_admin, institution_id: row.institution_id }),
   ])
   return {
     is_platform_admin,
     is_institution_admin,
-    is_leader:      is_platform_admin || has_role,
-    program_access: program_scope.kind,
+    is_leader:         is_platform_admin || has_role,
+    program_access:    program_scope.kind,
+    curriculum_access: access_scope.curriculum?.level ?? 'none',
   }
 }
 

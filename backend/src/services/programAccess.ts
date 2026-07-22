@@ -55,7 +55,7 @@ export async function getProgramAccessScope(teacher: TeacherIdentity): Promise<P
        JOIN org_units u ON u.id = our.org_unit_id
       WHERE our.teacher_id    = $1
         AND u.institution_id  = $2
-        AND our.role IN ('admin', 'head')`,
+        AND our.role IN ('admin', 'edit')`,
     [teacher.id, teacher.institution_id]
   )
 

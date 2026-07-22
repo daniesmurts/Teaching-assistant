@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { requireInstitutionAdmin } from '../middleware/requireRole'
+import { requireDomain } from '../middleware/requireDomain'
 import { validate } from '../middleware/validate'
 import { asyncHandler } from '../lib/asyncHandler'
 import { ValidationError, NotFoundError } from '../errors/AppError'
@@ -37,11 +38,6 @@ import type { CriterionSubject, RubricItem } from '../../../shared/types'
 
 const router = Router()
 router.use(authenticate)
-router.use(requireInstitutionAdmin)
-// This router records its own rich audit rows (recordAudit calls below) — opt
-// out of the catch-all auditLog middleware. Any new mutation here MUST call
-// recordAudit or it will go unlogged.
-router.use((_req, res, next) => { res.locals.selfAudited = true; next() })
 
 // Every handler is scoped to the admin's own institution — never trust a body value.
 function institutionId(req: { teacher: { institution_id: string | null } }): string {
@@ -49,6 +45,73 @@ function institutionId(req: { teacher: { institution_id: string | null } }): str
   if (!id) throw new ValidationError('Ваш аккаунт не привязан к организации')
   return id
 }
+
+// ─── Shared criteria / rubrics (Research.md §7.10 Phase 1 — 'curriculum' ──────
+// domain, NOT institution-root admin). Declared before the router-wide
+// requireInstitutionAdmin gate below so a curriculum-domain-only grant (e.g.
+// УМЦ head) can reach these without also reaching teacher invites, LTI/SSO,
+// LLM model choice, or the audit log. Each route sets its own selfAudited —
+// it no longer inherits the router-level assignment below.
+
+router.get('/criteria', requireDomain('curriculum', 'view'), asyncHandler(async (req, res) => {
+  res.json(await findCriteriaByInstitution(institutionId(req)))
+}))
+
+router.post('/criteria', requireDomain('curriculum', 'edit'), validate(createCriterionRules), asyncHandler(async (req, res) => {
+  res.locals.selfAudited = true
+  institutionId(req) // ensure scoped
+  const { name, description, course_id, subject } = req.body as {
+    name: string; description?: string; course_id?: string; subject?: CriterionSubject
+  }
+  // Shared across the institution → visible in every member's grading picker.
+  const criterion = await createCriterion(req.teacher.id, { name, description, course_id, subject })
+  const root = await getRootUnitForInstitution(institutionId(req))
+  const shared = root ? await shareCriterion(criterion.id, req.teacher.id, root.id) : criterion
+  recordAudit({ institutionId: req.teacher.institution_id, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
+    action: 'criterion.shared_created', target: name })
+  res.status(201).json(shared)
+}))
+
+router.get('/rubrics', requireDomain('curriculum', 'view'), asyncHandler(async (req, res) => {
+  res.json(await findRubricsByInstitution(institutionId(req)))
+}))
+
+router.post('/rubrics', requireDomain('curriculum', 'edit'), validate(createRubricRules), asyncHandler(async (req, res) => {
+  res.locals.selfAudited = true
+  institutionId(req) // ensure scoped
+  const { name, description, subject, items } = req.body as {
+    name: string; description?: string; subject?: CriterionSubject; items: RubricItem[]
+  }
+  // Weights must sum to 100 and every criterion must be one the admin can use
+  // (own + their institution's shared + global). The author becomes the row's
+  // teacher_id; is_institution_shared = TRUE so all members see it.
+  const total = items.reduce((s, it) => s + it.weight, 0)
+  if (total !== 100) {
+    throw new ValidationError(`Сумма весов критериев должна быть 100% (сейчас ${total}%)`)
+  }
+  const ids = items.map((it) => it.criterion_id)
+  if (new Set(ids).size !== ids.length) {
+    throw new ValidationError('Критерии в рубрике не должны повторяться')
+  }
+  const resolved = await findCriteriaByIds(ids, req.teacher.id, req.teacher.institution_id ?? null)
+  if (resolved.length !== new Set(ids).size) {
+    throw new ValidationError('Один или несколько критериев недоступны')
+  }
+  const rubric = await createInstitutionRubric(req.teacher.id, { name, description, subject, items })
+  const root = await getRootUnitForInstitution(institutionId(req))
+  const shared = root ? await shareRubric(rubric.id, req.teacher.id, root.id) : rubric
+  recordAudit({ institutionId: req.teacher.institution_id, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
+    action: 'rubric.shared_created', target: name })
+  res.status(201).json(shared)
+}))
+
+// ─── Everything below stays institution-root-admin-only ───────────────────────
+
+router.use(requireInstitutionAdmin)
+// This router records its own rich audit rows (recordAudit calls below) — opt
+// out of the catch-all auditLog middleware. Any new mutation here MUST call
+// recordAudit or it will go unlogged.
+router.use((_req, res, next) => { res.locals.selfAudited = true; next() })
 
 // ─── Overview ──────────────────────────────────────────────────────────────────
 
@@ -222,60 +285,6 @@ router.get('/usage/export', asyncHandler(async (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8')
   res.setHeader('Content-Disposition', `attachment; filename="${csvFilename('ispum_usage')}"`)
   res.send(csv)
-}))
-
-// ─── Shared criteria ───────────────────────────────────────────────────────────
-
-router.get('/criteria', asyncHandler(async (req, res) => {
-  res.json(await findCriteriaByInstitution(institutionId(req)))
-}))
-
-router.post('/criteria', validate(createCriterionRules), asyncHandler(async (req, res) => {
-  institutionId(req) // ensure scoped
-  const { name, description, course_id, subject } = req.body as {
-    name: string; description?: string; course_id?: string; subject?: CriterionSubject
-  }
-  // Shared across the institution → visible in every member's grading picker.
-  const criterion = await createCriterion(req.teacher.id, { name, description, course_id, subject })
-  const root = await getRootUnitForInstitution(institutionId(req))
-  const shared = root ? await shareCriterion(criterion.id, req.teacher.id, root.id) : criterion
-  recordAudit({ institutionId: req.teacher.institution_id, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
-    action: 'criterion.shared_created', target: name })
-  res.status(201).json(shared)
-}))
-
-// ─── Shared rubrics ────────────────────────────────────────────────────────────
-
-router.get('/rubrics', asyncHandler(async (req, res) => {
-  res.json(await findRubricsByInstitution(institutionId(req)))
-}))
-
-router.post('/rubrics', validate(createRubricRules), asyncHandler(async (req, res) => {
-  institutionId(req) // ensure scoped
-  const { name, description, subject, items } = req.body as {
-    name: string; description?: string; subject?: CriterionSubject; items: RubricItem[]
-  }
-  // Weights must sum to 100 and every criterion must be one the admin can use
-  // (own + their institution's shared + global). The author becomes the row's
-  // teacher_id; is_institution_shared = TRUE so all members see it.
-  const total = items.reduce((s, it) => s + it.weight, 0)
-  if (total !== 100) {
-    throw new ValidationError(`Сумма весов критериев должна быть 100% (сейчас ${total}%)`)
-  }
-  const ids = items.map((it) => it.criterion_id)
-  if (new Set(ids).size !== ids.length) {
-    throw new ValidationError('Критерии в рубрике не должны повторяться')
-  }
-  const resolved = await findCriteriaByIds(ids, req.teacher.id, req.teacher.institution_id ?? null)
-  if (resolved.length !== new Set(ids).size) {
-    throw new ValidationError('Один или несколько критериев недоступны')
-  }
-  const rubric = await createInstitutionRubric(req.teacher.id, { name, description, subject, items })
-  const root = await getRootUnitForInstitution(institutionId(req))
-  const shared = root ? await shareRubric(rubric.id, req.teacher.id, root.id) : rubric
-  recordAudit({ institutionId: req.teacher.institution_id, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
-    action: 'rubric.shared_created', target: name })
-  res.status(201).json(shared)
 }))
 
 // ─── Shared RAG flywheel (kafedra-wide loop) ──────────────────────────────────

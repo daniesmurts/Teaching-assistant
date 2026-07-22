@@ -21,8 +21,16 @@ export const ORG_UNIT_TYPES = [
 ] as const
 export type OrgUnitType = (typeof ORG_UNIT_TYPES)[number]
 
-export const UNIT_ROLES = ['admin', 'head', 'viewer'] as const
+export const UNIT_ROLES = ['admin', 'edit', 'view'] as const
 export type UnitRole = (typeof UNIT_ROLES)[number]
+
+// Research.md §7.10 — the functional-authority axis. 'all' is a grant-time
+// wildcard (today's institution-root admins) that the resolver
+// (services/accessScope.ts) expands across every concrete domain below.
+export const DOMAINS = ['platform', 'curriculum', 'teaching'] as const
+export type Domain = (typeof DOMAINS)[number]
+export const GRANT_DOMAINS = ['all', ...DOMAINS] as const
+export type GrantDomain = (typeof GRANT_DOMAINS)[number]
 
 // ─── Row shapes ───────────────────────────────────────────────────────────────
 
@@ -58,6 +66,7 @@ export interface UnitRoleRow {
   teacher_id:  string
   org_unit_id: string
   role:        string
+  domain:      string
   created_at:  Date
 }
 
@@ -66,6 +75,7 @@ export interface UnitRoleRow {
 export interface TeacherRoleScope {
   org_unit_id: string
   role:        string
+  domain:      string
   path:        string
 }
 
@@ -171,7 +181,7 @@ export async function getRootUnitForInstitution(institutionId: string): Promise<
  *  caller can answer many access questions from this single fetch. */
 export async function listRoleScopesForTeacher(teacherId: string): Promise<TeacherRoleScope[]> {
   const { rows } = await pool.query<TeacherRoleScope>(
-    `SELECT our.org_unit_id, our.role, u.path
+    `SELECT our.org_unit_id, our.role, our.domain, u.path
        FROM org_unit_roles our
        JOIN org_units u ON u.id = our.org_unit_id
       WHERE our.teacher_id = $1`,
@@ -257,7 +267,7 @@ export async function canTeacherShareToUnit(
            JOIN org_units holder ON holder.id = our.org_unit_id
            JOIN org_units target ON target.id = $2
           WHERE our.teacher_id = $1
-            AND our.role = ANY(ARRAY['head', 'admin'])
+            AND our.role = ANY(ARRAY['edit', 'admin'])
             AND target.path LIKE holder.path || '%'
        )
      ) AS ok`,
@@ -504,14 +514,15 @@ export async function deleteOrgUnit(id: string): Promise<boolean> {
 export async function addUnitRole(
   teacherId: string,
   orgUnitId: string,
-  role: UnitRole
+  role: UnitRole,
+  domain: GrantDomain = 'all'
 ): Promise<UnitRoleRow> {
   const { rows } = await pool.query<UnitRoleRow>(
-    `INSERT INTO org_unit_roles (teacher_id, org_unit_id, role)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (teacher_id, org_unit_id, role) DO UPDATE SET role = EXCLUDED.role
+    `INSERT INTO org_unit_roles (teacher_id, org_unit_id, role, domain)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (teacher_id, org_unit_id, role, domain) DO UPDATE SET role = EXCLUDED.role
      RETURNING *`,
-    [teacherId, orgUnitId, role]
+    [teacherId, orgUnitId, role, domain]
   )
   return rows[0]
 }
@@ -519,11 +530,12 @@ export async function addUnitRole(
 export async function removeUnitRole(
   teacherId: string,
   orgUnitId: string,
-  role: UnitRole
+  role: UnitRole,
+  domain: GrantDomain = 'all'
 ): Promise<boolean> {
   const { rowCount } = await pool.query(
-    'DELETE FROM org_unit_roles WHERE teacher_id = $1 AND org_unit_id = $2 AND role = $3',
-    [teacherId, orgUnitId, role]
+    'DELETE FROM org_unit_roles WHERE teacher_id = $1 AND org_unit_id = $2 AND role = $3 AND domain = $4',
+    [teacherId, orgUnitId, role, domain]
   )
   return (rowCount ?? 0) > 0
 }
@@ -617,16 +629,19 @@ export interface InstitutionMember {
   email:               string
   name:                string | null
   primary_org_unit_id: string | null
-  roles:               { org_unit_id: string; role: string }[]
+  roles:               { org_unit_id: string; role: string; domain: string }[]
 }
 
 /** All teachers in an institution with their primary unit and unit-role rows —
- *  the data the assignment UI needs in one fetch. */
+ *  the data the assignment UI needs in one fetch. `domain` is included so the
+ *  UI can target the exact row for revoke (uniqueness is now
+ *  (teacher_id, org_unit_id, role, domain), not (teacher_id, org_unit_id, role) —
+ *  Research.md §7.10). */
 export async function listInstitutionMembersWithRoles(institutionId: string): Promise<InstitutionMember[]> {
   const { rows } = await pool.query<InstitutionMember>(
     `SELECT t.id, t.email, t.name, t.primary_org_unit_id,
             COALESCE(
-              json_agg(json_build_object('org_unit_id', our.org_unit_id, 'role', our.role))
+              json_agg(json_build_object('org_unit_id', our.org_unit_id, 'role', our.role, 'domain', our.domain))
                 FILTER (WHERE our.id IS NOT NULL),
               '[]'
             ) AS roles
@@ -654,13 +669,16 @@ export async function isTeacherInInstitution(teacherId: string, institutionId: s
  *  removing the last admin on the institution root (lockout guard). Joins
  *  teachers.is_active: a deactivated admin can't log in, so counting them
  *  would let the guard wave through a revocation that locks the org out. */
-export async function countRoleOnUnit(unitId: string, role: UnitRole): Promise<number> {
+/** domain defaults to 'all' — the lockout guard cares about true (full-scope)
+ *  admins; a domain='curriculum' admin grant must never count toward it (see
+ *  isInstitutionAdmin below for the same reasoning). */
+export async function countRoleOnUnit(unitId: string, role: UnitRole, domain: GrantDomain = 'all'): Promise<number> {
   const { rows } = await pool.query<{ count: string }>(
     `SELECT COUNT(*) AS count
        FROM org_unit_roles our
        JOIN teachers t ON t.id = our.teacher_id
-      WHERE our.org_unit_id = $1 AND our.role = $2 AND t.is_active`,
-    [unitId, role]
+      WHERE our.org_unit_id = $1 AND our.role = $2 AND our.domain = $3 AND t.is_active`,
+    [unitId, role, domain]
   )
   return parseInt(rows[0].count, 10)
 }
@@ -670,7 +688,12 @@ export async function countRoleOnUnit(unitId: string, role: UnitRole): Promise<n
 /** Does this teacher hold `admin` on the root unit of this institution? This is
  *  the authoritative "institution admin" check — single indexed query, used by
  *  the requireInstitutionAdmin guard. (Admin on a sub-unit is NOT institution
- *  admin; institution-wide routes require admin on the root.) */
+ *  admin; institution-wide routes require admin on the root.)
+ *
+ *  `domain = 'all'` is required, not just role='admin' — Research.md §7.10
+ *  introduces domain-scoped admin grants (e.g. a future domain='curriculum'
+ *  admin at root); without this filter such a grant would be indistinguishable
+ *  from true institution-root admin here, a privilege-escalation bug. */
 export async function isInstitutionAdmin(teacherId: string, institutionId: string): Promise<boolean> {
   const { rows } = await pool.query<{ ok: boolean }>(
     `SELECT EXISTS (
@@ -679,6 +702,7 @@ export async function isInstitutionAdmin(teacherId: string, institutionId: strin
          JOIN org_units u ON u.id = our.org_unit_id
         WHERE our.teacher_id = $1
           AND our.role = 'admin'
+          AND our.domain = 'all'
           AND u.institution_id = $2
           AND u.type_code = 'institution'
           AND u.parent_id IS NULL

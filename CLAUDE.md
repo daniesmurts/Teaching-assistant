@@ -131,10 +131,21 @@ All AI calls go through `services/llm/registry.ts`:
 
 ### Org Tree Authorisation (§7)
 Resolves through `org_units` + `org_unit_roles`, not `teachers.role`:
-- `org_unit_roles` (admin/head/viewer) cascade down the tree
-- `isInstitutionAdmin()` = admin on root unit
+- `org_unit_roles` (admin/edit/view) cascade down the tree
+- `isInstitutionAdmin()` = admin on root unit **with `domain = 'all'`** — a
+  domain-scoped admin grant (e.g. `domain='curriculum'`) is never institution
+  admin, even though `role = 'admin'` alone would look the same
 - `isPlatformAdmin` = flat flag on teacher
 - Legacy `role` enum is a synced mirror; server-side reads the tree
+- **Domain axis (§7.10):** a grant is (level: admin/edit/view) × (domain:
+  platform/curriculum/teaching/…) × (unit subtree). `domain` defaults to
+  `'all'`, which `services/accessScope.ts` expands across every concrete
+  domain — every institution-root admin from the original backfill is
+  unaffected. `middleware/requireDomain.ts` gates routes on a specific domain
+  (e.g. РПД monitor + institution criteria/rubrics on `curriculum`) instead of
+  full institution-root admin. Phase 1 (`curriculum`) is shipped; `teaching`
+  and per-subtree query scoping for domain grants are deferred — see TODO
+  Feature P(c).
 
 ### RAG Flywheel
 1. Teacher approves grade → async embedding (Yandex, 1536-dim pgvector)

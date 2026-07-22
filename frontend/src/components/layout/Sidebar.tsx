@@ -137,6 +137,12 @@ export default function Sidebar({ onClose }: Props) {
   // программы» entry. Server resolves the actual per-row scope.
   const canSeePrograms =
     (teacher?.program_access && teacher.program_access !== 'none') || isInstitutionAdmin
+  // Research.md §7.10 Phase 1 — a curriculum-domain grant (e.g. УМЦ head)
+  // reaches the «Организация» panel too, scoped to what it covers
+  // (InstitutionLayout filters the NAV), without being an institution admin.
+  const hasCurriculumAccess =
+    !!teacher?.curriculum_access && teacher.curriculum_access !== 'none'
+  const canSeeInstitutionPanel = isInstitutionAdmin || hasCurriculumAccess
 
   function logout() { clearAuth(); navigate('/login') }
 
@@ -206,7 +212,7 @@ export default function Sidebar({ onClose }: Props) {
         </NavLink>
 
         {/* Role-driven entries — leadership dashboard, programs, institution admin */}
-        {(isLeader || canSeePrograms || isInstitutionAdmin) && (
+        {(isLeader || canSeePrograms || canSeeInstitutionPanel) && (
           <div className="mt-3 pt-3 border-t border-white/5 space-y-0.5">
             {isLeader && (
               <NavRow item={{ icon: 'bar-chart', label: 'Сводка', to: '/leadership' }} />
@@ -214,7 +220,7 @@ export default function Sidebar({ onClose }: Props) {
             {canSeePrograms && (
               <NavRow item={{ icon: 'list-checks', label: 'Образовательные программы', to: '/programs' }} />
             )}
-            {isInstitutionAdmin && (
+            {canSeeInstitutionPanel && (
               <NavRow item={{ icon: 'building', label: 'Организация', to: '/institution' }} />
             )}
             {isPlatformAdmin && (

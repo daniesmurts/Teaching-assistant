@@ -5,6 +5,7 @@ import type { TeacherRoleScope } from '../db/queries/orgUnits'
 const scope = (role: string, path: string): TeacherRoleScope => ({
   org_unit_id: path,  // id value is irrelevant to the pure evaluator
   role,
+  domain: 'all',
   path,
 })
 
@@ -48,25 +49,25 @@ describe('evaluateAccess', () => {
     expect(evaluateAccess(scopes, dept, ['admin'])).toBe(true)
   })
 
-  it('grants a head role on the exact unit', () => {
-    const scopes = [scope('head', dept)]
-    expect(evaluateAccess(scopes, dept, ['admin', 'head'])).toBe(true)
+  it('grants an edit role on the exact unit', () => {
+    const scopes = [scope('edit', dept)]
+    expect(evaluateAccess(scopes, dept, ['admin', 'edit'])).toBe(true)
   })
 
   it('denies when the role is not in the allowed set', () => {
-    const scopes = [scope('viewer', root)]
-    expect(evaluateAccess(scopes, dept, ['admin', 'head'])).toBe(false)
+    const scopes = [scope('view', root)]
+    expect(evaluateAccess(scopes, dept, ['admin', 'edit'])).toBe(false)
   })
 
   it('denies when the held unit is not an ancestor of the target', () => {
-    const scopes = [scope('head', other)]
-    expect(evaluateAccess(scopes, dept, ['head'])).toBe(false)
+    const scopes = [scope('edit', other)]
+    expect(evaluateAccess(scopes, dept, ['edit'])).toBe(false)
   })
 
   it('accommodates multiple roles across the tree', () => {
-    const scopes = [scope('head', dept), scope('viewer', root)]
-    expect(evaluateAccess(scopes, other, ['viewer'])).toBe(true)   // viewer at root covers other
-    expect(evaluateAccess(scopes, other, ['head'])).toBe(false)    // head only on dept, not other
+    const scopes = [scope('edit', dept), scope('view', root)]
+    expect(evaluateAccess(scopes, other, ['view'])).toBe(true)   // view at root covers other
+    expect(evaluateAccess(scopes, other, ['edit'])).toBe(false)  // edit only on dept, not other
   })
 
   it('denies with no scopes', () => {

@@ -1,14 +1,20 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 
-const NAV = [
+// Research.md §7.10 Phase 1 — each entry declares which domain-grant reaches
+// it. `undefined` = institution-root admin only (unchanged, Phase 3
+// territory). 'curriculum' entries additionally open for a curriculum-domain
+// grant; `minLevel` matches the backend's requireDomain minimum so a
+// view-only grant doesn't see a tab that would just 403 (RPD monitor and
+// criteria/rubrics writes require 'edit' server-side).
+const NAV: { to: string; label: string; end: boolean; domain?: 'curriculum'; minLevel?: 'view' | 'edit' }[] = [
   { to: '/institution',           label: 'Обзор',         end: true },
   { to: '/institution/structure', label: 'Структура',     end: false },
-  { to: '/institution/rpd',       label: 'Мониторинг РПД', end: false },
+  { to: '/institution/rpd',       label: 'Мониторинг РПД', end: false, domain: 'curriculum', minLevel: 'edit' },
   { to: '/institution/usage',     label: 'Использование', end: false },
   { to: '/institution/teachers', label: 'Преподаватели', end: false },
-  { to: '/institution/rubrics',  label: 'Критерии',      end: false },
-  { to: '/institution/rubric-presets', label: 'Рубрики',  end: false },
+  { to: '/institution/rubrics',  label: 'Критерии',      end: false, domain: 'curriculum', minLevel: 'view' },
+  { to: '/institution/rubric-presets', label: 'Рубрики',  end: false, domain: 'curriculum', minLevel: 'view' },
   { to: '/programs',              label: 'Образовательные программы', end: false },
   { to: '/institution/shared-rag', label: 'Общий цикл',  end: false },
   { to: '/institution/model',      label: 'Модель ИИ',   end: false },
@@ -16,15 +22,41 @@ const NAV = [
   { to: '/institution/audit',    label: 'Журнал действий', end: false },
 ]
 
+const CURRICULUM_LEVEL_RANK: Record<string, number> = { view: 1, edit: 2, admin: 3 }
+
 export default function InstitutionLayout() {
   const teacher   = useAuthStore((s) => s.teacher)
   const clearAuth = useAuthStore((s) => s.clearAuth)
   const navigate  = useNavigate()
+  const location  = useLocation()
 
   // A teacher can only reach this panel via institution_admin/platform_admin.
   // If they aren't attached to an institution (e.g. a platform admin), don't
   // fire the scoped queries — they'd 400. Show a pointer instead.
   const noInstitution = !teacher?.institution_id
+
+  // Research.md §7.10 Phase 1 — an institution/platform admin sees the full
+  // NAV (unchanged); a curriculum-domain-only grant (e.g. УМЦ head) sees only
+  // the entries its level actually reaches, so it never offers a tab that
+  // would just 403.
+  const isInstitutionAdmin =
+    (teacher?.is_platform_admin ?? teacher?.role === 'platform_admin') ||
+    (teacher?.is_institution_admin ?? teacher?.role === 'institution_admin')
+  const curriculumRank = CURRICULUM_LEVEL_RANK[teacher?.curriculum_access ?? ''] ?? 0
+  const visibleNav = isInstitutionAdmin
+    ? NAV
+    : NAV.filter((item) => item.domain === 'curriculum'
+        && curriculumRank >= CURRICULUM_LEVEL_RANK[item.minLevel ?? 'edit'])
+  // Admin-only sub-routes (the index/Обзор page, and any /institution/* path
+  // not in visibleNav — e.g. /institution/teachers, /institution/programs)
+  // call institution-admin-only endpoints. A curriculum-only grant landing on
+  // one directly (typed URL, stale bookmark) would just 403 after rendering
+  // a dead-end form — redirect to the first tab it can actually use instead.
+  // Admins are unaffected: visibleNav === NAV for them, so this never fires.
+  const needsRedirectFromOverview =
+    !isInstitutionAdmin
+    && visibleNav.length > 0
+    && !visibleNav.some((item) => item.to === location.pathname)
 
   return (
     <div className="flex min-h-screen bg-bg">
@@ -39,7 +71,7 @@ export default function InstitutionLayout() {
         </div>
 
         <nav className="flex-1 px-2 py-3 space-y-0.5">
-          {NAV.map((item) => (
+          {visibleNav.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end}>
               {({ isActive }) => (
                 <div className={`px-3 py-2 rounded-md text-sm font-sans transition-colors ${
@@ -87,6 +119,8 @@ export default function InstitutionLayout() {
               )}
             </div>
           </div>
+        ) : needsRedirectFromOverview ? (
+          <Navigate to={visibleNav[0].to} replace />
         ) : (
           <Outlet />
         )}

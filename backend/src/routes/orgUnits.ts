@@ -15,7 +15,7 @@ import {
   retypeOrgUnit, moveOrgUnit, countDirectPrimaryMembers,
   listInstitutionMembersWithRoles, isTeacherInInstitution, countRoleOnUnit,
   addUnitRole, removeUnitRole, setPrimaryOrgUnit, getRootUnitForInstitution,
-  type OrgUnitType, type UnitRole,
+  type OrgUnitType, type UnitRole, type GrantDomain,
 } from '../db/queries/orgUnits'
 import { recordAudit } from '../db/queries/audit'
 import { findTeacherRowById } from '../db/queries/teachers'
@@ -291,13 +291,14 @@ router.put('/members/:teacherId/primary', validate(setPrimaryRules), asyncHandle
 router.post('/roles', validate(grantRoleRules), asyncHandler(async (req, res) => {
   const instId = institutionId(req)
   const { teacherId, unitId, role } = req.body
+  const domain = (req.body.domain as GrantDomain | undefined) ?? 'all'
   if (!(await isTeacherInInstitution(teacherId, instId))) throw new NotFoundError('Преподаватель')
   const unit = await unitInInstitution(unitId, instId)
-  await addUnitRole(teacherId, unitId, role as UnitRole)
+  await addUnitRole(teacherId, unitId, role as UnitRole, domain)
   const member = await findTeacherRowById(teacherId)
   recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
     action: 'org_role.granted', target: member?.email ?? teacherId,
-    metadata: { teacherId, role, unitId, unitName: unit.name, unitType: unit.type_code } })
+    metadata: { teacherId, role, domain, unitId, unitName: unit.name, unitType: unit.type_code } })
   res.status(201).json({ ok: true })
 }))
 
@@ -306,6 +307,7 @@ router.post('/roles', validate(grantRoleRules), asyncHandler(async (req, res) =>
 router.delete('/roles', validate(grantRoleRules), asyncHandler(async (req, res) => {
   const instId = institutionId(req)
   const { teacherId, unitId, role } = req.body
+  const domain = (req.body.domain as GrantDomain | undefined) ?? 'all'
   if (!(await isTeacherInInstitution(teacherId, instId))) throw new NotFoundError('Преподаватель')
   const unit = await unitInInstitution(unitId, instId)
   const member = await findTeacherRowById(teacherId)
@@ -314,17 +316,17 @@ router.delete('/roles', validate(grantRoleRules), asyncHandler(async (req, res) 
   // (countRoleOnUnit counts active holders only — a deactivated admin can't
   // log in and mustn't satisfy the guard). Revoking from an already-
   // deactivated holder can't worsen lockout, so it's always allowed.
-  if (role === 'admin' && member?.is_active) {
+  if (role === 'admin' && domain === 'all' && member?.is_active) {
     const root = await getRootUnitForInstitution(instId)
-    if (root && root.id === unitId && (await countRoleOnUnit(unitId, 'admin')) <= 1) {
+    if (root && root.id === unitId && (await countRoleOnUnit(unitId, 'admin', 'all')) <= 1) {
       throw new ValidationError('Нельзя снять роль у последнего администратора организации')
     }
   }
 
-  await removeUnitRole(teacherId, unitId, role as UnitRole)
+  await removeUnitRole(teacherId, unitId, role as UnitRole, domain)
   recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
     action: 'org_role.revoked', target: member?.email ?? teacherId,
-    metadata: { teacherId, role, unitId, unitName: unit.name, unitType: unit.type_code } })
+    metadata: { teacherId, role, domain, unitId, unitName: unit.name, unitType: unit.type_code } })
   res.json({ ok: true })
 }))
 

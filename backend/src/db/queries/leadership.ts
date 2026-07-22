@@ -7,7 +7,7 @@ export interface LeadershipUnit {
   name:                   string
   short_name:             string | null
   type_code:              string
-  role:                   string         // 'head' | 'admin' (the one the caller holds on THIS unit)
+  role:                   string         // 'edit' | 'admin' (the one the caller holds on THIS unit)
   subtree_teacher_count:  number
 }
 
@@ -59,7 +59,7 @@ export async function listDirectLeadershipUnits(
        JOIN org_units u ON u.id = our.org_unit_id
       WHERE our.teacher_id = $1
         AND u.institution_id = $2
-        AND our.role IN ('head', 'admin')
+        AND our.role IN ('edit', 'admin')
       ORDER BY u.type_code, u.name`,
     [teacherId, institutionId]
   )
@@ -367,7 +367,7 @@ export async function hasLeadershipRole(teacherId: string, institutionId: string
          JOIN org_units u ON u.id = our.org_unit_id
         WHERE our.teacher_id = $1
           AND u.institution_id = $2
-          AND our.role IN ('head', 'admin')
+          AND our.role IN ('edit', 'admin')
      ) AS ok`,
     [teacherId, institutionId]
   )

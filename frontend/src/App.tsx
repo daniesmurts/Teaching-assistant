@@ -195,7 +195,11 @@ function InstitutionRoute({ children }: { children: React.ReactNode }) {
   if (!teacher) return <Navigate to="/login" replace />
   const canAdmin =
     (teacher.is_platform_admin ?? teacher.role === 'platform_admin') ||
-    (teacher.is_institution_admin ?? teacher.role === 'institution_admin')
+    (teacher.is_institution_admin ?? teacher.role === 'institution_admin') ||
+    // Research.md §7.10 Phase 1 — a curriculum-domain grant (e.g. УМЦ head)
+    // reaches this panel too, without being an institution-root admin.
+    // InstitutionLayout filters the NAV to what the grant actually covers.
+    (!!teacher.curriculum_access && teacher.curriculum_access !== 'none')
   if (!canAdmin) return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }

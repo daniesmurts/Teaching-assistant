@@ -6,17 +6,22 @@ import { useUIStore } from '../../store/uiStore'
 import {
   getOrgStructure, createOrgUnit, bulkCreateOrgUnits, updateOrgUnit, deleteOrgUnit,
   retypeOrgUnit, moveOrgUnit,
-  getMembers, setPrimaryUnit, grantRole, revokeRole,
-  type OrgUnit, type OrgUnitType, type OrgUnitMeta, type InstitutionMember, type UnitRole,
+  getMembers, setPrimaryUnit, grantRole, revokeRole, DOMAIN_LABEL,
+  type OrgUnit, type OrgUnitType, type OrgUnitMeta, type InstitutionMember, type UnitRole, type GrantDomain,
 } from '../../api/orgStructure'
 import { EDUCATION_LEVELS, STUDY_FORMS } from '../../types'
 import { buildTree, TYPE_LABEL, type TreeNode } from '../../lib/orgTree'
 
 const ROLE_LABEL: Record<UnitRole, string> = {
-  admin:  'Администратор',
-  head:   'Руководитель',
-  viewer: 'Наблюдатель',
+  admin: 'Администратор',
+  edit:  'Редактор',
+  view:  'Наблюдатель',
 }
+
+// Research.md §7.10 Phase 1 — domains a grant can be scoped to. 'admin' is
+// always full-scope (enforced server-side), so the domain picker only offers
+// a meaningful choice for 'edit'/'view'.
+const GRANT_DOMAIN_OPTIONS: GrantDomain[] = ['all', 'curriculum']
 
 // Level accenting. Two colour families, each reserved for one meaning: amber
 // is the brand/action accent (Button.tsx's `primary` variant, the CTA pulse,
@@ -81,7 +86,7 @@ function grantWarning(unit: OrgUnit | undefined, role: UnitRole): string | null 
   if (role === 'admin' && unit.type_code === 'institution') {
     return 'Даёт полный доступ администратора ко всей организации (равнозначно администратору организации).'
   }
-  if ((role === 'admin' || role === 'head') && INSTITUTION_WIDE_TYPES.has(unit.type_code)) {
+  if ((role === 'admin' || role === 'edit') && INSTITUTION_WIDE_TYPES.has(unit.type_code)) {
     return 'Подразделения этого типа дают доступ ко всем образовательным программам организации, а не только к этому подразделению.'
   }
   return null
@@ -380,11 +385,13 @@ function MembersSection({ units }: { units: OrgUnit[] }) {
     onSuccess: () => { invalidate(); addToast('Кафедра обновлена', 'success') }, onError,
   })
   const grantMut = useMutation({
-    mutationFn: (v: { teacherId: string; unitId: string; role: UnitRole }) => grantRole(v.teacherId, v.unitId, v.role),
+    mutationFn: (v: { teacherId: string; unitId: string; role: UnitRole; domain: GrantDomain }) =>
+      grantRole(v.teacherId, v.unitId, v.role, v.domain),
     onSuccess: () => { invalidate(); addToast('Роль назначена', 'success') }, onError,
   })
   const revokeMut = useMutation({
-    mutationFn: (v: { teacherId: string; unitId: string; role: UnitRole }) => revokeRole(v.teacherId, v.unitId, v.role),
+    mutationFn: (v: { teacherId: string; unitId: string; role: UnitRole; domain: GrantDomain }) =>
+      revokeRole(v.teacherId, v.unitId, v.role, v.domain),
     onSuccess: () => { invalidate(); addToast('Роль снята', 'success') }, onError,
   })
 
@@ -447,8 +454,8 @@ function MembersSection({ units }: { units: OrgUnit[] }) {
                 <MemberRow
                   key={m.id} member={m} departments={departments} units={units} unitsById={unitsById}
                   onSetPrimary={(unitId) => primaryMut.mutate({ teacherId: m.id, unitId })}
-                  onGrant={(unitId, role) => grantMut.mutate({ teacherId: m.id, unitId, role })}
-                  onRevoke={(unitId, role) => revokeMut.mutate({ teacherId: m.id, unitId, role })}
+                  onGrant={(unitId, role, domain) => grantMut.mutate({ teacherId: m.id, unitId, role, domain })}
+                  onRevoke={(unitId, role, domain) => revokeMut.mutate({ teacherId: m.id, unitId, role, domain })}
                 />
               ))}
             </div>
@@ -487,12 +494,13 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
   units: OrgUnit[]
   unitsById: Map<string, OrgUnit>
   onSetPrimary: (unitId: string) => void
-  onGrant: (unitId: string, role: UnitRole) => void
-  onRevoke: (unitId: string, role: UnitRole) => void
+  onGrant: (unitId: string, role: UnitRole, domain: GrantDomain) => void
+  onRevoke: (unitId: string, role: UnitRole, domain: GrantDomain) => void
 }) {
   const [adding, setAdding] = useState(false)
   const [roleUnit, setRoleUnit] = useState(units[0]?.id ?? '')
-  const [role, setRole] = useState<UnitRole>('head')
+  const [role, setRole] = useState<UnitRole>('edit')
+  const [domain, setDomain] = useState<GrantDomain>('all')
 
   const selectCls =
     'text-sm font-sans bg-surface border border-border rounded-md px-2.5 py-1.5 outline-none ' +
@@ -505,6 +513,10 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
   // an over-wide leftover (e.g. a polygroup grant left on when only one
   // programme was intended) is obvious. `redundantUnitIds` marks the covered
   // (descendant) chips; `overlaps` drives the explanatory line.
+  // Domain-aware (§7.10): the ancestor only covers the descendant when their
+  // domains actually overlap — a domain='curriculum' grant is not made
+  // redundant by an unrelated domain='platform' grant on an ancestor, only
+  // by an ancestor grant that is domain='all' or the same domain.
   const { overlaps, redundantUnitIds } = useMemo(() => {
     const seen = new Set<string>()
     const pairs: { broad: OrgUnit; narrow: OrgUnit }[] = []
@@ -512,6 +524,7 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
     for (const a of member.roles) {
       for (const b of member.roles) {
         if (a.org_unit_id === b.org_unit_id) continue
+        if (a.domain !== 'all' && a.domain !== b.domain) continue
         const ua = unitsById.get(a.org_unit_id)
         const ub = unitsById.get(b.org_unit_id)
         if (!ua || !ub) continue
@@ -551,18 +564,19 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
         <div className="flex-1 min-w-[180px] flex flex-wrap items-center gap-1.5 justify-end">
           {member.roles.map((r) => {
             const isRedundant = redundantUnitIds.has(r.org_unit_id)
+            const roleLabel = r.domain === 'all' ? ROLE_LABEL[r.role] : `${ROLE_LABEL[r.role]} (${DOMAIN_LABEL[r.domain]})`
             const full = isRedundant
-              ? `${ROLE_LABEL[r.role]} · ${unitsById.get(r.org_unit_id)?.name ?? ''} — избыточно: более широкая роль уже покрывает это подразделение`
-              : `${ROLE_LABEL[r.role]} · ${unitsById.get(r.org_unit_id)?.name ?? ''}`
+              ? `${roleLabel} · ${unitsById.get(r.org_unit_id)?.name ?? ''} — избыточно: более широкая роль уже покрывает это подразделение`
+              : `${roleLabel} · ${unitsById.get(r.org_unit_id)?.name ?? ''}`
             return (
-              <span key={`${r.org_unit_id}-${r.role}`} title={full}
+              <span key={`${r.org_unit_id}-${r.role}-${r.domain}`} title={full}
                 className={`inline-flex items-center gap-1 max-w-[240px] text-xs font-sans rounded-sm pl-2 pr-1 py-0.5 border ${
                   isRedundant
                     ? 'bg-surface-warm text-ink-tertiary border-border-mid border-dashed'
                     : 'bg-amber-light text-amber border-amber/20'
                 }`}>
-                <span className="truncate">{ROLE_LABEL[r.role]} · {unitLabel(unitsById.get(r.org_unit_id))}</span>
-                <button onClick={() => onRevoke(r.org_unit_id, r.role)} aria-label="Снять роль"
+                <span className="truncate">{roleLabel} · {unitLabel(unitsById.get(r.org_unit_id))}</span>
+                <button onClick={() => onRevoke(r.org_unit_id, r.role, r.domain)} aria-label="Снять роль"
                   className={`transition-colors leading-none flex-shrink-0 ${isRedundant ? 'text-ink-tertiary hover:text-danger' : 'text-amber/60 hover:text-danger'}`}>×</button>
               </span>
             )
@@ -609,12 +623,24 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
             </label>
             <label className="block w-[150px]">
               <span className="text-[11px] font-sans text-ink-secondary block mb-1">Роль</span>
-              <select value={role} onChange={(e) => setRole(e.target.value as UnitRole)}
-                className={`${selectCls} w-full`}>
-                {(['admin', 'head', 'viewer'] as UnitRole[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+              <select value={role} onChange={(e) => {
+                const next = e.target.value as UnitRole
+                setRole(next)
+                if (next === 'admin') setDomain('all') // admin is always full-scope
+              }} className={`${selectCls} w-full`}>
+                {(['admin', 'edit', 'view'] as UnitRole[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
               </select>
             </label>
-            <button onClick={() => { if (roleUnit) { onGrant(roleUnit, role); setAdding(false) } }}
+            {role !== 'admin' && (
+              <label className="block w-[220px]">
+                <span className="text-[11px] font-sans text-ink-secondary block mb-1">Область</span>
+                <select value={domain} onChange={(e) => setDomain(e.target.value as GrantDomain)}
+                  className={`${selectCls} w-full`}>
+                  {GRANT_DOMAIN_OPTIONS.map((d) => <option key={d} value={d}>{DOMAIN_LABEL[d]}</option>)}
+                </select>
+              </label>
+            )}
+            <button onClick={() => { if (roleUnit) { onGrant(roleUnit, role, role === 'admin' ? 'all' : domain); setAdding(false) } }}
               className="px-3 py-1.5 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity">
               Назначить
             </button>
@@ -623,9 +649,9 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
               Отмена
             </button>
           </div>
-          {role === 'viewer' && (
+          {role === 'view' && domain === 'all' && (
             <p className="text-[11px] font-sans text-ink-tertiary">
-              «Наблюдатель» пока не открывает отдельных разделов — роль сохраняется, но доступ не даёт. Используйте «Руководитель» для доступа к дашбордам подразделения.
+              «Наблюдатель» по всем областям пока не открывает дашборды подразделения (только чтение критериев/рубрик, если выбрана область «Учебно-методическая работа»).
             </p>
           )}
           {warning && (

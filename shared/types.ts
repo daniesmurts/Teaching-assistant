@@ -86,6 +86,10 @@ export interface Teacher {
   // extra round trip. Details of *which* programs are visible are resolved
   // by the routes themselves.
   program_access?:       'none' | 'all-rw' | 'all-ro' | 'specific'
+  // Research.md §7.10 Phase 1 — the 'curriculum' functional-authority domain
+  // level, independent of is_institution_admin (e.g. a УМЦ head can hold this
+  // without being a root admin). Computed from getAccessScope.
+  curriculum_access?:    'none' | 'view' | 'edit' | 'admin'
   institution_id?: string | null
   // Mirror of the teacher's institution's shared_rag_enabled flag — surfaced
   // here so the Courses page can decide whether to show / enable the "поделиться
