@@ -598,25 +598,44 @@ org-admin.
   incorrectly unlocked program-editing and rubric-sharing rights it was never
   meant to have. Both now require `domain IN ('all', 'curriculum')`. See
   CHANGELOG.
-- **Phase 3, slice B — deferred (not yet scheduled).** Scoped and explicitly
-  *not* attempted this session — each piece is a separate design problem, not
-  a mechanical extension of slice A:
-  - **RPD monitor (`curriculum`) subtree scoping.** Checked the schema
-    (`migrations/086_rpd_monitor.sql`): `rpd_snapshot_rows` keys departments
-    by a free-text `dept_code` string with **no FK or join path to
-    `org_units` at all** — needs a new `dept_code → org_unit_id` mapping
-    (schema + UI), not a query filter.
-  - **Criteria/rubrics sharing target.** `POST /api/institution/{criteria,rubrics}`
-    always shares to the institution root (hardcoded
-    `getRootUnitForInstitution` in the handler) regardless of the caller's
-    own granted subtree — scoping visibility to a sub-unit editor's subtree
-    means changing the share *target*, a behaviour change needing a product
-    decision.
-  - **True "platform narrowing"** — org tree CRUD, teacher invites, roster
-    `PATCH`, LTI/model/shared-RAG settings — for sub-unit admins. Invites are
-    institution-wide by concept today (no unit attached at all); deciding
-    what a division-level admin should be allowed to do to platform settings
-    is a real product question, not plumbing.
+- **Phase 3, slice B — subtree-scoped org tree CRUD + role grants · 🟢
+  SHIPPED (2026-07-22).** Narrowed after the original "platform narrowing"
+  framing turned out to be the wrong shape: user confirmed real-world
+  practice at KNITU (and likely other universities on the platform) —
+  **teacher invite/deactivation is centrally owned by IT, never delegated
+  per department**. So `POST/DELETE /api/institution/teachers/invite*`,
+  `PATCH /api/institution/teachers/:id`, `PUT /api/institution/structure/members/:teacherId/primary`,
+  and LTI/model/shared-RAG settings stay `platform`-domain, root-admin-only,
+  institution-wide **permanently** — not deferred, decided. What real
+  institute directors actually need is control over their own piece of the
+  org structure: `routes/orgUnits.ts` (`/api/institution/structure/*`) swaps
+  its `requireInstitutionAdmin` gate for `requireDomain('platform', 'admin')`
+  — safe because `role='admin'` is always `domain='all'` (Phase 1 invariant),
+  so this is a pure widening for the coarse gate; a sub-unit `admin × all`
+  grant (already grantable via the existing role UI) now also passes. New
+  `unitInScope` helper (alongside the existing `unitInInstitution`) enforces
+  the real per-target check via `pathIsAncestorOrSelf` — applied to every
+  write endpoint's target unit(s), including **both sides of move** (can't
+  pull a unit in from outside your subtree, can't move one of yours out to
+  somewhere you don't control). `listOrgUnitsWithCounts` and
+  `listInstitutionMembersWithRoles` gained the same optional
+  `unitPathPrefixes` filtering as slice A's queries (no orphan-row subtlety
+  here — every org unit has a real path). No new escalation-guard logic
+  needed for role grants: delegating `admin × all` on a descendant only
+  grants power within that descendant's subtree, by the same containment
+  math `canActOnUnit` already does. Verified live in the browser: a division
+  admin could create/rename/delete kafedry and grant roles within their own
+  institute, and was refused (via the UI's own error handling) touching
+  anything outside it. See CHANGELOG.
+  - **Still explicitly deferred**, unrelated to the narrowing above: **RPD
+    monitor (`curriculum`) subtree scoping** — `rpd_snapshot_rows` keys
+    departments by a free-text `dept_code` string with no FK or join path to
+    `org_units` at all (checked `migrations/086_rpd_monitor.sql`); needs a
+    new `dept_code → org_unit_id` mapping (schema + UI), not a query filter.
+    **Criteria/rubrics sharing target** — `POST /api/institution/{criteria,rubrics}`
+    still always shares to the institution root regardless of the caller's
+    own granted subtree; scoping that means changing the share *target*, a
+    behaviour change needing its own product decision.
 
 **Tail (d) — Leadership dashboard V2 · Effort: S.**
 

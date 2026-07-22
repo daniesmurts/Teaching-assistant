@@ -147,7 +147,12 @@ export default function Sidebar({ onClose }: Props) {
   // InstitutionLayout the same way curriculum access is.
   const hasTeachingAccess =
     !!teacher?.teaching_access && teacher.teaching_access !== 'none'
-  const canSeeInstitutionPanel = isInstitutionAdmin || hasCurriculumAccess || hasTeachingAccess
+  // Research.md §7.10 Phase 3 slice B — a platform-domain grant (e.g. an
+  // institute director scoped to their own subtree) reaches the
+  // «Организация» panel too (Структура), scoped the same way.
+  const hasPlatformAccess =
+    !!teacher?.platform_access && teacher.platform_access !== 'none'
+  const canSeeInstitutionPanel = isInstitutionAdmin || hasCurriculumAccess || hasTeachingAccess || hasPlatformAccess
 
   function logout() { clearAuth(); navigate('/login') }
 

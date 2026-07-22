@@ -107,8 +107,18 @@ export interface OrgUnitWithCount extends OrgUnitRow {
  *  teachers in its subtree (path-prefix match). Ordered by `created_at` so the
  *  frontend tree-builder renders siblings in the order the admin added them —
  *  `path` would sort siblings by their trailing UUID (random), which surfaces
- *  as 6-6 / 6-3 / 6-5 / … in the structure list. */
-export async function listOrgUnitsWithCounts(institutionId: string): Promise<OrgUnitWithCount[]> {
+ *  as 6-6 / 6-3 / 6-5 / … in the structure list.
+ *
+ *  `unitPathPrefixes` — Research.md §7.10 Phase 3 slice B. Omitted →
+ *  unrestricted (platform-admin bypass). Every org unit has a real `path`
+ *  (unlike teachers, which can have a NULL primary unit), so a root-anchored
+ *  `[rootPath]` filter naturally matches every unit in the institution —
+ *  no orphan-row special-casing needed, unlike the teaching-domain queries
+ *  in db/queries/institutions.ts. */
+export async function listOrgUnitsWithCounts(
+  institutionId: string,
+  unitPathPrefixes?: string[]
+): Promise<OrgUnitWithCount[]> {
   const { rows } = await pool.query<OrgUnitWithCount>(
     `SELECT u.*,
             (SELECT COUNT(*)::int
@@ -117,8 +127,11 @@ export async function listOrgUnitsWithCounts(institutionId: string): Promise<Org
               WHERE pu.path LIKE u.path || '%') AS member_count
        FROM org_units u
       WHERE u.institution_id = $1
+        AND ($2::text[] IS NULL OR EXISTS (
+              SELECT 1 FROM unnest($2::text[]) AS prefix WHERE u.path LIKE prefix || '%'
+            ))
       ORDER BY u.created_at`,
-    [institutionId]
+    [institutionId, unitPathPrefixes ?? null]
   )
   return rows
 }
@@ -650,8 +663,18 @@ export interface InstitutionMember {
  *  the data the assignment UI needs in one fetch. `domain` is included so the
  *  UI can target the exact row for revoke (uniqueness is now
  *  (teacher_id, org_unit_id, role, domain), not (teacher_id, org_unit_id, role) —
- *  Research.md §7.10). */
-export async function listInstitutionMembersWithRoles(institutionId: string): Promise<InstitutionMember[]> {
+ *  Research.md §7.10).
+ *
+ *  `unitPathPrefixes` — Phase 3 slice B. Omitted → unrestricted. When
+ *  provided, filters to teachers whose `primary_org_unit_id` falls under one
+ *  of the prefixes (teachers with no primary unit are excluded — same
+ *  reasoning as the teaching-domain roster query in db/queries/institutions.ts)
+ *  — this is what lets a sub-unit admin's role-grant picker show only their
+ *  own people. */
+export async function listInstitutionMembersWithRoles(
+  institutionId: string,
+  unitPathPrefixes?: string[]
+): Promise<InstitutionMember[]> {
   const { rows } = await pool.query<InstitutionMember>(
     `SELECT t.id, t.email, t.name, t.primary_org_unit_id,
             COALESCE(
@@ -661,10 +684,14 @@ export async function listInstitutionMembersWithRoles(institutionId: string): Pr
             ) AS roles
        FROM teachers t
        LEFT JOIN org_unit_roles our ON our.teacher_id = t.id
+       LEFT JOIN org_units pu ON pu.id = t.primary_org_unit_id
       WHERE t.institution_id = $1
+        AND ($2::text[] IS NULL OR EXISTS (
+              SELECT 1 FROM unnest($2::text[]) AS prefix WHERE pu.path LIKE prefix || '%'
+            ))
       GROUP BY t.id
       ORDER BY t.name NULLS LAST, t.email`,
-    [institutionId]
+    [institutionId, unitPathPrefixes ?? null]
   )
   return rows
 }

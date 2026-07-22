@@ -144,14 +144,18 @@ Resolves through `org_units` + `org_unit_roles`, not `teachers.role`:
   unaffected. `middleware/requireDomain.ts` gates routes on a specific domain
   (e.g. РПД monitor + institution criteria/rubrics on `curriculum`; institution
   overview/usage/roster-read on `teaching`) instead of full institution-root
-  admin. Phase 1 (`curriculum`), Phase 2 (`teaching`), and Phase 3 slice A
-  (subtree query scoping for `teaching`) are shipped. `getProgramAccessScope`
+  admin. Phase 1 (`curriculum`), Phase 2 (`teaching`), Phase 3 slice A
+  (subtree query scoping for `teaching`), and Phase 3 slice B (subtree-scoped
+  org tree CRUD + role grants on `platform`) are shipped. `getProgramAccessScope`
   and `canTeacherShareToUnit` also require `domain IN ('all','curriculum')` —
   both predated the domain axis and were fixed alongside Phase 3.
-  RPD-monitor subtree scoping, criteria/rubrics share-target scoping, and
-  `platform`-domain narrowing for sub-unit admins remain deferred — see TODO
-  Feature P(c) for why each is a separate design problem, not a mechanical
-  extension.
+  Invites, teacher activate/deactivate, primary-department reassignment
+  (`PUT .../members/:teacherId/primary`), and LTI/model/shared-RAG settings
+  are **permanently** root-admin-only, not just deferred — teacher
+  provisioning is centrally owned by IT at real institutions (confirmed
+  against KNITU practice), never delegated per subtree. RPD-monitor subtree
+  scoping and criteria/rubrics share-target scoping remain deferred for
+  unrelated reasons — see TODO Feature P(c).
 - **Institution routes that filter by subtree**
   (`routes/institution.ts`'s `resolveTeachingPrefixes`) must treat a
   root-anchored grant as unrestricted, not filter by "root path" — every
@@ -159,6 +163,9 @@ Resolves through `org_units` + `org_unit_roles`, not `teachers.role`:
   teachers with no `primary_org_unit_id` that the unrestricted query has
   always shown. Compare the grant's `pathPrefixes` against the institution's
   actual root path before deciding whether to pass a real filter through.
+  (Org-unit queries don't need this special case — every unit has a real
+  `path`, so a root-anchored filter naturally matches everything; see
+  `routes/orgUnits.ts`'s `unitInScope`.)
 - **`canActOnUnit`/`teacherCanActOnUnit` take a required `domain` param** — no
   "any domain" default. This is load-bearing, not stylistic: before Phase 2,
   the subtree-role check matched on `role` alone and a Phase 1 `curriculum`

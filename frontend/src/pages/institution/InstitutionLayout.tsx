@@ -2,16 +2,18 @@ import { Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-route
 import { useAuthStore } from '../../store/authStore'
 
 // Research.md §7.10 — each entry declares which domain-grant reaches it.
-// `undefined` = institution-root admin only (unchanged, Phase 3 territory).
-// 'curriculum'/'teaching' entries additionally open for that domain's grant;
-// `minLevel` matches the backend's requireDomain minimum so a view-only grant
-// doesn't see a tab that would just 403 (RPD monitor and criteria/rubrics
-// writes require 'edit' server-side; the Phase 2 teaching routes are all
-// read-only, so 'view' is enough for all of them).
-type NavDomain = 'curriculum' | 'teaching'
-const NAV: { to: string; label: string; end: boolean; domain?: NavDomain; minLevel?: 'view' | 'edit' }[] = [
+// `undefined` = institution-root admin only (permanently, for the
+// invite/deactivate/settings surfaces — see Phase 3 slice B's "explicitly
+// excluded" note in TODO.md: centrally-owned provisioning, not delegated).
+// 'curriculum'/'teaching'/'platform' entries additionally open for that
+// domain's grant; `minLevel` matches the backend's requireDomain minimum so
+// a lower-level grant doesn't see a tab that would just 403 (RPD monitor and
+// criteria/rubrics writes require 'edit'; the Phase 2 teaching routes are
+// all read-only so 'view' suffices; org-structure CRUD requires 'admin').
+type NavDomain = 'curriculum' | 'teaching' | 'platform'
+const NAV: { to: string; label: string; end: boolean; domain?: NavDomain; minLevel?: 'view' | 'edit' | 'admin' }[] = [
   { to: '/institution',           label: 'Обзор',         end: true, domain: 'teaching', minLevel: 'view' },
-  { to: '/institution/structure', label: 'Структура',     end: false },
+  { to: '/institution/structure', label: 'Структура',     end: false, domain: 'platform', minLevel: 'admin' },
   { to: '/institution/rpd',       label: 'Мониторинг РПД', end: false, domain: 'curriculum', minLevel: 'edit' },
   { to: '/institution/usage',     label: 'Использование', end: false, domain: 'teaching', minLevel: 'view' },
   { to: '/institution/teachers', label: 'Преподаватели', end: false, domain: 'teaching', minLevel: 'view' },
@@ -28,9 +30,14 @@ const DOMAIN_LEVEL_RANK: Record<string, number> = { view: 1, edit: 2, admin: 3 }
 
 /** The teacher's access level for a NAV item's domain, ranked. 0 = no access
  *  (item.domain undefined items are handled separately — admin-only). */
-function domainRank(teacher: { curriculum_access?: string; teaching_access?: string } | null, domain?: NavDomain): number {
+function domainRank(
+  teacher: { curriculum_access?: string; teaching_access?: string; platform_access?: string } | null,
+  domain?: NavDomain
+): number {
   if (!domain) return 0
-  const value = domain === 'curriculum' ? teacher?.curriculum_access : teacher?.teaching_access
+  const value = domain === 'curriculum' ? teacher?.curriculum_access
+    : domain === 'teaching' ? teacher?.teaching_access
+    : teacher?.platform_access
   return DOMAIN_LEVEL_RANK[value ?? ''] ?? 0
 }
 

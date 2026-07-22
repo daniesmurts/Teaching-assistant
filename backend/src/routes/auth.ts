@@ -67,6 +67,10 @@ function reqMeta(req: Request): { ipAddress: string | null; userAgent: string | 
 // teaching_access = Research.md §7.10 Phase 2 — same shape, 'teaching' domain
 // (usage analytics, grading activity, leadership dashboards, roster read):
 // a ПР УР can hold wide read-only teaching access without being a root admin.
+// platform_access = Research.md §7.10 Phase 3 slice B — same shape, 'platform'
+// domain (org tree CRUD, role grants — NOT invites/deactivation/settings,
+// which stay root-admin-only): an institute director can hold admin access
+// scoped to their own subtree without being a root admin.
 async function adminFlags(row: { id: string; institution_id: string | null; is_platform_admin: boolean }) {
   const is_platform_admin = row.is_platform_admin ?? false
   const [is_institution_admin, has_role, program_scope, access_scope] = await Promise.all([
@@ -82,6 +86,7 @@ async function adminFlags(row: { id: string; institution_id: string | null; is_p
     program_access:    program_scope.kind,
     curriculum_access: access_scope.curriculum?.level ?? 'none',
     teaching_access:   access_scope.teaching?.level ?? 'none',
+    platform_access:   access_scope.platform?.level ?? 'none',
   }
 }
 

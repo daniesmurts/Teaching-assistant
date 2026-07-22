@@ -1,9 +1,11 @@
-import { Router } from 'express'
+import { Router, type Request } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { requireInstitutionAdmin } from '../middleware/requireRole'
+import { requireDomain } from '../middleware/requireDomain'
 import { validate } from '../middleware/validate'
 import { asyncHandler } from '../lib/asyncHandler'
-import { ValidationError, NotFoundError } from '../errors/AppError'
+import { ValidationError, NotFoundError, ForbiddenError } from '../errors/AppError'
+import { pathIsAncestorOrSelf } from '../services/orgScope'
 import {
   createOrgUnitRules, bulkCreateOrgUnitsRules, updateOrgUnitRules,
   retypeOrgUnitRules, moveOrgUnitRules,
@@ -20,15 +22,21 @@ import {
 import { recordAudit } from '../db/queries/audit'
 import { findTeacherRowById } from '../db/queries/teachers'
 
-// Org-structure tree builder — the IT-admin surface (Research.md §7.4).
-// Mounted under /api/institution/structure. Guarded by requireInstitutionAdmin
-// — now tree-backed: admin on the institution root unit (or platform owner).
-// Every operation is additionally scoped to the admin's OWN institution; target
-// unit ownership is re-checked per op (404, never 403, so foreign ids don't leak).
+// Org-structure tree builder — the IT-admin surface (Research.md §7.4), plus
+// (Phase 3 slice B) sub-unit admins scoped to their own subtree. Mounted
+// under /api/institution/structure. Gated by requireDomain('platform','admin')
+// — role='admin' is always domain='all' (Phase 1 invariant), so this passes
+// both true institution-root admins AND sub-unit admin grants; the coarse
+// gate alone does not distinguish them. Real scoping is per-route below via
+// `unitInScope` (write endpoints) and `req.domainScope.pathPrefixes` (list
+// endpoints). `PUT /members/:teacherId/primary` stays root-admin-only
+// explicitly — reassigning which department a teacher belongs to is
+// centrally-owned provisioning, not delegated (confirmed against real
+// practice at KNITU), same as invites/deactivation in routes/institution.ts.
 
 const router = Router()
 router.use(authenticate)
-router.use(requireInstitutionAdmin)
+router.use(requireDomain('platform', 'admin'))
 // This router records its own rich audit rows (recordAudit calls below) — opt
 // out of the catch-all auditLog middleware. Any new mutation here MUST call
 // recordAudit or it will go unlogged.
@@ -45,6 +53,26 @@ function institutionId(req: { teacher: { institution_id: string | null } }): str
 async function unitInInstitution(unitId: string, instId: string) {
   const unit = await getOrgUnitById(unitId)
   if (!unit || unit.institution_id !== instId) throw new NotFoundError('Подразделение')
+  return unit
+}
+
+/**
+ * Load a unit, assert it belongs to the caller's institution (404, as
+ * `unitInInstitution`), and — Phase 3 slice B — assert it falls within the
+ * caller's granted subtree. `req.domainScope` is unset when platform_admin
+ * bypassed `requireDomain` (unrestricted) or, defensively, if somehow absent;
+ * a root admin's own `pathPrefixes` is `[rootPath]`, which is an ancestor of
+ * every unit in the institution, so this is a no-op for every admin that
+ * exists today. 403 (not 404) once out-of-scope — the unit demonstrably
+ * exists in their own institution, they just lack rights to it (same
+ * same-institution/out-of-scope convention as routes/leadership.ts).
+ */
+async function unitInScope(unitId: string, instId: string, req: Request) {
+  const unit = await unitInInstitution(unitId, instId)
+  const prefixes = req.domainScope?.pathPrefixes
+  if (prefixes && !prefixes.some((p) => pathIsAncestorOrSelf(p, unit.path))) {
+    throw new ForbiddenError('Подразделение вне вашей области ответственности')
+  }
   return unit
 }
 
@@ -71,7 +99,7 @@ function extractMeta(body: Record<string, unknown>): {
 // ─── Tree ─────────────────────────────────────────────────────────────────────
 
 router.get('/', asyncHandler(async (req, res) => {
-  res.json({ units: await listOrgUnitsWithCounts(institutionId(req)) })
+  res.json({ units: await listOrgUnitsWithCounts(institutionId(req), req.domainScope?.pathPrefixes) })
 }))
 
 // ─── Create a unit under a parent ─────────────────────────────────────────────
@@ -80,8 +108,8 @@ router.post('/units', validate(createOrgUnitRules), asyncHandler(async (req, res
   const instId = institutionId(req)
   const { parentId, typeCode, name, shortName, externalCode } = req.body
 
-  // Parent must exist and belong to this institution.
-  await unitInInstitution(parentId, instId)
+  // Parent must exist, belong to this institution, and be in the caller's scope.
+  await unitInScope(parentId, instId, req)
 
   const unit = await createOrgUnit({
     institutionId: instId,
@@ -107,7 +135,7 @@ router.post('/units/bulk', validate(bulkCreateOrgUnitsRules), asyncHandler(async
     units: { name: string; shortName?: string | null }[]
   }
 
-  const parent = await unitInInstitution(parentId, instId)
+  const parent = await unitInScope(parentId, instId, req)
 
   // Reject batches that contain duplicate names — clearer error than letting the
   // DB UNIQUE fire mid-transaction on the second row.
@@ -138,7 +166,7 @@ router.post('/units/bulk', validate(bulkCreateOrgUnitsRules), asyncHandler(async
 
 router.patch('/units/:unitId', validate(updateOrgUnitRules), asyncHandler(async (req, res) => {
   const instId = institutionId(req)
-  const existing = await unitInInstitution(req.params.unitId, instId)
+  const existing = await unitInScope(req.params.unitId, instId, req)
 
   const updated = await updateOrgUnit(req.params.unitId, {
     name:         req.body.name?.trim(),
@@ -160,7 +188,7 @@ const PROGRAM_PAIR = new Set(['program', 'program_direction'])
 
 router.post('/units/:unitId/retype', validate(retypeOrgUnitRules), asyncHandler(async (req, res) => {
   const instId = institutionId(req)
-  const unit = await unitInInstitution(req.params.unitId, instId)
+  const unit = await unitInScope(req.params.unitId, instId, req)
   const newType = req.body.typeCode as OrgUnitType
 
   if (!unit.parent_id) throw new ValidationError('Нельзя изменить тип корневого подразделения')
@@ -201,10 +229,13 @@ router.post('/units/:unitId/retype', validate(retypeOrgUnitRules), asyncHandler(
 
 router.post('/units/:unitId/move', validate(moveOrgUnitRules), asyncHandler(async (req, res) => {
   const instId = institutionId(req)
-  const unit = await unitInInstitution(req.params.unitId, instId)
+  const unit = await unitInScope(req.params.unitId, instId, req)
   if (!unit.parent_id) throw new ValidationError('Нельзя переместить корневое подразделение')
 
-  const newParent = await unitInInstitution(req.body.newParentId, instId)
+  // Both sides must be in scope — otherwise a sub-unit admin could pull a
+  // unit in from outside their subtree, or move one of their own out to
+  // somewhere they no longer control.
+  const newParent = await unitInScope(req.body.newParentId, instId, req)
   if (newParent.id === unit.parent_id) { res.json(unit); return }
 
   let moved
@@ -233,7 +264,7 @@ router.post('/units/:unitId/move', validate(moveOrgUnitRules), asyncHandler(asyn
 
 router.delete('/units/:unitId', asyncHandler(async (req, res) => {
   const instId = institutionId(req)
-  const unit = await unitInInstitution(req.params.unitId, instId)
+  const unit = await unitInScope(req.params.unitId, instId, req)
 
   if (!unit.parent_id) {
     throw new ValidationError('Нельзя удалить корневое подразделение организации')
@@ -265,12 +296,16 @@ router.delete('/units/:unitId', asyncHandler(async (req, res) => {
 // ─── Members & roles (slice 1b) ───────────────────────────────────────────────
 
 router.get('/members', asyncHandler(async (req, res) => {
-  res.json({ members: await listInstitutionMembersWithRoles(institutionId(req)) })
+  res.json({ members: await listInstitutionMembersWithRoles(institutionId(req), req.domainScope?.pathPrefixes) })
 }))
 
 // Assign a teacher's primary unit (their kafedra). Must be a department in this
-// institution — teachers belong to a department (§7.1).
-router.put('/members/:teacherId/primary', validate(setPrimaryRules), asyncHandler(async (req, res) => {
+// institution — teachers belong to a department (§7.1). Deliberately stays
+// root-admin-only even though the router's coarse gate now also admits
+// sub-unit admins (Phase 3 slice B): which department a teacher belongs to
+// is centrally-owned provisioning at real institutions (confirmed against
+// KNITU practice), not delegated — same as invites/deactivation.
+router.put('/members/:teacherId/primary', requireInstitutionAdmin, validate(setPrimaryRules), asyncHandler(async (req, res) => {
   const instId = institutionId(req)
   if (!(await isTeacherInInstitution(req.params.teacherId, instId))) {
     throw new NotFoundError('Преподаватель')
@@ -293,7 +328,7 @@ router.post('/roles', validate(grantRoleRules), asyncHandler(async (req, res) =>
   const { teacherId, unitId, role } = req.body
   const domain = (req.body.domain as GrantDomain | undefined) ?? 'all'
   if (!(await isTeacherInInstitution(teacherId, instId))) throw new NotFoundError('Преподаватель')
-  const unit = await unitInInstitution(unitId, instId)
+  const unit = await unitInScope(unitId, instId, req)
   await addUnitRole(teacherId, unitId, role as UnitRole, domain)
   const member = await findTeacherRowById(teacherId)
   recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,
@@ -309,7 +344,7 @@ router.delete('/roles', validate(grantRoleRules), asyncHandler(async (req, res) 
   const { teacherId, unitId, role } = req.body
   const domain = (req.body.domain as GrantDomain | undefined) ?? 'all'
   if (!(await isTeacherInInstitution(teacherId, instId))) throw new NotFoundError('Преподаватель')
-  const unit = await unitInInstitution(unitId, instId)
+  const unit = await unitInScope(unitId, instId, req)
   const member = await findTeacherRowById(teacherId)
 
   // Lockout guard: never revoke the last ACTIVE admin on the institution root

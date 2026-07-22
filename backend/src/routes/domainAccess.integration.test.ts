@@ -237,3 +237,133 @@ describe('subtree query scoping (Research.md §7.10 Phase 3)', () => {
     expect(ids).toContain(orphan.id)
   })
 })
+
+describe('subtree-scoped org tree CRUD + role grants (Research.md §7.10 Phase 3 slice B)', () => {
+  async function setupDivisionAdmin() {
+    const { institution, root } = await setupInstitutionTeacher()
+    const division = await createOrgUnit({
+      institutionId: institution.id, parentId: root.id, typeCode: 'division', name: 'Институт Х',
+    })
+    const outside = await createOrgUnit({
+      institutionId: institution.id, parentId: root.id, typeCode: 'department', name: 'Кафедра снаружи',
+    })
+    const director = await createTestTeacher({ institutionId: institution.id })
+    await pool.query('UPDATE teachers SET plan_tier = $2 WHERE id = $1', [director.id, 'institution'])
+    await addUnitRole(director.id, division.id, 'admin', 'all')
+    const token = signToken({ id: director.id, email: director.email })
+    return { institution, root, division, outside, director, token }
+  }
+
+  it('creates, renames, and deletes a unit WITHIN the granted subtree', async () => {
+    const { division, token } = await setupDivisionAdmin()
+
+    const create = await request(app).post('/api/institution/structure/units').set('Authorization', `Bearer ${token}`)
+      .send({ parentId: division.id, typeCode: 'department', name: 'Кафедра внутри' })
+    expect(create.status).toBe(201)
+    const kafedraId = create.body.id
+
+    const rename = await request(app).patch(`/api/institution/structure/units/${kafedraId}`).set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Кафедра внутри (переим.)' })
+    expect(rename.status).toBe(200)
+
+    const del = await request(app).delete(`/api/institution/structure/units/${kafedraId}`).set('Authorization', `Bearer ${token}`)
+    expect(del.status).toBe(204)
+  })
+
+  it('is REFUSED (403) creating/renaming/deleting a unit OUTSIDE the granted subtree', async () => {
+    const { root, outside, token } = await setupDivisionAdmin()
+
+    const createUnderOutside = await request(app).post('/api/institution/structure/units').set('Authorization', `Bearer ${token}`)
+      .send({ parentId: outside.id, typeCode: 'department', name: 'Не должно создаться' })
+    expect(createUnderOutside.status).toBe(403)
+
+    const renameOutside = await request(app).patch(`/api/institution/structure/units/${outside.id}`).set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Переименовано без прав' })
+    expect(renameOutside.status).toBe(403)
+
+    const deleteRoot = await request(app).delete(`/api/institution/structure/units/${root.id}`).set('Authorization', `Bearer ${token}`)
+    expect(deleteRoot.status).toBe(403)
+  })
+
+  it('refuses moving a unit OUT of scope, and refuses pulling one IN from outside scope', async () => {
+    const { division, outside, token } = await setupDivisionAdmin()
+
+    const create = await request(app).post('/api/institution/structure/units').set('Authorization', `Bearer ${token}`)
+      .send({ parentId: division.id, typeCode: 'department', name: 'Кафедра внутри' })
+    const kafedraId = create.body.id
+
+    // Move the in-scope kafedra to the out-of-scope department — refused
+    // (new parent is out of scope).
+    const moveOut = await request(app).post(`/api/institution/structure/units/${kafedraId}/move`).set('Authorization', `Bearer ${token}`)
+      .send({ newParentId: outside.id })
+    expect(moveOut.status).toBe(403)
+
+    // Move the out-of-scope department into the division — refused (the
+    // unit being moved is out of scope).
+    const moveIn = await request(app).post(`/api/institution/structure/units/${outside.id}/move`).set('Authorization', `Bearer ${token}`)
+      .send({ newParentId: division.id })
+    expect(moveIn.status).toBe(403)
+  })
+
+  it('grants and revokes a role WITHIN the subtree; refused OUTSIDE it', async () => {
+    const { institution, division, outside, token } = await setupDivisionAdmin()
+    const teacher = await createTestTeacher({ institutionId: institution.id })
+
+    const grant = await request(app).post('/api/institution/structure/roles').set('Authorization', `Bearer ${token}`)
+      .send({ teacherId: teacher.id, unitId: division.id, role: 'edit', domain: 'curriculum' })
+    expect(grant.status).toBe(201)
+
+    const revoke = await request(app).delete('/api/institution/structure/roles').set('Authorization', `Bearer ${token}`)
+      .send({ teacherId: teacher.id, unitId: division.id, role: 'edit', domain: 'curriculum' })
+    expect(revoke.status).toBe(200)
+
+    const grantOutside = await request(app).post('/api/institution/structure/roles').set('Authorization', `Bearer ${token}`)
+      .send({ teacherId: teacher.id, unitId: outside.id, role: 'edit', domain: 'curriculum' })
+    expect(grantOutside.status).toBe(403)
+  })
+
+  it('GET / and GET /members return only the granted subtree', async () => {
+    const { institution, division, outside, token } = await setupDivisionAdmin()
+    const insideTeacher  = await createTestTeacher({ institutionId: institution.id })
+    const outsideTeacher = await createTestTeacher({ institutionId: institution.id })
+    await setPrimaryOrgUnit(insideTeacher.id, division.id)
+    await setPrimaryOrgUnit(outsideTeacher.id, outside.id)
+
+    const tree = await request(app).get('/api/institution/structure').set('Authorization', `Bearer ${token}`)
+    expect(tree.status).toBe(200)
+    const unitIds = tree.body.units.map((u: { id: string }) => u.id)
+    expect(unitIds).toContain(division.id)
+    expect(unitIds).not.toContain(outside.id)
+
+    const members = await request(app).get('/api/institution/structure/members').set('Authorization', `Bearer ${token}`)
+    expect(members.status).toBe(200)
+    const memberIds = members.body.members.map((m: { id: string }) => m.id)
+    expect(memberIds).toContain(insideTeacher.id)
+    expect(memberIds).not.toContain(outsideTeacher.id)
+  })
+
+  it('PUT /members/:teacherId/primary stays 403 for a sub-unit admin (explicit exclusion)', async () => {
+    const { institution, division, token } = await setupDivisionAdmin()
+    const someTeacher = await createTestTeacher({ institutionId: institution.id })
+
+    const res = await request(app).put(`/api/institution/structure/members/${someTeacher.id}/primary`)
+      .set('Authorization', `Bearer ${token}`).send({ unitId: division.id })
+    expect(res.status).toBe(403)
+  })
+
+  it('a true root admin (domain=all at root) is unaffected — reaches everything unchanged', async () => {
+    const { institution, root } = await setupInstitutionTeacher()
+    const admin = await createTestTeacher({ institutionId: institution.id })
+    await pool.query('UPDATE teachers SET plan_tier = $2 WHERE id = $1', [admin.id, 'institution'])
+    await addUnitRole(admin.id, root.id, 'admin', 'all')
+    const adminToken = signToken({ id: admin.id, email: admin.email })
+
+    const create = await request(app).post('/api/institution/structure/units').set('Authorization', `Bearer ${adminToken}`)
+      .send({ parentId: root.id, typeCode: 'division', name: 'Новый институт' })
+    expect(create.status).toBe(201)
+
+    const tree = await request(app).get('/api/institution/structure').set('Authorization', `Bearer ${adminToken}`)
+    expect(tree.status).toBe(200)
+    expect(tree.body.units.length).toBeGreaterThanOrEqual(2) // root + newly created
+  })
+})
