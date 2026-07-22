@@ -144,9 +144,21 @@ Resolves through `org_units` + `org_unit_roles`, not `teachers.role`:
   unaffected. `middleware/requireDomain.ts` gates routes on a specific domain
   (e.g. РПД monitor + institution criteria/rubrics on `curriculum`; institution
   overview/usage/roster-read on `teaching`) instead of full institution-root
-  admin. Phase 1 (`curriculum`) and Phase 2 (`teaching`) are shipped;
-  `platform` narrowing and per-subtree query scoping for domain grants are
-  deferred — see TODO Feature P(c).
+  admin. Phase 1 (`curriculum`), Phase 2 (`teaching`), and Phase 3 slice A
+  (subtree query scoping for `teaching`) are shipped. `getProgramAccessScope`
+  and `canTeacherShareToUnit` also require `domain IN ('all','curriculum')` —
+  both predated the domain axis and were fixed alongside Phase 3.
+  RPD-monitor subtree scoping, criteria/rubrics share-target scoping, and
+  `platform`-domain narrowing for sub-unit admins remain deferred — see TODO
+  Feature P(c) for why each is a separate design problem, not a mechanical
+  extension.
+- **Institution routes that filter by subtree**
+  (`routes/institution.ts`'s `resolveTeachingPrefixes`) must treat a
+  root-anchored grant as unrestricted, not filter by "root path" — every
+  grant issued to date is root-anchored, and filtering by it would exclude
+  teachers with no `primary_org_unit_id` that the unrestricted query has
+  always shown. Compare the grant's `pathPrefixes` against the institution's
+  actual root path before deciding whether to pass a real filter through.
 - **`canActOnUnit`/`teacherCanActOnUnit` take a required `domain` param** — no
   "any domain" default. This is load-bearing, not stylistic: before Phase 2,
   the subtree-role check matched on `role` alone and a Phase 1 `curriculum`

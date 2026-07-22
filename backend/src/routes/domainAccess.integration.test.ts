@@ -11,7 +11,7 @@ import { pool } from '../db/connection'
 import { signToken } from '../lib/jwt'
 import { createTestTeacher } from '../db/__tests__/fixtures'
 import { createInstitution } from '../db/queries/institutions'
-import { getRootUnitForInstitution, addUnitRole } from '../db/queries/orgUnits'
+import { getRootUnitForInstitution, addUnitRole, createOrgUnit, setPrimaryOrgUnit } from '../db/queries/orgUnits'
 
 beforeEach(async () => { await pool.query('BEGIN') })
 afterEach(async () => { await pool.query('ROLLBACK') })
@@ -181,5 +181,59 @@ describe('teaching-domain access (Research.md §7.10 Phase 2)', () => {
     const leadership = await request(app).get(`/api/leadership/overview?unitId=${root.id}`)
       .set('Authorization', `Bearer ${token}`)
     expect(leadership.status).toBe(200)
+  })
+})
+
+describe('subtree query scoping (Research.md §7.10 Phase 3)', () => {
+  it('a teaching/view grant on a SUB-UNIT only sees teachers/activity in that subtree', async () => {
+    const { institution, root } = await setupInstitutionTeacher()
+
+    const division = await createOrgUnit({
+      institutionId: institution.id, parentId: root.id, typeCode: 'division', name: 'Test Division',
+    })
+    const outsideDept = await createOrgUnit({
+      institutionId: institution.id, parentId: root.id, typeCode: 'department', name: 'Outside Dept',
+    })
+
+    const insideTeacher  = await createTestTeacher({ institutionId: institution.id })
+    const outsideTeacher = await createTestTeacher({ institutionId: institution.id })
+    await setPrimaryOrgUnit(insideTeacher.id, division.id)
+    await setPrimaryOrgUnit(outsideTeacher.id, outsideDept.id)
+
+    const viewer = await createTestTeacher({ institutionId: institution.id })
+    await pool.query('UPDATE teachers SET plan_tier = $2 WHERE id = $1', [viewer.id, 'institution'])
+    await addUnitRole(viewer.id, division.id, 'view', 'teaching')
+    const viewerToken = signToken({ id: viewer.id, email: viewer.email })
+
+    const res = await request(app).get('/api/institution/teachers').set('Authorization', `Bearer ${viewerToken}`)
+    expect(res.status).toBe(200)
+    const ids = res.body.map((t: { id: string }) => t.id)
+    expect(ids).toContain(insideTeacher.id)
+    expect(ids).not.toContain(outsideTeacher.id)
+
+    const overview = await request(app).get('/api/institution/overview').set('Authorization', `Bearer ${viewerToken}`)
+    expect(overview.status).toBe(200)
+    expect(overview.body.totalTeachers).toBe(1)
+  })
+
+  it('a ROOT-anchored teaching/view grant is unrestricted — regression guard against the subtlety', async () => {
+    // If the root-path check in resolveTeachingPrefixes were removed, this
+    // would incorrectly drop any teacher with no primary_org_unit_id from an
+    // otherwise-unrestricted root grant's view.
+    const { institution, root } = await setupInstitutionTeacher()
+
+    const grantee = await createTestTeacher({ institutionId: institution.id })
+    await pool.query('UPDATE teachers SET plan_tier = $2 WHERE id = $1', [grantee.id, 'institution'])
+    await addUnitRole(grantee.id, root.id, 'view', 'teaching')
+    const granteeToken = signToken({ id: grantee.id, email: grantee.email })
+
+    // A teacher with NO primary unit assigned — must still be visible under
+    // an unrestricted (root-anchored) grant.
+    const orphan = await createTestTeacher({ institutionId: institution.id })
+
+    const res = await request(app).get('/api/institution/teachers').set('Authorization', `Bearer ${granteeToken}`)
+    expect(res.status).toBe(200)
+    const ids = res.body.map((t: { id: string }) => t.id)
+    expect(ids).toContain(orphan.id)
   })
 })

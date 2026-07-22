@@ -574,11 +574,49 @@ org-admin.
   `head`/`viewer` label map in `Leadership.tsx` and `InstitutionAudit.tsx`
   (missed by the Phase 1 rename sweep — unquoted object keys, not string
   literals) fixed while verifying in-browser. See CHANGELOG.
-- **Phase 3 — `platform` narrowing + per-subtree query scoping:** IT becomes
-  sole root admin; the recorded-but-inert 1b sub-unit `admin` grants start
-  being consumed (the original (c) work lands here — institution route
-  queries take path-prefix filters, consuming the `pathPrefixes` already
-  carried by `AccessScope` since Phase 1).
+- **Phase 3, slice A — subtree query scoping for `teaching` · 🟢 SHIPPED
+  (2026-07-22).** The `teaching`-domain institution routes (`/overview`,
+  `/usage/daily`, `/usage/export`, `/teachers`) now actually consume the
+  `pathPrefixes` a grant carries — a sub-unit grant (e.g. an institute
+  director holding `view × teaching × their-division`, grantable since Phase
+  2's role UI) sees only their subtree's teachers/activity, not the whole
+  institution. `db/queries/institutions.ts`'s three query functions gained an
+  optional `unitPathPrefixes` param (subtree-filtered via
+  `primary_org_unit_id` → `org_units.path`); `routes/institution.ts`'s new
+  `resolveTeachingPrefixes(req)` decides when to apply it — critically,
+  **root-anchored grants stay unrestricted** (not filtered by "root path"),
+  because every grant issued to date is root-anchored and filtering by root
+  path would incorrectly drop teachers with no `primary_org_unit_id` that the
+  unrestricted query has always shown. Verified in the browser with a real
+  division + kafedra-under-it + two teachers (one in-subtree, one out).
+  **Two more domain-blindness gaps found and fixed alongside** (same class as
+  the Phase 2 leadership leak, lower severity): `getProgramAccessScope`
+  (`services/programAccess.ts`) and `canTeacherShareToUnit`
+  (`db/queries/orgUnits.ts`) both matched on role alone with no domain
+  filter — since Phase 2's role-grant UI now offers `teaching` at `edit`
+  level too, a hypothetical future `teaching`-domain edit grant would have
+  incorrectly unlocked program-editing and rubric-sharing rights it was never
+  meant to have. Both now require `domain IN ('all', 'curriculum')`. See
+  CHANGELOG.
+- **Phase 3, slice B — deferred (not yet scheduled).** Scoped and explicitly
+  *not* attempted this session — each piece is a separate design problem, not
+  a mechanical extension of slice A:
+  - **RPD monitor (`curriculum`) subtree scoping.** Checked the schema
+    (`migrations/086_rpd_monitor.sql`): `rpd_snapshot_rows` keys departments
+    by a free-text `dept_code` string with **no FK or join path to
+    `org_units` at all** — needs a new `dept_code → org_unit_id` mapping
+    (schema + UI), not a query filter.
+  - **Criteria/rubrics sharing target.** `POST /api/institution/{criteria,rubrics}`
+    always shares to the institution root (hardcoded
+    `getRootUnitForInstitution` in the handler) regardless of the caller's
+    own granted subtree — scoping visibility to a sub-unit editor's subtree
+    means changing the share *target*, a behaviour change needing a product
+    decision.
+  - **True "platform narrowing"** — org tree CRUD, teacher invites, roster
+    `PATCH`, LTI/model/shared-RAG settings — for sub-unit admins. Invites are
+    institution-wide by concept today (no unit attached at all); deciding
+    what a division-level admin should be allowed to do to platform settings
+    is a real product question, not plumbing.
 
 **Tail (d) — Leadership dashboard V2 · Effort: S.**
 

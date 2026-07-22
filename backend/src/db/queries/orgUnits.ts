@@ -252,9 +252,12 @@ export async function listShareTargetsForTeacher(teacherId: string): Promise<Org
  *   - targetUnitId is an ancestor-or-self of the teacher's own primary unit
  *     (their department, their faculty, or the whole institution) — any
  *     teacher may share "up" their own chain without needing a role, or
- *   - the teacher holds head/admin on targetUnitId or an ancestor of it
- *     (a unit head sharing into a unit they administer, even if it isn't
- *     on their own personal chain).
+ *   - the teacher holds head/admin on targetUnitId or an ancestor of it,
+ *     within the 'curriculum' domain (rubric/criterion content — Research.md
+ *     §7.10 Phase 3; a `teaching`-domain grant must not unlock this, same
+ *     class of cross-domain leak as the Phase 2 leadership fix) — a unit
+ *     head sharing into a unit they administer, even if it isn't on their
+ *     own personal chain.
  */
 export async function canTeacherShareToUnit(
   teacherId: string,
@@ -278,6 +281,7 @@ export async function canTeacherShareToUnit(
            JOIN org_units target ON target.id = $2
           WHERE our.teacher_id = $1
             AND our.role = ANY(ARRAY['edit', 'admin'])
+            AND our.domain = ANY(ARRAY['all', 'curriculum'])
             AND target.path LIKE holder.path || '%'
        )
      ) AS ok`,

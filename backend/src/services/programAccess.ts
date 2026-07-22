@@ -49,13 +49,22 @@ export async function getProgramAccessScope(teacher: TeacherIdentity): Promise<P
 
   // Pull every head/admin row this teacher holds, joined to the unit's
   // type_code. One query, then decide in memory.
+  //
+  // Domain filter (Research.md §7.10 Phase 3) — programmes are curriculum
+  // content, so only 'all' (root admin, always domain='all' by the Phase 1
+  // validation invariant) or 'curriculum' grants should reach this. Without
+  // it, a hypothetical `teaching`-domain edit grant (grantable since Phase 2's
+  // role-assignment UI added the 'teaching' domain option) would silently
+  // unlock program-editing rights it was never meant to have — same class of
+  // cross-domain leak as the Phase 2 leadership-dashboard fix.
   const { rows } = await pool.query<{ type_code: string; role: string; org_unit_id: string }>(
     `SELECT u.type_code, our.role, our.org_unit_id
        FROM org_unit_roles our
        JOIN org_units u ON u.id = our.org_unit_id
       WHERE our.teacher_id    = $1
         AND u.institution_id  = $2
-        AND our.role IN ('admin', 'edit')`,
+        AND our.role IN ('admin', 'edit')
+        AND our.domain IN ('all', 'curriculum')`,
     [teacher.id, teacher.institution_id]
   )
 

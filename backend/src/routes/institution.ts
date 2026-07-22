@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router, type Request } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { requireInstitutionAdmin } from '../middleware/requireRole'
 import { requireDomain } from '../middleware/requireDomain'
@@ -111,12 +111,30 @@ router.post('/rubrics', requireDomain('curriculum', 'edit'), validate(createRubr
 // these without also reaching invites, LTI/SSO, model choice, or the audit
 // log. All four routes are pure reads — no recordAudit/selfAudited needed
 // (the global auditLog middleware only logs mutating verbs).
+//
+// Phase 3 — subtree query scoping. A sub-unit grant (e.g. an institute
+// director holding view×teaching×their-division) must only see their own
+// subtree, not the whole institution. `resolveTeachingPrefixes` decides what
+// to pass the query layer:
+//   - platform admin bypassed requireDomain (no req.domainScope)  → unrestricted
+//   - the grant's own pathPrefixes include the institution root   → unrestricted
+//     (every grant issued today is root-anchored; treating "root" as a real
+//     restriction would incorrectly exclude teachers with no
+//     primary_org_unit_id, who the unrestricted query has always shown)
+//   - otherwise (a genuine sub-unit grant)                        → real filter
+async function resolveTeachingPrefixes(req: Request): Promise<string[] | undefined> {
+  if (!req.domainScope) return undefined
+  const root = await getRootUnitForInstitution(institutionId(req))
+  if (root && req.domainScope.pathPrefixes.includes(root.path)) return undefined
+  return req.domainScope.pathPrefixes
+}
 
 router.get('/overview', requireDomain('teaching', 'view'), asyncHandler(async (req, res) => {
   const id = institutionId(req)
+  const prefixes = await resolveTeachingPrefixes(req)
   const [institution, overview] = await Promise.all([
     getInstitutionById(id),
-    getInstitutionOverview(id),
+    getInstitutionOverview(id, prefixes),
   ])
   res.json({
     institution: institution ? { id: institution.id, name: institution.name, plan_tier: institution.plan_tier, max_teachers: institution.max_teachers } : null,
@@ -126,12 +144,14 @@ router.get('/overview', requireDomain('teaching', 'view'), asyncHandler(async (r
 
 router.get('/usage/daily', requireDomain('teaching', 'view'), asyncHandler(async (req, res) => {
   const days = Math.min(parseInt((req.query.days as string) ?? '30', 10) || 30, 365)
-  res.json(await getInstitutionDailyUsage(institutionId(req), days))
+  const prefixes = await resolveTeachingPrefixes(req)
+  res.json(await getInstitutionDailyUsage(institutionId(req), days, prefixes))
 }))
 
 router.get('/usage/export', requireDomain('teaching', 'view'), asyncHandler(async (req, res) => {
   const days = Math.min(parseInt((req.query.days as string) ?? '90', 10) || 90, 365)
-  const rows = await getInstitutionDailyUsage(institutionId(req), days)
+  const prefixes = await resolveTeachingPrefixes(req)
+  const rows = await getInstitutionDailyUsage(institutionId(req), days, prefixes)
   const csv = toCsv(
     ['Дата', 'Проверок', 'Презентаций', 'Токенов'],
     rows.map((r) => [r.date, r.grade_count, r.presentation_count, r.total_tokens])
@@ -142,7 +162,8 @@ router.get('/usage/export', requireDomain('teaching', 'view'), asyncHandler(asyn
 }))
 
 router.get('/teachers', requireDomain('teaching', 'view'), asyncHandler(async (req, res) => {
-  res.json(await listInstitutionTeachers(institutionId(req)))
+  const prefixes = await resolveTeachingPrefixes(req)
+  res.json(await listInstitutionTeachers(institutionId(req), prefixes))
 }))
 
 // ─── Everything below stays institution-root-admin-only ───────────────────────

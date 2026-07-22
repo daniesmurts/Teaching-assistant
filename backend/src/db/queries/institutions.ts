@@ -326,14 +326,33 @@ export interface InstitutionTeacherRow {
   grades:      number
 }
 
-export async function listInstitutionTeachers(institutionId: string): Promise<InstitutionTeacherRow[]> {
+/**
+ * `unitPathPrefixes` — Research.md §7.10 Phase 3 subtree scoping. Omitted (or
+ * `undefined`) preserves the original unrestricted behaviour, unchanged (the
+ * platform-admin bypass path, and every root-anchored grant per
+ * `routes/institution.ts`'s `resolveTeachingPrefixes` helper — filtering by
+ * the institution root's own path would exclude teachers with no
+ * `primary_org_unit_id`, a real if rare edge case that must stay visible when
+ * the caller isn't actually subtree-restricted). When provided, only
+ * teachers whose primary unit falls under one of the given path prefixes are
+ * returned — teachers with no primary unit are excluded, since they aren't
+ * provably in anyone's subtree.
+ */
+export async function listInstitutionTeachers(
+  institutionId: string,
+  unitPathPrefixes?: string[]
+): Promise<InstitutionTeacherRow[]> {
   const { rows } = await pool.query<InstitutionTeacherRow>(
     `SELECT t.id, t.email, t.name, t.role, t.plan_tier, t.is_active, t.created_at,
             (SELECT COUNT(*) FROM assignments a WHERE a.teacher_id = t.id)::int AS grades
        FROM teachers t
+       LEFT JOIN org_units pu ON pu.id = t.primary_org_unit_id
       WHERE t.institution_id = $1
+        AND ($2::text[] IS NULL OR EXISTS (
+              SELECT 1 FROM unnest($2::text[]) AS prefix WHERE pu.path LIKE prefix || '%'
+            ))
       ORDER BY t.created_at`,
-    [institutionId]
+    [institutionId, unitPathPrefixes ?? null]
   )
   return rows
 }
@@ -368,21 +387,41 @@ export interface InstitutionOverview {
   totalPresentations: number
 }
 
-export async function getInstitutionOverview(institutionId: string): Promise<InstitutionOverview> {
+/** See `listInstitutionTeachers`'s doc comment for `unitPathPrefixes` semantics. */
+export async function getInstitutionOverview(
+  institutionId: string,
+  unitPathPrefixes?: string[]
+): Promise<InstitutionOverview> {
   const { rows } = await pool.query<{
     total_teachers: string; active_this_month: string
     total_grades: string; total_presentations: string
   }>(
     `SELECT
-       (SELECT COUNT(*) FROM teachers t WHERE t.institution_id = $1)                          AS total_teachers,
+       (SELECT COUNT(*) FROM teachers t
+          LEFT JOIN org_units pu ON pu.id = t.primary_org_unit_id
+          WHERE t.institution_id = $1 AND ($2::text[] IS NULL OR EXISTS (
+                SELECT 1 FROM unnest($2::text[]) AS prefix WHERE pu.path LIKE prefix || '%'
+              )))                                                                             AS total_teachers,
        (SELECT COUNT(DISTINCT a.teacher_id) FROM assignments a
           JOIN teachers t ON t.id = a.teacher_id
-          WHERE t.institution_id = $1 AND a.created_at >= date_trunc('month', NOW()))         AS active_this_month,
+          LEFT JOIN org_units pu ON pu.id = t.primary_org_unit_id
+          WHERE t.institution_id = $1 AND a.created_at >= date_trunc('month', NOW())
+            AND ($2::text[] IS NULL OR EXISTS (
+                SELECT 1 FROM unnest($2::text[]) AS prefix WHERE pu.path LIKE prefix || '%'
+              )))                                                                             AS active_this_month,
        (SELECT COUNT(*) FROM assignments a
-          JOIN teachers t ON t.id = a.teacher_id WHERE t.institution_id = $1)                 AS total_grades,
+          JOIN teachers t ON t.id = a.teacher_id
+          LEFT JOIN org_units pu ON pu.id = t.primary_org_unit_id
+          WHERE t.institution_id = $1 AND ($2::text[] IS NULL OR EXISTS (
+                SELECT 1 FROM unnest($2::text[]) AS prefix WHERE pu.path LIKE prefix || '%'
+              )))                                                                             AS total_grades,
        (SELECT COUNT(*) FROM presentations p
-          JOIN teachers t ON t.id = p.teacher_id WHERE t.institution_id = $1)                 AS total_presentations`,
-    [institutionId]
+          JOIN teachers t ON t.id = p.teacher_id
+          LEFT JOIN org_units pu ON pu.id = t.primary_org_unit_id
+          WHERE t.institution_id = $1 AND ($2::text[] IS NULL OR EXISTS (
+                SELECT 1 FROM unnest($2::text[]) AS prefix WHERE pu.path LIKE prefix || '%'
+              )))                                                                             AS total_presentations`,
+    [institutionId, unitPathPrefixes ?? null]
   )
   const r = rows[0]
   return {
@@ -402,9 +441,11 @@ export interface InstitutionDailyUsageRow {
 
 // Tokens + counts only — cost_usd is deliberately omitted (platform-admin only).
 // Scoped via teacher membership so it works regardless of api_usage_log.institution_id.
+// See `listInstitutionTeachers`'s doc comment for `unitPathPrefixes` semantics.
 export async function getInstitutionDailyUsage(
   institutionId: string,
-  days = 30
+  days = 30,
+  unitPathPrefixes?: string[]
 ): Promise<InstitutionDailyUsageRow[]> {
   const { rows } = await pool.query<InstitutionDailyUsageRow>(
     `SELECT
@@ -414,11 +455,15 @@ export async function getInstitutionDailyUsage(
        COUNT(*) FILTER (WHERE l.feature = 'presentation')::int       AS presentation_count
      FROM api_usage_log l
      JOIN teachers t ON t.id = l.teacher_id
+     LEFT JOIN org_units pu ON pu.id = t.primary_org_unit_id
      WHERE t.institution_id = $1
        AND l.created_at >= NOW() - ($2 || ' days')::INTERVAL
+       AND ($3::text[] IS NULL OR EXISTS (
+             SELECT 1 FROM unnest($3::text[]) AS prefix WHERE pu.path LIKE prefix || '%'
+           ))
      GROUP BY DATE(l.created_at)
      ORDER BY date DESC`,
-    [institutionId, days]
+    [institutionId, days, unitPathPrefixes ?? null]
   )
   return rows
 }
