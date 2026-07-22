@@ -1537,3 +1537,67 @@ export interface ApiError {
   error: string
   details?: unknown
 }
+
+// ─── Feature AA v1 — ФГОС 3++ registry (TODO.md "### AA") ─────────────────────
+// Platform-wide reference data (federal law, one per направление × level) —
+// never institution-scoped. A standard stays 'draft' until a platform admin
+// confirms the review screen; only 'published' rows are meant for downstream
+// consumers (Feature Z's профстандарт selection, K's conformance check).
+
+export interface FgosCompetency {
+  id?:                   string
+  type:                  'УК' | 'ОПК'
+  code:                  string
+  formulation:           string
+  is_verbatim_verified:  boolean
+}
+
+export interface FgosStructureRequirement {
+  id?:          string
+  block_label:  string
+  min_credits:  number | null
+  max_credits:  number | null
+  notes:        string | null
+}
+
+export interface FgosProfstandardRef {
+  id?:         string
+  code:        string
+  name:        string
+  source_url:  string | null
+}
+
+export interface FgosStandard {
+  id:             string
+  direction_code: string
+  level:          string
+  title:          string
+  generation:     string | null
+  order_number:   string | null
+  order_date:     string | null
+  source_url:     string | null
+  effective_date: string | null
+  status:         'draft' | 'published'
+  created_at:     string
+}
+
+export interface FgosStandardWithChildren extends FgosStandard {
+  competencies:             FgosCompetency[]
+  structure_requirements:   FgosStructureRequirement[]
+  profstandard_refs:        FgosProfstandardRef[]
+}
+
+export interface FgosDraft {
+  standard: {
+    direction_code: string | null
+    level:          string | null
+    title:          string | null
+    generation:     string | null
+    order_number:   string | null
+    order_date:     string | null
+    effective_date: string | null
+  }
+  competencies:            FgosCompetency[]
+  structureRequirements:   FgosStructureRequirement[]
+  profstandardRefs:        FgosProfstandardRef[]
+}

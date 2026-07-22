@@ -422,3 +422,35 @@ export async function getAdminPayments(params: { status?: string; limit?: number
   const res = await client.get<{ rows: AdminPayment[]; total: number }>('/api/admin/payments', { params })
   return res.data
 }
+
+// ─── ФГОС 3++ registry (Feature AA v1) ─────────────────────────────────────────
+
+import type { FgosDraft, FgosStandard, FgosStandardWithChildren } from '../types'
+
+export async function getFgosStandards(): Promise<FgosStandard[]> {
+  const res = await client.get<{ standards: FgosStandard[] }>('/api/admin/fgos')
+  return res.data.standards
+}
+export async function getFgosStandard(id: string): Promise<FgosStandardWithChildren> {
+  const res = await client.get<FgosStandardWithChildren>(`/api/admin/fgos/${id}`)
+  return res.data
+}
+export async function extractFgosDraft(file: File): Promise<FgosDraft> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await client.post<FgosDraft>('/api/admin/fgos/extract', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return res.data
+}
+export async function createFgosDraft(payload: FgosDraft): Promise<FgosStandard> {
+  const res = await client.post<FgosStandard>('/api/admin/fgos', payload)
+  return res.data
+}
+export async function publishFgosStandard(id: string, payload: FgosDraft): Promise<FgosStandard> {
+  const res = await client.post<FgosStandard>(`/api/admin/fgos/${id}/publish`, payload)
+  return res.data
+}
+export async function deleteFgosStandard(id: string): Promise<void> {
+  await client.delete(`/api/admin/fgos/${id}`)
+}

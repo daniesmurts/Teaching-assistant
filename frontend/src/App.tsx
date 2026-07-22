@@ -55,6 +55,7 @@ import AdminMessages from './pages/admin/AdminMessages'
 import AdminErrors from './pages/admin/AdminErrors'
 import AdminAudit from './pages/admin/AdminAudit'
 import AdminEvals from './pages/admin/AdminEvals'
+import AdminFgos from './pages/admin/AdminFgos'
 import InstitutionLayout from './pages/institution/InstitutionLayout'
 import InstitutionOverview from './pages/institution/InstitutionOverview'
 import InstitutionUsage from './pages/institution/InstitutionUsage'
@@ -317,6 +318,7 @@ export default function App() {
             <Route path="errors"    element={<AdminErrors />} />
             <Route path="audit"     element={<AdminAudit />} />
             <Route path="evals"     element={<AdminEvals />} />
+            <Route path="fgos"      element={<AdminFgos />} />
           </Route>
 
           {/* Institution admin — institution_admin or platform_admin */}

@@ -16,3 +16,13 @@ if (!url || !/test/i.test(new URL(url).pathname)) {
     `Check .env.test at the repo root.`
   )
 }
+
+// Dynamic import, not a static one at the top of this file — `db/connection.ts`
+// throws at module-load time if DATABASE_URL is unset, so it must not be
+// evaluated before the config()/safety-check above has run.
+// Closes the pool.connect()-based transaction-nesting leak documented in
+// db/__tests__/transactionalTestIsolation.ts — see that file for the full
+// story (found while verifying Feature AA v1, 2026-07-22).
+const { pool } = await import('./src/db/connection')
+const { installTransactionalTestIsolation } = await import('./src/db/__tests__/transactionalTestIsolation')
+installTransactionalTestIsolation(pool)

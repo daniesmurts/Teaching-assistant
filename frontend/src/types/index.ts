@@ -140,6 +140,12 @@ export type {
   LiveSessionParticipantProgress,
   LiveSession,
   LiveJoinState,
+  FgosStandard,
+  FgosStandardWithChildren,
+  FgosCompetency,
+  FgosStructureRequirement,
+  FgosProfstandardRef,
+  FgosDraft,
 } from '../../../shared/types'
 
 export {

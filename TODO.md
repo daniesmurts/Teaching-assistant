@@ -1394,7 +1394,68 @@ of learning vs. two quarters of the wrong platform.
   institutional-scale sibling of O's per-course concept graph; keep the
   relations-table schemas compatible.
 
-### AA. ФГОС 3++ registry — normative reference layer + ПК-конструктор · Effort: v1 S (inside Z's pilot), full M
+### AA. ФГОС 3++ registry — normative reference layer + ПК-конструктор · Effort: v1 S (inside Z's pilot), full M · 🟢 v1 SHIPPED (2026-07-22)
+
+**v1 shipped:** single-standard ingestion — upload PDF/DOCX → `extractText`
+(existing `documentExtractor.ts`) → one `chatJSON` pass (`services/fgosExtractor.ts`)
+pulling УК/ОПК (each verbatim-checked against the source via
+`validateQuoteAgainstSource`, `lib/citation.ts` — unverified formulations are
+flagged, not dropped, for the admin to fix), structural block requirements,
+and the профстандарт appendix → editable admin review screen
+(`pages/admin/AdminFgos.tsx`) → confirm/publish (never auto-published — a
+standard stays `status='draft'` until confirmed, same AI-never-final posture
+as every other extraction pipeline). Platform-wide reference data — gated by
+`requireAdmin` (platform owner only, not institution admin — a ФГОС is
+federal law, identical for every institution), own route file
+(`routes/adminFgos.ts`, mounted `/api/admin/fgos`) rather than growing
+`routes/admin.ts`, matching how `orgUnits.ts`/`rpdMonitor.ts` got their own
+files for the same reason. Migration `088_fgos_registry.sql`: `fgos_standards`
+/ `fgos_competencies` / `fgos_structure_requirements` / `fgos_profstandard_refs`
+— the last has no FK to a профстандарт table yet since Feature Z (which
+would own `profstandard_nodes`) doesn't exist; plain columns for now,
+forward-compatible for a join column later. 6 unit tests
+(`fgosExtractor.test.ts`) + 7 integration tests (`adminFgos.integration.test.ts`,
+covering the `requireAdmin` gate, the full extract→create→publish round
+trip, and that extract alone never writes to the DB). Verified live against
+a real synthetic ФГОС document end-to-end (real `chatJSON` call, both
+competencies correctly extracted and verbatim-verified).
+
+**Test-infrastructure finding surfaced while verifying — 🟢 FIXED (2026-07-22):**
+the integration test harness's per-test `BEGIN`/`ROLLBACK` isolation
+(`vitest.setup.integration.ts` + `DB_POOL_MAX=1`) didn't correctly nest
+against query functions that open their own transaction via
+`pool.connect()` + `BEGIN`/`COMMIT` (e.g. `createOrgUnit`, `moveOrgUnit`,
+this feature's `createFgosStandardDraft`/`publishFgosStandard`, and others)
+— with pool size 1, the inner `COMMIT` committed the *outer* test
+transaction too, so `afterEach`'s `ROLLBACK` had nothing left to undo and
+rows leaked permanently into the shared test database. Confirmed real and
+long-standing: `gradeassist_test` held hundreds of orphaned `institutions`/
+`org_units`/`teachers` rows, invisible until now because no existing
+integration test asserted an exact/empty row count — they only check "does
+my own returned id appear," which stays true regardless of accumulated
+garbage.
+
+Fixed via savepoint-wrapping the test pool only (zero production code
+changes): new `db/__tests__/transactionalTestIsolation.ts` patches
+`pool.connect()` inside integration test setup so the returned client's
+`BEGIN`/`COMMIT`/`ROLLBACK` get rewritten to
+`SAVEPOINT`/`RELEASE SAVEPOINT`/`ROLLBACK TO SAVEPOINT` when nested inside
+the outer per-test transaction (tracked by real transaction depth, not by
+call site). Three bugs found and fixed along the way: (1) naive rewriting
+without depth-tracking also rewrote the outer test's own `BEGIN`, since
+`pg-pool`'s internal `Pool.prototype.query()` acquires its connection via
+the same public `connect()`; (2) the patched `connect()` only supported
+promise-style calls, silently dropping the callback `pg-pool` uses
+internally, which hung every test and permanently leaked the sole
+connection; (3) `pg-pool` reuses the same `PoolClient` object across
+checkouts with `DB_POOL_MAX=1`, so wrapping `.query` without an idempotency
+guard compounded a new layer on every `connect()` call. Regression test
+(`db/transactionalTestIsolation.integration.test.ts`) proves a
+`pool.connect()`-based write is genuinely rolled back. Verified via two
+consecutive full integration suite runs against a cleaned DB — `psql` row
+counts for `institutions`/`org_units`/`teachers`/`fgos_standards` stayed at
+exactly 0 after both runs (previously grew every run); unit suite (414
+tests) unaffected.
 
 Follow-on from the Feature Z design discussion (2026-07-21). One ФГОС ВО per
 (направление, level), published by Минобрнауки on fgosvo.ru. Today the
