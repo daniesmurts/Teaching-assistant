@@ -427,9 +427,11 @@ export async function getAdminPayments(params: { status?: string; limit?: number
 
 import type { FgosDraft, FgosStandard, FgosStandardWithChildren } from '../types'
 
-export async function getFgosStandards(): Promise<FgosStandard[]> {
-  const res = await client.get<{ standards: FgosStandard[] }>('/api/admin/fgos')
-  return res.data.standards
+export async function getFgosStandards(
+  params: { page?: number; search?: string; level?: string } = {}
+): Promise<{ standards: FgosStandard[]; total: number }> {
+  const res = await client.get<{ standards: FgosStandard[]; total: number }>('/api/admin/fgos', { params })
+  return res.data
 }
 export async function getFgosStandard(id: string): Promise<FgosStandardWithChildren> {
   const res = await client.get<FgosStandardWithChildren>(`/api/admin/fgos/${id}`)

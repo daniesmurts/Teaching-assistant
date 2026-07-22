@@ -9,7 +9,7 @@ import { extractFgosDraft, type FgosDraft } from '../services/fgosExtractor'
 import { fetchPageHtml, fetchDocumentFromUrl } from '../services/documentFetch'
 import { parseCategoryLinks, parsePageLevel, parseDirectionRows } from '../services/fgosvoParser'
 import {
-  listFgosStandards, getFgosStandardById, createFgosStandardDraft, publishFgosStandard, deleteFgosStandard,
+  listFgosStandards, listFgosStandardsPage, getFgosStandardById, createFgosStandardDraft, publishFgosStandard, deleteFgosStandard,
   type FgosStandardPayload,
 } from '../db/queries/fgos'
 import { recordAudit } from '../db/queries/audit'
@@ -52,8 +52,14 @@ function payloadFromBody(body: unknown): FgosStandardPayload {
 
 // ─── List / detail ──────────────────────────────────────────────────────────
 
-router.get('/', asyncHandler(async (_req, res) => {
-  res.json({ standards: await listFgosStandards() })
+router.get('/', asyncHandler(async (req, res) => {
+  const { rows, total } = await listFgosStandardsPage({
+    page:   req.query.page  ? Number(req.query.page)  : undefined,
+    limit:  req.query.limit ? Number(req.query.limit) : undefined,
+    search: req.query.search as string | undefined,
+    level:  req.query.level as string | undefined,
+  })
+  res.json({ standards: rows, total })
 }))
 
 router.get('/:id', asyncHandler(async (req, res) => {

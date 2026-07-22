@@ -1496,6 +1496,29 @@ issues, one real and fixed, one investigated and not a bug.
   so scanned ФГОС PDFs already OCR automatically — confirmed
   `YANDEX_VISION_API_KEY`/`YANDEX_FOLDER_ID` are configured.
 
+**List UI: color-coded level badges + pagination/search/filter
+(2026-07-22).** The registry crossed 376 rows mid-import (magistratura,
+специалитет, ординатура all still to come on top of bakalavriat) and the
+flat list was already unreadable, all badges one color. `db/queries/fgos.ts`
+gained `listFgosStandardsPage({page, limit, search, level})` (LIMIT/OFFSET +
+`COUNT(*)`, same shape as `admin.ts`'s `/teachers` pagination) alongside the
+existing unpaginated `listFgosStandards()`, which stays as-is — bulk
+import's `/discover` dedup needs every existing `(direction_code, level)`
+pair, not one page of them, so it keeps its own function rather than the
+route reusing the paginated one. `GET /api/admin/fgos` now takes
+`page`/`limit`/`search`/`level` query params, responds `{ standards, total
+}`. Frontend: search input + a `Select` level-filter dropdown (house
+pattern from `AdminTeachers.tsx`/`AdminAudit.tsx` — page resets to 1 on
+either changing), `← Назад / X из Y · N всего / Вперёд →` pager footer.
+`LEVEL_COLOR` gives fgosvo.ru's four ФГОС ВО (3++) categories
+(бакалавриат/магистратура/специалитет/ординатура) their own
+`bg-*-bg text-*` token pair (amber/info/success/warning) instead of one
+shared amber for every level; `ординатура` was also missing from
+`LEVEL_LABEL` entirely (a copy gap from v1) — added. 2 new integration
+tests (search-by-code-or-title, level filter, page/limit bounds). Verified
+live: search narrowed 376 → 4 rows, level filter narrowed 4 → 2, pager
+showed "1 из 19 · 376 всего" and paginated to a second page correctly.
+
 **Test-infrastructure finding surfaced while verifying — 🟢 FIXED (2026-07-22):**
 the integration test harness's per-test `BEGIN`/`ROLLBACK` isolation
 (`vitest.setup.integration.ts` + `DB_POOL_MAX=1`) didn't correctly nest

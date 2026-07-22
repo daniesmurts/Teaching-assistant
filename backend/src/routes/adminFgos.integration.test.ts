@@ -222,3 +222,36 @@ describe('ФГОС registry — bulk import from fgosvo.ru', () => {
     expect(res.status).toBe(400)
   })
 })
+
+describe('ФГОС registry — list pagination, search, and level filter', () => {
+  it('search matches by direction_code or title, and level filters exactly', async () => {
+    const { token } = await platformAdminToken()
+    const uniqueCode = `99.${Date.now() % 100}.01`
+    await request(app).post('/api/admin/fgos').set('Authorization', `Bearer ${token}`).send({
+      ...VALID_PAYLOAD,
+      standard: { ...VALID_PAYLOAD.standard, direction_code: uniqueCode, title: 'Уникальное название для поиска', level: 'магистратура' },
+    })
+
+    const byCode = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`).query({ search: uniqueCode })
+    expect(byCode.body.standards.map((s: { direction_code: string }) => s.direction_code)).toEqual([uniqueCode])
+    expect(byCode.body.total).toBe(1)
+
+    const byTitle = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`).query({ search: 'Уникальное название' })
+    expect(byTitle.body.total).toBe(1)
+
+    const wrongLevel = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`).query({ search: uniqueCode, level: 'бакалавриат' })
+    expect(wrongLevel.body.total).toBe(0)
+
+    const rightLevel = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`).query({ search: uniqueCode, level: 'магистратура' })
+    expect(rightLevel.body.total).toBe(1)
+  })
+
+  it('page/limit bound the returned rows and total reflects the full match count', async () => {
+    const { token } = await platformAdminToken()
+    const res = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`).query({ page: 1, limit: 2 })
+    expect(res.status).toBe(200)
+    expect(res.body.standards.length).toBeLessThanOrEqual(2)
+    expect(typeof res.body.total).toBe('number')
+    expect(res.body.total).toBeGreaterThanOrEqual(res.body.standards.length)
+  })
+})

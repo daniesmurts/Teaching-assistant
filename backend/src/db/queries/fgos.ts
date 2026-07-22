@@ -61,6 +61,49 @@ export async function listFgosStandards(): Promise<FgosStandardRow[]> {
   return rows
 }
 
+export interface FgosStandardsPageParams {
+  page?:   number
+  limit?:  number
+  search?: string
+  level?:  string
+}
+
+/** Paginated/filtered listing for the admin UI — `listFgosStandards()` above
+ *  stays the unpaginated full fetch used internally by bulk-import dedup
+ *  (`routes/adminFgos.ts`'s `/discover`), which needs every existing
+ *  (direction_code, level) pair, not a page of them. */
+export async function listFgosStandardsPage(
+  params: FgosStandardsPageParams
+): Promise<{ rows: FgosStandardRow[]; total: number }> {
+  const page  = Math.max(1, params.page ?? 1)
+  const limit = Math.min(50, Math.max(1, params.limit ?? 20))
+  const offset = (page - 1) * limit
+  const search = params.search?.trim()
+  const level  = params.level?.trim()
+
+  const conditions: string[] = []
+  const values: unknown[] = []
+  if (search) { values.push(`%${search}%`); conditions.push(`(direction_code ILIKE $${values.length} OR title ILIKE $${values.length})`) }
+  if (level)  { values.push(level); conditions.push(`level = $${values.length}`) }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  const limitIdx  = values.length + 1
+  const offsetIdx = values.length + 2
+
+  const [{ rows }, { rows: countRows }] = await Promise.all([
+    pool.query<FgosStandardRow>(
+      `SELECT * FROM fgos_standards ${where} ORDER BY created_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      [...values, limit, offset]
+    ),
+    pool.query<{ total: number }>(
+      `SELECT COUNT(*)::int AS total FROM fgos_standards ${where}`,
+      values
+    ),
+  ])
+
+  return { rows, total: countRows[0].total }
+}
+
 export async function getFgosStandardById(id: string): Promise<FgosStandardWithChildren | null> {
   const { rows } = await pool.query<FgosStandardRow>(
     `SELECT * FROM fgos_standards WHERE id = $1`,

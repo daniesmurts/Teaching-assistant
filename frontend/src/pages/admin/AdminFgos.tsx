@@ -7,13 +7,25 @@ import Button from '../../components/ui/Button'
 import CreateButton from '../../components/ui/CreateButton'
 import { Input } from '../../components/ui/Input'
 import LoadingSpinner from '../../components/ui/LoadingSpinner'
+import Select from '../../components/ui/Select'
 import { useUIStore } from '../../store/uiStore'
 import FgosvoImportModal from './FgosvoImportModal'
 import type { FgosDraft, FgosStandard, FgosStandardWithChildren, FgosCompetency, FgosStructureRequirement, FgosProfstandardRef } from '../../types'
 
 const LEVEL_LABEL: Record<string, string> = {
-  бакалавриат: 'Бакалавриат', магистратура: 'Магистратура', специалитет: 'Специалитет', аспирантура: 'Аспирантура',
+  бакалавриат: 'Бакалавриат', магистратура: 'Магистратура', специалитет: 'Специалитет', ординатура: 'Ординатура', аспирантура: 'Аспирантура',
 }
+// fgosvo.ru's own four ФГОС ВО (3++) categories get distinct colors so a
+// long, mixed-level list scans at a glance; аспирантура (outside that
+// index, never populated via bulk import) falls back to a neutral tone.
+const LEVEL_COLOR: Record<string, string> = {
+  бакалавриат: 'bg-amber-light text-amber',
+  магистратура: 'bg-info-bg text-info',
+  специалитет: 'bg-success-bg text-success',
+  ординатура: 'bg-warning-bg text-warning',
+}
+const LEVEL_COLOR_FALLBACK = 'bg-surface-warm text-ink-tertiary'
+const PAGE_SIZE = 20
 
 const emptyDraft: FgosDraft = {
   standard: { direction_code: '', level: 'бакалавриат', title: '', generation: '3++', order_number: null, order_date: null, effective_date: null },
@@ -34,8 +46,17 @@ export default function AdminFgos() {
   const [extracting, setExtracting] = useState(false)
   const [opening, setOpening] = useState<string | null>(null)
   const [showFgosvoImport, setShowFgosvoImport] = useState(false)
+  const [search, setSearch]   = useState('')
+  const [levelFilter, setLevelFilter] = useState('')
+  const [page, setPage]       = useState(1)
 
-  const { data: standards = [], isLoading } = useQuery({ queryKey: ['admin-fgos'], queryFn: getFgosStandards })
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-fgos', page, search, levelFilter],
+    queryFn: () => getFgosStandards({ page, search: search || undefined, level: levelFilter || undefined }),
+  })
+  const standards = data?.standards ?? []
+  const total     = data?.total ?? 0
+  const pages     = Math.ceil(total / PAGE_SIZE)
 
   async function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -280,12 +301,32 @@ export default function AdminFgos() {
           />
         )}
 
+        <div className="flex items-center gap-2 mb-4">
+          <input
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+            placeholder="Поиск по коду или названию направления…"
+            className="w-full max-w-sm px-3 py-2 text-sm font-sans bg-surface border border-border rounded-md focus:outline-none focus:border-border-strong"
+          />
+          <Select
+            value={levelFilter}
+            onChange={(v) => { setLevelFilter(v); setPage(1) }}
+            options={[{ value: '', label: 'Все уровни' }, ...Object.entries(LEVEL_LABEL).map(([v, l]) => ({ value: v, label: l }))]}
+            ariaLabel="Фильтр по уровню"
+            className="w-48 flex-shrink-0"
+          />
+        </div>
+
         {isLoading ? (
           <p className="text-sm font-sans text-ink-tertiary">Загрузка…</p>
         ) : standards.length === 0 ? (
           <div className="text-center py-12">
-            <p className="font-sans text-sm text-ink-secondary mb-1">Реестр пуст.</p>
-            <p className="font-sans text-xs text-ink-tertiary">Загрузите PDF или Word ФГОС, чтобы добавить первую запись.</p>
+            <p className="font-sans text-sm text-ink-secondary mb-1">
+              {search || levelFilter ? 'Ничего не найдено.' : 'Реестр пуст.'}
+            </p>
+            <p className="font-sans text-xs text-ink-tertiary">
+              {search || levelFilter ? 'Попробуйте изменить запрос или фильтр.' : 'Загрузите PDF или Word ФГОС, чтобы добавить первую запись.'}
+            </p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -296,7 +337,7 @@ export default function AdminFgos() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-sans text-sm font-medium text-ink">{s.direction_code} {s.title}</span>
-                    <span className="text-[10px] bg-amber-light text-amber px-1.5 py-0.5 rounded-sm">{LEVEL_LABEL[s.level] ?? s.level}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-sm ${LEVEL_COLOR[s.level] ?? LEVEL_COLOR_FALLBACK}`}>{LEVEL_LABEL[s.level] ?? s.level}</span>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-sm ${s.status === 'published' ? 'bg-success-bg text-success' : 'bg-surface-warm text-ink-tertiary'}`}>
                       {s.status === 'published' ? 'Опубликован' : 'Черновик'}
                     </span>
@@ -307,6 +348,14 @@ export default function AdminFgos() {
                   className="text-xs text-ink-tertiary hover:text-danger flex-shrink-0 ml-3">Удалить</button>
               </div>
             ))}
+          </div>
+        )}
+
+        {pages > 1 && (
+          <div className="flex items-center justify-center gap-3 mt-4 text-xs font-sans">
+            <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="px-2 py-1 disabled:opacity-40 hover:text-amber">← Назад</button>
+            <span className="text-ink-secondary">{page} из {pages} · {total} всего</span>
+            <button disabled={page >= pages} onClick={() => setPage((p) => p + 1)} className="px-2 py-1 disabled:opacity-40 hover:text-amber">Вперёд →</button>
           </div>
         )}
       </div>
