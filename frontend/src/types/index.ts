@@ -146,6 +146,12 @@ export type {
   FgosStructureRequirement,
   FgosProfstandardRef,
   FgosDraft,
+  SampleVacancy,
+  ProfessionSnapshot,
+  RegionSnapshot,
+  SupportedRegion,
+  MarketEvidenceProfstandardRef,
+  MarketEvidence,
 } from '../../../shared/types'
 
 export {

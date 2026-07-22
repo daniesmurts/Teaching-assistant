@@ -1217,7 +1217,85 @@ grounded in the teacher's own generated materials.
   extensions (comprehension pings, slide-aligned questions, ASR) build on
   this session/participant substrate later.
 
-### Z. Market-evidence layer + РОП-студия — defensible labor-market justification at design time · Effort: pilot S–M, full track L+ (phased)
+### Z. Market-evidence layer + РОП-студия — defensible labor-market justification at design time · Effort: pilot S–M, full track L+ (phased) · 🟢 Phase 0 SHIPPED (2026-07-22)
+
+**Phase 0 pilot shipped (2026-07-22)**, pilot: направление 15.03.02
+«Технологические машины и оборудование», Респ. Татарстан. Real РОП Студия
+surface, not a throwaway script — new standalone page (`/rop-studio`,
+own nav entry) rather than folding the pilot capability into an existing
+page, since Z's own framing calls this a "programme-level sibling of
+РПД-студия."
+
+- **`services/labourMarket.ts`** — `fetchVacancySnapshot(regionCodes: string[],
+  professions)` hits trudvsem.ru directly (no auth, no SSRF-allowlist
+  machinery needed — single fixed platform-controlled source, same
+  reasoning as `fgosvoParser.ts`'s hardcoded domain). `SUPPORTED_REGIONS`
+  now covers **all ~90 Russian federal subjects** (expanded 2026-07-22 from
+  the initial Татарстан-only list) — every code individually confirmed
+  against a live trudvsem query, not guessed (surfaced real surprises:
+  Chechnya is code 20 not 95, code 95 is Херсонская область, and the four
+  post-2022 territories use non-sequential codes — Запорожская=90, ДНР=93,
+  ЛНР=94, Херсонская=95). Sequential per-region×term fetch, fails soft per
+  term. Exposed to the frontend via `GET /api/institution/programs/regions`
+  rather than duplicating the list client-side.
+- **`services/marketEvidenceGenerator.ts`** — one `chatJSON` call grounded
+  in structured data (профстандарт codes/names + vacancy counts/salaries/
+  employers/dates), instructed to never invent a number or code outside
+  what's given. Unlike `lib/citation.ts`'s verbatim-quote validation (built
+  for free-text source documents), there's no text to match against here —
+  the safety mechanism is architectural: the UI always renders the
+  generated text next to the raw source data side-by-side (see below), so
+  review is a direct check against real numbers, not an automated matcher.
+- **`db/queries/fgos.ts`** gained `getProfstandardRefsForDirection(code,
+  level)` — joins the ФГОС registry (Feature AA) by `(direction_code,
+  level)`; new `program_market_evidence` table (migration 089) mirrors
+  `program_analyses`' cached-latest-wins shape — append-only, no
+  draft/publish status (the text is just always-editable, matching
+  `program_analyses`'s posture, not AA's heavier draft/publish workflow).
+- **`routes/programs.ts`** gained `POST/GET/PUT :id/market-evidence` on the
+  existing program resource (reusing `requireProgramAccess`/
+  `loadReadable`/`assertEdit` — no new route file, no new middleware).
+  `programs.level` (`bachelor`/`master`/`specialist`, English) maps to
+  `fgos_standards.level` (Russian) at the route layer.
+- **Frontend `pages/RopStudio.tsx`**: program picker → region(s) + profession-terms
+  form (profession terms are typed by the РОП, not auto-derived — they know
+  their own field's job titles better than a keyword heuristic would guess,
+  and it avoids an extra unvalidated LLM step) → generated text in an
+  editable textarea (explicit Сохранить, not debounced autosave — this text
+  is headed for an official document) + a «Черновик ИИ» badge → a
+  «Источники» block rendering every vacancy sample (title/employer/salary/date,
+  card rows, grouped by region when more than one is selected) and
+  профстандарт (code badge + name) the text was built from.
+- **Multi-region selection (2026-07-22)**: region picker is now
+  `components/ui/MultiSelect.tsx` — a searchable checkbox combobox (sibling
+  to `Select.tsx`, doesn't close on pick, text filter narrows the ~90-entry
+  list) rather than a single-region dropdown. `fetchVacancySnapshot` and
+  `generateMarketEvidenceSection` take `regionCodes: string[]`/build a
+  `regions: RegionSnapshot[]` context so the generated paragraph can cite
+  multiple regions' numbers side by side. `program_market_evidence` schema
+  changed from `region_code`/`region_name` to `region_codes`/`region_names`
+  arrays (migration 090) with `vacancy_snapshot` now nested per-region
+  (migration 091 fixed a real gap: it wrapped the one pre-existing row's
+  still-flat snapshot into the new shape — caught via live verification,
+  which crashed on `region.by_profession.map is not a function` before the
+  fix).
+- 28 tests total across the feature (`labourMarket.test.ts`,
+  `marketEvidenceGenerator.test.ts`, `programMarketEvidence.integration.test.ts`,
+  all updated/extended for multi-region + full region-list coverage) plus the
+  full 443-test backend suite and a clean frontend `tsc --noEmit`. Verified
+  live end-to-end against the real pilot direction and a real institution's
+  actual 15.03.02 programme: single-region generation (1796 «технолог»
+  vacancies in Tatarstan, real employers, all 16 real профстандарт codes)
+  and 3-region generation (Алтайский край + Москва + Татарстан — 31/123/86
+  vacancies respectively) both spot-checked with every number/salary in the
+  generated paragraph matching the raw source data exactly; MultiSelect's
+  search-filter-then-select flow confirmed to not deselect prior picks.
+- **Not yet built** (deferred to Phase 1+ per the TODO's own sequencing —
+  gated on this pilot's real-user verdict first): the `labourMarket`
+  provider-abstraction interface, HH/Росстат as additional sources
+  (HH now requires a registered OAuth app — anonymous search returns
+  403, confirmed live), Plane-2 reference documents, the full dossier
+  generator, DOCX export, учебный план/competency-matrix builder.
 
 From the 2026-07-21 discussions with the head metodist at the test university.
 Her ask started as "add РосНавык-like features"; the distilled need is
@@ -1393,6 +1471,74 @@ of learning vs. two quarters of the wrong platform.
   Related: O (knowledge graph) — the crosswalk here is the
   institutional-scale sibling of O's per-course concept graph; keep the
   relations-table schemas compatible.
+
+**Phase 0 scoping started (2026-07-22), pilot: направление 15.03.02
+«Технологические машины и оборудование», регион Респ. Татарстан.** Two
+findings while trying to pull this direction's профстандарты out of the
+registry to seed the pilot:
+
+- **trudvsem.ru: confirmed live, zero setup.** Plain HTTP GET, no auth, no
+  registration. Region code for Татарстан is `1600000000000`
+  (`/api/v1/vacancies/region/1600000000000?text=...`) — verified against
+  real data: 86 real, dated vacancies for «инженер-технолог» in Tatarstan
+  (ТАИФ-НК, Казанское ОКБ «Союз», Зеленодольский завод им. Горького), each
+  with salary and creation date. This alone is enough to seed Phase 1's
+  `labourMarket` interface for this profession/region.
+- **hh.ru: no longer usable anonymously.** Confirmed live: unauthenticated
+  `GET /vacancies` now returns `{"errors":[{"type":"forbidden"}]}` (matches
+  the "closed API access" tightening reported since Dec 2024 — evidently
+  extends past job-seeker features to anonymous analytical search too).
+  `GET /areas` (reference data) still works with no auth — Tatarstan's `id`
+  is `1624`. Actual vacancy search needs a registered app + OAuth token via
+  dev.hh.ru. Not a blocker (trudvsem alone covers Phase 0) — treat as
+  secondary/deferred, register only if trudvsem's coverage proves
+  insufficient for a real dossier.
+- **Two real bugs found and fixed in the shared OCR pipeline** (this
+  direction's fgosvo.ru PDF is a scanned document — see
+  `services/documentExtractor.ts` / `services/yandexVision.ts`, shared by
+  grading, program import, and ФГОС ingestion alike, so both fixes benefit
+  every feature that OCRs a document, not just this pilot):
+  1. `documentExtractor.ts`'s scanned-PDF detector counted `pdf-parse`'s own
+     per-page markers (`-- 1 of 23 --`, …) as "words" — a 23-page scan with
+     zero real text tokenised to 115 "words" via naive whitespace-splitting,
+     sailing past the 50-word OCR trigger and landing as an empty draft
+     with no error. Now counts runs of 2+ Unicode letters instead, immune
+     to digit/punctuation noise from page markers or page numbers.
+  2. Yandex Vision's own PDF ingestion can't decode every embedded image
+     codec — confirmed directly against the real 15.03.02 PDF: its scanned
+     pages are CCITT Group 4-encoded (the standard compression for
+     scanned government documents), and Vision's `batchAnalyze` fails
+     outright with `"Can't decode Image: image: unknown format"` even
+     though the PDF itself is perfectly valid. Fixed by rasterizing every
+     page to a PNG (`pdf-to-img`, wraps pdfjs-dist — pure JS, no system
+     binary dependency) before sending to Vision, which sidesteps codec
+     support entirely and also removes the old 8-page-per-call cap
+     `batchAnalyze` silently applied to raw PDF content (replaced
+     `pdf-lib`-based PDF chunking, now unused, with per-page rasterization).
+     **Needed `npm install` at the repo root** to pick up the new
+     `pdf-to-img` dependency — the code degrades gracefully (falls back to
+     the old whole-PDF call) if it's ever missing, but that fallback still
+     can't decode CCITT scans. Also needed an `overrides` entry
+     (`pdfjs-dist` pinned to one version — `pdf-parse` and `pdf-to-img`
+     each pull their own, and pdfjs-dist's Node build gets confused when
+     two different-version copies load into the same process, throwing
+     "API version does not match Worker version"). Applying the override
+     against an already-committed lockfile is a known npm bug
+     ([npm/cli#4232](https://github.com/npm/cli/issues/4232)) — needed a
+     full `rm -rf node_modules package-lock.json && npm install`, not just
+     a plain reinstall.
+  - 5 new unit tests for `yandexVisionOCR` (mocking `pdf-to-img` + `fetch`)
+    + 2 new for `documentExtractor.ts`'s OCR trigger.
+  - **Re-verified end-to-end against the real 15.03.02 PDF, confirmed
+    working:** re-ran the actual import pipeline (`fetchDocumentFromUrl` →
+    `extractText` → `extractFgosDraft` → `createFgosStandardDraft`) —
+    OCR'd all 23 scanned pages (27.7s), correctly identified the document
+    (приказ №728, 15.03.02 Технологические машины и оборудование), and
+    extracted **25 competencies, 16 профстандарты (28.003, 40.052, 40.069,
+    …, all genuinely scoped to machinery/manufacturing — механосборочное,
+    кузнечно-штамповочное, литейное производство), 4 structure
+    requirements.** Phase 0's профстандарты blocker is closed — the pilot
+    can proceed.
 
 ### AA. ФГОС 3++ registry — normative reference layer + ПК-конструктор · Effort: v1 S (inside Z's pilot), full M · 🟢 v1 SHIPPED (2026-07-22)
 

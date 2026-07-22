@@ -1601,3 +1601,50 @@ export interface FgosDraft {
   structureRequirements:   FgosStructureRequirement[]
   profstandardRefs:        FgosProfstandardRef[]
 }
+
+// РОП Студия v0 (TODO.md Feature Z, Phase 0) — labor-market evidence.
+
+export interface SampleVacancy {
+  title:    string
+  employer: string
+  salary:   string | null
+  url:      string
+  date:     string
+}
+
+export interface ProfessionSnapshot {
+  term:   string
+  total:  number
+  sample: SampleVacancy[]
+}
+
+// Multi-region support (migration 090) — one generation can be grounded in
+// vacancy data across several regions at once, not just the first picked.
+export interface RegionSnapshot {
+  region_code:   string
+  region_name:   string
+  by_profession: ProfessionSnapshot[]
+}
+
+export interface SupportedRegion {
+  code: string
+  name: string
+}
+
+export interface MarketEvidenceProfstandardRef {
+  code: string
+  name: string
+}
+
+export interface MarketEvidence {
+  id:                string
+  program_id:        string
+  region_codes:      string[]
+  region_names:      string[]
+  professions:       string[]
+  vacancy_snapshot:  RegionSnapshot[]
+  profstandard_refs: MarketEvidenceProfstandardRef[]
+  section_text:      string
+  created_at:        string
+  updated_at:        string
+}

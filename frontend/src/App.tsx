@@ -25,6 +25,7 @@ import History from './pages/History'
 import Presentations from './pages/Presentations'
 import Topics from './pages/Topics'
 import Curriculum from './pages/Curriculum'
+import RopStudio from './pages/RopStudio'
 import Quizzes from './pages/Quizzes'
 import FosStudio from './pages/FosStudio'
 import PublishedAssignments from './pages/PublishedAssignments'
@@ -299,6 +300,7 @@ export default function App() {
             <Route path="/leadership/teachers/:id" element={<LeadershipRoute><LeadershipTeacher /></LeadershipRoute>} />
             <Route path="/programs"      element={<ProgramsRoute><InstitutionPrograms /></ProgramsRoute>} />
             <Route path="/programs/:id"  element={<ProgramsRoute><InstitutionProgramDetail /></ProgramsRoute>} />
+            <Route path="/rop-studio"    element={<ProgramsRoute><RopStudio /></ProgramsRoute>} />
             <Route path="/settings"      element={<Settings />} />
             <Route path="/help"          element={<Help />} />
             <Route path="/feedback"      element={<Feedback />} />

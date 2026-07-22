@@ -1,16 +1,19 @@
 import { logger } from '../lib/logger'
 
-// Yandex Vision v1 batchAnalyze silently caps a PDF at 8 pages per call — a
-// 20-page scanned учебный план loses everything after page 8. When pdf-lib is
-// available at runtime we split the PDF into 8-page chunks and OCR each. If
-// pdf-lib isn't installed (npm install pdf-lib) the code degrades to the
-// single-call behavior — identical to before, no regression, just a warning.
-const PAGES_PER_OCR_CALL = 8
-
 /**
  * OCR via Yandex Vision — best Cyrillic accuracy, accessible inside Russia.
- * Accepts image buffers and PDF buffers. For multi-page PDFs > 8 pages, splits
- * into 8-page chunks so nothing is silently truncated (requires pdf-lib).
+ * Accepts image buffers and PDF buffers. PDFs are rasterized to one PNG per
+ * page before sending, for two reasons confirmed against real fgosvo.ru
+ * documents:
+ *   1. Yandex Vision's own PDF ingestion can't decode every embedded image
+ *      codec — a CCITT Group 4 scan (the common compression for
+ *      scanned government documents) fails outright with "Can't decode
+ *      Image: image: unknown format", even though the PDF itself is
+ *      perfectly valid and pdf-lib/pdf-parse read it fine. A plain PNG
+ *      sidesteps codec support entirely.
+ *   2. batchAnalyze also silently caps a raw PDF at 8 pages per call — a
+ *      20+ page scanned document loses everything after page 8. Rasterizing
+ *      per-page removes this cap too (one image per call, not one PDF).
  */
 export async function yandexVisionOCR(
   fileBuffer: Buffer,
@@ -29,22 +32,27 @@ export async function yandexVisionOCR(
     return ocrOneChunk(fileBuffer, apiKey, folderId)
   }
 
-  // Split PDFs > 8 pages so nothing after page 8 is silently lost.
-  const chunks = await splitPdfIntoChunks(fileBuffer, PAGES_PER_OCR_CALL)
-  if (chunks.length <= 1) {
+  const pages = await rasterizePdfPages(fileBuffer)
+  if (pages === null) {
+    // Rasterizer unavailable/failed — degrade to the legacy whole-PDF call.
+    // Works for a PDF Vision can decode natively; still fails for a
+    // CCITT-encoded scan, but that's the same behavior as before this fix.
     return ocrOneChunk(fileBuffer, apiKey, folderId)
   }
-  logger.info({ message: 'PDF OCR: splitting into chunks', chunks: chunks.length })
+  if (pages.length === 0) return ''
+  if (pages.length === 1) return ocrOneChunk(pages[0], apiKey, folderId)
+
+  logger.info({ message: 'PDF OCR: rasterized to page images', pages: pages.length })
 
   // Sequential (not parallel) — Vision has per-key rate limits and OCR of a
-  // large scanned plan is already slow; avoiding a burst keeps the request
-  // predictable and preserves reading order.
+  // large scanned document is already slow; avoiding a burst keeps the
+  // request predictable and preserves reading order.
   const out: string[] = []
-  for (const chunk of chunks) {
-    out.push(await ocrOneChunk(chunk, apiKey, folderId))
+  for (const page of pages) {
+    out.push(await ocrOneChunk(page, apiKey, folderId))
   }
-  // Chunks are already separated by their own \f page-breaks; join with \f
-  // between chunks to preserve the same downstream «[стр. N]» convention.
+  // Each page is OCR'd independently; join with \f to preserve the same
+  // downstream «[стр. N]» convention as a native multi-page result.
   return out.join('\f')
 }
 
@@ -94,63 +102,41 @@ async function ocrOneChunk(
     .join('\f')
 }
 
-// Split a PDF Buffer into N-page chunks using pdf-lib. Dynamic import so the
-// service still runs (with single-call OCR — legacy behavior) if pdf-lib isn't
-// installed. Returns [original] when splitting can't help (single page,
-// pdf-lib missing, or corrupt PDF).
-// Structural type for the subset of pdf-lib we use — lets tsc succeed even
-// before the dependency is installed (dynamic import at runtime is what
-// actually loads it).
-interface PdfLibPageProxy { /* opaque */ }
-interface PdfLibDoc {
-  getPageCount(): number
-  copyPages(src: PdfLibDoc, indices: number[]): Promise<PdfLibPageProxy[]>
-  addPage(p: PdfLibPageProxy): void
-  save(): Promise<Uint8Array>
-}
-interface PdfLibShape {
-  PDFDocument: {
-    load(bytes: Buffer, opts?: { ignoreEncryption?: boolean }): Promise<PdfLibDoc>
-    create(): Promise<PdfLibDoc>
-  }
+// Rasterize every page of a PDF to a PNG buffer via `pdf-to-img` (wraps
+// pdfjs-dist — pure JS, no system binary like poppler required, so this
+// works on any deploy target without extra provisioning). Dynamic import so
+// the service still runs (degraded to the legacy whole-PDF call — see
+// yandexVisionOCR) if the package isn't installed. Returns null (not []) so
+// the caller can tell "rasterizer unavailable/failed" apart from "genuinely
+// zero pages" and choose the right fallback.
+// Structural type for the subset of pdf-to-img we use — lets tsc succeed
+// even before the dependency is installed (dynamic import at runtime is
+// what actually loads it).
+interface PdfToImgShape {
+  pdf(dataUrl: string, opts?: { scale?: number }): Promise<AsyncIterable<Buffer>>
 }
 
-async function splitPdfIntoChunks(fileBuffer: Buffer, pagesPerChunk: number): Promise<Buffer[]> {
-  let pdfLib: PdfLibShape
+async function rasterizePdfPages(fileBuffer: Buffer): Promise<Buffer[] | null> {
+  let pdfToImg: PdfToImgShape
   try {
-    // Dynamic import — pdf-lib may or may not be present depending on how the
-    // env was provisioned. Cast through unknown so the code compiles whether
-    // or not `pdf-lib` has type declarations resolvable at build time.
-    pdfLib = (await import('pdf-lib' as string)) as unknown as PdfLibShape
+    // Cast through unknown so the code compiles whether or not `pdf-to-img`
+    // has type declarations resolvable at build time.
+    pdfToImg = (await import('pdf-to-img' as string)) as unknown as PdfToImgShape
   } catch {
-    logger.warn({ message: 'pdf-lib not installed — PDF OCR limited to first ~8 pages. Run: npm install pdf-lib' })
-    return [fileBuffer]
+    logger.warn({ message: 'pdf-to-img not installed — scanned-PDF OCR may fail on some documents (e.g. CCITT-encoded scans). Run: npm install pdf-to-img' })
+    return null
   }
   try {
-    const { PDFDocument } = pdfLib
-    const src = await PDFDocument.load(fileBuffer, { ignoreEncryption: true })
-    const total = src.getPageCount()
-    if (total <= pagesPerChunk) return [fileBuffer]
-    const chunks: Buffer[] = []
-    for (let start = 0; start < total; start += pagesPerChunk) {
-      const end = Math.min(start + pagesPerChunk, total)
-      const out = await PDFDocument.create()
-      const copied = await out.copyPages(src, range(start, end))
-      copied.forEach((p: PdfLibPageProxy) => out.addPage(p))
-      const bytes = await out.save()
-      chunks.push(Buffer.from(bytes))
-    }
-    return chunks
+    // pdf-to-img takes a file path or a data URL, not a raw Buffer.
+    const dataUrl = `data:application/pdf;base64,${fileBuffer.toString('base64')}`
+    const doc = await pdfToImg.pdf(dataUrl, { scale: 2 })
+    const pages: Buffer[] = []
+    for await (const page of doc) pages.push(page)
+    return pages
   } catch (err) {
-    logger.warn({ message: 'PDF split failed — falling back to single-call OCR', error: (err as Error).message })
-    return [fileBuffer]
+    logger.warn({ message: 'PDF rasterization failed — falling back to whole-PDF OCR call', error: (err as Error).message })
+    return null
   }
-}
-
-function range(start: number, end: number): number[] {
-  const out: number[] = []
-  for (let i = start; i < end; i++) out.push(i)
-  return out
 }
 
 // ─── Minimal response typing ──────────────────────────────────────────────────

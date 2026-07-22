@@ -104,6 +104,24 @@ export async function listFgosStandardsPage(
   return { rows, total: countRows[0].total }
 }
 
+// РОП Студия v0 (TODO.md Feature Z, Phase 0) — looks up a direction's
+// профстандарты for the market-evidence generator. `programs.level` is
+// English ('bachelor'|'master'|'specialist'); fgos_standards.level is
+// Russian — the caller maps between them (routes/programs.ts).
+export async function getProfstandardRefsForDirection(
+  directionCode: string,
+  level: string
+): Promise<FgosProfstandardRefRow[]> {
+  const { rows } = await pool.query<FgosProfstandardRefRow>(
+    `SELECT p.* FROM fgos_profstandard_refs p
+       JOIN fgos_standards s ON s.id = p.fgos_standard_id
+      WHERE s.direction_code = $1 AND s.level = $2
+      ORDER BY p.code`,
+    [directionCode, level]
+  )
+  return rows
+}
+
 export async function getFgosStandardById(id: string): Promise<FgosStandardWithChildren | null> {
   const { rows } = await pool.query<FgosStandardRow>(
     `SELECT * FROM fgos_standards WHERE id = $1`,

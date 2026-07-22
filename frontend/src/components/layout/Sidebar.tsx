@@ -230,6 +230,9 @@ export default function Sidebar({ onClose }: Props) {
             {canSeePrograms && (
               <NavRow item={{ icon: 'list-checks', label: 'Образовательные программы', to: '/programs' }} />
             )}
+            {canSeePrograms && (
+              <NavRow item={{ icon: 'bar-chart', label: 'РОП Студия', to: '/rop-studio' }} />
+            )}
             {canSeeInstitutionPanel && (
               <NavRow item={{ icon: 'building', label: 'Организация', to: '/institution' }} />
             )}

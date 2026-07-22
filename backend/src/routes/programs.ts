@@ -40,6 +40,10 @@ import { fetchDocumentFromUrl, fetchPageHtml, resolveAllowedDomains, type Fetche
 import { parseSvedenPage, selectProgramRow, matchDiscipline } from '../services/svedenParser'
 import { getLimits } from '../config/planLimits'
 import { logger } from '../lib/logger'
+import { getProfstandardRefsForDirection } from '../db/queries/fgos'
+import { getLatestMarketEvidence, createMarketEvidence, updateMarketEvidenceText } from '../db/queries/programMarketEvidence'
+import { fetchVacancySnapshot, SUPPORTED_REGIONS } from '../services/labourMarket'
+import { generateMarketEvidenceSection } from '../services/marketEvidenceGenerator'
 import type {
   ProgramDiscipline, ProgramCompetency,
   ProgramPracticeType, ProgramDocumentKind,
@@ -154,6 +158,14 @@ async function resolveUploadOrUrl(
 // Returns `program` org_units the caller can link a new programme to. Kept as
 // a dedicated endpoint so РОПы and polygroup heads (who can't call the
 // institution-admin structure endpoint) can still populate the picker.
+
+// РОП Студия v0 (TODO.md Feature Z) — the full trudvsem-verified region
+// list (see services/labourMarket.ts for how each code was confirmed).
+// Exposed as an endpoint rather than duplicated in the frontend so there's
+// one source of truth for 90 entries, not two to keep in sync.
+router.get('/regions', asyncHandler(async (_req, res) => {
+  res.json(SUPPORTED_REGIONS)
+}))
 
 router.get('/pickable-units', asyncHandler(async (req, res) => {
   const scope = req.programAccessScope!
@@ -505,6 +517,76 @@ router.get('/:id/analysis.pdf', asyncHandler(async (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${fname}"`)
   res.setHeader('Content-Length', pdf.length)
   res.end(pdf)
+}))
+
+// ── РОП Студия v0 — market evidence (TODO.md Feature Z, Phase 0) ───────────────
+// «Обоснование актуальности»: citation-grounded market-relevance text built
+// from real trudvsem.ru vacancy data + the direction's профстандарты
+// (already in the ФГОС registry, migration 088). Generation persists a new
+// row (program_market_evidence, migration 089) — cached-latest-wins, same
+// shape as program_analyses above. Never auto-published anywhere — the РОП
+// edits the text in place (rule #3), same posture as every other AI-assisted
+// authoring surface in the app.
+
+const PROGRAM_LEVEL_TO_FGOS_LEVEL: Record<string, string> = {
+  bachelor: 'бакалавриат', master: 'магистратура', specialist: 'специалитет',
+}
+
+router.get('/:id/market-evidence', asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  res.json(await getLatestMarketEvidence(detail.id))
+}))
+
+router.post('/:id/market-evidence', aiLimiter, asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  assertEdit(req, detail.org_unit_id)   // generates + persists a row — treat as edit
+
+  const regionCodes = Array.isArray(req.body.region_codes)
+    ? req.body.region_codes.map((c: unknown) => String(c).trim()).filter(Boolean)
+    : []
+  if (regionCodes.length === 0) throw new ValidationError('Выберите хотя бы один регион.')
+  const unknownCode = regionCodes.find((c: string) => !SUPPORTED_REGIONS.some((r) => r.code === c))
+  if (unknownCode) throw new ValidationError('Неизвестный регион.')
+
+  const professions = Array.isArray(req.body.professions)
+    ? req.body.professions.map((p: unknown) => String(p).trim()).filter(Boolean)
+    : []
+  if (professions.length === 0) throw new ValidationError('Укажите хотя бы одну профессию для поиска вакансий.')
+
+  if (!detail.code) throw new ValidationError('У программы не указан код направления — обоснование не с чем связать.')
+  const fgosLevel = detail.level ? PROGRAM_LEVEL_TO_FGOS_LEVEL[detail.level] : null
+  if (!fgosLevel) throw new ValidationError('У программы не указан уровень образования.')
+
+  const profstandardRefs = (await getProfstandardRefsForDirection(detail.code, fgosLevel))
+    .map((r) => ({ code: r.code, name: r.name }))
+
+  const snapshot = await fetchVacancySnapshot(regionCodes, professions)
+  const { text } = await generateMarketEvidenceSection({
+    programTitle:  detail.name,
+    profstandards: profstandardRefs,
+    snapshot,
+    teacherId:     req.teacher.id,
+    institutionId: req.teacher.institution_id ?? undefined,
+  })
+  if (!text) throw new ValidationError('Не удалось сгенерировать текст — попробуйте ещё раз.')
+
+  const evidence = await createMarketEvidence({
+    programId: detail.id, snapshot, professions, profstandardRefs,
+    sectionText: text, createdBy: req.teacher.id,
+  })
+  res.status(201).json(evidence)
+}))
+
+router.put('/:id/market-evidence/:evidenceId', asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  assertEdit(req, detail.org_unit_id)
+
+  const sectionText = String(req.body.section_text ?? '').trim()
+  if (!sectionText) throw new ValidationError('Текст не может быть пустым.')
+
+  const updated = await updateMarketEvidenceText(req.params.evidenceId, detail.id, sectionText)
+  if (!updated) throw new NotFoundError('Обоснование актуальности')
+  res.json(updated)
 }))
 
 // ── Attached documents (рабочая программа + практики) ──────────────────────────

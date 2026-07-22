@@ -2,7 +2,7 @@ import client from './client'
 import type {
   Program, ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramAnalysis,
   ProgramPracticeType, ProgramDocumentKind, ProgramDocument, ProgramDocumentReview,
-  ProgramDocumentDiff,
+  ProgramDocumentDiff, MarketEvidence, SupportedRegion,
 } from '../types'
 
 // Academic programs (учебные планы) — institution-admin feature.
@@ -290,6 +290,42 @@ export async function analyzeProgram(id: string): Promise<ProgramAnalysis> {
 
 export async function getAnalysis(id: string): Promise<ProgramAnalysis | null> {
   const res = await client.get<ProgramAnalysis | null>(`/api/institution/programs/${id}/analysis`)
+  return res.data
+}
+
+// ─── РОП Студия v0 — market evidence (TODO Feature Z, Phase 0) ─────────────
+
+export async function getSupportedRegions(): Promise<SupportedRegion[]> {
+  const res = await client.get<SupportedRegion[]>('/api/institution/programs/regions')
+  return res.data
+}
+
+export async function getMarketEvidence(programId: string): Promise<MarketEvidence | null> {
+  const res = await client.get<MarketEvidence | null>(`/api/institution/programs/${programId}/market-evidence`)
+  return res.data
+}
+
+export async function generateMarketEvidence(
+  programId: string,
+  input: { regionCodes: string[]; professions: string[] }
+): Promise<MarketEvidence> {
+  // A trudvsem fetch per (region × profession term) pair + one LLM call —
+  // override the default timeout; scales with how many regions are picked.
+  const res = await client.post<MarketEvidence>(
+    `/api/institution/programs/${programId}/market-evidence`,
+    { region_codes: input.regionCodes, professions: input.professions },
+    { timeout: 30_000 + input.regionCodes.length * 20_000 }
+  )
+  return res.data
+}
+
+export async function updateMarketEvidence(
+  programId: string, evidenceId: string, sectionText: string
+): Promise<MarketEvidence> {
+  const res = await client.put<MarketEvidence>(
+    `/api/institution/programs/${programId}/market-evidence/${evidenceId}`,
+    { section_text: sectionText }
+  )
   return res.data
 }
 

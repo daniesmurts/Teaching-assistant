@@ -38,8 +38,15 @@ export async function extractText(
         await parser.destroy()
       }
 
-      // Very little text → likely a scanned PDF, fall through to OCR
-      const wordCount = text.split(/\s+/).filter(Boolean).length
+      // Very little real text → likely a scanned PDF, fall through to OCR.
+      // Counting on whitespace-split tokens alone is fooled by a scanned PDF
+      // whose only "text layer" is pdf-parse's own per-page markers
+      // ("-- 1 of 23 --", ...) — confirmed against a real fgosvo.ru document
+      // (23 scanned pages) where those markers alone tokenised to 115 "words",
+      // sailing past any reasonable threshold while carrying zero real
+      // content. Count runs of 2+ Unicode letters instead — immune to
+      // digit/punctuation noise from page markers, page numbers, or tables.
+      const wordCount = (text.match(/\p{L}{2,}/gu) ?? []).length
       if (wordCount < 50) {
         const ocrText = await yandexVisionOCR(fileBuffer, 'application/pdf')
         return { text: cleanText(ocrText), method: 'ocr', pageCount }

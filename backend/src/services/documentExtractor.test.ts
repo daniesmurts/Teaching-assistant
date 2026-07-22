@@ -1,5 +1,24 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { cleanText, estimateTokens } from './documentExtractor'
+
+// Scanned-PDF OCR fallback: mocks pdf-parse's `PDFParse` class shape
+// (`.getText()` → `{text, total}`, `.destroy()`) and yandexVisionOCR, so the
+// dynamic `import('pdf-parse')` inside extractText() resolves to this stub.
+// vi.hoisted is required (not plain top-level consts) since vi.mock factories
+// are hoisted above imports and can't close over ordinary module-scope vars.
+const { getTextMock, destroyMock, yandexVisionOCRMock } = vi.hoisted(() => ({
+  getTextMock: vi.fn(), destroyMock: vi.fn(), yandexVisionOCRMock: vi.fn(),
+}))
+vi.mock('pdf-parse', () => ({
+  // A regular function, not an arrow function — `new PDFParse(...)` needs a
+  // real constructor; an arrow-function implementation throws "is not a
+  // constructor" (silently swallowed by extractText's own try/catch, which
+  // then falls through to OCR — a confusing failure mode to debug blind).
+  PDFParse: vi.fn().mockImplementation(function PDFParseMock() {
+    return { getText: getTextMock, destroy: destroyMock }
+  }),
+}))
+vi.mock('./yandexVision', () => ({ yandexVisionOCR: yandexVisionOCRMock }))
 
 describe('cleanText', () => {
   it('normalizes Windows line endings', () => {
@@ -36,6 +55,41 @@ describe('cleanText', () => {
 
   it('trims the entire string', () => {
     expect(cleanText('  \n\n  text  \n\n  ')).toBe('text')
+  })
+})
+
+describe('extractText — scanned-PDF OCR fallback', () => {
+  // Call counts (not implementations) accumulate across tests without this —
+  // e.g. the previous test's OCR call would still show up in this test's
+  // `not.toHaveBeenCalled()` assertion.
+  beforeEach(() => { getTextMock.mockClear(); destroyMock.mockClear(); yandexVisionOCRMock.mockClear() })
+
+  it('falls back to OCR when pdf-parse only returns per-page markers (no real text)', async () => {
+    // A real fgosvo.ru document: a scanned PDF whose only "text layer" is
+    // pdf-parse's own page-boundary markers — 23 pages, zero real content.
+    // Naively token-splitting this yields 115 "words" (well past a 50-word
+    // threshold), which used to fool the OCR trigger entirely.
+    const markerOnlyText = Array.from({ length: 23 }, (_, i) => `-- ${i + 1} of 23 --`).join('\n\n')
+    getTextMock.mockResolvedValueOnce({ text: markerOnlyText, total: 23 })
+    yandexVisionOCRMock.mockResolvedValueOnce('Реальный текст со скана, распознанный OCR.')
+
+    const { extractText } = await import('./documentExtractor')
+    const result = await extractText(Buffer.from('stub pdf bytes'), 'application/pdf')
+
+    expect(result.method).toBe('ocr')
+    expect(result.text).toBe('Реальный текст со скана, распознанный OCR.')
+    expect(yandexVisionOCRMock).toHaveBeenCalledOnce()
+  })
+
+  it('does not OCR a PDF with a genuine text layer', async () => {
+    const realParagraph = 'Настоящий текст документа с достаточным количеством содержательных слов для прохождения порога в пятьдесят слов подряд без обращения к оптическому распознаванию символов. '
+    getTextMock.mockResolvedValueOnce({ text: realParagraph.repeat(3), total: 1 })
+
+    const { extractText } = await import('./documentExtractor')
+    const result = await extractText(Buffer.from('stub pdf bytes'), 'application/pdf')
+
+    expect(result.method).toBe('text_layer')
+    expect(yandexVisionOCRMock).not.toHaveBeenCalled()
   })
 })
 
