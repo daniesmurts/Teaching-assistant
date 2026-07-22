@@ -7,7 +7,7 @@ export interface LeadershipUnit {
   name:                   string
   short_name:             string | null
   type_code:              string
-  role:                   string         // 'edit' | 'admin' (the one the caller holds on THIS unit)
+  role:                   string         // 'view' | 'edit' | 'admin' (the one the caller holds on THIS unit)
   subtree_teacher_count:  number
 }
 
@@ -44,6 +44,13 @@ export interface LeadershipActivity {
  * Platform admin is handled by the caller (it short-circuits and returns all
  * institution roots) — this query answers the tree-membership question only.
  */
+/** Direct-holding picker list for the leadership dashboard. Domain- and
+ *  level-widened in Phase 2 (Research.md §7.10) to match `hasLeadershipRole`
+ *  — found missing during Phase 2 browser verification: without this, a
+ *  `view × teaching` grant passed the `requireLeader` discoverability gate
+ *  but got an empty picker here (still `role IN ('edit','admin')`,
+ *  domain-blind), so the dashboard rendered "no leadership roles" despite
+ *  being authorised. */
 export async function listDirectLeadershipUnits(
   teacherId: string,
   institutionId: string | null
@@ -59,7 +66,8 @@ export async function listDirectLeadershipUnits(
        JOIN org_units u ON u.id = our.org_unit_id
       WHERE our.teacher_id = $1
         AND u.institution_id = $2
-        AND our.role IN ('edit', 'admin')
+        AND our.role IN ('view', 'edit', 'admin')
+        AND our.domain IN ('all', 'teaching')
       ORDER BY u.type_code, u.name`,
     [teacherId, institutionId]
   )
@@ -355,10 +363,17 @@ export async function listTeacherRecentGrades(teacherId: string, limit = 20): Pr
 
 // ─── is_leader signal for the auth payload ────────────────────────────────────
 
-/** Cheap existence check — does this teacher hold any head/admin role on a unit
- *  in their CURRENT institution? Roles left behind in another institution after
- *  a reassignment don't count. Platform admin is checked separately on the auth
- *  payload (orthogonal flag). */
+/** Cheap existence check — does this teacher hold any view/edit/admin role,
+ *  in the `teaching` domain (or `'all'`), on a unit in their CURRENT
+ *  institution? Roles left behind in another institution after a
+ *  reassignment don't count. Platform admin is checked separately on the auth
+ *  payload (orthogonal flag).
+ *
+ *  Domain filter added in Phase 2 (Research.md §7.10) — before this, the
+ *  check matched on role alone, so a `domain='curriculum'` grant (e.g. a
+ *  УМЦ head) silently satisfied it and reached the leadership dashboard
+ *  (grading activity, rosters) it was never meant to see. `view` is included
+ *  because every route this gates (`routes/leadership.ts`) is read-only. */
 export async function hasLeadershipRole(teacherId: string, institutionId: string | null): Promise<boolean> {
   if (!institutionId) return false
   const { rows } = await pool.query<{ ok: boolean }>(
@@ -367,7 +382,8 @@ export async function hasLeadershipRole(teacherId: string, institutionId: string
          JOIN org_units u ON u.id = our.org_unit_id
         WHERE our.teacher_id = $1
           AND u.institution_id = $2
-          AND our.role IN ('edit', 'admin')
+          AND our.role IN ('view', 'edit', 'admin')
+          AND our.domain IN ('all', 'teaching')
      ) AS ok`,
     [teacherId, institutionId]
   )

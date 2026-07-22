@@ -105,17 +105,14 @@ router.post('/rubrics', requireDomain('curriculum', 'edit'), validate(createRubr
   res.status(201).json(shared)
 }))
 
-// ─── Everything below stays institution-root-admin-only ───────────────────────
+// ─── Overview / usage / roster read (Research.md §7.10 Phase 2 — 'teaching' ───
+// domain, read-only, NOT institution-root admin). Same reasoning as the
+// criteria/rubrics block above: a ПР УР holding view×teaching×root reaches
+// these without also reaching invites, LTI/SSO, model choice, or the audit
+// log. All four routes are pure reads — no recordAudit/selfAudited needed
+// (the global auditLog middleware only logs mutating verbs).
 
-router.use(requireInstitutionAdmin)
-// This router records its own rich audit rows (recordAudit calls below) — opt
-// out of the catch-all auditLog middleware. Any new mutation here MUST call
-// recordAudit or it will go unlogged.
-router.use((_req, res, next) => { res.locals.selfAudited = true; next() })
-
-// ─── Overview ──────────────────────────────────────────────────────────────────
-
-router.get('/overview', asyncHandler(async (req, res) => {
+router.get('/overview', requireDomain('teaching', 'view'), asyncHandler(async (req, res) => {
   const id = institutionId(req)
   const [institution, overview] = await Promise.all([
     getInstitutionById(id),
@@ -127,18 +124,36 @@ router.get('/overview', asyncHandler(async (req, res) => {
   })
 }))
 
-// ─── Usage (tokens + counts only — never cost) ────────────────────────────────
-
-router.get('/usage/daily', asyncHandler(async (req, res) => {
+router.get('/usage/daily', requireDomain('teaching', 'view'), asyncHandler(async (req, res) => {
   const days = Math.min(parseInt((req.query.days as string) ?? '30', 10) || 30, 365)
   res.json(await getInstitutionDailyUsage(institutionId(req), days))
 }))
 
-// ─── Teachers ──────────────────────────────────────────────────────────────────
+router.get('/usage/export', requireDomain('teaching', 'view'), asyncHandler(async (req, res) => {
+  const days = Math.min(parseInt((req.query.days as string) ?? '90', 10) || 90, 365)
+  const rows = await getInstitutionDailyUsage(institutionId(req), days)
+  const csv = toCsv(
+    ['Дата', 'Проверок', 'Презентаций', 'Токенов'],
+    rows.map((r) => [r.date, r.grade_count, r.presentation_count, r.total_tokens])
+  )
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+  res.setHeader('Content-Disposition', `attachment; filename="${csvFilename('ispum_usage')}"`)
+  res.send(csv)
+}))
 
-router.get('/teachers', asyncHandler(async (req, res) => {
+router.get('/teachers', requireDomain('teaching', 'view'), asyncHandler(async (req, res) => {
   res.json(await listInstitutionTeachers(institutionId(req)))
 }))
+
+// ─── Everything below stays institution-root-admin-only ───────────────────────
+
+router.use(requireInstitutionAdmin)
+// This router records its own rich audit rows (recordAudit calls below) — opt
+// out of the catch-all auditLog middleware. Any new mutation here MUST call
+// recordAudit or it will go unlogged.
+router.use((_req, res, next) => { res.locals.selfAudited = true; next() })
+
+// ─── Teachers (mutations stay admin-only) ─────────────────────────────────────
 
 // institution_admin may only toggle active state — not role or plan
 router.patch('/teachers/:id', asyncHandler(async (req, res) => {
@@ -271,20 +286,6 @@ router.delete('/teachers/invite/:id', asyncHandler(async (req, res) => {
 router.get('/audit', asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt((req.query.limit as string) ?? '100', 10) || 100, 500)
   res.json(await listAuditByInstitution(institutionId(req), limit))
-}))
-
-// ─── CSV usage export (units only — never cost) ──────────────────────────────
-
-router.get('/usage/export', asyncHandler(async (req, res) => {
-  const days = Math.min(parseInt((req.query.days as string) ?? '90', 10) || 90, 365)
-  const rows = await getInstitutionDailyUsage(institutionId(req), days)
-  const csv = toCsv(
-    ['Дата', 'Проверок', 'Презентаций', 'Токенов'],
-    rows.map((r) => [r.date, r.grade_count, r.presentation_count, r.total_tokens])
-  )
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-  res.setHeader('Content-Disposition', `attachment; filename="${csvFilename('ispum_usage')}"`)
-  res.send(csv)
 }))
 
 // ─── Shared RAG flywheel (kafedra-wide loop) ──────────────────────────────────

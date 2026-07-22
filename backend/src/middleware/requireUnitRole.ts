@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express'
 import { ForbiddenError } from '../errors/AppError'
 import { canActOnUnit } from '../services/orgScope'
-import type { UnitRole } from '../db/queries/orgUnits'
+import type { UnitRole, GrantDomain } from '../db/queries/orgUnits'
 
 // ─── Unit-scoped authoriser (Research.md §7.3, CLAUDE.md target middleware) ────
 //
@@ -26,14 +26,17 @@ export function requirePlatformAdmin(req: Request, _res: Response, next: NextFun
 /**
  * Per-route guard: resolve the target org unit from the request, then ask
  * whether the calling teacher holds any of `roles` on that unit or any
- * ancestor. platform_admin bypasses the check.
+ * ancestor, within `domain`. platform_admin bypasses the check.
  *
  * `resolveUnit` returns the target org_unit_id (e.g. from a path param, or by
- * looking up the unit that owns the resource being acted on).
+ * looking up the unit that owns the resource being acted on). `domain` is
+ * required (Research.md §7.10) — see `canActOnUnit`'s doc comment for why an
+ * implicit "any domain" default is unsafe.
  */
 export function requireUnitRole(
   resolveUnit: (req: Request) => Promise<string | null>,
   roles: UnitRole[],
+  domain: GrantDomain,
 ) {
   return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
     try {
@@ -44,7 +47,7 @@ export function requireUnitRole(
         return next(new ForbiddenError('Недостаточно прав для выполнения этого действия'))
       }
 
-      const ok = await canActOnUnit(req.teacher.id, unitId, roles)
+      const ok = await canActOnUnit(req.teacher.id, unitId, roles, domain)
       if (!ok) {
         return next(new ForbiddenError('Недостаточно прав для выполнения этого действия'))
       }

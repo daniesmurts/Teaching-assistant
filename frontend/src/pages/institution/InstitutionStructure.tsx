@@ -18,10 +18,10 @@ const ROLE_LABEL: Record<UnitRole, string> = {
   view:  'Наблюдатель',
 }
 
-// Research.md §7.10 Phase 1 — domains a grant can be scoped to. 'admin' is
-// always full-scope (enforced server-side), so the domain picker only offers
-// a meaningful choice for 'edit'/'view'.
-const GRANT_DOMAIN_OPTIONS: GrantDomain[] = ['all', 'curriculum']
+// Research.md §7.10 — domains a grant can be scoped to. 'admin' is always
+// full-scope (enforced server-side), so the domain picker only offers a
+// meaningful choice for 'edit'/'view'. 'teaching' added Phase 2.
+const GRANT_DOMAIN_OPTIONS: GrantDomain[] = ['all', 'curriculum', 'teaching']
 
 // Level accenting. Two colour families, each reserved for one meaning: amber
 // is the brand/action accent (Button.tsx's `primary` variant, the CTA pulse,

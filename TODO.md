@@ -554,8 +554,26 @@ org-admin.
   on `teacher.curriculum_access` so a curriculum-only grant sees only the tabs
   its level reaches (and is redirected away from admin-only sub-routes rather
   than hitting a 403 wall). See CHANGELOG.
-- **Phase 2 — `teaching` + `view`:** ПР УР read-only width; unlocks the
-  deferred viewer dashboards and §2.x analytics consumers.
+- **Phase 2 — `teaching` domain · 🟢 SHIPPED (2026-07-22).** ПР УР read-only
+  width — usage analytics, grading activity, leadership dashboards, roster
+  read — at `view` level, unlocking the deferred viewer dashboards and §2.x
+  analytics consumers. `hasLeadershipRole`, `listDirectLeadershipUnits`, and
+  both `canActOnUnit` call sites in `routes/leadership.ts` gate on `teaching`
+  domain + `view` level instead of a bare role check.
+  **Real bug found and fixed in the same commit:** `teacherCanActOnUnit`
+  (backing all of the above) predates the domain axis and matched on role
+  alone — so a Phase 1 `curriculum` grant already leaked into the leadership
+  dashboard (grading activity, rosters, institution-wide) before this shipped.
+  `canActOnUnit`/`teacherCanActOnUnit`/`evaluateAccess`/`requireUnitRole` all
+  gained a required `domain` parameter (no unsafe "any domain" default) to
+  close it, with a regression test. institution.ts's `GET /overview`,
+  `/usage/daily`, `/usage/export`, `/teachers` (roster read only) moved ahead
+  of the admin gate the same way Phase 1's criteria/rubrics did — mutations
+  (`PATCH /teachers/:id`, invites) stay admin-only. Frontend: `curriculum_access`
+  gating generalised to also read `teaching_access`; a stale pre-Phase-1
+  `head`/`viewer` label map in `Leadership.tsx` and `InstitutionAudit.tsx`
+  (missed by the Phase 1 rename sweep — unquoted object keys, not string
+  literals) fixed while verifying in-browser. See CHANGELOG.
 - **Phase 3 — `platform` narrowing + per-subtree query scoping:** IT becomes
   sole root admin; the recorded-but-inert 1b sub-unit `admin` grants start
   being consumed (the original (c) work lands here — institution route

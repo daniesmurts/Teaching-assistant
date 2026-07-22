@@ -114,3 +114,72 @@ describe('curriculum-domain access (Research.md §7.10 Phase 1)', () => {
     expect(res.status).toBe(400)
   })
 })
+
+describe('teaching-domain access (Research.md §7.10 Phase 2)', () => {
+  it('REGRESSION: a curriculum-domain grant does NOT leak into the leadership dashboard', async () => {
+    // Found while scoping Phase 2: teacherCanActOnUnit/hasLeadershipRole
+    // predate the domain axis and matched on role alone, so a Phase 1
+    // curriculum grant (role='edit') already satisfied their role-only check
+    // and reached grading activity + rosters it was never meant to see.
+    const { teacher, root, token } = await setupInstitutionTeacher()
+    await addUnitRole(teacher.id, root.id, 'edit', 'curriculum')
+
+    const overview = await request(app).get(`/api/leadership/overview?unitId=${root.id}`)
+      .set('Authorization', `Bearer ${token}`)
+    expect(overview.status).toBe(403)
+  })
+
+  it('a teaching/view grant at root reaches leadership + institution read surfaces', async () => {
+    const { teacher, root, token } = await setupInstitutionTeacher()
+    await addUnitRole(teacher.id, root.id, 'view', 'teaching')
+
+    const leadership = await request(app).get(`/api/leadership/overview?unitId=${root.id}`)
+      .set('Authorization', `Bearer ${token}`)
+    expect(leadership.status).toBe(200)
+
+    const overview = await request(app).get('/api/institution/overview').set('Authorization', `Bearer ${token}`)
+    expect(overview.status).toBe(200)
+
+    const usage = await request(app).get('/api/institution/usage/daily').set('Authorization', `Bearer ${token}`)
+    expect(usage.status).toBe(200)
+
+    const teachers = await request(app).get('/api/institution/teachers').set('Authorization', `Bearer ${token}`)
+    expect(teachers.status).toBe(200)
+  })
+
+  it('a teaching/view grant does NOT reach teacher mutation, curriculum, or platform routes', async () => {
+    const { teacher, root, token } = await setupInstitutionTeacher()
+    await addUnitRole(teacher.id, root.id, 'view', 'teaching')
+    const other = await createTestTeacher({ institutionId: root.institution_id })
+
+    const patch = await request(app).patch(`/api/institution/teachers/${other.id}`)
+      .set('Authorization', `Bearer ${token}`).send({ isActive: false })
+    expect(patch.status).toBe(403)
+
+    const rpd = await request(app).get('/api/institution/rpd/overview').set('Authorization', `Bearer ${token}`)
+    expect(rpd.status).toBe(403)
+
+    const audit = await request(app).get('/api/institution/audit').set('Authorization', `Bearer ${token}`)
+    expect(audit.status).toBe(403)
+  })
+
+  it('a teacher with no grant is refused on teaching-gated routes', async () => {
+    const { root, token } = await setupInstitutionTeacher()
+
+    const leadership = await request(app).get(`/api/leadership/overview?unitId=${root.id}`)
+      .set('Authorization', `Bearer ${token}`)
+    expect(leadership.status).toBe(403)
+
+    const overview = await request(app).get('/api/institution/overview').set('Authorization', `Bearer ${token}`)
+    expect(overview.status).toBe(403)
+  })
+
+  it('a true institution-root admin (domain=all) is unaffected — still reaches leadership', async () => {
+    const { teacher, root, token } = await setupInstitutionTeacher()
+    await addUnitRole(teacher.id, root.id, 'admin', 'all')
+
+    const leadership = await request(app).get(`/api/leadership/overview?unitId=${root.id}`)
+      .set('Authorization', `Bearer ${token}`)
+    expect(leadership.status).toBe(200)
+  })
+})

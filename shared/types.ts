@@ -90,6 +90,11 @@ export interface Teacher {
   // level, independent of is_institution_admin (e.g. a УМЦ head can hold this
   // without being a root admin). Computed from getAccessScope.
   curriculum_access?:    'none' | 'view' | 'edit' | 'admin'
+  // Research.md §7.10 Phase 2 — the 'teaching' functional-authority domain
+  // level (usage analytics, grading activity, leadership dashboards, roster
+  // read), independent of is_institution_admin (e.g. a ПР УР can hold wide
+  // read-only teaching access without being a root admin).
+  teaching_access?:      'none' | 'view' | 'edit' | 'admin'
   institution_id?: string | null
   // Mirror of the teacher's institution's shared_rag_enabled flag — surfaced
   // here so the Courses page can decide whether to show / enable the "поделиться

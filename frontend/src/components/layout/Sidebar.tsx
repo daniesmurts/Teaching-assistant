@@ -142,7 +142,12 @@ export default function Sidebar({ onClose }: Props) {
   // (InstitutionLayout filters the NAV), without being an institution admin.
   const hasCurriculumAccess =
     !!teacher?.curriculum_access && teacher.curriculum_access !== 'none'
-  const canSeeInstitutionPanel = isInstitutionAdmin || hasCurriculumAccess
+  // Research.md §7.10 Phase 2 — a teaching-domain grant (e.g. ПР УР) reaches
+  // the «Организация» panel too (Обзор/Использование/roster read), scoped by
+  // InstitutionLayout the same way curriculum access is.
+  const hasTeachingAccess =
+    !!teacher?.teaching_access && teacher.teaching_access !== 'none'
+  const canSeeInstitutionPanel = isInstitutionAdmin || hasCurriculumAccess || hasTeachingAccess
 
   function logout() { clearAuth(); navigate('/login') }
 

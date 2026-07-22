@@ -64,6 +64,9 @@ function reqMeta(req: Request): { ipAddress: string | null; userAgent: string | 
 // curriculum_access = Research.md §7.10 Phase 1 — the 'curriculum' domain
 // level ('admin'/'edit'/'view'/'none'), independent of is_institution_admin:
 // a УМЦ head can hold curriculum access without being a root admin.
+// teaching_access = Research.md §7.10 Phase 2 — same shape, 'teaching' domain
+// (usage analytics, grading activity, leadership dashboards, roster read):
+// a ПР УР can hold wide read-only teaching access without being a root admin.
 async function adminFlags(row: { id: string; institution_id: string | null; is_platform_admin: boolean }) {
   const is_platform_admin = row.is_platform_admin ?? false
   const [is_institution_admin, has_role, program_scope, access_scope] = await Promise.all([
@@ -78,6 +81,7 @@ async function adminFlags(row: { id: string; institution_id: string | null; is_p
     is_leader:         is_platform_admin || has_role,
     program_access:    program_scope.kind,
     curriculum_access: access_scope.curriculum?.level ?? 'none',
+    teaching_access:   access_scope.teaching?.level ?? 'none',
   }
 }
 

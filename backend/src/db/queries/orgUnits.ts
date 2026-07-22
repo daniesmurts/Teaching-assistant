@@ -195,11 +195,20 @@ export async function listRoleScopesForTeacher(teacherId: string): Promise<Teach
  * `roles` on `targetUnitId` or any of its ancestors? A holder unit is an
  * ancestor-or-self of the target when the holder's `path` is a prefix of the
  * target's `path` (paths are '/a/b/c/' so prefix-match is exact).
+ *
+ * `domain` is required, not optional — Research.md §7.10. Before Phase 2 this
+ * matched on role alone, which meant a `domain='curriculum'` grant (role
+ * 'edit') silently satisfied checks meant for `domain='teaching'` surfaces
+ * (`hasLeadershipRole`, `routes/leadership.ts`) — a real cross-domain leak,
+ * closed by requiring every caller to state which domain it's checking.
+ * `domain='all'` on the held grant always matches, regardless of what the
+ * caller asks for (it's the "full access" wildcard from the 1b backfill).
  */
 export async function teacherCanActOnUnit(
   teacherId:    string,
   targetUnitId: string,
-  roles:        readonly string[]
+  roles:        readonly string[],
+  domain:       GrantDomain
 ): Promise<boolean> {
   const { rows } = await pool.query<{ ok: boolean }>(
     `SELECT EXISTS (
@@ -209,9 +218,10 @@ export async function teacherCanActOnUnit(
          JOIN org_units target ON target.id = $2
         WHERE our.teacher_id = $1
           AND our.role = ANY($3::text[])
+          AND (our.domain = 'all' OR our.domain = $4)
           AND target.path LIKE holder.path || '%'
      ) AS ok`,
-    [teacherId, targetUnitId, roles as string[]]
+    [teacherId, targetUnitId, roles as string[], domain]
   )
   return rows[0]?.ok ?? false
 }

@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { pathIsAncestorOrSelf, evaluateAccess } from './orgScope'
 import type { TeacherRoleScope } from '../db/queries/orgUnits'
 
-const scope = (role: string, path: string): TeacherRoleScope => ({
+const scope = (role: string, path: string, domain = 'all'): TeacherRoleScope => ({
   org_unit_id: path,  // id value is irrelevant to the pure evaluator
   role,
-  domain: 'all',
+  domain,
   path,
 })
 
@@ -46,31 +46,51 @@ describe('evaluateAccess', () => {
 
   it('grants when an ancestor-unit role matches', () => {
     const scopes = [scope('admin', root)]
-    expect(evaluateAccess(scopes, dept, ['admin'])).toBe(true)
+    expect(evaluateAccess(scopes, dept, ['admin'], 'teaching')).toBe(true)
   })
 
   it('grants an edit role on the exact unit', () => {
     const scopes = [scope('edit', dept)]
-    expect(evaluateAccess(scopes, dept, ['admin', 'edit'])).toBe(true)
+    expect(evaluateAccess(scopes, dept, ['admin', 'edit'], 'teaching')).toBe(true)
   })
 
   it('denies when the role is not in the allowed set', () => {
     const scopes = [scope('view', root)]
-    expect(evaluateAccess(scopes, dept, ['admin', 'edit'])).toBe(false)
+    expect(evaluateAccess(scopes, dept, ['admin', 'edit'], 'teaching')).toBe(false)
   })
 
   it('denies when the held unit is not an ancestor of the target', () => {
     const scopes = [scope('edit', other)]
-    expect(evaluateAccess(scopes, dept, ['edit'])).toBe(false)
+    expect(evaluateAccess(scopes, dept, ['edit'], 'teaching')).toBe(false)
   })
 
   it('accommodates multiple roles across the tree', () => {
     const scopes = [scope('edit', dept), scope('view', root)]
-    expect(evaluateAccess(scopes, other, ['view'])).toBe(true)   // view at root covers other
-    expect(evaluateAccess(scopes, other, ['edit'])).toBe(false)  // edit only on dept, not other
+    expect(evaluateAccess(scopes, other, ['view'], 'teaching')).toBe(true)   // view at root covers other
+    expect(evaluateAccess(scopes, other, ['edit'], 'teaching')).toBe(false)  // edit only on dept, not other
   })
 
   it('denies with no scopes', () => {
-    expect(evaluateAccess([], dept, ['admin'])).toBe(false)
+    expect(evaluateAccess([], dept, ['admin'], 'teaching')).toBe(false)
+  })
+
+  // Research.md §7.10 Phase 2 — domain filtering. Regression coverage for the
+  // cross-domain leak found while scoping Phase 2: a role held in one domain
+  // must not satisfy a check for a different domain.
+  it('denies a role held in a different domain', () => {
+    const scopes = [scope('edit', root, 'curriculum')]
+    expect(evaluateAccess(scopes, dept, ['edit', 'admin'], 'teaching')).toBe(false)
+  })
+
+  it('grants a role held in the matching domain', () => {
+    const scopes = [scope('view', root, 'teaching')]
+    expect(evaluateAccess(scopes, dept, ['view', 'edit', 'admin'], 'teaching')).toBe(true)
+  })
+
+  it("an 'all'-domain scope satisfies any domain requested", () => {
+    const scopes = [scope('admin', root, 'all')]
+    expect(evaluateAccess(scopes, dept, ['admin'], 'teaching')).toBe(true)
+    expect(evaluateAccess(scopes, dept, ['admin'], 'curriculum')).toBe(true)
+    expect(evaluateAccess(scopes, dept, ['admin'], 'platform')).toBe(true)
   })
 })

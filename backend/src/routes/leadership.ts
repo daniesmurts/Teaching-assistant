@@ -52,7 +52,7 @@ router.get('/overview', asyncHandler(async (req, res) => {
     if (unit.institution_id !== req.teacher.institution_id) {
       throw new NotFoundError('Подразделение')
     }
-    const ok = await canActOnUnit(req.teacher.id, unitId, ['edit', 'admin'])
+    const ok = await canActOnUnit(req.teacher.id, unitId, ['view', 'edit', 'admin'], 'teaching')
     if (!ok) throw new ForbiddenError('Нет доступа к этому подразделению')
   }
 
@@ -101,7 +101,7 @@ router.get('/teachers/:id', asyncHandler(async (req, res) => {
     if (!profile.primary_org_unit_id) {
       throw new ForbiddenError('Нет доступа к этому преподавателю')
     }
-    const ok = await canActOnUnit(req.teacher.id, profile.primary_org_unit_id, ['edit', 'admin'])
+    const ok = await canActOnUnit(req.teacher.id, profile.primary_org_unit_id, ['view', 'edit', 'admin'], 'teaching')
     if (!ok) throw new ForbiddenError('Нет доступа к этому преподавателю')
   }
 

@@ -142,10 +142,17 @@ Resolves through `org_units` + `org_unit_roles`, not `teachers.role`:
   `'all'`, which `services/accessScope.ts` expands across every concrete
   domain — every institution-root admin from the original backfill is
   unaffected. `middleware/requireDomain.ts` gates routes on a specific domain
-  (e.g. РПД monitor + institution criteria/rubrics on `curriculum`) instead of
-  full institution-root admin. Phase 1 (`curriculum`) is shipped; `teaching`
-  and per-subtree query scoping for domain grants are deferred — see TODO
-  Feature P(c).
+  (e.g. РПД monitor + institution criteria/rubrics on `curriculum`; institution
+  overview/usage/roster-read on `teaching`) instead of full institution-root
+  admin. Phase 1 (`curriculum`) and Phase 2 (`teaching`) are shipped;
+  `platform` narrowing and per-subtree query scoping for domain grants are
+  deferred — see TODO Feature P(c).
+- **`canActOnUnit`/`teacherCanActOnUnit` take a required `domain` param** — no
+  "any domain" default. This is load-bearing, not stylistic: before Phase 2,
+  the subtree-role check matched on `role` alone and a Phase 1 `curriculum`
+  grant silently satisfied checks meant for the leadership/`teaching` surface.
+  Every new caller of these primitives (and of `requireUnitRole`) must state
+  which domain it's checking, or it risks reintroducing that leak.
 
 ### RAG Flywheel
 1. Teacher approves grade → async embedding (Yandex, 1536-dim pgvector)

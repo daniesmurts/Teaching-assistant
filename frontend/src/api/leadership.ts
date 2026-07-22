@@ -5,7 +5,7 @@ export interface LeadershipUnit {
   name:                  string
   short_name:            string | null
   type_code:             string
-  role:                  'edit' | 'admin'
+  role:                  'view' | 'edit' | 'admin'
   subtree_teacher_count: number
 }
 

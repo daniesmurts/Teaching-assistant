@@ -3,7 +3,7 @@ import { getAuditLog, type AuditEntry } from '../../api/institution'
 
 const fmt = (d: string) => new Date(d).toLocaleString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
-const ROLE_LABEL: Record<string, string> = { admin: 'Администратор', head: 'Руководитель', viewer: 'Наблюдатель' }
+const ROLE_LABEL: Record<string, string> = { admin: 'Администратор', edit: 'Редактор', view: 'Наблюдатель' }
 
 function describe(e: AuditEntry): string {
   const meta = e.metadata as {

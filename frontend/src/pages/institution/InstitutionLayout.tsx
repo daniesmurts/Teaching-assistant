@@ -1,18 +1,20 @@
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 
-// Research.md §7.10 Phase 1 — each entry declares which domain-grant reaches
-// it. `undefined` = institution-root admin only (unchanged, Phase 3
-// territory). 'curriculum' entries additionally open for a curriculum-domain
-// grant; `minLevel` matches the backend's requireDomain minimum so a
-// view-only grant doesn't see a tab that would just 403 (RPD monitor and
-// criteria/rubrics writes require 'edit' server-side).
-const NAV: { to: string; label: string; end: boolean; domain?: 'curriculum'; minLevel?: 'view' | 'edit' }[] = [
-  { to: '/institution',           label: 'Обзор',         end: true },
+// Research.md §7.10 — each entry declares which domain-grant reaches it.
+// `undefined` = institution-root admin only (unchanged, Phase 3 territory).
+// 'curriculum'/'teaching' entries additionally open for that domain's grant;
+// `minLevel` matches the backend's requireDomain minimum so a view-only grant
+// doesn't see a tab that would just 403 (RPD monitor and criteria/rubrics
+// writes require 'edit' server-side; the Phase 2 teaching routes are all
+// read-only, so 'view' is enough for all of them).
+type NavDomain = 'curriculum' | 'teaching'
+const NAV: { to: string; label: string; end: boolean; domain?: NavDomain; minLevel?: 'view' | 'edit' }[] = [
+  { to: '/institution',           label: 'Обзор',         end: true, domain: 'teaching', minLevel: 'view' },
   { to: '/institution/structure', label: 'Структура',     end: false },
   { to: '/institution/rpd',       label: 'Мониторинг РПД', end: false, domain: 'curriculum', minLevel: 'edit' },
-  { to: '/institution/usage',     label: 'Использование', end: false },
-  { to: '/institution/teachers', label: 'Преподаватели', end: false },
+  { to: '/institution/usage',     label: 'Использование', end: false, domain: 'teaching', minLevel: 'view' },
+  { to: '/institution/teachers', label: 'Преподаватели', end: false, domain: 'teaching', minLevel: 'view' },
   { to: '/institution/rubrics',  label: 'Критерии',      end: false, domain: 'curriculum', minLevel: 'view' },
   { to: '/institution/rubric-presets', label: 'Рубрики',  end: false, domain: 'curriculum', minLevel: 'view' },
   { to: '/programs',              label: 'Образовательные программы', end: false },
@@ -22,7 +24,15 @@ const NAV: { to: string; label: string; end: boolean; domain?: 'curriculum'; min
   { to: '/institution/audit',    label: 'Журнал действий', end: false },
 ]
 
-const CURRICULUM_LEVEL_RANK: Record<string, number> = { view: 1, edit: 2, admin: 3 }
+const DOMAIN_LEVEL_RANK: Record<string, number> = { view: 1, edit: 2, admin: 3 }
+
+/** The teacher's access level for a NAV item's domain, ranked. 0 = no access
+ *  (item.domain undefined items are handled separately — admin-only). */
+function domainRank(teacher: { curriculum_access?: string; teaching_access?: string } | null, domain?: NavDomain): number {
+  if (!domain) return 0
+  const value = domain === 'curriculum' ? teacher?.curriculum_access : teacher?.teaching_access
+  return DOMAIN_LEVEL_RANK[value ?? ''] ?? 0
+}
 
 export default function InstitutionLayout() {
   const teacher   = useAuthStore((s) => s.teacher)
@@ -35,18 +45,17 @@ export default function InstitutionLayout() {
   // fire the scoped queries — they'd 400. Show a pointer instead.
   const noInstitution = !teacher?.institution_id
 
-  // Research.md §7.10 Phase 1 — an institution/platform admin sees the full
-  // NAV (unchanged); a curriculum-domain-only grant (e.g. УМЦ head) sees only
-  // the entries its level actually reaches, so it never offers a tab that
-  // would just 403.
+  // Research.md §7.10 — an institution/platform admin sees the full NAV
+  // (unchanged); a domain-only grant (e.g. УМЦ head on curriculum, ПР УР on
+  // teaching) sees only the entries its level actually reaches, so it never
+  // offers a tab that would just 403.
   const isInstitutionAdmin =
     (teacher?.is_platform_admin ?? teacher?.role === 'platform_admin') ||
     (teacher?.is_institution_admin ?? teacher?.role === 'institution_admin')
-  const curriculumRank = CURRICULUM_LEVEL_RANK[teacher?.curriculum_access ?? ''] ?? 0
   const visibleNav = isInstitutionAdmin
     ? NAV
-    : NAV.filter((item) => item.domain === 'curriculum'
-        && curriculumRank >= CURRICULUM_LEVEL_RANK[item.minLevel ?? 'edit'])
+    : NAV.filter((item) => item.domain
+        && domainRank(teacher, item.domain) >= DOMAIN_LEVEL_RANK[item.minLevel ?? 'edit'])
   // Admin-only sub-routes (the index/Обзор page, and any /institution/* path
   // not in visibleNav — e.g. /institution/teachers, /institution/programs)
   // call institution-admin-only endpoints. A curriculum-only grant landing on

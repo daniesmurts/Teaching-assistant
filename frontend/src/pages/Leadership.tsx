@@ -17,7 +17,8 @@ const TYPE_LABEL: Record<string, string> = {
   department:        'Кафедра',
 }
 const ROLE_LABEL: Record<string, string> = {
-  head:  'Руководитель',
+  view:  'Наблюдатель',
+  edit:  'Редактор',
   admin: 'Администратор',
 }
 
