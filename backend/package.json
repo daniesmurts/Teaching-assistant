@@ -19,7 +19,9 @@
     "repair:role-tree": "node --env-file=../.env $(npm root)/.bin/tsx scripts/repairRoleTreeSync.ts",
     "repair:rpd-dept-mapping": "node --env-file=../.env $(npm root)/.bin/tsx scripts/fixRpdDeptMapping.ts",
     "backup:db": "node --env-file=../.env $(npm root)/.bin/tsx scripts/backupDatabase.ts",
-    "marketing:merge-list": "node --env-file=../.env $(npm root)/.bin/tsx scripts/generateMarketingMergeList.ts"
+    "marketing:merge-list": "node --env-file=../.env $(npm root)/.bin/tsx scripts/generateMarketingMergeList.ts",
+    "loadtest:seed": "node --env-file=../.env $(npm root)/.bin/tsx scripts/loadtest/seedLoadTestTeachers.ts",
+    "loadtest:cleanup": "node --env-file=../.env $(npm root)/.bin/tsx scripts/loadtest/cleanupLoadTestTeachers.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1059.0",
@@ -65,5 +67,8 @@
     "tsx": "^4.16.2",
     "typescript": "^5.5.3",
     "vitest": "^4.1.8"
+  },
+  "overrides": {
+    "pdfjs-dist": "5.6.205"
   }
 }

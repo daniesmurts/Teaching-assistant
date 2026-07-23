@@ -7,3 +7,4 @@ dist/
 uploads/
 marketing-merge-list*.csv
 /VERSION
+backend/scripts/loadtest/tokens.json

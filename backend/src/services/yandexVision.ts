@@ -1,4 +1,12 @@
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import { mkdtemp, writeFile, readFile, readdir, rm } from 'fs/promises'
+import { existsSync } from 'fs'
+import { tmpdir } from 'os'
+import path from 'path'
 import { logger } from '../lib/logger'
+
+const execFileAsync = promisify(execFile)
 
 /**
  * OCR via Yandex Vision — best Cyrillic accuracy, accessible inside Russia.
@@ -117,6 +125,48 @@ interface PdfToImgShape {
 }
 
 async function rasterizePdfPages(fileBuffer: Buffer): Promise<Buffer[] | null> {
+  // Run in a fresh child process — proven necessary, not just defensive.
+  // Reproduced live in production (2026-07-23): if pdf-parse's getText() has
+  // run anywhere earlier in this process (documentExtractor.ts always tries
+  // it first), pdf-to-img's pdfjs-dist worker resolution gets permanently
+  // corrupted for the rest of the process's lifetime — "API version X does
+  // not match Worker version Y" on every subsequent call, even though both
+  // packages resolve to the same correct on-disk version. A fresh process
+  // never ran pdf-parse, so it never inherits the corruption. See
+  // rasterizeWorker.ts for the full writeup.
+  //
+  // Dev-mode fallback: rasterizeWorker.js only exists once compiled (`tsc`
+  // build, same directory as this file's own compiled output) — under `tsx`
+  // in local dev there's no sibling .js to spawn, and this exact corruption
+  // was never reproduced locally, so we just call pdf-to-img in-process.
+  const compiledWorkerPath = path.join(__dirname, 'rasterizeWorker.js')
+  if (existsSync(compiledWorkerPath)) {
+    return rasterizeViaChildProcess(fileBuffer, compiledWorkerPath)
+  }
+  return rasterizeInProcess(fileBuffer)
+}
+
+async function rasterizeViaChildProcess(fileBuffer: Buffer, workerPath: string): Promise<Buffer[] | null> {
+  const dir = await mkdtemp(path.join(tmpdir(), 'rasterize-'))
+  try {
+    const pdfPath = path.join(dir, 'input.pdf')
+    await writeFile(pdfPath, fileBuffer)
+    await execFileAsync(process.execPath, [workerPath, pdfPath, dir], { timeout: 120_000 })
+
+    const files = (await readdir(dir)).filter((f) => f.startsWith('page-')).sort()
+    return Promise.all(files.map((f) => readFile(path.join(dir, f))))
+  } catch (err) {
+    const message = err instanceof Error && 'stderr' in err
+      ? String((err as { stderr?: unknown }).stderr) || err.message
+      : (err as Error).message
+    logger.warn({ message: 'PDF rasterization failed — falling back to whole-PDF OCR call', error: message })
+    return null
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => null)
+  }
+}
+
+async function rasterizeInProcess(fileBuffer: Buffer): Promise<Buffer[] | null> {
   let pdfToImg: PdfToImgShape
   try {
     // Cast through unknown so the code compiles whether or not `pdf-to-img`
