@@ -1003,6 +1003,7 @@ export async function approve(
     approvedImprovements?: BulletItem[]
     approvedCriteriaScores?: CriterionScore[]
     approvedEditReason?: import('../../../shared/types').ApprovedEditReason
+    approvedBrsCheckpointId?: string | null
   }
 ): Promise<Assignment> {
   const assignment = await approveAssignment(id, teacherId, data)

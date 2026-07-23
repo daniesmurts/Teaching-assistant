@@ -26,6 +26,7 @@ import feedbackRouter from './routes/feedback'
 import topicsRouter from './routes/topics'
 import tasksRouter from './routes/tasks'
 import curriculumRouter from './routes/curriculum'
+import brsRouter from './routes/brs'
 import programsRouter from './routes/programs'
 import orgStructureRouter from './routes/orgUnits'
 import leadershipRouter from './routes/leadership'
@@ -147,6 +148,7 @@ app.use('/api/presentations', presentationsRouter)
 app.use('/api/topics',        topicsRouter)
 app.use('/api/tasks',         tasksRouter)
 app.use('/api/curriculum',    curriculumRouter)
+app.use('/api/brs',           brsRouter)
 app.use('/api/quizzes',       quizzesRouter)
 app.use('/api/fos',           fosRouter)
 app.use('/api/live-sessions', liveSessionsRouter)

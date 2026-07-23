@@ -37,6 +37,7 @@ interface AssignmentRow {
   approved_improvements: BulletItem[] | null
   approved_criteria_scores: CriterionScore[] | null
   approved_edit_reason: string | null
+  brs_checkpoint_id: string | null
   approved_at: Date | null
   status: string
   parent_assignment_id: string | null
@@ -79,6 +80,7 @@ function toAssignment(row: AssignmentRow): Assignment {
     approved_improvements: row.approved_improvements,
     approved_criteria_scores: row.approved_criteria_scores,
     approved_edit_reason: row.approved_edit_reason as ApprovedEditReason | null,
+    brs_checkpoint_id: row.brs_checkpoint_id,
     approved_at: row.approved_at?.toISOString() ?? null,
     status: row.status as Assignment['status'],
     parent_assignment_id: row.parent_assignment_id,
@@ -184,6 +186,7 @@ export async function approveAssignment(
     approvedImprovements?: BulletItem[]
     approvedCriteriaScores?: CriterionScore[]
     approvedEditReason?: ApprovedEditReason
+    approvedBrsCheckpointId?: string | null   // Feature AE — контрольная точка this approval counts toward
   }
 ): Promise<Assignment | null> {
   // Two writes in one transaction: update the canonical assignments row AND
@@ -203,6 +206,7 @@ export async function approveAssignment(
            approved_improvements    = $7,
            approved_criteria_scores = $8,
            approved_edit_reason     = $9,
+           brs_checkpoint_id        = $10,
            approved_at              = NOW(),
            status                   = 'approved'
        WHERE id = $1 AND teacher_id = $2
@@ -214,6 +218,7 @@ export async function approveAssignment(
         data.approvedImprovements     ? JSON.stringify(data.approvedImprovements)     : null,
         data.approvedCriteriaScores   ? JSON.stringify(data.approvedCriteriaScores)   : null,
         data.approvedEditReason       ?? null,
+        data.approvedBrsCheckpointId  ?? null,
       ]
     )
 
@@ -227,8 +232,8 @@ export async function approveAssignment(
          assignment_id, actor_teacher_id,
          approved_score, approved_grade, approved_feedback,
          approved_strengths, approved_improvements,
-         approved_criteria_scores, approved_edit_reason
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+         approved_criteria_scores, approved_edit_reason, brs_checkpoint_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
         id, teacherId,
         data.approvedScore, data.approvedGrade, data.approvedFeedback,
@@ -236,6 +241,7 @@ export async function approveAssignment(
         data.approvedImprovements     ? JSON.stringify(data.approvedImprovements)     : null,
         data.approvedCriteriaScores   ? JSON.stringify(data.approvedCriteriaScores)   : null,
         data.approvedEditReason       ?? null,
+        data.approvedBrsCheckpointId  ?? null,
       ]
     )
 

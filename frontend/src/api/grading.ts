@@ -104,6 +104,7 @@ export async function approveGrade(
     approved_improvements?: BulletItem[]
     approved_criteria_scores?: CriterionScore[]
     approved_edit_reason?:     ApprovedEditReason
+    approved_brs_checkpoint_id?: string | null
   }
 ): Promise<{ assignment: Assignment }> {
   const res = await client.post<{ assignment: Assignment }>(`/api/grading/${id}/approve`, data)

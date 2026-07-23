@@ -14,6 +14,7 @@ import { useUIStore } from '../../store/uiStore'
 import { usePersistedState, clearPersistedState } from '../../hooks/usePersistedState'
 import { GRADES, gradeColor, gradeLabel, GRADE_BRACKETS, scoreToGrade, snapScoreToGrade } from '../../lib/grades'
 import { getStudentTrajectory } from '../../api/grading'
+import { getBrsSchemeForCourse } from '../../api/brs'
 import type { GradeResponse } from '../../api/grading'
 import type { GradeLetter, BulletItem, BulletSeverity, VerificationQuestion, CriterionScore, ApprovedEditReason, ChallengeSourceType, ChallengeVerdict } from '../../types'
 
@@ -112,6 +113,19 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
     '',
   )
 
+  // Feature AE — БРС checkpoint this score counts toward, if the course has
+  // a published scheme. No-op (renders nothing) when it doesn't.
+  const [brsCheckpointId, setBrsCheckpointId] = usePersistedState<string>(
+    `${editKey}:brs_checkpoint_id`,
+    '',
+  )
+  const { data: brsScheme } = useQuery({
+    queryKey: ['brs-scheme', student?.courseId],
+    queryFn: () => getBrsSchemeForCourse(student!.courseId!),
+    enabled: Boolean(student?.courseId),
+  })
+  const brsCheckpoints = brsScheme?.status === 'published' ? brsScheme.checkpoints : []
+
   // "Оспорить" nudge — a retracted/reworded bullet or criterion comment may
   // have been part of why the AI landed on this score, but applyChallenge
   // only ever touches the text, never editScore/editGrade (there's no
@@ -140,6 +154,7 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
           ...(bulletsEqual(editImprovements, result.ai_improvements ?? []) ? {} : { approved_improvements: editImprovements.filter((b) => b.text.trim()) }),
           ...(criteriaScoresEdited ? { approved_criteria_scores: editCriteriaScores } : {}),
           ...(editReason ? { approved_edit_reason: editReason as ApprovedEditReason } : {}),
+          ...(brsCheckpointId ? { approved_brs_checkpoint_id: brsCheckpointId } : {}),
         },
       },
       {
@@ -153,6 +168,7 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
           clearPersistedState(`${editKey}:improvements`)
           clearPersistedState(`${editKey}:criteria_scores`)
           clearPersistedState(`${editKey}:edit_reason`)
+          clearPersistedState(`${editKey}:brs_checkpoint_id`)
           onApproved()
         },
       }
@@ -219,6 +235,20 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
         </div>
         {!approved ? (
           <div className="flex items-center gap-2">
+            {brsCheckpoints.length > 0 && (
+              <select
+                value={brsCheckpointId}
+                onChange={(e) => setBrsCheckpointId(e.target.value)}
+                disabled={approveMut.isPending}
+                title="Засчитать в контрольную точку БРС"
+                className="px-2 py-1 text-xs font-sans text-ink bg-surface border border-border rounded-md hover:border-border-strong"
+              >
+                <option value="">Без контрольной точки</option>
+                {brsCheckpoints.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            )}
             <EditReasonPicker value={editReason} onChange={setEditReason} disabled={approveMut.isPending} />
             <Button onClick={handleApprove} loading={approveMut.isPending}>
               Подтвердить оценку

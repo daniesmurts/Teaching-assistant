@@ -318,6 +318,7 @@ router.post(
       approved_score, approved_grade, approved_feedback,
       approved_strengths, approved_improvements,
       approved_criteria_scores, approved_edit_reason,
+      approved_brs_checkpoint_id,
     } = req.body as {
       approved_score:           number
       approved_grade:           GradeLetter
@@ -326,6 +327,7 @@ router.post(
       approved_improvements?:   BulletItem[]
       approved_criteria_scores?: import('../../../shared/types').CriterionScore[]
       approved_edit_reason?:    import('../../../shared/types').ApprovedEditReason
+      approved_brs_checkpoint_id?: string | null
     }
     const assignment = await approve(req.params.id, req.teacher.id, {
       approvedScore:           Number(approved_score),
@@ -335,6 +337,7 @@ router.post(
       approvedImprovements:    approved_improvements,
       approvedCriteriaScores:  approved_criteria_scores,
       approvedEditReason:      approved_edit_reason,
+      approvedBrsCheckpointId: approved_brs_checkpoint_id ?? null,
     })
     res.json({ assignment })
   })

@@ -19,8 +19,10 @@ import { logger } from '../lib/logger'
 const router = Router()
 router.use(authenticate)
 
-// Resolve a discipline's syllabus text — inline syllabus_text, else latest ready РПД.
-async function resolveCourseText(courseId: string, teacherId: string) {
+// Resolve a discipline's syllabus text — inline syllabus_text, else latest
+// ready РПД. Exported for routes/brs.ts (Feature AE), which needs the same
+// course+document resolution to extract a БРС scheme from.
+export async function resolveCourseText(courseId: string, teacherId: string) {
   const course = await findCourseById(courseId, teacherId)
   if (!course) throw new NotFoundError('Дисциплина')
   let text = (course.syllabus_text ?? '').trim()

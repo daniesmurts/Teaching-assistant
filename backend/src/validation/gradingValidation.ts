@@ -183,4 +183,8 @@ export const approveRules = [
   body('approved_edit_reason').optional({ nullable: true })
     .isIn(['fact_check', 'tone', 'criterion_weight', 'scale', 'scope', 'other'])
     .withMessage('Неверная причина редактирования'),
+
+  // Feature AE — БРС контрольная точка this score counts toward, if any.
+  body('approved_brs_checkpoint_id').optional({ nullable: true, checkFalsy: true }).isUUID()
+    .withMessage('Неверная контрольная точка'),
 ]

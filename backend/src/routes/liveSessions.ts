@@ -177,6 +177,7 @@ router.post(
     if (!quiz) throw new NotFoundError('Тест')
 
     const courseId: string | undefined = req.body.course_id ?? quiz.course_id ?? undefined
+    const checkpointId: string | undefined = req.body.checkpoint_id ?? undefined
     const entries = req.body.entries as { participant_id: string; student_name: string; student_group?: string }[]
 
     let created = 0
@@ -199,7 +200,10 @@ router.post(
         submissionText, aiScore: pct, aiGrade: grade, aiGradeLabel: label, aiFeedback: submissionText,
         aiCriteriaScores: [], aiStrengths: [], aiImprovements: [],
       })
-      await approve(assignment.id, req.teacher.id, { approvedScore: pct, approvedGrade: grade, approvedFeedback: submissionText })
+      await approve(assignment.id, req.teacher.id, {
+        approvedScore: pct, approvedGrade: grade, approvedFeedback: submissionText,
+        approvedBrsCheckpointId: checkpointId ?? null,
+      })
       await linkParticipantAssignment(participant.id, assignment.id)
       created++
     }

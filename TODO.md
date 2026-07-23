@@ -2113,7 +2113,7 @@ the РОП still pastes dozens of links one at a time.
   Plane-2 document intake could later reuse the same discovery service for
   university strategy docs (they live on the same disclosure sites).
 
-### AE. БРС engine + native interactive activities — the semester ledger governed by the РПД · Effort: v1 M, full track L
+### AE. БРС engine + native interactive activities — the semester ledger governed by the РПД · Effort: v1 M, full track L · 🟢 v1 SHIPPED (2026-07-23)
 
 From the 2026-07-21 metodist discussions (last of the five-idea session:
 Z/AA/AB/AC/AD/AE). She saw the live-quiz feature (Y), got as excited as we

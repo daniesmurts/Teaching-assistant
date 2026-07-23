@@ -153,6 +153,11 @@ export type {
   MarketEvidenceProfstandardRef,
   MarketEvidenceStrategyExcerpt,
   MarketEvidence,
+  BrsCheckpoint,
+  BrsGradeThreshold,
+  BrsDraft,
+  BrsCheckpointAccrual,
+  BrsStudentAccrual,
 } from '../../../shared/types'
 
 export {

@@ -404,6 +404,7 @@ export interface Assignment {
   approved_improvements: BulletItem[] | null  // ditto — feeds the revision check on resubmission
   approved_criteria_scores: CriterionScore[] | null   // teacher-edited per-criterion scores (Phase asset-hardening)
   approved_edit_reason:     ApprovedEditReason | null  // optional taxonomy of WHY the teacher edited
+  brs_checkpoint_id: string | null   // Feature AE — БРС контрольная точка this score counts toward, if any
   approved_at: string | null
   status: AssignmentStatus
   parent_assignment_id: string | null              // linked previous version, if any
@@ -1600,6 +1601,53 @@ export interface FgosDraft {
   competencies:            FgosCompetency[]
   structureRequirements:   FgosStructureRequirement[]
   profstandardRefs:        FgosProfstandardRef[]
+}
+
+// ─── Feature AE v1 — БРС engine (TODO.md "### AE") ────────────────────────────
+// Per-course teacher data (unlike ФГОС's platform-wide reference data above).
+// A scheme stays 'draft' until the teacher confirms the review screen; only
+// 'published' rows feed the semester ledger. Re-extracting/editing an
+// already-published scheme creates a new (course_id, version) row rather
+// than mutating the old one, so historical accruals stay reproducible.
+
+export interface BrsCheckpoint {
+  id?:                   string
+  name:                  string
+  max_points:            number
+  checkpoint_type:       'graded' | 'manual'
+  is_verbatim_verified:  boolean
+}
+
+export interface BrsGradeThreshold {
+  min_points:  number
+  max_points:  number
+  grade_label: string
+}
+
+export interface BrsDraft {
+  id?:              string
+  status?:          'draft' | 'published'
+  version?:         number
+  title:            string | null
+  checkpoints:      BrsCheckpoint[]
+  gradeThresholds:  BrsGradeThreshold[]
+}
+
+export interface BrsCheckpointAccrual {
+  checkpoint_id:    string
+  checkpoint_name:  string
+  max_points:       number
+  earned_points:    number | null
+  raw_points:       number | null
+}
+
+export interface BrsStudentAccrual {
+  student_name?:      string
+  student_group?:     string | null
+  checkpoints:        BrsCheckpointAccrual[]
+  total_points:       number
+  total_max_points:   number
+  final_grade_label:  string | null
 }
 
 // РОП Студия v0 (TODO.md Feature Z, Phase 0) — labor-market evidence.

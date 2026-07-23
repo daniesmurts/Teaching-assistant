@@ -6,6 +6,7 @@ import { getLiveSession, advanceLiveSession, finishLiveSession, saveLiveSessionT
 import { getQuiz } from '../api/quizzes'
 import { getStudents } from '../api/grading'
 import { getCourses } from '../api/courses'
+import { getBrsSchemeForCourse } from '../api/brs'
 import Button from '../components/ui/Button'
 import { useUIStore } from '../store/uiStore'
 import type { LiveSession, LiveSessionParticipantProgress, Quiz, QuizQuestion } from '../types'
@@ -348,6 +349,7 @@ function SaveToJournalPanel({
     include: !p.already_saved, student_name: p.nickname ?? '', student_group: '',
   })))
   const [courseId, setCourseId] = useState('')
+  const [checkpointId, setCheckpointId] = useState('')
   const [saving, setSaving] = useState(false)
 
   const effectiveCourseId = quiz?.course_id ?? courseId
@@ -357,6 +359,13 @@ function SaveToJournalPanel({
     queryFn: () => getStudents(effectiveCourseId || undefined),
     enabled: open,
   })
+  // Feature AE — one checkpoint applies to the whole batch save below.
+  const { data: brsScheme } = useQuery({
+    queryKey: ['brs-scheme', effectiveCourseId],
+    queryFn: () => getBrsSchemeForCourse(effectiveCourseId),
+    enabled: open && Boolean(effectiveCourseId),
+  })
+  const brsCheckpoints = brsScheme?.status === 'published' ? brsScheme.checkpoints : []
   const nameSuggestions = Array.from(new Set(students.map((s) => s.student_name).filter(Boolean)))
   const groupSuggestions = Array.from(new Set(students.map((s) => s.student_group).filter((g): g is string => Boolean(g))))
 
@@ -372,7 +381,8 @@ function SaveToJournalPanel({
     try {
       const result = await saveLiveSessionToJournal(
         sessionId, effectiveCourseId,
-        toSave.map((r) => ({ participant_id: r.participant_id, student_name: r.student_name.trim(), student_group: r.student_group.trim() || undefined }))
+        toSave.map((r) => ({ participant_id: r.participant_id, student_name: r.student_name.trim(), student_group: r.student_group.trim() || undefined })),
+        checkpointId || undefined,
       )
       addToast(`Сохранено в журнал: ${result.created}${result.skipped ? `, пропущено: ${result.skipped}` : ''}`, 'success')
       const savedIds = new Set(toSave.map((r) => r.participant_id))
@@ -409,6 +419,20 @@ function SaveToJournalPanel({
           >
             <option value="">— выберите предмет —</option>
             {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {brsCheckpoints.length > 0 && (
+        <div className="mb-4">
+          <label className="block text-xs text-white/60 mb-1">Контрольная точка БРС (опционально)</label>
+          <select
+            value={checkpointId}
+            onChange={(e) => setCheckpointId(e.target.value)}
+            className="w-full px-3 py-2 rounded-md bg-white/10 border border-white/20 text-white text-sm"
+          >
+            <option value="">Без контрольной точки</option>
+            {brsCheckpoints.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
       )}

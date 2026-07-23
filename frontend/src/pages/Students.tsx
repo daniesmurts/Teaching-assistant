@@ -9,6 +9,7 @@ import { gradeColor } from '../lib/grades'
 import { buildChains, computeStudentStats, formatHours } from '../lib/studentStats'
 import { getStudents, getGradingHistory, getCohortAnalytics, type StudentSummary } from '../api/grading'
 import { getCourses } from '../api/courses'
+import { getBrsStudentLedger } from '../api/brs'
 import type { Assignment, AssignmentStatus } from '../types'
 
 const fmt = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -43,6 +44,14 @@ function StudentDetail({ student, courseId, onBack }: { student: StudentSummary;
   const stats = computeStudentStats(all)
   const chains = buildChains(all)
   const totalChecks = stats.corrections.addressed + stats.corrections.partial + stats.corrections.not_addressed
+
+  // Feature AE — semester БРС ledger. Scheme is per-course, so this only
+  // renders once a specific course is selected upstream (courseId prop).
+  const { data: ledger } = useQuery({
+    queryKey: ['brs-student-ledger', student.student_name, student.student_group, courseId],
+    queryFn: () => getBrsStudentLedger(courseId!, student.student_name, student.student_group ?? undefined),
+    enabled: Boolean(courseId),
+  })
 
   return (
     <div>
@@ -131,6 +140,39 @@ function StudentDetail({ student, courseId, onBack }: { student: StudentSummary;
           <div className="flex gap-2 mt-1">
             {assignments.map((a) => (
               <div key={a.id} className="flex-1 text-center text-[9px] text-ink-tertiary truncate">{new Date(a.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* БРС ledger (Feature AE) — running semester score per checkpoint */}
+      {ledger && ledger.checkpoints.length > 0 && (
+        <div className="bg-surface border border-border rounded-lg p-5 mb-6">
+          <div className="flex items-baseline justify-between mb-3">
+            <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">БРС за семестр</div>
+            <div className="text-sm font-display font-bold text-ink">
+              {ledger.total_points} / {ledger.total_max_points}
+              {ledger.final_grade_label && <span className="ml-2 text-success">{ledger.final_grade_label}</span>}
+            </div>
+          </div>
+          <div className="space-y-2">
+            {ledger.checkpoints.map((c) => (
+              <div key={c.checkpoint_id} className="flex items-center gap-3">
+                <span className="text-sm font-sans text-ink flex-1 min-w-0 truncate">{c.checkpoint_name}</span>
+                <div className="w-32 h-1.5 bg-border rounded-full overflow-hidden flex-shrink-0">
+                  <div
+                    className="h-full rounded-full transition-all duration-700"
+                    style={{
+                      width: `${c.earned_points != null ? Math.min(100, (c.earned_points / c.max_points) * 100) : 0}%`,
+                      backgroundColor: 'var(--color-amber)',
+                    }}
+                  />
+                </div>
+                <span className="text-xs font-sans text-ink-secondary w-20 text-right flex-shrink-0">
+                  {c.earned_points != null ? `${Math.round(c.earned_points * 10) / 10} / ${c.max_points}` : `— / ${c.max_points}`}
+                  {c.raw_points != null && c.raw_points > c.max_points && ' (сумма выше макс.)'}
+                </span>
+              </div>
             ))}
           </div>
         </div>

@@ -30,11 +30,11 @@ export interface SaveToJournalEntry {
 }
 
 export async function saveLiveSessionToJournal(
-  sessionId: string, courseId: string | undefined, entries: SaveToJournalEntry[]
+  sessionId: string, courseId: string | undefined, entries: SaveToJournalEntry[], checkpointId?: string
 ): Promise<{ created: number; skipped: number }> {
   const res = await client.post<{ created: number; skipped: number }>(
     `/api/live-sessions/${sessionId}/save-to-journal`,
-    { course_id: courseId, entries }
+    { course_id: courseId, entries, checkpoint_id: checkpointId || undefined }
   )
   return res.data
 }

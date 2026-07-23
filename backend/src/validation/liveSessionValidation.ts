@@ -35,6 +35,8 @@ export const advanceRules = [
 export const saveToJournalRules = [
   param('id').isUUID().withMessage('Неверный идентификатор сессии'),
   body('course_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Неверный идентификатор предмета'),
+  // Feature AE — one checkpoint applies to the whole batch save, not per-entry.
+  body('checkpoint_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Неверная контрольная точка'),
   body('entries').isArray({ min: 1 }).withMessage('Не выбрано ни одного участника'),
   body('entries.*.participant_id').isUUID().withMessage('Неверный идентификатор участника'),
   body('entries.*.student_name').isString().trim().isLength({ min: 1, max: 100 }).withMessage('Укажите имя студента').escape(),

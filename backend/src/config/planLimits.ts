@@ -29,6 +29,7 @@ export const PLAN_LIMITS = {
     challengeFeedback:     false,
     fosGenerator:          false,
     rpdMonitor:            false,
+    brsEngine:             false,   // Feature AE v1 — БРС semester ledger — Pro/Institution
     liveSessionsPerMonth:  1,
     monthlySpendCapUsd:    3,
   },
@@ -59,6 +60,7 @@ export const PLAN_LIMITS = {
     challengeFeedback:     true,
     fosGenerator:          true,
     rpdMonitor:            false,
+    brsEngine:             true,
     liveSessionsPerMonth:  Infinity,
     monthlySpendCapUsd:    30,
   },
@@ -89,6 +91,7 @@ export const PLAN_LIMITS = {
     challengeFeedback:     true,
     fosGenerator:          true,
     rpdMonitor:            true,
+    brsEngine:             true,
     liveSessionsPerMonth:  Infinity,
     monthlySpendCapUsd:    150,
   },

@@ -28,6 +28,7 @@ import Curriculum from './pages/Curriculum'
 import RopStudio from './pages/RopStudio'
 import Quizzes from './pages/Quizzes'
 import FosStudio from './pages/FosStudio'
+import BrsStudio from './pages/BrsStudio'
 import PublishedAssignments from './pages/PublishedAssignments'
 import PublishedAssignmentDetail from './pages/PublishedAssignmentDetail'
 import SubmissionReview from './pages/SubmissionReview'
@@ -295,6 +296,7 @@ export default function App() {
             <Route path="/curriculum"    element={<Curriculum />} />
             <Route path="/quizzes"       element={<Quizzes />} />
             <Route path="/fos"          element={<FosStudio />} />
+            <Route path="/brs"          element={<BrsStudio />} />
             <Route path="/materials/:kind" element={<MaterialGenerator />} />
             <Route path="/billing"       element={<Billing />} />
             <Route path="/leadership"              element={<LeadershipRoute><Leadership /></LeadershipRoute>} />
