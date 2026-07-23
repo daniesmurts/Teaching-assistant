@@ -1217,7 +1217,7 @@ grounded in the teacher's own generated materials.
   extensions (comprehension pings, slide-aligned questions, ASR) build on
   this session/participant substrate later.
 
-### Z. Market-evidence layer + РОП-студия — defensible labor-market justification at design time · Effort: pilot S–M, full track L+ (phased) · 🟢 Phase 0 SHIPPED (2026-07-22)
+### Z. Market-evidence layer + РОП-студия — defensible labor-market justification at design time · Effort: pilot S–M, full track L+ (phased) · 🟢 Phase 0 SHIPPED (2026-07-23)
 
 **Phase 0 pilot shipped (2026-07-22)**, pilot: направление 15.03.02
 «Технологические машины и оборудование», Респ. Татарстан. Real РОП Студия
@@ -1290,12 +1290,54 @@ page, since Z's own framing calls this a "programme-level sibling of
   vacancies respectively) both spot-checked with every number/salary in the
   generated paragraph matching the raw source data exactly; MultiSelect's
   search-filter-then-select flow confirmed to not deselect prior picks.
+- **Plane-2 pilot document shipped (2026-07-23) — the pilot spec's own
+  "include ONE Plane-2 document" is now built, completing Phase 0 as
+  originally scoped.** One grounded document per institution — the
+  university's «стратегия развития» — that the generator can cite
+  verbatim alongside Plane-1 market data. New `institution_strategy_documents`/
+  `institution_strategy_chunks` tables (migration 092, one document per
+  institution — `institution_id UNIQUE`, reupload replaces); new
+  institution-admin-only Settings page (`/institution/strategy-document`,
+  root-admin-gated like LTI/shared-RAG/model settings, not delegated to a
+  domain grant); reuses `documentExtractor`/embeddings — no new extraction
+  machinery, per the pilot spec's own instruction. `chunker.ts` gained a
+  pure `splitTextIntoChunks()` (extracted from `chunkDocument`, zero
+  behavior change) so this institution-scoped pipeline doesn't need a fake
+  course/document ID to reuse the same splitting logic. On each generation,
+  `routes/programs.ts` embeds a query (programme title + profession terms,
+  no new user input) and retrieves the closest institution chunk(s) via the
+  *same* cosine-distance refusal gate `docChat.ts`'s "Спроси документ" uses
+  (`UNGROUNDED_DISTANCE = 0.35`) — a weak/no match silently skips Plane-2 for
+  that generation rather than forcing a citation. `program_market_evidence`
+  gained `strategy_excerpts JSONB` to persist what (if anything) grounded a
+  given generation, rendered as a third «Источники» block in `RopStudio.tsx`
+  only when non-empty. 9 new tests (unit: chunker regression, service
+  upload/process/fail-soft; integration: 3 institution routes + grounded/
+  ungrounded market-evidence paths). **Real bug caught during live
+  verification, not by any test:** the new tables were created with
+  `vector(1536)`, but Yandex's `text-search-doc` model (the only embedding
+  provider this platform uses, migration 024) is 256-dimensional — every
+  chunk insert was silently failing the dimension check, caught in the
+  `try/catch` and logged as a warning, so the document showed "Готово" with
+  zero real chunks. Fixed by correcting the column to `vector(256)` (migration
+  was uncommitted, fixed in place rather than layering a patch) before this
+  had shipped anywhere. Verified live end-to-end on the real institution:
+  uploaded a Russian-language strategy PDF, regenerated the real 15.03.02
+  programme's evidence, confirmed the excerpt appeared in «Источники» and
+  every reference to it in the generated paragraph matched verbatim; also
+  confirmed the refusal gate itself works under real (not mocked) embeddings
+  — an English-language stand-in document's cosine distance (0.357) landed
+  just above the 0.35 threshold and was correctly omitted, not forced in;
+  confirmed delete + regenerate leaves no crash and no phantom «Источники»
+  block.
 - **Not yet built** (deferred to Phase 1+ per the TODO's own sequencing —
   gated on this pilot's real-user verdict first): the `labourMarket`
   provider-abstraction interface, HH/Росстат as additional sources
   (HH now requires a registered OAuth app — anonymous search returns
-  403, confirmed live), Plane-2 reference documents, the full dossier
-  generator, DOCX export, учебный план/competency-matrix builder.
+  403, confirmed live), multiple/platform-wide Plane-2 documents (нацпроект/
+  федпроект passports, промпартнер docs — the general `platform | institution
+  | programme` document-scope tier), the full dossier generator, DOCX export,
+  учебный план/competency-matrix builder.
 
 From the 2026-07-21 discussions with the head metodist at the test university.
 Her ask started as "add РосНавык-like features"; the distilled need is

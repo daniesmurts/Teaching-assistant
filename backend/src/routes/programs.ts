@@ -43,7 +43,9 @@ import { logger } from '../lib/logger'
 import { getProfstandardRefsForDirection } from '../db/queries/fgos'
 import { getLatestMarketEvidence, createMarketEvidence, updateMarketEvidenceText } from '../db/queries/programMarketEvidence'
 import { fetchVacancySnapshot, SUPPORTED_REGIONS } from '../services/labourMarket'
-import { generateMarketEvidenceSection } from '../services/marketEvidenceGenerator'
+import { generateMarketEvidenceSection, type StrategyExcerpt } from '../services/marketEvidenceGenerator'
+import { embed } from '../services/deepseek'
+import { findRelevantStrategyChunksScored } from '../db/queries/institutionStrategyDoc'
 import type {
   ProgramDiscipline, ProgramCompetency,
   ProgramPracticeType, ProgramDocumentKind,
@@ -561,21 +563,50 @@ router.post('/:id/market-evidence', aiLimiter, asyncHandler(async (req, res) => 
     .map((r) => ({ code: r.code, name: r.name }))
 
   const snapshot = await fetchVacancySnapshot(regionCodes, professions)
+  const strategyExcerpts = await findStrategyExcerpts(req, detail.name, professions)
+
   const { text } = await generateMarketEvidenceSection({
     programTitle:  detail.name,
     profstandards: profstandardRefs,
     snapshot,
     teacherId:     req.teacher.id,
     institutionId: req.teacher.institution_id ?? undefined,
+    strategyExcerpts,
   })
   if (!text) throw new ValidationError('Не удалось сгенерировать текст — попробуйте ещё раз.')
 
   const evidence = await createMarketEvidence({
-    programId: detail.id, snapshot, professions, profstandardRefs,
+    programId: detail.id, snapshot, professions, profstandardRefs, strategyExcerpts,
     sectionText: text, createdBy: req.teacher.id,
   })
   res.status(201).json(evidence)
 }))
+
+// Plane-2 retrieval (Feature Z Phase 0 pilot completion) — same
+// cosine-distance refusal gate services/docChat.ts uses for "Спроси
+// документ": a weak/no match means Plane-2 is silently skipped for this
+// generation, never forced. Duplicated rather than imported — docChat.ts's
+// constant is course-scoped grounded chat, an unrelated feature; coupling
+// the two for one shared literal isn't worth it.
+const STRATEGY_UNGROUNDED_DISTANCE = 0.35
+const MAX_STRATEGY_EXCERPTS = 2
+
+async function findStrategyExcerpts(
+  req: Request,
+  programTitle: string,
+  professions: string[]
+): Promise<StrategyExcerpt[]> {
+  const institutionId = req.teacher.institution_id
+  if (!institutionId) return []
+
+  const query = `${programTitle} ${professions.join(' ')}`.trim()
+  const vector = await embed(query, { teacherId: req.teacher.id, institutionId, feature: 'embedding' })
+  const chunks = await findRelevantStrategyChunksScored(institutionId, vector, MAX_STRATEGY_EXCERPTS)
+
+  return chunks
+    .filter((c) => c.distance <= STRATEGY_UNGROUNDED_DISTANCE)
+    .map((c) => ({ text: c.text, pageStart: c.page_start, pageEnd: c.page_end }))
+}
 
 router.put('/:id/market-evidence/:evidenceId', asyncHandler(async (req, res) => {
   const detail = await loadReadable(req)

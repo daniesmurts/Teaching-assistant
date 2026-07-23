@@ -20,12 +20,19 @@ export interface ProfstandardRef {
   name: string
 }
 
+export interface StrategyExcerpt {
+  text:      string
+  pageStart: number | null
+  pageEnd:   number | null
+}
+
 export interface GenerateMarketEvidenceParams {
   programTitle:  string
   profstandards: ProfstandardRef[]
   snapshot:      VacancySnapshot
   teacherId:     string
   institutionId?: string
+  strategyExcerpts?: StrategyExcerpt[]
 }
 
 interface RawGeneration {
@@ -49,6 +56,12 @@ export async function generateMarketEvidenceSection(
     'не делайте это утверждение. Пишите по-русски, деловым стилем, 2-4 абзаца. ' +
     'Обязательно указывайте дату среза данных (по состоянию на …). Если регионов несколько, ' +
     'приводите данные по каждому региону отдельно, а не только по одному. ' +
+    (params.strategyExcerpts?.length
+      ? 'Ниже также приведены дословные выдержки из стратегии развития университета. ' +
+        'Если это уместно, свяжите востребованность программы со стратегическими ' +
+        'приоритетами вуза — но используйте ТОЛЬКО эти выдержки дословно, никогда не ' +
+        'придумывайте формулировки стратегии от себя. '
+      : '') +
     'Отвечайте только валидным JSON.'
 
   const context = {
@@ -63,6 +76,7 @@ export async function generateMarketEvidenceSection(
         examples: p.sample.map((s) => ({ title: s.title, employer: s.employer, salary: s.salary, date: s.date })),
       })),
     })),
+    ...(params.strategyExcerpts?.length ? { strategy: params.strategyExcerpts.map((e) => ({ text: e.text })) } : {}),
   }
 
   const user =

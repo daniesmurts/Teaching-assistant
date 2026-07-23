@@ -85,6 +85,33 @@ describe('generateMarketEvidenceSection', () => {
     expect(userMessage).toContain('300')
   })
 
+  it('includes strategy excerpts in the prompt context only when passed (Plane-2)', async () => {
+    chatJSONMock.mockResolvedValueOnce({ text: 'текст' })
+
+    await generateMarketEvidenceSection({
+      programTitle: 'X', profstandards: [], snapshot: SNAPSHOT, teacherId: 'teacher-1',
+      strategyExcerpts: [{ text: 'Приоритет — развитие инженерных кадров региона.', pageStart: 4, pageEnd: 4 }],
+    })
+
+    const [messages] = chatJSONMock.mock.calls[0]
+    const systemMessage = messages.find((m: { role: string }) => m.role === 'system').content
+    const userMessage   = messages.find((m: { role: string }) => m.role === 'user').content
+    expect(systemMessage).toContain('стратегии развития')
+    expect(userMessage).toContain('Приоритет — развитие инженерных кадров региона.')
+  })
+
+  it('omits any strategy context when strategyExcerpts is not passed', async () => {
+    chatJSONMock.mockResolvedValueOnce({ text: 'текст' })
+
+    await generateMarketEvidenceSection({
+      programTitle: 'X', profstandards: [], snapshot: SNAPSHOT, teacherId: 'teacher-1',
+    })
+
+    const [messages] = chatJSONMock.mock.calls[0]
+    const userMessage = messages.find((m: { role: string }) => m.role === 'user').content
+    expect(userMessage).not.toContain('"strategy"')
+  })
+
   it('returns empty text (not throwing) when the LLM response has no text field', async () => {
     chatJSONMock.mockResolvedValueOnce({})
     const result = await generateMarketEvidenceSection({

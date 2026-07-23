@@ -1636,6 +1636,16 @@ export interface MarketEvidenceProfstandardRef {
   name: string
 }
 
+// Plane-2 (Feature Z Phase 0 pilot completion) — a verbatim excerpt from the
+// university's own «стратегия развития», cited alongside the Plane-1
+// vacancy/профстандарт sources. Empty when no strategy document is uploaded
+// or none matched closely enough (Plane-2 is optional per generation).
+export interface MarketEvidenceStrategyExcerpt {
+  text:       string
+  page_start: number | null
+  page_end:   number | null
+}
+
 export interface MarketEvidence {
   id:                string
   program_id:        string
@@ -1644,6 +1654,7 @@ export interface MarketEvidence {
   professions:       string[]
   vacancy_snapshot:  RegionSnapshot[]
   profstandard_refs: MarketEvidenceProfstandardRef[]
+  strategy_excerpts: MarketEvidenceStrategyExcerpt[]
   section_text:      string
   created_at:        string
   updated_at:        string

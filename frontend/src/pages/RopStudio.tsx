@@ -249,6 +249,27 @@ export default function RopStudio() {
                       </div>
                     )}
                   </div>
+
+                  {evidence.strategy_excerpts.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-1.5 text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-2">
+                        <Icon name="building" size={12} />
+                        Стратегия развития университета
+                      </div>
+                      <div className="space-y-2">
+                        {evidence.strategy_excerpts.map((e, i) => (
+                          <div key={i} className="text-xs font-sans bg-canvas border border-border rounded-md px-2.5 py-1.5">
+                            <p className="text-ink leading-relaxed">«{e.text}»</p>
+                            {e.page_start && (
+                              <p className="text-ink-tertiary mt-1">
+                                стр. {e.page_start}{e.page_end && e.page_end !== e.page_start ? `–${e.page_end}` : ''}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </section>
               </>
             ) : (

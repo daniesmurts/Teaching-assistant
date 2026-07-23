@@ -29,6 +29,19 @@ vi.mock('../services/marketEvidenceGenerator', () => ({
     text: 'По состоянию на 22.07.2026 в Республике Татарстан зафиксировано 86 вакансий по профессии «инженер-технолог».',
   }),
 }))
+// Plane-2 retrieval (routes/programs.ts's findStrategyExcerpts) embeds a
+// query string via services/deepseek's embed — fixed to a known vector so
+// tests can control cosine distance against seeded institution_strategy_chunks
+// rows deterministically (same vector twice = distance 0). Other services
+// mounted by app.ts (e.g. policyMemo.ts) import chatJSON from the same
+// module, so this must spread importOriginal rather than replace it wholesale.
+// 256-dim, not 1536 — Yandex's text-search-doc model (migration 024), what
+// every embedding column in this schema actually stores.
+const { STRATEGY_QUERY_VECTOR } = vi.hoisted(() => ({ STRATEGY_QUERY_VECTOR: new Array(256).fill(0.01) }))
+vi.mock('../services/deepseek', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../services/deepseek')>()
+  return { ...actual, embed: vi.fn().mockResolvedValue(STRATEGY_QUERY_VECTOR) }
+})
 
 beforeEach(async () => { await pool.query('BEGIN') })
 afterEach(async () => { await pool.query('ROLLBACK') })
@@ -50,7 +63,7 @@ async function platformAdminSetup() {
     name: 'Технологические машины и оборудование', code: '15.03.02', level: 'bachelor', duration_semesters: 8,
   })
 
-  return { teacher, token, program }
+  return { teacher, token, program, institution }
 }
 
 describe('market evidence — generate, read, edit', () => {
@@ -138,5 +151,36 @@ describe('market evidence — generate, read, edit', () => {
     const token = signToken({ id: outsider.id, email: outsider.email })
     const res = await request(app).get(`/api/institution/programs/${program.id}/market-evidence`).set('Authorization', `Bearer ${token}`)
     expect(res.status).toBe(403)
+  })
+
+  it('leaves strategy_excerpts empty when the institution has no strategy document', async () => {
+    const { token, program } = await platformAdminSetup()
+    const res = await request(app).post(`/api/institution/programs/${program.id}/market-evidence`)
+      .set('Authorization', `Bearer ${token}`).send({ region_codes: ['1600000000000'], professions: ['инженер-технолог'] })
+    expect(res.status).toBe(201)
+    expect(res.body.strategy_excerpts).toEqual([])
+  })
+
+  it('includes a strategy excerpt (Plane-2) when the institution has a closely-matching document chunk', async () => {
+    const { token, program, institution } = await platformAdminSetup()
+
+    const { rows } = await pool.query(
+      `INSERT INTO institution_strategy_documents (institution_id, file_name, storage_path, processing_status)
+       VALUES ($1, 'strategy.pdf', 'x', 'ready') RETURNING id`,
+      [institution.id]
+    )
+    await pool.query(
+      `INSERT INTO institution_strategy_chunks (document_id, chunk_index, text, embedding, page_start, page_end)
+       VALUES ($1, 0, 'Приоритет — развитие инженерных кадров региона.', $2, 4, 4)`,
+      [rows[0].id, `[${STRATEGY_QUERY_VECTOR.join(',')}]`]
+    )
+
+    const res = await request(app).post(`/api/institution/programs/${program.id}/market-evidence`)
+      .set('Authorization', `Bearer ${token}`).send({ region_codes: ['1600000000000'], professions: ['инженер-технолог'] })
+
+    expect(res.status).toBe(201)
+    expect(res.body.strategy_excerpts).toEqual([
+      { text: 'Приоритет — развитие инженерных кадров региона.', page_start: 4, page_end: 4 },
+    ])
   })
 })

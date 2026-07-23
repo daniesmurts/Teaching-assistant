@@ -2,6 +2,7 @@ import { Router, type Request } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { requireInstitutionAdmin } from '../middleware/requireRole'
 import { requireDomain } from '../middleware/requireDomain'
+import { uploadConfig, verifyFileContent } from '../middleware/fileValidation'
 import { validate } from '../middleware/validate'
 import { asyncHandler } from '../lib/asyncHandler'
 import { ValidationError, NotFoundError } from '../errors/AppError'
@@ -22,6 +23,10 @@ import { findTeacherByEmail, findTeacherById } from '../db/queries/teachers'
 import { findCriteriaByInstitution, createCriterion, findCriteriaByIds, shareCriterion } from '../db/queries/criteria'
 import { findRubricsByInstitution, createInstitutionRubric, shareRubric } from '../db/queries/rubrics'
 import { getSharedRagSummary, setInstitutionSharedRag } from '../db/queries/sharedRag'
+import {
+  getStrategyDocumentByInstitution, deleteStrategyDocument,
+} from '../db/queries/institutionStrategyDoc'
+import { uploadStrategyDocument } from '../services/institutionStrategyDoc'
 import { invalidateInstitutionProviderCache } from '../services/llm/institutionResolver'
 import { pool } from '../db/connection'
 import { recordAudit, listAuditByInstitution } from '../db/queries/audit'
@@ -313,6 +318,52 @@ router.get('/audit', asyncHandler(async (req, res) => {
 
 router.get('/shared-rag', asyncHandler(async (req, res) => {
   res.json(await getSharedRagSummary(institutionId(req)))
+}))
+
+// ─── Strategy document (Feature Z Plane-2 pilot) ──────────────────────────────
+//
+// One grounded document — the university's «стратегия развития» — that
+// РОП Студия's market-evidence generator can cite alongside its Plane-1
+// vacancy data (routes/programs.ts). Root-admin-only like every other
+// institution-wide setting in this file (LTI, shared RAG, model choice) —
+// not delegated to a curriculum/teaching-domain grant.
+
+router.get('/strategy-document', asyncHandler(async (req, res) => {
+  const doc = await getStrategyDocumentByInstitution(institutionId(req))
+  res.json(doc ? {
+    file_name:         doc.file_name,
+    uploaded_at:       doc.uploaded_at,
+    processing_status: doc.processing_status,
+  } : null)
+}))
+
+router.post(
+  '/strategy-document',
+  uploadConfig.single('file'),
+  verifyFileContent,
+  asyncHandler(async (req, res) => {
+    const file = req.file
+    if (!file) throw new ValidationError('Файл не предоставлен')
+
+    const doc = await uploadStrategyDocument({
+      institutionId: institutionId(req),
+      teacherId:     req.teacher.id,
+      fileBuffer:    file.buffer,
+      fileName:      file.originalname,
+      mimeType:      file.mimetype,
+    })
+    res.status(201).json({
+      file_name:         doc.file_name,
+      uploaded_at:       doc.uploaded_at,
+      processing_status: doc.processing_status,
+    })
+  })
+)
+
+router.delete('/strategy-document', asyncHandler(async (req, res) => {
+  const deleted = await deleteStrategyDocument(institutionId(req))
+  if (!deleted) throw new NotFoundError('Документ стратегии развития')
+  res.status(204).end()
 }))
 
 // ─── Model sovereignty (Phase 4) ──────────────────────────────────────────────

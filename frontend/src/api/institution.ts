@@ -143,6 +143,31 @@ export async function setSharedRagEnabled(enabled: boolean): Promise<SharedRagSu
   return (await client.patch<SharedRagSummary>('/api/institution/shared-rag', { enabled })).data
 }
 
+// ─── Strategy document (Feature Z Plane-2 pilot) ───────────────────────────────
+// The one grounded document РОП Студия's market-evidence generator can cite
+// alongside its Plane-1 vacancy data. Institution-admin-only, one document
+// per institution — reupload replaces it server-side.
+
+export interface StrategyDocumentStatus {
+  file_name:         string
+  uploaded_at:       string
+  processing_status: 'pending' | 'extracting' | 'chunking' | 'ready' | 'failed'
+}
+
+export async function getStrategyDocument(): Promise<StrategyDocumentStatus | null> {
+  return (await client.get<StrategyDocumentStatus | null>('/api/institution/strategy-document')).data
+}
+
+export async function uploadStrategyDocument(file: File): Promise<StrategyDocumentStatus> {
+  const fd = new FormData()
+  fd.append('file', file)
+  return (await client.post<StrategyDocumentStatus>('/api/institution/strategy-document', fd, { timeout: 60_000 })).data
+}
+
+export async function deleteStrategyDocument(): Promise<void> {
+  await client.delete('/api/institution/strategy-document')
+}
+
 // ─── Document-URL fetch allowlist (migration 085) ─────────────────────────────
 
 export async function getDocumentDomains(): Promise<string[]> {

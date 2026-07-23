@@ -151,6 +151,7 @@ export type {
   RegionSnapshot,
   SupportedRegion,
   MarketEvidenceProfstandardRef,
+  MarketEvidenceStrategyExcerpt,
   MarketEvidence,
 } from '../../../shared/types'
 
