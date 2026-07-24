@@ -1,3 +1,16 @@
+import dns from 'node:dns'
+// Prod VM has no routable IPv6 (eth0 carries only a link-local address), but
+// Node's default DNS resolution can still return/prefer a target's AAAA
+// record — the connection then hangs until it times out, with no fallback
+// to the working A record. Confirmed live (2026-07-24): a raw TCP connect to
+// api.telegram.org over IPv6 hung/failed while the same host over IPv4
+// connected instantly, and it silently broke Telegram alerting (including
+// the pre-existing incident-alert path in errorHandler.ts, not just the new
+// DeepSeek-account-fallback alert that surfaced it) with no visible error —
+// sendTelegramMessage's catch only logs and returns false. `ipv4first`
+// affects every outbound call process-wide, not just Telegram.
+dns.setDefaultResultOrder('ipv4first')
+
 import { app } from './app'
 import { logger } from './lib/logger'
 import { config } from './lib/config'

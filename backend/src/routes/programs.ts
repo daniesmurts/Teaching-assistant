@@ -534,6 +534,25 @@ const PROGRAM_LEVEL_TO_FGOS_LEVEL: Record<string, string> = {
   bachelor: 'бакалавриат', master: 'магистратура', specialist: 'специалитет',
 }
 
+// FGOS registry level terms — used as a fallback below to read a level out
+// of `education_level` (free text, e.g. "Высшее образование — бакалавриат",
+// set by the programme import form's «Уровень образования» field) when the
+// separate `level` enum column was never populated. The two columns are
+// filled by different code paths (`level` only by direct program creation,
+// `education_level` by the sveden.ru bulk-import flow) and nothing links
+// them — found 2026-07-24 when every real imported programme had
+// `education_level` set but `level` null, so a РОП who'd genuinely filled in
+// "Уровень образования" at import time still hit "не указан уровень
+// образования" here. `fgos_standards.level` is already these exact Russian
+// terms, so a substring match needs no further mapping.
+const FGOS_LEVEL_TERMS = ['бакалавриат', 'магистратура', 'специалитет', 'аспирантура']
+
+function inferFgosLevel(detail: { level: string | null; education_level: string | null }): string | null {
+  if (detail.level && PROGRAM_LEVEL_TO_FGOS_LEVEL[detail.level]) return PROGRAM_LEVEL_TO_FGOS_LEVEL[detail.level]
+  const text = (detail.education_level ?? '').toLowerCase()
+  return FGOS_LEVEL_TERMS.find((term) => text.includes(term)) ?? null
+}
+
 router.get('/:id/market-evidence', asyncHandler(async (req, res) => {
   const detail = await loadReadable(req)
   res.json(await getLatestMarketEvidence(detail.id))
@@ -556,7 +575,7 @@ router.post('/:id/market-evidence', aiLimiter, asyncHandler(async (req, res) => 
   if (professions.length === 0) throw new ValidationError('Укажите хотя бы одну профессию для поиска вакансий.')
 
   if (!detail.code) throw new ValidationError('У программы не указан код направления — обоснование не с чем связать.')
-  const fgosLevel = detail.level ? PROGRAM_LEVEL_TO_FGOS_LEVEL[detail.level] : null
+  const fgosLevel = inferFgosLevel(detail)
   if (!fgosLevel) throw new ValidationError('У программы не указан уровень образования.')
 
   const profstandardRefs = (await getProfstandardRefsForDirection(detail.code, fgosLevel))

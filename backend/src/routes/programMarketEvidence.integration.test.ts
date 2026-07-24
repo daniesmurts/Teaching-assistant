@@ -66,6 +66,33 @@ async function platformAdminSetup() {
   return { teacher, token, program, institution }
 }
 
+// Regression for the 2026-07-24 finding: programmes imported from a sveden.ru
+// disclosure page only ever get `education_level` (free text) populated —
+// `level` (the enum PROGRAM_LEVEL_TO_FGOS_LEVEL maps) is never set by that
+// path, so every real imported programme hit "не указан уровень
+// образования" even though the РОП had genuinely filled in «Уровень
+// образования» at import time.
+async function platformAdminSetupNoLevelEnum() {
+  const institution = await createTestInstitution({})
+  const teacher = await createTestTeacher({ institutionId: institution.id })
+  await pool.query('UPDATE teachers SET is_platform_admin = TRUE WHERE id = $1', [teacher.id])
+  const token = signToken({ id: teacher.id, email: teacher.email })
+
+  await createFgosStandardDraft({
+    standard: { direction_code: '15.03.02', level: 'бакалавриат', title: 'Технологические машины и оборудование', generation: '3++' },
+    competencies: [],
+    structureRequirements: [],
+    profstandardRefs: [{ code: '28.003', name: 'Специалист по автоматизации и механизации механосборочного производства', source_url: null }],
+  }, teacher.id)
+
+  const program = await createProgram(institution.id, teacher.id, {
+    name: 'Технологические машины и оборудование', code: '15.03.02', duration_semesters: 8,
+    education_level: 'Высшее образование — бакалавриат',
+  })
+
+  return { teacher, token, program, institution }
+}
+
 describe('market evidence — generate, read, edit', () => {
   it('POST generates and persists evidence using real profstandard refs from the ФГОС registry', async () => {
     const { token, program } = await platformAdminSetup()
@@ -109,6 +136,16 @@ describe('market evidence — generate, read, edit', () => {
     expect(put.body.section_text).toBe('Отредактированный РОПом текст.')
     expect(put.body.region_names).toEqual(create.body.region_names)
     expect(put.body.profstandard_refs).toEqual(create.body.profstandard_refs)
+  })
+
+  it('generates successfully when only education_level (free text) is set, not the level enum', async () => {
+    const { token, program } = await platformAdminSetupNoLevelEnum()
+    const res = await request(app).post(`/api/institution/programs/${program.id}/market-evidence`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ region_codes: ['1600000000000'], professions: ['инженер-технолог'] })
+
+    expect(res.status).toBe(201)
+    expect(res.body.profstandard_refs).toEqual([{ code: '28.003', name: 'Специалист по автоматизации и механизации механосборочного производства' }])
   })
 
   it('rejects generation with an unknown region code', async () => {
