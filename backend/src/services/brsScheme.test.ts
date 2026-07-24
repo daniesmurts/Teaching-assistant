@@ -75,10 +75,9 @@ describe('extractBrsDraft', () => {
     expect(draft.checkpoints[0].name).toBe('КТ-2 Тест')
   })
 
-  it('fails soft to an empty draft when chatJSON throws', async () => {
+  it('propagates a chatJSON error rather than silently returning an empty draft (see fgosExtractor.test.ts for the production incident that motivated this)', async () => {
     chatJSONMock.mockRejectedValueOnce(new Error('provider unavailable'))
-    const draft = await extractBrsDraft(SOURCE_TEXT)
-    expect(draft).toEqual({ title: null, checkpoints: [], gradeThresholds: [] })
+    await expect(extractBrsDraft(SOURCE_TEXT)).rejects.toThrow('provider unavailable')
   })
 
   it('passes through grade thresholds', async () => {

@@ -69,10 +69,9 @@ describe('extractFgosDraft', () => {
     expect(draft.competencies[0].code).toBe('ОПК-1')
   })
 
-  it('fails soft to an empty draft when chatJSON throws', async () => {
+  it('propagates a chatJSON error rather than silently returning an empty draft (2026-07-24 incident: a DeepSeek 402 was swallowed here, landing 60+ empty drafts)', async () => {
     chatJSONMock.mockRejectedValueOnce(new Error('provider unavailable'))
-    const draft = await extractFgosDraft(SOURCE_TEXT)
-    expect(draft).toEqual({ standard: {}, competencies: [], structureRequirements: [], profstandardRefs: [] })
+    await expect(extractFgosDraft(SOURCE_TEXT)).rejects.toThrow('provider unavailable')
   })
 
   it('passes through structure requirements and профстандарт refs', async () => {

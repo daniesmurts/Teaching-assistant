@@ -73,16 +73,15 @@ export async function extractBrsDraft(text: string): Promise<BrsDraft> {
     `## Формат\nВерните JSON: {"title": ..., "checkpoints": [...], "grade_thresholds": [...]}. Только JSON. ` +
     `Если раздел БРС не найден — верните пустые массивы, не выдумывайте данные.`
 
-  let raw: RawExtraction
-  try {
-    raw = await chatJSON<RawExtraction>(
-      [{ role: 'system', content: system }, { role: 'user', content: user }],
-      'разбор БРС',
-      { maxTokens: 4000 },
-    )
-  } catch {
-    return empty
-  }
+  // No try/catch here — a failed LLM call must surface as a real error, not
+  // silently produce an empty draft indistinguishable from "this РПД
+  // genuinely has no БРС section" (see fgosExtractor.ts for the production
+  // incident that motivated removing this pattern, 2026-07-24).
+  const raw = await chatJSON<RawExtraction>(
+    [{ role: 'system', content: system }, { role: 'user', content: user }],
+    'разбор БРС',
+    { maxTokens: 4000 },
+  )
 
   const checkpoints: BrsDraftCheckpoint[] = (raw.checkpoints ?? [])
     .filter((c): c is { name: string; max_points: number | string } => !!c.name && c.max_points != null)

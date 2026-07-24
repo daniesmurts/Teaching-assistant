@@ -95,16 +95,17 @@ export async function extractFgosDraft(text: string): Promise<FgosDraft> {
     `## Формат\nВерните JSON: {"standard": {...}, "competencies": [...], "structure_requirements": [...], ` +
     `"profstandard_refs": [...]}. Только JSON.`
 
-  let raw: RawExtraction
-  try {
-    raw = await chatJSON<RawExtraction>(
-      [{ role: 'system', content: system }, { role: 'user', content: user }],
-      'разбор ФГОС',
-      { maxTokens: 8000 },
-    )
-  } catch {
-    return empty
-  }
+  // No try/catch here — a failed LLM call (rate limit, provider outage,
+  // billing issue) must surface as a real error, not silently produce an
+  // empty draft that looks like "this ФГОС genuinely has no competencies"
+  // and gets persisted as garbage (found in production 2026-07-24: a
+  // DeepSeek 402 was silently swallowed here, and 60+ standards were
+  // imported as empty drafts with zero indication anything had failed).
+  const raw = await chatJSON<RawExtraction>(
+    [{ role: 'system', content: system }, { role: 'user', content: user }],
+    'разбор ФГОС',
+    { maxTokens: 8000 },
+  )
 
   const competencies: FgosDraftCompetency[] = (raw.competencies ?? [])
     .filter((c): c is { type: string; code: string; formulation: string } =>
