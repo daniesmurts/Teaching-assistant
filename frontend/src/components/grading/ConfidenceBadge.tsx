@@ -11,7 +11,10 @@ const LEVEL: Record<ConfidenceLevel, { label: string; cls: string; icon: string 
 function spreadHint(e: AiEnsemble | null | undefined): string | undefined {
   if (!e || e.samples.length < 2) return undefined
   const grades = e.samples.map((s) => s.grade).join(', ')
-  return `Оценки вариантов модели: ${grades} · разброс баллов ${e.score_spread}`
+  const base = `Оценки вариантов модели: ${grades} · разброс баллов ${e.score_spread}`
+  return e.reconciled && e.reconciliation_note
+    ? `${base}\nИтоговый балл скорректирован: ${e.reconciliation_note}`
+    : base
 }
 
 interface Props {

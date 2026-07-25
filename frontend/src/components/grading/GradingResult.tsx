@@ -281,7 +281,10 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
         </div>
       )}
 
-      {/* Low-confidence triage banner — the variants disagreed; ask for a look */}
+      {/* Low-confidence triage banner — the variants disagreed; ask for a look.
+          When reconciled, the shown score/grade already reflects the arbiter
+          pass (see confidence.ts's reconcileDisagreement) — the note explains
+          what it weighed, not just that disagreement happened. */}
       {result.ai_confidence === 'low' && !approved && (
         <div className="mx-5 mt-3 px-3 py-2.5 bg-warning-bg border border-warning/20 rounded-md flex items-start gap-2.5">
           <span className="text-warning text-sm mt-0.5 flex-shrink-0">⚠</span>
@@ -292,6 +295,12 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
               {result.ai_ensemble && ` (${result.ai_ensemble.samples.map((s) => s.grade).join(', ')})`}
               {' '}— стоит проверить работу внимательнее перед подтверждением.
             </span>
+            {result.ai_ensemble?.reconciled && result.ai_ensemble.reconciliation_note && (
+              <div className="mt-1 text-ink-secondary">
+                <span className="font-medium text-ink">Итоговый балл скорректирован:</span>{' '}
+                {result.ai_ensemble.reconciliation_note}
+              </div>
+            )}
           </div>
         </div>
       )}

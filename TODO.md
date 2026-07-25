@@ -17,142 +17,6 @@ the line to `CHANGELOG.md` and delete here.
 
 ## Improvements
 
-### ~~1. Move long reviews onto a real job queue~~ — already done
-
-Shipped: `POST /api/grading/review` now enqueues onto pg-boss
-(`services/jobQueue.ts`, `services/longReviewWorker.ts`) instead of running
-`runLongReview` fire-and-forget in-process — a PM2 restart mid-job no longer
-orphans the work; pg-boss persists the job as a Postgres row before the 202
-response and picks a still-running job back up via retry (retryLimit 2,
-30-minute expiry) if the process dies mid-attempt, with a dead-letter queue
-after retries are exhausted. `runLongReview` now throws on failure (was:
-swallowed internally) so pg-boss's retry machinery actually sees it;
-`long_reviews.status = 'failed'` is written only on the last attempt, so the
-UI doesn't flash "failed" before a silent retry. Retries re-run the whole
-pipeline from scratch — no section-level checkpointing in v1; a natural
-follow-up if retry-from-scratch proves too costly for the common failure
-modes (transient provider blip, restart) it's actually solving for. pg-boss
-v10.4.2 pinned (not the current v12, which is ESM-only and incompatible with
-this CommonJS-compiled backend); no new migration needed — pg-boss manages
-its own schema. Same infra now powers bulk grading (feature below) without
-bespoke plumbing when that ships. See CHANGELOG for the full design.
-
-### ~~2. Audit grade changes after approval~~ — already done
-
-Already shipped: `approved_revisions` table (migration `038_asset_hardening.sql`)
-gets a new row on every `approveAssignment()` call, written in the same
-transaction as the update (app-level, not a Postgres trigger, but same
-guarantee). Exposed via `GET /api/grading/assignment/:id/approval-history`
-(`findApprovalHistory` in
-[db/queries/assignments.ts](backend/src/db/queries/assignments.ts)) and
-already rendered in
-[AssignmentDetailModal.tsx](frontend/src/components/grading/AssignmentDetailModal.tsx).
-No further action needed.
-
-### ~~3. Switch embeddings to a Russian-tuned model~~ — already done
-
-Already shipped: migration `024_yandex_embeddings.sql` moved every embedding
-call to Yandex `text-search-doc` (discovered DeepSeek had no `/embeddings`
-endpoint at all — every call had been 404ing silently). `llm/registry.ts:embed()`
-now routes through Yandex unconditionally, regardless of institution LLM
-preference (CLAUDE.md rule #9). No further action needed here.
-
-### ~~4. localStorage hardening for the grading persistence layer~~ — already done
-
-Shipped: took the "encrypt with a key derived from the JWT" option. New
-[lib/draftCrypto.ts](frontend/src/lib/draftCrypto.ts) — AES-GCM, key is
-SHA-256 of the current JWT (rotates on re-login; old encrypted drafts become
-silently unreadable, which is fine since `clearGradingDrafts()` already wipes
-them on logout — this is defense-in-depth for the window before that runs,
-e.g. a token that expired without an explicit logout). `usePersistedState.ts`
-now encrypts on write and decrypts on read; a leftover plaintext entry from
-before this shipped is treated as undecryptable and dropped, not crash-read.
-No further action needed.
-
-### ~~5. Document re-ingestion lifecycle~~ — already done
-
-Shipped: took the "cascade-delete chunks when replaced" option (simple,
-matches `courses.syllabus_text`'s existing overwrite-not-append design).
-New `deleteChunksForOtherSyllabusDocuments()`
-([db/queries/chunks.ts](backend/src/db/queries/chunks.ts)), called from
-[services/documents.ts](backend/src/services/documents.ts)'s
-`processDocument` once a replacement syllabus has produced at least one
-chunk of its own (never deletes the old ones first — a total embedding
-failure on the new upload should leave the stale-but-present old chunks,
-not zero). Scoped to `document_type = 'syllabus'` only; `'material'`
-documents are untouched — a course accumulates many of those on purpose,
-unlike syllabus which is single-source-of-truth by design. No migration
-needed — no schema change, just a DELETE query. Old presentations/quizzes
-are unaffected since their citations are text snapshots captured at
-generation time, not live FKs into `document_chunks`. See CHANGELOG for
-the full design.
-
-### ~~6. Onboarding signposting for the criteria model~~ — already done
-
-Shipped: new `components/onboarding/CriteriaHint.tsx`, mirroring the existing
-`NoCourseHint.tsx` pattern exactly — a subtle amber link to `/criteria`,
-rendered in `GradingForm.tsx` right under the criterion-add select, only when
-the teacher has never created a criterion of their own (templates don't
-count) and hasn't picked one for the current grade. Deliberately left the
-dashboard checklist and `/criteria`'s own empty state untouched — `/criteria`
-already had a `FeatureIntro` + template picker + empty-state copy, so the real
-gap was purely the missing signpost at the point of contact; a 4th checklist
-step risked re-surfacing the dashboard checklist for existing users who'd
-already completed and hidden it. See CHANGELOG for the full reasoning.
-
-### ~~7. Real testing for DB-backed paths~~ — already done
-
-Shipped: new `vitest.integration.config.ts` (separate from the pure-function
-`vitest.config.ts` — `npm test` stays DB-free) runs 33 tests across 6 files
-against a real dedicated test database (`gradeassist_test`), not
-Testcontainers or `pg-mem` — Docker isn't available in this environment, and
-`pg-mem` doesn't support `pgvector`, a hard blocker for the RAG tests.
-`DB_POOL_MAX=1` + `BEGIN`/`ROLLBACK` per test gives transaction-isolated
-tests with zero cleanup code. Covers all four named paths: plan-limit
-enforcement (`checkPlan.integration.test.ts`, `usageCounters.integration.test.ts`),
-the T-Bank webhook (`webhook.integration.test.ts` — the one flow tested at
-the true HTTP level via `supertest`, since its wire format is a third-party
-contract; `payments.integration.test.ts` for `confirmPayment()` idempotency),
-auth/JWT lifecycle (`authenticate.integration.test.ts`, plus pure JWT edge
-cases moved to `lib/jwt.test.ts`), and RAG retrieval
-(`assignments.rag.integration.test.ts` — including the institution-pool's
-double opt-in gating across all four flag combinations). One-time setup:
-`npm run test:integration:setup`, then `npm run test:integration`. See
-CHANGELOG for the full design and a caught-mid-implementation gotcha (the
-`*.integration.test.ts` suffix also matches the default config's glob —
-now explicitly excluded).
-
-### ~~8. Token / spend caps per teacher~~ — already done
-
-Shipped: `services/spendCap.ts` enforces a per-teacher monthly USD cap
-(not a raw token cap — cost maps directly to the actual risk and varies by
-model) centrally in `llm/registry.ts` (`chat`/`chatJSON`), covering every
-route and background job through one choke point. Default caps per tier in
-[planLimits.ts](backend/src/config/planLimits.ts) (`monthlySpendCapUsd`),
-optional per-teacher override (`teachers.monthly_spend_cap_usd`, migration
-`062_spend_caps.sql`) settable from the `AdminTeachers.tsx` "Расходы/лимит"
-column. See CHANGELOG for the full design (fail-open on infra errors, 60s
-cache, `SpendCapExceededError`). No further action needed.
-
-### ~~9. Criterion-level RAG retrieval~~ — already done
-
-Shipped: new `criterion_rag_examples` table (migration `065_criterion_rag_examples.sql`)
-— one row per (assignment, criterion), mirroring the `document_chunks`/`chunks.ts`
-pattern (own table, own query file `db/queries/criterionExamples.ts`) rather than
-denormalizing into `assignments`. Cost-conscious design: criterion feedback is
-embedded once at **approval time** (`services/embeddings.ts`'s
-`generateCriterionEmbeddings()`, fire-and-forget alongside the existing
-whole-assignment embedding call), and grading time reuses the **already-computed
-submission embedding** as the query vector — zero new embedding-provider calls per
-grade, only cheap local Postgres queries run in parallel across criteria. Matching
-is by `LOWER(criterion_name)` (criteria are ephemeral per-assignment snapshots, not
-FK-based), rendered as a capped "Похожие прошлые оценки по этому критерию" snippet
-under the relevant criterion line in `buildCriteriaPrompt`. No new plan flag — rides
-the existing `ragFlywheel` gate. v1 is own-course only (no institution-pool
-cross-teacher union) and not threaded through the eval harness's offline replay,
-matching the calc-verification precedent of documenting a scope cut rather than
-silently expanding it. See CHANGELOG for the full design.
-
 ### 10. Don't retry token-truncated LLM responses · Effort: S
 
 `chatJSON`'s parse-and-retry loop (`services/llm/deepseek.ts`, mirrored in
@@ -222,7 +86,7 @@ entirely, not just the "rebuild in Excel" step v1 already removed.
 
 ## Features
 
-### A. Bulk grading · Effort: L (depends on #1 — job queue)
+### A. Bulk grading · Effort: L
 
 Drop a folder of PDFs/DOCX into the grading page → parse student name from
 filename pattern (configurable per course) → queue all of them → results
@@ -232,57 +96,10 @@ land in History.
   individually. Especially valuable for finals weeks where one professor
   grades 60+ ВКР in two days.
 - **Touches:** new `BulkGrading.tsx` page, drag-and-drop component, queue
-  integration (needs Improvement #1 first), `routes/grading.ts` batch
-  endpoint, progress polling.
+  integration (reuses the pg-boss job queue already powering long reviews —
+  see CHANGELOG), `routes/grading.ts` batch endpoint, progress polling.
 - **Pricing hook:** worth gating to Pro; institution tier could add
   per-batch templates.
-
-### ~~B. Per-student trajectory panel~~ — already done
-
-Shipped: new "За семестр" tab in
-[GradingResult.tsx](frontend/src/components/grading/GradingResult.tsx),
-visible only when the current submission has a `student_name`. New
-`findStudentTrajectory()` in
-[db/queries/assignments.ts](backend/src/db/queries/assignments.ts) — last 3
-grades for the same (student_name, student_group) pair, scoped to the
-current course when one is selected (criteria are only comparable within a
-course), excluding the assignment being viewed. New
-[StudentTrajectory.tsx](frontend/src/components/grading/StudentTrajectory.tsx)
-renders the score/grade history plus **per-criterion movement**: each
-current criterion is matched by normalised name against the most recent
-prior occurrence, showing `72 → 85 (+13)` with a colored delta, or "впервые"
-when the criterion has no history yet. New route
-`GET /api/grading/student-trajectory`. No new AI calls — pure history
-lookup, matching the original design note.
-
-**Also added to [AssignmentDetailModal.tsx](frontend/src/components/grading/AssignmentDetailModal.tsx)** (the История/past-grades detail view), not just the live grading screen — user testing surfaced that checking on a student's trajectory happens at least as often from browsing history as from a fresh grading, and the original scope had only wired the live screen. Reuses the same `StudentTrajectory` component and `getStudentTrajectory` query, anchored on the historical assignment's own score/grade instead of an in-progress edit. 6 integration tests
-(`assignments.trajectory.integration.test.ts`) covering course scoping,
-NULL-group matching, cross-teacher isolation, and the limit/ordering
-contract.
-
-### ~~C. Cohort / group analytics for the Students page~~ — already done
-
-Shipped: new **«По группе»** tab on [Students.tsx](frontend/src/pages/Students.tsx)
-next to the existing roster list. New pure `computeCohortAnalytics()`
-([services/cohortAnalytics.ts](backend/src/services/cohortAnalytics.ts)) over a
-flat per-assignment row set — overall grade histogram, per-group breakdown
-(count + avg score, sorted alphabetically with ungrouped last), **top 3
-weakest criteria** (lowest average score, criteria matched case-insensitively
-by name, requires ≥3 samples so one harsh grading of one student can't read
-as "the whole cohort struggles here"), and **«Требуют внимания»** — students
-whose last-2-submissions average dropped ≥8 points vs. their prior average
-(minimum 4 submissions to have a meaningful split), sorted worst-first,
-capped at 10, clickable straight into their profile. New
-`findCohortRows()` ([db/queries/assignments.ts](backend/src/db/queries/assignments.ts),
-capped at 5000 rows) + `GET /api/grading/cohort-analytics`. **No AI calls** —
-pure aggregation, distinct from the AI-driven cohort synthesis on published
-assignments ([services/cohortSynthesis.ts](backend/src/services/cohortSynthesis.ts)),
-which is scoped to one published assignment and produces qualitative
-gaps/topics via LLM rather than a roster-wide histogram. 10 unit tests
-(`cohortAnalytics.test.ts`) + 2 integration tests
-(`assignments.cohort.integration.test.ts`). CSV export not built — no
-demand signal yet, easy fast-follow via the existing `toCsv` helper if
-asked for.
 
 ### D. Real PPTX export · Effort: M
 
@@ -338,48 +155,6 @@ are under-using the platform? Useful institutional decisions data.
   want this view; it's not the same as a per-teacher dashboard.
 - **Touches:** [routes/institution.ts](backend/src/routes/institution.ts)
   new aggregation endpoints, new admin pages under `/institution/analytics`.
-
-### ~~I. "Спроси документ" — grounded chat over reference materials~~ — already done
-
-Shipped: **per-subject** scope (the lean option from the original design
-choice) — reuses the `course_id` chunk scoping presentations/quizzes already
-use, rather than a per-document picker. New `askDocument()`
-([services/docChat.ts](backend/src/services/docChat.ts)) embeds the question,
-retrieves the top 5 chunks via a new `findRelevantChunksScored()`
-([db/queries/chunks.ts](backend/src/db/queries/chunks.ts) — a distance-aware
-twin of the existing `findRelevantChunks`), and answers with `chat()` (plain
-prose, `[N]` bracket citations mirroring `presentations.ts`'s citation
-convention, parsed by a small `extractCitedIndices()` that also strips
-markers pointing at nonexistent sources).
-
-**Both non-negotiable design constraints landed as designed:**
-- **Refuse-when-ungrounded is deterministic, not prompt-only.** If the course
-  has no chunks at all, or the best-matching chunk's cosine distance exceeds
-  `0.35` (a starting heuristic — revisit against real usage, same posture as
-  `calcVerifier`'s tolerance and `citationChecker`'s reference cap), the
-  request never reaches the LLM — a fixed Russian refusal is returned
-  instead. The system prompt *additionally* forbids answering from general
-  knowledge as defense-in-depth, but the hard gate doesn't rely on the model
-  behaving.
-- **Multi-turn, re-retrieve per turn.** The client resends the local
-  conversation history (capped, both client- and server-side) for
-  continuity, but retrieval always re-runs fresh on the latest question —
-  the model never drifts onto stale context from three turns ago.
-
-New `POST /api/documents/chat` (extends `routes/documents.ts` rather than a
-separate router — natural home next to upload/status), gated by the existing
-`documentUpload` Pro+ flag exactly as planned (no new entitlement). New
-`DocChatModal.tsx` opens from a **«Спросить документ»** button next to the
-subject picker in `GradingForm.tsx`, visible once a subject is selected —
-the "hook to open it from the grading screen" from the original design.
-5 unit tests (`docChat.test.ts`, citation-extraction edge cases) + 3
-integration tests (`chunks.integration.test.ts`, real pgvector distance
-ordering).
-
-**Open question from the original entry, still genuinely open:** which
-documents teachers check most (ГОСТы vs. методички vs. internal
-normatives) — no usage data yet since this just shipped; revisit ingestion
-priorities once it's used.
 
 > **КНИТУ curriculum-intelligence suite** (items K, L below; A3 and M already shipped). These
 > are the *near-term, actionable* slices. The full feature map, dependencies, and items not
@@ -442,53 +217,6 @@ content aimed at given ОПК/ПК/УК + goals. Pairs with K into a **write →
   auto-published (same "AI never final" rule as grading).
 - **Depends on:** K (the check closes the loop) — build K first.
 
-### ~~N. Drawings into the ВКР review — text-vs-drawing findings~~ — already done
-
-Shipped: teachers can attach up to 6 чертежи (PDF/photo) to a ВКР long review
-via new **`DrawingsUpload.tsx`** (visible only on the long-review path). Each
-file reuses the *existing* `/api/documents/upload` pipeline unchanged — no new
-OCR plumbing needed, `services/documentExtractor.ts` already routes a
-low-text-layer PDF or an image through `yandexVisionOCR` — so steps 1-2 from
-the original plan turned out to be almost entirely a UI addition on
-already-shipped infrastructure, not new backend work.
-
-**Step 3 (the payoff) landed exactly as scoped, plus one free addition.** Each
-OCR'd drawing is analysed by a new, deliberately *non*-reused function,
-`analyzeDrawing()` — extractive only (summary + key_quantities with verbatim
-quotes), no strengths/gaps critique, since a title block isn't prose to
-review. Wrapped as a pseudo-`Section` (new `kind: 'drawing'`, via pure
-`buildDrawingSection()`) appended *after* the ПЗ's own sections so indices
-never collide with real chapters. Fed into **both** contradiction-detecting
-passes:
-- **Tier-5 (`findPremiseIssues`)** — the originally-scoped target.
-- **Tier-2 (`findInconsistencies`)** — realized during implementation that
-  this cheap, non-reasoner, name-clustering pass is actually the more precise
-  mechanism for the TODO's own headline example ("15 м в тексте vs 54 000 мм
-  на чертеже" is a same-name, different-value cluster — exactly what Tier-2
-  already does for cross-chapter numbers). Free to add since both passes take
-  the same `analyses: SectionAnalysis[]` shape — no new prompt.
-
-Deliberately **excluded** from `synthesizeReview` (chapter_reviews — a
-drawing isn't a chapter) and `findRecomputations` (no derivable formula in a
-dimension callout).
-
-**UI labeling:** a finding whose evidence points at a drawing needs to render
-"Чертёж: файл.pdf", not "Раздел 7" — new `LongReviewResult.drawings:
-{title}[]` (rides in the existing `result` JSONB column, **no migration**)
-lets `PremiseFindingsBlock`/`InconsistenciesBlock` resolve `chapter_index >=
-chapter_reviews.length` back to the right drawing title, in both
-`ReviewResult.tsx` (live) and `AssignmentDetailModal.tsx` (history).
-
-- **Touches:** `services/longReview.ts` (`Section.kind`, `buildDrawingSection`,
-  `analyzeDrawing`, orchestrator wiring), `routes/grading.ts` +
-  `gradingValidation.ts` (`drawings` on the review request, capped at 6 files /
-  20k chars OCR text each), `shared/types.ts`, new `DrawingsUpload.tsx`,
-  `PremiseFindingsBlock.tsx` / `InconsistenciesBlock.tsx`.
-- **Note:** OCR won't recover pure geometry ("horizontal vs vertical" as shapes),
-  but it does recover the dimension/label *text* where most contradictions live.
-- **Pricing hook:** rides on `documentUpload` (already Pro-only); OCR cost is
-  ~$0.001/page (negligible).
-
 ### O. Course knowledge graph — concept extraction + prerequisite inference · Effort: L+ (research-track)
 
 Build a per-course concept graph: nodes are concepts taught/tested, edges are
@@ -513,8 +241,8 @@ becomes the substrate for a student-facing tutor down the line.
   services to attach concept IDs; admin/teacher views to inspect the graph.
 - **Sequencing:** explicit research-track. Don't start before grant scoping is
   done — the patent-claim language and demo scope should be locked first so
-  what we ship matches what we claim. Cross-link with #3 (Russian embeddings)
-  since concept extraction quality rides on embedding quality.
+  what we ship matches what we claim. Concept extraction quality rides on
+  embedding quality (currently Yandex `text-search-doc`, see CLAUDE.md rule #9).
 
 ### P. Organisational structure model — canonical-typed org tree · Effort: L+ (foundational) · 🟢 MOSTLY SHIPPED
 
@@ -527,115 +255,34 @@ for pre-upgrade sessions. See CHANGELOG.
 
 **Done:** (a) prod migration, (b) frontend gate coherence.
 
-**(c) Domain-scoped grants — two-axis authorisation**
-([Research.md](Research.md) §7.10). Re-scoped from "per-subtree admin
-scoping": the original framing (subtree containment only) cannot express
-functional authority — the УМЦ head had to hold root admin just to reach
-РПД monitoring, and every future admin department (other проректоры, отделы)
-would repeat the problem. New model: a grant is **(level: admin/edit/view) ×
-(domain: platform/curriculum/teaching/…) × (unit subtree)**. Functional staff
-get domain-narrow grants at root (УМЦ: `edit × curriculum × root`; ПР УР:
-`view × teaching,curriculum × root`); line managers get grants at their unit
-(institute director, kafedra head); IT holds `admin × * × root` — the real
-org-admin.
-
-- **Phase 1 — `curriculum` domain · 🟢 SHIPPED (2026-07-22).** Migration 087
-  adds `org_unit_roles.domain` (default `'all'`, pure-widening — every
-  existing institution-root admin is untouched) and renames the level values
-  `head`→`edit`, `viewer`→`view` in the same migration (§7.10.3). New
-  `services/accessScope.ts` (`getAccessScope`) + `middleware/requireDomain.ts`
-  gate РПД monitor and institution criteria/rubrics on `curriculum` domain
-  instead of institution-root admin; `orgUnits.ts` role-grant endpoints accept
-  an optional `domain` (validation refuses `role='admin'` paired with a
-  non-`'all'` domain — belt-and-suspenders against a domain-scoped admin grant
-  being mistaken for true root admin, which `isInstitutionAdmin` now also
-  explicitly guards against via `domain='all'`). Frontend: role-assignment UI
-  gained a domain picker; Sidebar/`InstitutionLayout`/`InstitutionRoute` gate
-  on `teacher.curriculum_access` so a curriculum-only grant sees only the tabs
-  its level reaches (and is redirected away from admin-only sub-routes rather
-  than hitting a 403 wall). See CHANGELOG.
-- **Phase 2 — `teaching` domain · 🟢 SHIPPED (2026-07-22).** ПР УР read-only
-  width — usage analytics, grading activity, leadership dashboards, roster
-  read — at `view` level, unlocking the deferred viewer dashboards and §2.x
-  analytics consumers. `hasLeadershipRole`, `listDirectLeadershipUnits`, and
-  both `canActOnUnit` call sites in `routes/leadership.ts` gate on `teaching`
-  domain + `view` level instead of a bare role check.
-  **Real bug found and fixed in the same commit:** `teacherCanActOnUnit`
-  (backing all of the above) predates the domain axis and matched on role
-  alone — so a Phase 1 `curriculum` grant already leaked into the leadership
-  dashboard (grading activity, rosters, institution-wide) before this shipped.
-  `canActOnUnit`/`teacherCanActOnUnit`/`evaluateAccess`/`requireUnitRole` all
-  gained a required `domain` parameter (no unsafe "any domain" default) to
-  close it, with a regression test. institution.ts's `GET /overview`,
-  `/usage/daily`, `/usage/export`, `/teachers` (roster read only) moved ahead
-  of the admin gate the same way Phase 1's criteria/rubrics did — mutations
-  (`PATCH /teachers/:id`, invites) stay admin-only. Frontend: `curriculum_access`
-  gating generalised to also read `teaching_access`; a stale pre-Phase-1
-  `head`/`viewer` label map in `Leadership.tsx` and `InstitutionAudit.tsx`
-  (missed by the Phase 1 rename sweep — unquoted object keys, not string
-  literals) fixed while verifying in-browser. See CHANGELOG.
-- **Phase 3, slice A — subtree query scoping for `teaching` · 🟢 SHIPPED
-  (2026-07-22).** The `teaching`-domain institution routes (`/overview`,
-  `/usage/daily`, `/usage/export`, `/teachers`) now actually consume the
-  `pathPrefixes` a grant carries — a sub-unit grant (e.g. an institute
-  director holding `view × teaching × their-division`, grantable since Phase
-  2's role UI) sees only their subtree's teachers/activity, not the whole
-  institution. `db/queries/institutions.ts`'s three query functions gained an
-  optional `unitPathPrefixes` param (subtree-filtered via
-  `primary_org_unit_id` → `org_units.path`); `routes/institution.ts`'s new
-  `resolveTeachingPrefixes(req)` decides when to apply it — critically,
-  **root-anchored grants stay unrestricted** (not filtered by "root path"),
-  because every grant issued to date is root-anchored and filtering by root
-  path would incorrectly drop teachers with no `primary_org_unit_id` that the
-  unrestricted query has always shown. Verified in the browser with a real
-  division + kafedra-under-it + two teachers (one in-subtree, one out).
-  **Two more domain-blindness gaps found and fixed alongside** (same class as
-  the Phase 2 leadership leak, lower severity): `getProgramAccessScope`
-  (`services/programAccess.ts`) and `canTeacherShareToUnit`
-  (`db/queries/orgUnits.ts`) both matched on role alone with no domain
-  filter — since Phase 2's role-grant UI now offers `teaching` at `edit`
-  level too, a hypothetical future `teaching`-domain edit grant would have
-  incorrectly unlocked program-editing and rubric-sharing rights it was never
-  meant to have. Both now require `domain IN ('all', 'curriculum')`. See
-  CHANGELOG.
-- **Phase 3, slice B — subtree-scoped org tree CRUD + role grants · 🟢
-  SHIPPED (2026-07-22).** Narrowed after the original "platform narrowing"
-  framing turned out to be the wrong shape: user confirmed real-world
-  practice at KNITU (and likely other universities on the platform) —
-  **teacher invite/deactivation is centrally owned by IT, never delegated
-  per department**. So `POST/DELETE /api/institution/teachers/invite*`,
-  `PATCH /api/institution/teachers/:id`, `PUT /api/institution/structure/members/:teacherId/primary`,
-  and LTI/model/shared-RAG settings stay `platform`-domain, root-admin-only,
-  institution-wide **permanently** — not deferred, decided. What real
-  institute directors actually need is control over their own piece of the
-  org structure: `routes/orgUnits.ts` (`/api/institution/structure/*`) swaps
-  its `requireInstitutionAdmin` gate for `requireDomain('platform', 'admin')`
-  — safe because `role='admin'` is always `domain='all'` (Phase 1 invariant),
-  so this is a pure widening for the coarse gate; a sub-unit `admin × all`
-  grant (already grantable via the existing role UI) now also passes. New
-  `unitInScope` helper (alongside the existing `unitInInstitution`) enforces
-  the real per-target check via `pathIsAncestorOrSelf` — applied to every
-  write endpoint's target unit(s), including **both sides of move** (can't
-  pull a unit in from outside your subtree, can't move one of yours out to
-  somewhere you don't control). `listOrgUnitsWithCounts` and
-  `listInstitutionMembersWithRoles` gained the same optional
-  `unitPathPrefixes` filtering as slice A's queries (no orphan-row subtlety
-  here — every org unit has a real path). No new escalation-guard logic
-  needed for role grants: delegating `admin × all` on a descendant only
-  grants power within that descendant's subtree, by the same containment
-  math `canActOnUnit` already does. Verified live in the browser: a division
-  admin could create/rename/delete kafedry and grant roles within their own
-  institute, and was refused (via the UI's own error handling) touching
-  anything outside it. See CHANGELOG.
-  - **Still explicitly deferred**, unrelated to the narrowing above: **RPD
-    monitor (`curriculum`) subtree scoping** — `rpd_snapshot_rows` keys
-    departments by a free-text `dept_code` string with no FK or join path to
-    `org_units` at all (checked `migrations/086_rpd_monitor.sql`); needs a
-    new `dept_code → org_unit_id` mapping (schema + UI), not a query filter.
-    **Criteria/rubrics sharing target** — `POST /api/institution/{criteria,rubrics}`
-    still always shares to the institution root regardless of the caller's
-    own granted subtree; scoping that means changing the share *target*, a
-    behaviour change needing its own product decision.
+**(c) Domain-scoped grants — two-axis authorisation** ([Research.md](Research.md)
+§7.10): a grant is **(level: admin/edit/view) × (domain:
+platform/curriculum/teaching/…) × (unit subtree)**, letting functional staff
+(УМЦ, ПР УР) get domain-narrow grants at root without holding full institution
+admin, while line managers get grants at their own unit. All four phases
+shipped 2026-07-22 — see CHANGELOG for full detail:
+- **Phase 1 (`curriculum` domain)** — shipped. Migration 087, `accessScope.ts`
+  + `requireDomain.ts`, domain picker in the role-assignment UI.
+- **Phase 2 (`teaching` domain)** — shipped. ПР УР read-only width (usage,
+  grading activity, leadership, roster read). Found and fixed a real bug in
+  the same commit: `canActOnUnit`/`teacherCanActOnUnit`/`requireUnitRole` now
+  require an explicit `domain` param (no unsafe "any domain" default) — a
+  Phase 1 `curriculum` grant had been leaking into the leadership dashboard.
+- **Phase 3, slice A (subtree query scoping for `teaching`)** — shipped.
+  Institution routes now honor a grant's `pathPrefixes`; root-anchored grants
+  stay unrestricted. Two more domain-blindness gaps of the same class found
+  and fixed (`getProgramAccessScope`, `canTeacherShareToUnit`).
+- **Phase 3, slice B (subtree-scoped org tree CRUD + role grants)** — shipped.
+  Teacher invite/deactivate and LTI/model/shared-RAG settings stay
+  **permanently** root-admin-only (IT owns provisioning, confirmed against
+  KNITU practice — not deferred, decided); `routes/orgUnits.ts` structure
+  endpoints now accept subtree `admin × all` grants via `unitInScope`.
+  - **Still explicitly deferred**, unrelated to the above: **RPD monitor
+    (`curriculum`) subtree scoping** — `rpd_snapshot_rows` keys departments by
+    a free-text `dept_code` with no FK to `org_units`; needs a new mapping
+    (schema + UI). **Criteria/rubrics sharing target** — always shares to the
+    institution root regardless of the caller's granted subtree; changing
+    that is a behaviour-change product decision, not a query filter.
 
 **Tail (d) — Leadership dashboard V2 · Effort: S.**
 
@@ -658,36 +305,10 @@ Touches (remaining): `routes/leadership.ts` (extend `/overview` + drill),
 `db/queries/leadership.ts` (presentations + published-assignments queries),
 `pages/Leadership.tsx` + `pages/LeadershipTeacher.tsx` (extra cards).
 
-Original design notes below.
-
-Replace today's flat `institutions` + 3-value `teachers.role` enum with a
-self-referencing `org_units` table (canonical `type_code` taxonomy:
-`institution` / `governance` / `admin_office` / `cluster` / `division` /
-`department`) and a `org_unit_roles` junction (admin / head / viewer per
-unit). Authorisation resolves via materialised path walk. Teachers belong
-to a primary `department`; roles attach at any level above. See
-[Research.md](Research.md) §7 for full design including KSTU/КНИТУ mapping,
-schema sketch, and onboarding-variability decision (self-service tree
-builder for v1).
-
-- **Why:** the 2-level model collapses the moment we touch a real Russian
-  university. Each of §2.1 fairness audit, §2.2 coverage audit, §2.4
-  federated benchmarking, §5.1 published assignments, §6 LTI integration
-  needs a real org tree to resolve scope correctly. Retrofitting after any
-  of those ship is a painful migration that risks scoping bugs in the
-  first institutional pilot. Doing this first is the cheapest path.
-- **Touches:** new `org_units`, `org_unit_roles` tables + migration;
-  `teachers.primary_org_unit_id`; new authorisation helper
-  (`services/orgScope.ts`) that walks paths; revision of every existing
-  admin route to scope via the tree instead of `institution_id`;
-  IT-admin tree-builder UI (Settings → Organisation); backfill script that
-  creates one root unit per existing institution + a placeholder
-  `department` per existing teacher; CLAUDE.md *Admin System* and
-  *Database Schema* sections rewritten to match.
-- **Sequencing:** ships **before** §5.1 build (Feature N+ work) and
-  before §6 LTI. Estimated 3–4 weeks of focused work for schema +
-  middleware + minimal admin UI. Defer rich per-level dashboards,
-  template library, AD sync.
+*(Original full design — the `org_units`/`org_unit_roles` schema, materialised
+path authorisation, KSTU/КНИТУ mapping — is superseded by what actually
+shipped above; see [Research.md](Research.md) §7 and CHANGELOG if the
+historical rationale is needed.)*
 
 ### Q. Published assignments + process-of-creation attestation (§5.1) · Effort: M · 🟢 CORE SHIPPED
 
@@ -756,47 +377,6 @@ Remaining scope (low priority, no customer has asked yet):
   credentials (§6.1). The §6.5 config UX is what keeps each institutional sale
   from becoming a hand-held engineering engagement.
 
-### ~~S. Agentic calc verification~~ — already done
-
-Shipped: `services/calcVerifier.ts` extracts up to 12 computational steps
-from a calc-mode submission (one bounded `chatJSON` call), evaluates each
-substitution via a sandboxed `mathjs` instance (restricted scope + a
-defense-in-depth character allowlist — `expr-eval` was the original pick
-but had an unpatched high-severity prototype-pollution advisory, ruled out
-during implementation), and compares against the claimed result with a 1%
-relative tolerance. Mismatches merge into `ai_improvements` as citable
-bullets reusing the existing Tier-3 `severity`/`action`/`correction` fields;
-the full per-step trace persists in `assignments.ai_calc_verification`
-(migration `063_calc_verification.sql`). Gated behind `calcVerification`
-plan flag (Pro+). See CHANGELOG for full design including the evaluator
-pivot and 21 unit tests in `calcVerifier.test.ts`.
-
-**Follow-up discovered while building, not yet done:** `assignment_type` is
-never persisted on `assignments` (request-time parameter only) — the eval
-harness's `runReplay()` has no way to identify which historical assignments
-were originally calc-mode, so this feature can't be measured via replay
-today. Fixing would mean adding a persisted `assignment_type` column and
-threading it through `ReplayTarget`/`findReplayTargets` — real but separate
-scope from this ship.
-
-### ~~T. Citation existence checking~~ — already done
-
-Shipped: `services/citationChecker.ts` mirrors `calcVerifier.ts`'s pattern —
-one bounded `chatJSON` call extracts up to 15 bibliography entries; a
-4-worker bounded-concurrency pass (reusing `evalHarness.ts`'s worker-pool
-shape) searches each via `webSearch()` (reformulating once on a zero-result
-first pass), and `classifyMatch()` scores token overlap locally (no further
-LLM call) into found / similar_found / not_found. Only `not_found` merges
-into `ai_improvements` as a citable bullet, always phrased as a neutral
-fact with the "not proof of fabrication" caveat baked into the note text.
-Full trace persists in `assignments.ai_citation_check`
-(migration `064_citation_check.sql`). Opt-in per request (`check_citations`,
-mirrors the existing `thorough` checkbox pattern rather than
-`calcVerification`'s auto-enable, since it applies to any submission type
-and adds real latency) — gated Pro+ via new `citationCheck` plan flag. See
-CHANGELOG for the full design, known constraints (15-reference cap,
-synchronous request, heuristic classification), and 11 unit tests in
-`citationChecker.test.ts`.
 
 ### U. Criteria/rubric marketplace — cross-institution publishing · Effort: L
 
@@ -978,92 +558,8 @@ unzipping a real `.docx`). 15 unit tests (`fosTickets.test.ts`,
 sourcing from `program_disciplines.competency_codes` (accreditation-grade,
 sells the institution tier) — v1 extracts topics/competencies ad hoc from
 `courses.syllabus_text` instead. Revisit once a real programme-linked
-discipline wants this.
-
-Original design notes below.
-
-From the 2026-07-16 wow-feature slate ([Research.md](Research.md) §9.2).
-Every РПД legally requires a фонд оценочных средств; teachers assemble them
-by hand under accreditation deadline pressure. One button on a discipline:
-«Собрать ФОС» → a complete, editable, exportable document whose parts are
-generated by engines that already exist.
-
-- **Why:** the best jaw-drop-to-engineering ratio on the platform — it is
-  orchestration of shipped generators, not new AI capability; it attacks
-  the most-hated bureaucratic artifact in the profession; it is defensibly
-  Russian-specific (no Western competitor will build it); and it targets
-  the pain that institution-tier buyers (УМУ/проректор) personally feel.
-  Photo-stack grading is the better demo; this is the better sale.
-
-- **What a ФОС contains → which engine produces it:**
-  1. **Паспорт ФОС** — the header table mapping компетенции → индикаторы
-     достижения → оценочные средства → формы контроля. Source: the
-     programme competency model (`program_disciplines.competency_codes` +
-     indicator decomposition already built for the РПД conformance check
-     in `documentReview.ts`), or ad-hoc extraction from the РПД text when
-     the discipline isn't linked to a programme. Assembly, no generation.
-  2. **Тестовые задания** — `services/quizzes.ts`, called per topic block
-     at the three Bloom levels it already supports, each batch tagged with
-     the индикатор(ы) it evidences.
-  3. **Практические задания / кейсы** — `services/tasks.ts`, same tagging.
-  4. **Экзаменационные билеты** — the one genuinely new generator: N
-     билетов × (2 теоретических вопроса + 1 практическое задание), with a
-     balance constraint — every topic and every индикатор covered by at
-     least one билет, no topic dominating. One `chatJSON` call taking the
-     topic list + indicator set; the balance check is deterministic
-     post-validation (like `validateCitation` — never trust the model to
-     self-report coverage).
-  5. **Критерии оценивания** — map to the 5/4/3/2 scale from the
-     discipline's rubrics/criteria where the teacher has them; otherwise
-     generate defaults per assessment type.
-
-- **Coverage self-check (the differentiator):** after assembly, a
-  deterministic pass verifies every индикатор is hit by ≥1 оценочное
-  средство; gaps render as a warning list with a «Догенерировать» button
-  per gap. Same write→check→fix loop as РПД-студия's «Перепроверить
-  покрытие».
-
-- **Orchestration:** a pg-boss job (`services/fosGenerator.ts` +
-  `fosWorker.ts`) — this is many LLM calls (minutes, not seconds), exactly
-  what the long-review machinery was built for. 202 + poll, survives PM2
-  restart, progress by section («Билеты: 12 из 20…»).
-
-- **Persistence:** new `fos_documents` table — discipline/course link,
-  `sections JSONB` (editable, like РПД-студия sections), status,
-  `generated_at`. Teacher edits sections in place; **AI drafts, teacher is
-  author of record** (same rule as РПД-студия — never auto-final).
-
-- **Export:** DOCX is non-negotiable (УМУ lives in Word; a ФОС gets edited
-  and signed, not framed) — `docx` npm package, new dependency (**user
-  runs the install** — agent env can't). Branded PDF as the second format
-  via the existing `programReportPdf.ts` pdfkit path.
-
-- **Entry points:** programme detail → Документы tab (per-discipline
-  «Собрать ФОС» next to the conformance check); РПД-студия (generate from
-  the drafted РПД); Materials hub card.
-
-- **Phasing:**
-  - **v1 (teacher-scoped):** from a предмет with a syllabus — topics from
-    `syllabus_text`, competencies extracted ad hoc from the uploaded РПД
-    if present. Ships without touching the programme model.
-  - **v2 (programme-integrated):** when the discipline is linked in the
-    org tree, паспорт pulls the real indicator decomposition and the
-    conformance check cross-references the ФОС («ФОС покрывает 14 из 16
-    индикаторов»). This is the accreditation-grade version that sells the
-    institution tier.
-
-- **Gating:** new `fosGenerator` plan flag, Pro+ (`canUseFeature`, rule
-  #4). Institution tier could add the v2 programme integration as its
-  exclusive.
-- **Touches:** new `services/fosGenerator.ts` + worker + `routes/fos.ts`
-  (or extend curriculum routes), migration for `fos_documents`, билеты
-  prompt + deterministic balance validator (+ unit tests, prompt-path
-  tests per workflow rule), `FosStudio.tsx` page (section editor, reuse
-  РПД-студия patterns), export endpoints, `docx` dependency,
-  `planLimits.ts`, FEATURES.md + CHANGELOG.md same-commit updates.
-- **Sequencing:** independent; v1 has no blockers. Do v1 before Feature V
-  (УМЦ dashboard) — a readiness matrix is more compelling when ФОС
-  existence/coverage is one of its columns.
+discipline wants this. v2 gating: rides `fosGenerator` (Pro+), with the
+programme-integration as an Institution-tier exclusive.
 
 ### Y. Live lecture mode — QR quiz during the лекция · Effort: M–L · 🟢 v1 SHIPPED
 
@@ -1136,208 +632,32 @@ several bugs, both now fixed:**
   `live_participants.assignment_id` (migration
   `083_live_session_journal_link.sql`) makes re-saving idempotent.
 
-Original design notes below.
-
-From the 2026-07-16 wow-feature slate ([Research.md](Research.md) §9.5);
-the deliberate v1 slice of the §3.1 live-lecture engagement layer —
-**no WebRTC, no ASR, no confusion heatmap** — just the Kahoot-style moment
-grounded in the teacher's own generated materials.
-
-- **Flow:** teacher opens a quiz (or a presentation with an attached quiz)
-  → «Запустить в аудитории» → projector-friendly host screen with a QR
-  code + short join code → students scan and join from phones with **no
-  account** (anonymous or nickname-only — same no-student-portal
-  philosophy as `/write/:token`, and cleaner 152-ФЗ posture than
-  attestation since nothing identifies a person; consent gate not needed
-  for anonymous aggregate answers, mirror the §5.1.2 aggregate-only
-  principle anyway) → teacher advances questions one at a time → students
-  answer once per question → live histogram + correct-answer reveal on the
-  projector.
-
-- **Transport decision — short polling, not WebSockets.** The backend runs
-  a 2-worker PM2 cluster; WebSockets would force sticky sessions or a
-  Redis pub/sub layer — real infra for a v1. Short polling (student page
-  polls session state every ~2s; host polls answer counts every ~2s) rides
-  entirely on existing HTTP/nginx/rate-limit infrastructure and is
-  consistent with the platform's existing poll-for-results patterns
-  (async grading, long reviews). A 100-seat lecture hall ≈ 50 rps of
-  trivial indexed reads — fine on current sizing, but give the poll
-  endpoints their own rate-limit bucket (`rateLimits.ts`) so a lecture
-  hall can't trip the general limiter, and keep the state query to one
-  indexed SELECT. WebSockets become the v2 upgrade if usage proves demand
-  (revisit alongside `docs/scaling.md` Tier 2).
-
-- **Schema (migration):**
-  - `live_sessions` — id, teacher_id, quiz_id, join_code (6-char, unique
-    among active), status (`lobby | question | reveal | finished`),
-    current_question_index, created_at/finished_at.
-  - `live_participants` — session_id, participant_token (server-issued),
-    nickname nullable.
-  - `live_answers` — session_id, participant_token, question_index,
-    choice_index, answered_at; unique (session, participant, question) —
-    answer-once enforced by constraint, not client.
-  - On finish: per-question aggregate persisted onto the session row
-    (JSONB) so the raw answers can be pruned later.
-
-- **Routes:** authenticated — create session, advance/reveal/finish, host
-  state; public tokenised — join by code (issues participant token),
-  session state, submit answer. Join/submit validated + rate-limited;
-  join codes expire with the session.
-
-- **Frontend:**
-  - `LiveSessionHost.tsx` — projector mode: big QR (client-side `qrcode`
-    npm, small frontend dep — **user runs the install**), participant
-    counter in lobby, question view with live answer-count bar, histogram
-    + reveal, next/finish controls. Large type, dark-friendly.
-  - `LiveJoin.tsx` (public route `/live/:code`) — mobile-first: nickname
-    (optional), waiting state, answer buttons, per-question
-    got-it/locked-in state, final «Спасибо». Zero chrome.
-  - Entry points: quiz history rows + quiz result screen («Запустить в
-    аудитории»), Presentations result for a related quiz.
-
-- **After the lecture:** session summary for the teacher (per-question
-  correct %, hardest question). v1 stops there; feeding results into
-  cohort analytics or generating a «разбор ошибок» (Research.md §9.3) is
-  the natural fast-follow that turns a gimmick into a loop.
-
-- **Gating:** new `liveSessions` plan flag — Pro+; Free gets 1 session/mo
-  as the teaser (this feature markets itself to everyone in the room).
-- **Touches:** migration (3 tables), `routes/liveSessions.ts` +
-  validation + dedicated rate-limit bucket, small `services/liveSessions.ts`
-  (state machine + aggregation; pure where possible, unit-tested),
-  `LiveSessionHost.tsx`, `LiveJoin.tsx` + public route in `App.tsx`,
-  quiz-page entry buttons, `qrcode` frontend dep, `planLimits.ts`,
-  FEATURES.md + CHANGELOG.md same-commit updates.
-- **Risks / open questions:** projector UX needs real-room testing
-  (contrast, QR size at distance); Wi-Fi quality in auditoriums argues
-  for tolerant polling (retry, don't error-flash); decide whether
-  nickname display on the histogram screen is wanted at all (anonymous
-  histogram is safer and still fun).
-- **Sequencing:** independent of X; no blockers. The §3.1 research-track
-  extensions (comprehension pings, slide-aligned questions, ASR) build on
-  this session/participant substrate later.
+- **Sequencing:** the §3.1 research-track extensions (comprehension pings,
+  slide-aligned questions, ASR, WebRTC) build on this session/participant
+  substrate later — none scheduled.
 
 ### Z. Market-evidence layer + РОП-студия — defensible labor-market justification at design time · Effort: pilot S–M, full track L+ (phased) · 🟢 Phase 0 SHIPPED (2026-07-23)
 
-**Phase 0 pilot shipped (2026-07-22)**, pilot: направление 15.03.02
-«Технологические машины и оборудование», Респ. Татарстан. Real РОП Студия
-surface, not a throwaway script — new standalone page (`/rop-studio`,
-own nav entry) rather than folding the pilot capability into an existing
-page, since Z's own framing calls this a "programme-level sibling of
-РПД-студия."
+**Phase 0 pilot shipped (2026-07-22, Plane-2 doc completed 2026-07-23)**,
+pilot: направление 15.03.02 «Технологические машины и оборудование», Респ.
+Татарстан. New `/rop-studio` page, `services/labourMarket.ts` (pulls
+trudvsem.ru vacancy snapshots for all ~90 Russian federal subjects) +
+`services/marketEvidenceGenerator.ts` (one grounded `chatJSON` call, numbers
+always rendered next to raw source data for direct review rather than an
+automated citation matcher), multi-region selection, and a Plane-2 grounded
+document (per-institution «стратегия развития», reuses documentExtractor/
+chunker/embeddings + the same cosine-distance refusal gate `docChat.ts`
+uses). 28+9 tests, verified live end-to-end against the real pilot
+direction and institution. See CHANGELOG for full implementation detail.
 
-- **`services/labourMarket.ts`** — `fetchVacancySnapshot(regionCodes: string[],
-  professions)` hits trudvsem.ru directly (no auth, no SSRF-allowlist
-  machinery needed — single fixed platform-controlled source, same
-  reasoning as `fgosvoParser.ts`'s hardcoded domain). `SUPPORTED_REGIONS`
-  now covers **all ~90 Russian federal subjects** (expanded 2026-07-22 from
-  the initial Татарстан-only list) — every code individually confirmed
-  against a live trudvsem query, not guessed (surfaced real surprises:
-  Chechnya is code 20 not 95, code 95 is Херсонская область, and the four
-  post-2022 territories use non-sequential codes — Запорожская=90, ДНР=93,
-  ЛНР=94, Херсонская=95). Sequential per-region×term fetch, fails soft per
-  term. Exposed to the frontend via `GET /api/institution/programs/regions`
-  rather than duplicating the list client-side.
-- **`services/marketEvidenceGenerator.ts`** — one `chatJSON` call grounded
-  in structured data (профстандарт codes/names + vacancy counts/salaries/
-  employers/dates), instructed to never invent a number or code outside
-  what's given. Unlike `lib/citation.ts`'s verbatim-quote validation (built
-  for free-text source documents), there's no text to match against here —
-  the safety mechanism is architectural: the UI always renders the
-  generated text next to the raw source data side-by-side (see below), so
-  review is a direct check against real numbers, not an automated matcher.
-- **`db/queries/fgos.ts`** gained `getProfstandardRefsForDirection(code,
-  level)` — joins the ФГОС registry (Feature AA) by `(direction_code,
-  level)`; new `program_market_evidence` table (migration 089) mirrors
-  `program_analyses`' cached-latest-wins shape — append-only, no
-  draft/publish status (the text is just always-editable, matching
-  `program_analyses`'s posture, not AA's heavier draft/publish workflow).
-- **`routes/programs.ts`** gained `POST/GET/PUT :id/market-evidence` on the
-  existing program resource (reusing `requireProgramAccess`/
-  `loadReadable`/`assertEdit` — no new route file, no new middleware).
-  `programs.level` (`bachelor`/`master`/`specialist`, English) maps to
-  `fgos_standards.level` (Russian) at the route layer.
-- **Frontend `pages/RopStudio.tsx`**: program picker → region(s) + profession-terms
-  form (profession terms are typed by the РОП, not auto-derived — they know
-  their own field's job titles better than a keyword heuristic would guess,
-  and it avoids an extra unvalidated LLM step) → generated text in an
-  editable textarea (explicit Сохранить, not debounced autosave — this text
-  is headed for an official document) + a «Черновик ИИ» badge → a
-  «Источники» block rendering every vacancy sample (title/employer/salary/date,
-  card rows, grouped by region when more than one is selected) and
-  профстандарт (code badge + name) the text was built from.
-- **Multi-region selection (2026-07-22)**: region picker is now
-  `components/ui/MultiSelect.tsx` — a searchable checkbox combobox (sibling
-  to `Select.tsx`, doesn't close on pick, text filter narrows the ~90-entry
-  list) rather than a single-region dropdown. `fetchVacancySnapshot` and
-  `generateMarketEvidenceSection` take `regionCodes: string[]`/build a
-  `regions: RegionSnapshot[]` context so the generated paragraph can cite
-  multiple regions' numbers side by side. `program_market_evidence` schema
-  changed from `region_code`/`region_name` to `region_codes`/`region_names`
-  arrays (migration 090) with `vacancy_snapshot` now nested per-region
-  (migration 091 fixed a real gap: it wrapped the one pre-existing row's
-  still-flat snapshot into the new shape — caught via live verification,
-  which crashed on `region.by_profession.map is not a function` before the
-  fix).
-- 28 tests total across the feature (`labourMarket.test.ts`,
-  `marketEvidenceGenerator.test.ts`, `programMarketEvidence.integration.test.ts`,
-  all updated/extended for multi-region + full region-list coverage) plus the
-  full 443-test backend suite and a clean frontend `tsc --noEmit`. Verified
-  live end-to-end against the real pilot direction and a real institution's
-  actual 15.03.02 programme: single-region generation (1796 «технолог»
-  vacancies in Tatarstan, real employers, all 16 real профстандарт codes)
-  and 3-region generation (Алтайский край + Москва + Татарстан — 31/123/86
-  vacancies respectively) both spot-checked with every number/salary in the
-  generated paragraph matching the raw source data exactly; MultiSelect's
-  search-filter-then-select flow confirmed to not deselect prior picks.
-- **Plane-2 pilot document shipped (2026-07-23) — the pilot spec's own
-  "include ONE Plane-2 document" is now built, completing Phase 0 as
-  originally scoped.** One grounded document per institution — the
-  university's «стратегия развития» — that the generator can cite
-  verbatim alongside Plane-1 market data. New `institution_strategy_documents`/
-  `institution_strategy_chunks` tables (migration 092, one document per
-  institution — `institution_id UNIQUE`, reupload replaces); new
-  institution-admin-only Settings page (`/institution/strategy-document`,
-  root-admin-gated like LTI/shared-RAG/model settings, not delegated to a
-  domain grant); reuses `documentExtractor`/embeddings — no new extraction
-  machinery, per the pilot spec's own instruction. `chunker.ts` gained a
-  pure `splitTextIntoChunks()` (extracted from `chunkDocument`, zero
-  behavior change) so this institution-scoped pipeline doesn't need a fake
-  course/document ID to reuse the same splitting logic. On each generation,
-  `routes/programs.ts` embeds a query (programme title + profession terms,
-  no new user input) and retrieves the closest institution chunk(s) via the
-  *same* cosine-distance refusal gate `docChat.ts`'s "Спроси документ" uses
-  (`UNGROUNDED_DISTANCE = 0.35`) — a weak/no match silently skips Plane-2 for
-  that generation rather than forcing a citation. `program_market_evidence`
-  gained `strategy_excerpts JSONB` to persist what (if anything) grounded a
-  given generation, rendered as a third «Источники» block in `RopStudio.tsx`
-  only when non-empty. 9 new tests (unit: chunker regression, service
-  upload/process/fail-soft; integration: 3 institution routes + grounded/
-  ungrounded market-evidence paths). **Real bug caught during live
-  verification, not by any test:** the new tables were created with
-  `vector(1536)`, but Yandex's `text-search-doc` model (the only embedding
-  provider this platform uses, migration 024) is 256-dimensional — every
-  chunk insert was silently failing the dimension check, caught in the
-  `try/catch` and logged as a warning, so the document showed "Готово" with
-  zero real chunks. Fixed by correcting the column to `vector(256)` (migration
-  was uncommitted, fixed in place rather than layering a patch) before this
-  had shipped anywhere. Verified live end-to-end on the real institution:
-  uploaded a Russian-language strategy PDF, regenerated the real 15.03.02
-  programme's evidence, confirmed the excerpt appeared in «Источники» and
-  every reference to it in the generated paragraph matched verbatim; also
-  confirmed the refusal gate itself works under real (not mocked) embeddings
-  — an English-language stand-in document's cosine distance (0.357) landed
-  just above the 0.35 threshold and was correctly omitted, not forced in;
-  confirmed delete + regenerate leaves no crash and no phantom «Источники»
-  block.
-- **Not yet built** (deferred to Phase 1+ per the TODO's own sequencing —
-  gated on this pilot's real-user verdict first): the `labourMarket`
-  provider-abstraction interface, HH/Росстат as additional sources
-  (HH now requires a registered OAuth app — anonymous search returns
-  403, confirmed live), multiple/platform-wide Plane-2 documents (нацпроект/
-  федпроект passports, промпартнер docs — the general `platform | institution
-  | programme` document-scope tier), the full dossier generator, DOCX export,
-  учебный план/competency-matrix builder.
+**Not yet built** (deferred to Phase 1+ per the sequencing below — gated on
+this pilot's real-user verdict first): the `labourMarket`
+provider-abstraction interface, HH/Росстат as additional sources (HH now
+requires a registered OAuth app — anonymous search returns 403, confirmed
+live), multiple/platform-wide Plane-2 documents (нацпроект/федпроект
+passports, промпартнер docs — the general `platform | institution |
+programme` document-scope tier), the full dossier generator, DOCX export,
+учебный план/competency-matrix builder.
 
 From the 2026-07-21 discussions with the head metodist at the test university.
 Her ask started as "add РосНавык-like features"; the distilled need is
@@ -1436,22 +756,12 @@ NOT building*.
   never see the ФОС or the student. Long-term this makes us a *partner or
   customer* for their breadth, not a competitor.
 
-**Pilot slice (phase 0) — validate before building anything general:**
-ONE направление at the test university. Ingest the relevant профстандарт(ы)
-+ a trudvsem/HH pull for the matching profession profiles in the region →
-generate one «обоснование актуальности» section with full citations → put
-it in the metodist's hands. Cheap, high-impact pilot extension now that her
-verbatim ask is known: include ONE Plane-2 document — the university's own
-стратегия развития (a single public file) — so the pilot artifact
-demonstrates both planes and previews the dossier, at the cost of one
-document upload through existing machinery. **Success test:** "I would put
-this in front of the учёный совет." If instead it's "nice, but I still need the РосНавык
-dashboard," the dashboard IS her product — license, don't build. Three weeks
-of learning vs. two quarters of the wrong platform.
+**Success test for the shipped pilot:** "I would put this in front of the
+учёный совет." If instead it's "nice, but I still need the РосНавык
+dashboard," the dashboard IS her product — license, don't build.
 
 - **Phases (each gated on the previous one's validation):**
-  - **0. Pilot slice** (above) · S–M. Hardcoded направление is fine;
-    the only deliverable is the artifact + her verdict.
+  - **0. Pilot slice** · S–M · shipped (above).
   - **1. `labourMarket` service behind an interface** — mirror the
     `llm/registry.ts` provider-abstraction pattern so the source is
     swappable (trudvsem/HH today, licensed РосНавык/other feed later
@@ -1514,235 +824,27 @@ of learning vs. two quarters of the wrong platform.
   institutional-scale sibling of O's per-course concept graph; keep the
   relations-table schemas compatible.
 
-**Phase 0 scoping started (2026-07-22), pilot: направление 15.03.02
-«Технологические машины и оборудование», регион Респ. Татарстан.** Two
-findings while trying to pull this direction's профстандарты out of the
-registry to seed the pilot:
-
-- **trudvsem.ru: confirmed live, zero setup.** Plain HTTP GET, no auth, no
-  registration. Region code for Татарстан is `1600000000000`
-  (`/api/v1/vacancies/region/1600000000000?text=...`) — verified against
-  real data: 86 real, dated vacancies for «инженер-технолог» in Tatarstan
-  (ТАИФ-НК, Казанское ОКБ «Союз», Зеленодольский завод им. Горького), each
-  with salary and creation date. This alone is enough to seed Phase 1's
-  `labourMarket` interface for this profession/region.
-- **hh.ru: no longer usable anonymously.** Confirmed live: unauthenticated
-  `GET /vacancies` now returns `{"errors":[{"type":"forbidden"}]}` (matches
-  the "closed API access" tightening reported since Dec 2024 — evidently
-  extends past job-seeker features to anonymous analytical search too).
-  `GET /areas` (reference data) still works with no auth — Tatarstan's `id`
-  is `1624`. Actual vacancy search needs a registered app + OAuth token via
-  dev.hh.ru. Not a blocker (trudvsem alone covers Phase 0) — treat as
-  secondary/deferred, register only if trudvsem's coverage proves
-  insufficient for a real dossier.
-- **Two real bugs found and fixed in the shared OCR pipeline** (this
-  direction's fgosvo.ru PDF is a scanned document — see
-  `services/documentExtractor.ts` / `services/yandexVision.ts`, shared by
-  grading, program import, and ФГОС ingestion alike, so both fixes benefit
-  every feature that OCRs a document, not just this pilot):
-  1. `documentExtractor.ts`'s scanned-PDF detector counted `pdf-parse`'s own
-     per-page markers (`-- 1 of 23 --`, …) as "words" — a 23-page scan with
-     zero real text tokenised to 115 "words" via naive whitespace-splitting,
-     sailing past the 50-word OCR trigger and landing as an empty draft
-     with no error. Now counts runs of 2+ Unicode letters instead, immune
-     to digit/punctuation noise from page markers or page numbers.
-  2. Yandex Vision's own PDF ingestion can't decode every embedded image
-     codec — confirmed directly against the real 15.03.02 PDF: its scanned
-     pages are CCITT Group 4-encoded (the standard compression for
-     scanned government documents), and Vision's `batchAnalyze` fails
-     outright with `"Can't decode Image: image: unknown format"` even
-     though the PDF itself is perfectly valid. Fixed by rasterizing every
-     page to a PNG (`pdf-to-img`, wraps pdfjs-dist — pure JS, no system
-     binary dependency) before sending to Vision, which sidesteps codec
-     support entirely and also removes the old 8-page-per-call cap
-     `batchAnalyze` silently applied to raw PDF content (replaced
-     `pdf-lib`-based PDF chunking, now unused, with per-page rasterization).
-     **Needed `npm install` at the repo root** to pick up the new
-     `pdf-to-img` dependency — the code degrades gracefully (falls back to
-     the old whole-PDF call) if it's ever missing, but that fallback still
-     can't decode CCITT scans. Also needed an `overrides` entry
-     (`pdfjs-dist` pinned to one version — `pdf-parse` and `pdf-to-img`
-     each pull their own, and pdfjs-dist's Node build gets confused when
-     two different-version copies load into the same process, throwing
-     "API version does not match Worker version"). Applying the override
-     against an already-committed lockfile is a known npm bug
-     ([npm/cli#4232](https://github.com/npm/cli/issues/4232)) — needed a
-     full `rm -rf node_modules package-lock.json && npm install`, not just
-     a plain reinstall.
-  - 5 new unit tests for `yandexVisionOCR` (mocking `pdf-to-img` + `fetch`)
-    + 2 new for `documentExtractor.ts`'s OCR trigger.
-  - **Re-verified end-to-end against the real 15.03.02 PDF, confirmed
-    working:** re-ran the actual import pipeline (`fetchDocumentFromUrl` →
-    `extractText` → `extractFgosDraft` → `createFgosStandardDraft`) —
-    OCR'd all 23 scanned pages (27.7s), correctly identified the document
-    (приказ №728, 15.03.02 Технологические машины и оборудование), and
-    extracted **25 competencies, 16 профстандарты (28.003, 40.052, 40.069,
-    …, all genuinely scoped to machinery/manufacturing — механосборочное,
-    кузнечно-штамповочное, литейное производство), 4 structure
-    requirements.** Phase 0's профстандарты blocker is closed — the pilot
-    can proceed.
-
 ### AA. ФГОС 3++ registry — normative reference layer + ПК-конструктор · Effort: v1 S (inside Z's pilot), full M · 🟢 v1 SHIPPED (2026-07-22)
 
-**v1 shipped:** single-standard ingestion — upload PDF/DOCX → `extractText`
-(existing `documentExtractor.ts`) → one `chatJSON` pass (`services/fgosExtractor.ts`)
-pulling УК/ОПК (each verbatim-checked against the source via
-`validateQuoteAgainstSource`, `lib/citation.ts` — unverified formulations are
-flagged, not dropped, for the admin to fix), structural block requirements,
-and the профстандарт appendix → editable admin review screen
-(`pages/admin/AdminFgos.tsx`) → confirm/publish (never auto-published — a
-standard stays `status='draft'` until confirmed, same AI-never-final posture
-as every other extraction pipeline). Platform-wide reference data — gated by
-`requireAdmin` (platform owner only, not institution admin — a ФГОС is
-federal law, identical for every institution), own route file
-(`routes/adminFgos.ts`, mounted `/api/admin/fgos`) rather than growing
-`routes/admin.ts`, matching how `orgUnits.ts`/`rpdMonitor.ts` got their own
-files for the same reason. Migration `088_fgos_registry.sql`: `fgos_standards`
-/ `fgos_competencies` / `fgos_structure_requirements` / `fgos_profstandard_refs`
-— the last has no FK to a профстандарт table yet since Feature Z (which
-would own `profstandard_nodes`) doesn't exist; plain columns for now,
-forward-compatible for a join column later. 6 unit tests
-(`fgosExtractor.test.ts`) + 7 integration tests (`adminFgos.integration.test.ts`,
-covering the `requireAdmin` gate, the full extract→create→publish round
-trip, and that extract alone never writes to the DB). Verified live against
-a real synthetic ФГОС document end-to-end (real `chatJSON` call, both
-competencies correctly extracted and verbatim-verified).
+**v1 shipped:** single-standard ingestion — upload PDF/DOCX →
+`documentExtractor` → `chatJSON` extraction (`services/fgosExtractor.ts`,
+verbatim-checked УК/ОПК via `validateCitation`, structural block
+requirements, профстандарт appendix) → admin review screen
+(`pages/admin/AdminFgos.tsx`) → confirm/publish (never auto-published).
+Platform-wide reference data, `requireAdmin`-gated. Migration
+`088_fgos_registry.sql`.
 
-**Bulk import from fgosvo.ru — 🟢 SHIPPED (2026-07-22):** seeding the
-registry standard-by-standard doesn't scale to the ~700 ФГОС 3++ documents
-fgosvo.ru publishes, so this extends v1 with the same "paste a link, get a
-checklist" pattern already shipped for РОПы' bulk РПД import (Feature AD,
-`SvedenImportModal.tsx`). Two-level auto-crawl: the admin pastes one top
-listing URL (e.g. `https://fgosvo.ru/fgosvo/index/24` for bachelor's) →
-new `services/fgosvoParser.ts` (pure, dependency-free, verified against real
-fetched markup — fgosvo.ru renders every row, at both the category-listing
-and direction-listing level, as a non-nesting `<div class="item d-flex">`
-block, which is what makes tag-level regex parsing safe here without a real
-DOM) → the backend follows every category link and returns one combined
-checklist across all ~50 categories (`POST /discover`) → admin reviews/
-unchecks/adjusts level per item → each checked item is fetched, extracted,
-and landed as a **draft** one at a time (`POST /import-one`, client-driven
-loop — same reasoning as Feature AD: hundreds of sequential LLM calls in one
-HTTP request would risk timeouts). `already_imported` cross-references each
-`(direction_code, level)` against the existing registry so re-running
-discovery doesn't re-suggest what's already there. fgosvo.ru is a single,
-fixed, platform-controlled source, so its domain allowlist is hardcoded
-(`fgosvo.ru`) rather than reusing the per-institution
-`document_fetch_domains` allowlist the sveden importer needs.
-
-Since bulk-imported drafts are too numerous to hand-review at import time
-(rule #3 still holds — nothing publishes without a human confirm, it just
-happens later), `AdminFgos.tsx` gained a second capability it was missing
-even for v1: **clicking an existing registry row now opens it into the
-review screen** (`getFgosStandard` → maps to `FgosDraft` shape → the
-existing `publishMut` already branched on `standardId`, so no mutation
-changes were needed, just the load-and-open wiring). Without this, a
-bulk-imported draft would have been permanently unreachable.
-
-8 new unit tests (`fgosvoParser.test.ts`, against real fetched HTML
-excerpts) + 5 new integration tests (`adminFgos.integration.test.ts`,
-mocking `documentFetch`/`chatJSON`: requireAdmin gate, multi-category crawl
-aggregation, `already_imported` dedup, single-item import lands as draft,
-missing-field validation). Verified live in the browser against the real
-fgosvo.ru site: one paste discovered 188 направления across 51 categories
-correctly grouped and coded; imported two real standards end-to-end (real
-PDF fetch → real `chatJSON` extraction → landed as drafts); opened one from
-the list and published it through the existing review screen.
-
-**Follow-up found while reviewing real imported data (2026-07-22):** two
-issues, one real and fixed, one investigated and not a bug.
-- **Review-screen layout bug — fixed.** `AdminFgos.tsx`'s shared `inputCls`
-  baked in `w-full`; every field appending a narrower `w-XX` class on top
-  (competency code, min/max credits, профстандарт code) lost that fight —
-  Tailwind's generated stylesheet orders `w-full` after the numeric width
-  scale, so it silently won every time, squeezing the sibling field (often
-  the formulation textarea) down to a near-zero-width sliver that wrapped
-  text letter-by-letter. Looked like missing/truncated data; wasn't — the DB
-  already held full 17-competency, multi-block records. Fixed by dropping
-  `w-full` from the shared class and adding it explicitly only at the one
-  call site that needs it.
-- **Empty профстандарты — investigated, mostly not a bug.** Suspected the
-  48000-char `MAX_TEXT_CHARS` truncation cutoff (`fgosExtractor.ts`) was
-  cutting off the appendix, which sits near the end of the document. Checked
-  two real documents directly (54.03.04 «Реставрация»: 3 профстандарты
-  correctly extracted; 58.03.01 «Востоковедение и африканистика»: 0) — both
-  fully extracted at 32-36k chars, well inside the old budget, and the
-  58.03.01 PDF genuinely has no «Перечень профессиональных стандартов»
-  appendix section in its text at all (confirmed by searching the extracted
-  text directly). Across 20 already-imported standards, only 2 came back
-  with 0 профстандарты — consistent with "some directions really don't have
-  one," not systematic truncation. Still raised `MAX_TEXT_CHARS` from 48000
-  to 120000 as a safety margin for actual 40-page documents (a 12-page
-  document already ran to ~33-36k chars, ~2.7-3k chars/page — 48000 left
-  almost no headroom for the format's documented page-count range).
-- **OCR for scanned PDFs — already wired up, no new code needed.** Asked
-  about connecting Yandex OCR the way grading does; `services/documentExtractor.ts`'s
-  `extractText()` (shared by grading, program import, and ФГОС ingestion
-  alike) already falls back to `yandexVisionOCR()` whenever `pdf-parse`
-  extracts fewer than 50 words, chunking through Yandex's 8-page-per-call
-  cap via `pdf-lib`. ФГОС ingestion already calls this same shared function,
-  so scanned ФГОС PDFs already OCR automatically — confirmed
-  `YANDEX_VISION_API_KEY`/`YANDEX_FOLDER_ID` are configured.
-
-**List UI: color-coded level badges + pagination/search/filter
-(2026-07-22).** The registry crossed 376 rows mid-import (magistratura,
-специалитет, ординатура all still to come on top of bakalavriat) and the
-flat list was already unreadable, all badges one color. `db/queries/fgos.ts`
-gained `listFgosStandardsPage({page, limit, search, level})` (LIMIT/OFFSET +
-`COUNT(*)`, same shape as `admin.ts`'s `/teachers` pagination) alongside the
-existing unpaginated `listFgosStandards()`, which stays as-is — bulk
-import's `/discover` dedup needs every existing `(direction_code, level)`
-pair, not one page of them, so it keeps its own function rather than the
-route reusing the paginated one. `GET /api/admin/fgos` now takes
-`page`/`limit`/`search`/`level` query params, responds `{ standards, total
-}`. Frontend: search input + a `Select` level-filter dropdown (house
-pattern from `AdminTeachers.tsx`/`AdminAudit.tsx` — page resets to 1 on
-either changing), `← Назад / X из Y · N всего / Вперёд →` pager footer.
-`LEVEL_COLOR` gives fgosvo.ru's four ФГОС ВО (3++) categories
-(бакалавриат/магистратура/специалитет/ординатура) their own
-`bg-*-bg text-*` token pair (amber/info/success/warning) instead of one
-shared amber for every level; `ординатура` was also missing from
-`LEVEL_LABEL` entirely (a copy gap from v1) — added. 2 new integration
-tests (search-by-code-or-title, level filter, page/limit bounds). Verified
-live: search narrowed 376 → 4 rows, level filter narrowed 4 → 2, pager
-showed "1 из 19 · 376 всего" and paginated to a second page correctly.
-
-**Test-infrastructure finding surfaced while verifying — 🟢 FIXED (2026-07-22):**
-the integration test harness's per-test `BEGIN`/`ROLLBACK` isolation
-(`vitest.setup.integration.ts` + `DB_POOL_MAX=1`) didn't correctly nest
-against query functions that open their own transaction via
-`pool.connect()` + `BEGIN`/`COMMIT` (e.g. `createOrgUnit`, `moveOrgUnit`,
-this feature's `createFgosStandardDraft`/`publishFgosStandard`, and others)
-— with pool size 1, the inner `COMMIT` committed the *outer* test
-transaction too, so `afterEach`'s `ROLLBACK` had nothing left to undo and
-rows leaked permanently into the shared test database. Confirmed real and
-long-standing: `gradeassist_test` held hundreds of orphaned `institutions`/
-`org_units`/`teachers` rows, invisible until now because no existing
-integration test asserted an exact/empty row count — they only check "does
-my own returned id appear," which stays true regardless of accumulated
-garbage.
-
-Fixed via savepoint-wrapping the test pool only (zero production code
-changes): new `db/__tests__/transactionalTestIsolation.ts` patches
-`pool.connect()` inside integration test setup so the returned client's
-`BEGIN`/`COMMIT`/`ROLLBACK` get rewritten to
-`SAVEPOINT`/`RELEASE SAVEPOINT`/`ROLLBACK TO SAVEPOINT` when nested inside
-the outer per-test transaction (tracked by real transaction depth, not by
-call site). Three bugs found and fixed along the way: (1) naive rewriting
-without depth-tracking also rewrote the outer test's own `BEGIN`, since
-`pg-pool`'s internal `Pool.prototype.query()` acquires its connection via
-the same public `connect()`; (2) the patched `connect()` only supported
-promise-style calls, silently dropping the callback `pg-pool` uses
-internally, which hung every test and permanently leaked the sole
-connection; (3) `pg-pool` reuses the same `PoolClient` object across
-checkouts with `DB_POOL_MAX=1`, so wrapping `.query` without an idempotency
-guard compounded a new layer on every `connect()` call. Regression test
-(`db/transactionalTestIsolation.integration.test.ts`) proves a
-`pool.connect()`-based write is genuinely rolled back. Verified via two
-consecutive full integration suite runs against a cleaned DB — `psql` row
-counts for `institutions`/`org_units`/`teachers`/`fgos_standards` stayed at
-exactly 0 after both runs (previously grew every run); unit suite (414
-tests) unaffected.
+**Bulk import from fgosvo.ru — shipped:** same "paste a link, get a
+checklist" pattern as Feature AD — admin pastes one category-listing URL,
+`services/fgosvoParser.ts` crawls all ~50 categories, admin reviews/adjusts
+level per item, each checked item imports as a draft one at a time.
+`already_imported` dedup against the registry. List UI gained
+pagination/search/level-filter once the registry crossed 376 rows. A
+review-screen layout bug (Tailwind class-order clobbering field width) and
+a test-isolation gap in the integration harness (nested transactions not
+correctly rolled back, leaking rows into the shared test DB across runs)
+were both found and fixed along the way. See CHANGELOG for full detail on
+all of the above.
 
 Follow-on from the Feature Z design discussion (2026-07-21). One ФГОС ВО per
 (направление, level), published by Минобрнауки on fgosvo.ru. Today the
@@ -2029,90 +1131,6 @@ IT conversation.
   needs. #12's auto-fetch rides the same v0 outcome and should ship
   under whatever access mechanism this negotiates.
 
-### ~~AD. Bulk РПД discovery from /sveden/education — one paste instead of 44~~ — already done
-
-**Shipped 2026-07-21** (same day it was scoped — РОПы are testing now). See
-CHANGELOG for the full design. Landed as designed with one deliberate
-deviation: the bulk import is **client-driven** (the confirmed checklist
-feeds each item sequentially through the existing
-`POST /:id/documents` + `file_url` endpoint — per-item progress and retry
-for free), not a pg-boss job as the sketch below suggested; closing the
-modal mid-run leaves already-imported documents in place and re-running
-discovery is idempotent. New: `services/svedenParser.ts` (dependency-free,
-19 unit tests), `fetchPageHtml` in `services/documentFetch.ts`,
-`POST /:id/documents/discover`, `SvedenImportModal.tsx` + «Импортировать со
-страницы сведений» on the Документы tab. Not built (documented scope cuts):
-форма-обучения row scoping (first code-matching row wins — revisit with a
-real multi-form counterexample), plan/description/график import (не
-importable via this endpoint; listed as skipped counts in the UI), Z Plane-2
-reuse of the discovery service. Original design notes below.
-
-From the 2026-07-21 discussions; РОПы are actively starting to test the
-platform. The shipped paste-a-link document pull works
-per document — but a programme's disclosure row lists one Описание ООП +
-one учебный план + **~40+ individual РПД links** + графики + практики, so
-the РОП still pastes dozens of links one at a time.
-
-**The regulatory gift that makes this reliable:** the «Сведения об
-образовательной организации → Образование» page is federally mandated
-(Рособрнадзор Приказ № 831 + methodology) to be machine-readable:
-- **Standardized path** — `<university-site>/sveden/education` on
-  essentially every Russian university site (derivable from the
-  institution's known website — no URL paste needed at all in the best
-  case).
-- **Standardized markup** — required `itemprop` microdata attributes on
-  exactly these elements (РПД links, учебный план, описание ОП,
-  календарный график, практики; programme rows carry направление code +
-  name), designed so Рособрнадзор's own crawler can parse them.
-  Universities are audited on this markup being present and correct.
-
-- **Flow:** РОП pastes ONE URL (or ИСПУМ derives `/sveden/education`) →
-  backend fetches + parses itemprop rows → scopes to the programme by
-  направление code + name match against the programme being worked on →
-  **discovery checklist** («Найдено: Описание ООП · Учебный план · 44 РПД ·
-  2 графика · 4 практики», РПД titles from link text — which IS the
-  discipline name on these pages) → РОП confirms → bulk fetch through the
-  **existing** pull-by-link pipeline, one pg-boss job per document with
-  pollable progress → each РПД auto-associates to `program_disciplines` by
-  name matching, with a review screen for fuzzy cases (human-confirms
-  posture, as everywhere).
-- **Parser tiers (degrade gracefully):**
-  1. `itemprop` microdata (the mandated format — primary).
-  2. DOM heuristics — links within the matched programme's table
-     row/section, classified by link text + filename patterns (for sites
-     with imperfect markup).
-  3. Manual per-link paste (today's shipped behavior — always available).
-  JS-rendered tables: do NOT chase with headless browsers in v1 — tier 3
-  covers them, and the markup requirement pushes sites server-rendered
-  anyway.
-- **Security — deliberate pass required:** bulk server-side fetching of
-  user-supplied URLs is SSRF surface. Inherit/verify the single-link
-  pull's protections (scheme allowlist, block private/internal address
-  ranges, no redirects to internal hosts) and add: per-host rate limiting
-  / politeness, sane timeouts, per-file size caps, total-documents cap
-  per discovery run.
-- **Touches:** new `services/svedenDiscovery.ts` (fetch → itemprop parse →
-  tier-2 heuristics → classify → discipline name-match), discovery
-  checklist step in the programme import/documents UI in front of the
-  existing pull flow, bulk-fetch pg-boss job (reuse the per-document pull
-  as the job body), review screen for unmatched РПД↔discipline pairs,
-  FEATURES/CHANGELOG same-commit.
-- **Gating:** rides the existing programme/document-import gates — no new
-  plan flag; it's UX leverage on shipped functionality.
-- **Risks / open questions:** markup quality varies (tier 2 exists for
-  this — collect real counterexamples from pilot universities rather than
-  speculating); signed-PDF wrappers and экзотика formats (documentExtractor
-  handles the common cases); discipline-name matching against
-  `program_disciplines` needs the same fuzzy-match + review treatment as
-  AC's field mapping; multi-form pages (очная/заочная rows for the same
-  направление) — scope by форма обучения too, not just code.
-- **Sequencing:** ⏭️ **next to build** — РОПы are testing now and this
-  removes their worst manual step (44 download-upload cycles → one paste +
-  one confirm). Independent of Z/AA/AB/AC. Related: AC shares the
-  "external document intake at scale" theme but nothing structural; Z's
-  Plane-2 document intake could later reuse the same discovery service for
-  university strategy docs (they live on the same disclosure sites).
-
 ### AE. БРС engine + native interactive activities — the semester ledger governed by the РПД · Effort: v1 M, full track L · 🟢 v1 SHIPPED (2026-07-23)
 
 From the 2026-07-21 metodist discussions (last of the five-idea session:
@@ -2218,300 +1236,19 @@ idea of the whole session.**
 
 ### AF. Per-course/teacher score calibration · Effort: S–M · 🟢 v1 SHIPPED (2026-07-24)
 
-Promoted from Research §10.1. The grading number was trusted raw
-(`clampScore(result.score)`); each teacher runs systematically hot or cold
-and each course has its own grade distribution, which is exactly the bias
-QWK/MAE punish hardest. `assignments` already pairs every `ai_score` with the
-teacher's final `approved_score` — enough history to fit a monotone
-correction map with zero extra LLM calls.
+Promoted from Research §10.1. The grading number was trusted raw; each
+teacher runs systematically hot or cold and each course has its own grade
+distribution — exactly the bias QWK/MAE punish hardest. Shipped: isotonic
+calibration (`lib/scoreCalibration.ts`, Pool Adjacent Violators over
+`{aiScore, teacherScore}` pairs) with most-specific-first backoff
+(course → teacher → institution → none), wired into `grading.ts`'s `grade()`
+right before persistence, plus a leakage-safe validation harness (fits on
+the earliest slice of history, scores MAE/Spearman on a later held-out
+slice the fit never saw — no same-data memorisation). Admin-triggered via
+`routes/adminEvals.ts`. Migration `094_score_calibration.sql`. See CHANGELOG
+for full design.
 
-- **`lib/scoreCalibration.ts`** (pure, unit-tested) — `fitIsotonicCalibration`
-  runs Pool Adjacent Violators over `{aiScore, teacherScore}` pairs, grouping
-  duplicate raw scores and merging adjacent violators until the map is
-  monotone non-decreasing; returns `null` below a minimum sample size (20) or
-  when the fit collapses into one block (no usable shape) — callers must
-  treat `null` as "pass the raw score through," never as zero correction.
-  `applyCalibration` interpolates linearly between breakpoints and
-  extrapolates **flat** beyond the fitted domain (isotonic regression has no
-  evidence outside the range it was trained on).
-- **`db/queries/scoreCalibration.ts`** + migration `094_score_calibration.sql`
-  — new `score_calibration` table, one row per `(scope_type, scope_id)`
-  where scope is `course`/`teacher`/`institution`; pair-fetching queries read
-  straight off `assignments.status = 'approved'`.
-- **`services/scoreCalibration.ts`** — `getActiveCalibrationMap` does
-  most-specific-first backoff (course → teacher → institution → none), each
-  hop cached 5 min (mirrors `confidence.ts`'s threshold cache) so grading
-  never does a live fit. `fitCalibration(scopeType, scopeId)` is the explicit
-  trigger — pulls pairs, fits, upserts, busts the cache — exposed via
-  `GET /api/admin/evals/calibration` + `POST /api/admin/evals/calibration/fit`
-  on the existing eval-harness admin surface (`routes/adminEvals.ts`),
-  mirroring `fitThresholdsForRun`'s pattern exactly.
-- **Wired into `grading.ts`'s `grade()`** — applied once, right after
-  `gradeOnce`/the ensemble produce the (possibly §10.4-aggregated) raw score
-  and before `createAssignment` persists it; wrapped in try/catch so a
-  lookup failure falls back to the raw score rather than blocking a grade
-  (same posture as RAG retrieval's failure handling).
-- **Leakage-safe validation harness (shipped same day)** — `lib/scoreCalibration.ts`'s
-  `validateCalibrationSplit` fits on the chronologically-earliest slice of a
-  scope's approved history only, then scores MAE/Spearman on the later slice
-  the fit never saw (mirrors `evalHarness.ts`'s `findSimilarAssignmentsBefore`
-  "no future leakage" posture for RAG replay) — proof the map generalises to
-  grades issued *after* it was fitted, not just a same-data fit-and-score
-  exercise that would let it memorise the evaluation set. No LLM calls
-  needed: unlike the flywheel/confidence replays, calibration only ever
-  operates on scores already sitting in `assignments`, so validating it is
-  pure arithmetic. `services/scoreCalibration.ts`'s `validateCalibration`
-  wraps it with the DB read; exposed read-only via
-  `GET /api/admin/evals/calibration/validate` (never writes
-  `score_calibration` — safe to call repeatedly while deciding whether a
-  scope is ready for the real `/calibration/fit`). 5 new unit tests,
-  including one that plants a systematic +15 bias across the *whole*
-  timeline, fits only on the first 65%, and confirms the held-out 35%'s
-  calibrated MAE collapses from ~15 to <2 (>85% improvement) — the
-  generalization claim, not just a fit-quality check. Smoke-tested against
-  the real dev DB (course/teacher/institution joins all execute correctly;
-  correctly returns `null` on too-little-data scopes rather than erroring).
 - **Deferred:** automatic/scheduled refitting (v1 is admin-triggered only).
-
-### AG. Ensemble reconciliation — adjudicate low-confidence disagreement · Effort: S
-
-Promoted from Research §10.2. `gradeEnsemble` (`confidence.ts`) already
-samples strict/lenient/cross-provider variants and computes dispersion, but
-today a `low`-confidence label just flags the work for closer teacher review
-— the divergent samples' own reasoning is discarded. Add a reconciliation
-pass gated on `confidence === 'low'`: feed the model the divergent
-scores + justifications and have it adjudicate a final grade instead of
-just reporting disagreement.
-
-- **Why:** the ensemble is already paid for; this only stops throwing away
-  signal. Low-confidence works are exactly the ones dragging down MAE, so
-  fixing only those moves the aggregate a lot for little marginal cost.
-- **Touches:** one new judge prompt in `confidence.ts` (or a sibling module),
-  gated behind the existing `EnsembleOutcome.confidence` check in
-  `grading.ts`'s `grade()`.
-- **Sequencing:** after AF — calibrate first, then adjudicate the residual
-  hard cases; validate in `evalHarness.ts` against the confidence-labelled
-  subset.
-
-### AH. Evidence-first two-phase grading + selective reasoner · Effort: M · 🟢 SHIPPED (2026-07-25)
-
-Promoted from Research §10.3 (+ §10.5). One `chatJSON` call produced score +
-feedback + quotes together, letting the model anchor on a gestalt number then
-rationalise it.
-
-- **Phase 1 — `extractEvidence`** (`grading.ts`): a call that pulls per-criterion
-  passages and is *explicitly forbidden from proposing a score* — if it scored,
-  phase 2 would anchor on **its** number and the problem would simply move.
-  Every extracted quote is validated verbatim against the submission before it
-  can reach phase 2, so the scoring prompt can never reason from text that
-  isn't in the work. Fails soft: a failed extraction degrades to plain
-  single-pass grading.
-- **Phase 2** — `buildEvidenceBlock` renders the validated table *ahead of* the
-  criteria and submission, so the model meets the passages before the scoring
-  instruction. The block explicitly says the list is not exhaustive, so the
-  model still reads the full work rather than treating the excerpt as the whole.
-- **Gating:** `evidenceFirst` is a new plan flag (Pro/Institution), and fires
-  only when the teacher opted into «тщательная проверка» — that path already
-  accepts extra latency and already runs the ensemble. Free tier and ordinary
-  gradings are unchanged in cost.
-- **Selective reasoner (§10.5)** — `shouldUseReasoner` extends reasoning beyond
-  calc to thorough-mode and long work. **Threshold deliberately set at 40k
-  chars, not the ~12–15k that "long" intuitively suggests:** the measured
-  corpus average is ~15.2k, so a 12–15k cut-off would route the *majority* of
-  gradings through the reasoner — a large silent spend increase, which is not
-  a change to make quietly one day after the DeepSeek 402 balance incident.
-  40k targets the genuine long tail below the 120k ВКР hand-off. Lowering it
-  is a cost decision to make with spend data.
-- **Verified live** (real DeepSeek call, criteria + level descriptors +
-  evidence-first): 6/7 bullets grounded, per-criterion feedback 401–521 chars,
-  score 60 → grade «3» consistent with the bands.
-
-### AK. Grading review-quality fixes — grounding, critic window, level descriptors · Effort: M · 🟢 SHIPPED (2026-07-25)
-
-Four defects found by measuring what the grader actually produces across a
-real 30-assignment corpus, rather than reasoning about the pipeline. These
-target *review quality* — whether the model reads the work and says something
-substantive — as opposed to Features AF/AI/AJ, which only made the **number**
-consistent.
-
-**Baseline measured before any change:** of 269 feedback bullets, only **42
-carried a verified quote (15%)**; per-criterion comments averaged 239 chars;
-overall feedback 865 chars; average submission 15,228 chars (max 117,383).
-
-**1. Grounding was opt-out, so 85% of feedback had no anchor.** The prompt
-said «Не выдумывайте цитаты — **лучше null**» — null is better — while the one
-field that *is* mandatory (`verification_questions`) demanded a quote and duly
-complied. The anti-hallucination framing was working too well: the model took
-the safe path and omitted. New shared `QUOTE_RULE` inverts the default — the
-quote is `ОБЯЗАТЕЛЬНОЕ поле`, the model is told quotes are machine-checked,
-and crucially it is told to **swap the point for one it can ground** rather
-than drop the quote. `validateCitation` stays the safety net (Non-Negotiable
-#2), which is exactly what makes demanding quotes safe rather than reckless.
-The `null` escape hatch survives **deliberately** for absence-type findings
-("no methodology section") — you cannot quote what isn't there, and pressuring
-the model to try is how fabrication starts.
-  - **Live result: grounding went 15% → 89%** (`accepted: 8, absent: 0,
-    rejectedNotFound: 1` on a real graded work), with the single ungrounded
-    bullet being exactly an absence-type point.
-
-**2. Nothing distinguished "no quote offered" from "quote rejected".** Those
-have opposite fixes (prompt vs matcher tolerance for hyphenation/OCR noise),
-and the split was invisible. New `CitationStats` threads an optional tally
-through `validateCitation`/`normaliseBullets`/`normaliseCriteriaScores` (kept
-optional so existing callers and tests are untouched), and `gradeOnce` logs one
-`[Grounding]` line per grading with the outcome breakdown and `groundedShare`.
-On the first live run this immediately answered the question the whole item
-existed for: `absent: 0` — under the new prompt the residual loss is
-*rejection*, not omission, so any further work belongs in matcher tolerance.
-
-**3. The critic pass was judging evidence it could not see.**
-`critiqueFeedback` asked "is this bullet grounded?" while receiving
-`submissionText.slice(0, 4000)` — a blind prefix. With a 15.2k average, **43%
-of the corpus (13/30) exceeded that window**, so bullets correctly grounded in
-later pages looked unsupported and were dropped or rewritten vaguer. Because
-it is gated on `feedbackCritic` (Pro+), paying users on long works were hit
-hardest. New pure `buildCriticContext` windows ±400 chars around each bullet's
-**already-validated** quote, merges overlapping windows, marks elisions with
-«[…]», keeps a head excerpt for framing, and caps total size. The critic is
-now also shown each bullet's own quote and told the quotes are pre-verified, so
-it can't discard a point merely because its passage wasn't in the excerpt.
-
-**4. Criteria had no level anchors.** The `criteria` table was `name` +
-free-text `description`, so nothing said what a 90 looks like versus a 70 *for
-that criterion* — the model inferred the boundaries from the name alone, which
-drives score noise and generic feedback simultaneously. Migration
-`096_criterion_level_descriptors.sql` adds `level_descriptors JSONB`, keyed by
-grade letter (`{"5": …, "4": …}`) because the bands are already canonical in
-`shared/grades.ts` and teachers think «на пятёрку», not «[87,100]». JSONB
-rather than a child table for the same reason as `brs_schemes.grade_thresholds`:
-a fixed-shape ≤4-entry map always read and written with its parent. Snapshotted
-into `criteria_snapshot` so past gradings stay reproducible after a teacher
-edits their anchors. Rendered by `buildLevelDescriptorLines` (highest grade
-first, blank levels skipped, `sanitiseForPrompt` applied per
-Non-Negotiable #1), with an instruction added only when at least one criterion
-actually carries anchors. Route-level `sanitiseLevelDescriptors` whitelists keys
-to the four canonical letters and caps each at 600 chars. Editable in
-`Criteria.tsx` behind a collapsed «Уровни оценки» disclosure (auto-expands when
-anchors exist, shows an «N из 4» badge, per-level placeholders); new
-`chevron-down` icon added to the design system for the toggle.
-  - **Live result:** per-criterion feedback rose from a 239-char average to
-    401–521 chars and explicitly named which level the work met and what was
-    missing to reach the next one.
-
-- **Tests:** 30 new unit tests (grounding telemetry incl.
-  omission-vs-rejection, `buildCriticContext` incl. a quote past the old 4k
-  window and overlap merging, `buildLevelDescriptorLines` incl. sanitisation,
-  `buildEvidenceBlock`, `shouldUseReasoner` thresholds). Backend 530 green,
-  frontend 41 green, both `tsc --noEmit` clean.
-- **One test caught my own wrong assumption:** I initially asserted
-  `sanitiseForPrompt` strips a plain `<system>` tag. It does not — it strips
-  `<|system|>`-style delimiters and phrase patterns (`promptSanitiser.ts`).
-  Test corrected to the real contract. **Noted, not fixed:** plain angle-bracket
-  pseudo-tags aren't in the pattern list; that's pre-existing and applies to
-  every user string on the prompt path, so it belongs in its own scoped change
-  rather than being folded in here.
-
-### AI. Analytic (deterministic) aggregation for rubric grades · Effort: S · 🟢 SHIPPED (2026-07-24)
-
-Promoted from Research §10.4. When criteria + weights exist, the model was
-previously free to hand back a holistic overall `score` disconnected from
-its own per-criterion numbers — an entire class of holistic-drift/arithmetic
-error that's pure arithmetic we can just compute instead of trusting the
-model to do it.
-
-- **`grading.ts`'s `aggregateWeightedScore`** (pure, unit-tested) —
-  Σ(criterion score · weight)/100 over the already-normalised
-  `criteriaScores`, matched to the criteria snapshot the same
-  case/whitespace-insensitive way `mergeScoresIntoSnapshot` already does.
-  Returns `null` (→ caller falls back to the model's own holistic score)
-  when any criterion has no matching AI score by name — never aggregates a
-  partial set, since that would silently understate the true weighted total.
-- **Wired into `gradeOnce`** — only overrides the numeric `score` when
-  `params.criteria.length > 0` (holistic grading, with no weights to
-  aggregate, is untouched).
-- **Correction (2026-07-25):** this entry originally claimed "there is no
-  fixed score→grade cutoff in this system to recompute it from." **That was
-  wrong.** The bands are real and canonical — `5: 87–100, 4: 73–86, 3: 60–72,
-  2: <60` — declared in four prompt strings *and* implemented as
-  `scoreToGrade` in the frontend. The backend simply never applied them.
-  Because aggregation moves the score while the letter stayed as the model
-  emitted it, this feature as first shipped could produce internally
-  contradictory records (weighted sum 71 labelled «Отлично»), and — since the
-  eval harness computes QWK on grade **letters** — delivered no QWK gain at
-  all. Fixed by Feature AJ below.
-- **Ships ahead of AF** in the same score-production pipeline: aggregation
-  corrects the model's own arithmetic first, calibration (AF) then corrects
-  the resulting number against the teacher's scale on top of that.
-
-### AJ. Grading-accuracy integrity fixes — score↔grade contract, calibration feedback loop, ensemble symmetry · Effort: S · 🟢 SHIPPED (2026-07-25)
-
-Three defects found by auditing the grading pipeline after AF/AI landed. Two
-were regressions introduced by AF/AI themselves; the third predated them and
-was silently corrupting the confidence signal. All three attacked accuracy at
-the measurement layer, which is why they outranked building AG/AH next.
-
-**1. Score and grade letter had come apart — and it nullified QWK.**
-The bands (`5: 87–100, 4: 73–86, 3: 60–72, 2: <60`) were declared in four
-prompt strings and implemented in `frontend/src/lib/grades.ts`, but the
-backend never applied them — it told the model the bands and trusted whatever
-letter came back. AI (aggregation) and AF (calibration) then both moved the
-*score* while leaving the *letter* untouched, so a weighted sum of 71 could
-persist alongside «Отлично», and the teacher's panel rendered that
-contradiction (the frontend's own score↔grade sync only fires when the teacher
-*edits* a field). Critically, `evalHarness.ts`'s `summariseRun` computes
-**QWK on grade letters** — so AF and AI improved MAE while contributing
-nothing to the headline agreement metric.
-  - Lifted the scale into new **`shared/grades.ts`** (`GRADES`,
-    `GRADE_BRACKETS`, `scoreToGrade`, `snapScoreToGrade`, `gradeLabel`) —
-    one definition for both sides, ending a duplication the frontend's own
-    comment had flagged ("mirrored from the grading prompt"). Frontend's
-    `lib/grades.ts` re-exports it and keeps only `gradeColor` (CSS-variable
-    presentation), so all 10 existing import sites and its 12 tests were
-    untouched.
-  - New pure **`resolveGradeForScore`** in `grading.ts` derives the letter
-    from the final score and regenerates the label only when the letter
-    actually moves (so label and letter can never disagree). Applied in
-    `gradeOnce` (post-aggregation), `scoreOnce`, and `grade()`
-    (post-calibration).
-**2. Calibration would have trained on its own output.**
-`grade()` persists the calibrated score into `assignments.ai_score`, and the
-refit queries read that same column — so once a map went live, every refit
-would learn "calibrated → teacher" while inference kept feeding a *raw*
-score, drifting train/inference apart and compounding the correction each
-refit. Fixed with migration `095_ai_score_raw.sql` (`ai_score_raw`) +
-`createAssignment` persisting the pre-calibration score; fitting now reads
-`COALESCE(ai_score_raw, ai_score)`. **No backfill needed** — rows written
-before 095 were graded with no map fitted, so their `ai_score` already *is*
-the raw score (verified against the dev DB: all 28 existing rows have
-`ai_score_raw IS NULL` and resolve correctly through the fallback).
-  - Deliberately **not** applied to the policy memo's delta query
-    (`db/queries/policyMemos.ts`) — that one *should* keep measuring the
-    residual disagreement remaining after calibration, so the prompt-level
-    memo and the calibration map correct complementary things instead of both
-    learning the same bias and double-correcting it.
-**3. The confidence ensemble was comparing unequally-informed graders.**
-`ScoreOnceParams` carried no policy memo, sent criteria as name+weight only
-(no descriptions), and reduced retrieved examples to bare labels
-(`"4 (78/100)"`) — while the primary saw the memo, full descriptions, and
-600-char excerpts with teacher feedback. So `score_std` mixed genuine
-disagreement about the work with an information asymmetry we created
-ourselves, inflating dispersion, over-reporting `low` confidence, and skewing
-the thresholds fitted on top of it. `scoreOnce` now receives the memo, the
-criteria descriptions, and the primary's own `buildExamplesBlock`.
-`criterionExamples` is deliberately still excluded — `scoreOnce` emits no
-per-criterion scores, so per-criterion exemplars have no output surface to act
-on, and they're the bulkiest of the three inputs.
-  - **Consequence flagged in `confidence.ts`:** any `confidence_config`
-    thresholds fitted before this change were fitted against a dispersion
-    distribution that included the asymmetry as noise and read too wide — they
-    should be refit (confidence replay → apply-thresholds) rather than trusted.
-- **Tests:** 5 new for `resolveGradeForScore` (incl. exact band boundaries and
-  the 71+«5» case) and a new `grading.scoreOnce.test.ts` (7 tests) asserting
-  prompt symmetry and score/grade consistency, using the house
-  `vi.hoisted` + `vi.mock('./deepseek')` pattern. Backend 503 tests green,
-  frontend 41 green, both `tsc --noEmit` clean.
-- **Unblocks AG:** reconciliation is only worth building on a dispersion
-  signal that means what it claims — fix 3 was a hard prerequisite.
 
 ---
 

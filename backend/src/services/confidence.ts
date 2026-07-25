@@ -10,8 +10,11 @@
 // The pure functions (computeDispersion, classifyConfidence) carry the logic
 // and are fully unit-tested; gradeEnsemble is the I/O orchestrator.
 
-import { gradeOnce, scoreOnce, type GradeOnceParams, type GradeOnceResult } from './grading'
+import { gradeOnce, scoreOnce, resolveGradeForScore, type GradeOnceParams, type GradeOnceResult } from './grading'
 import { getConfidenceConfig } from '../db/queries/confidenceConfig'
+import { chatJSON, type CallContext } from './deepseek'
+import { sanitiseForPrompt } from '../lib/promptSanitiser'
+import { logger } from '../lib/logger'
 import type { GradeLetter, ConfidenceLevel, EnsembleSample, AiEnsemble } from '../../../shared/types'
 
 // ─── Pure: dispersion stats ────────────────────────────────────────────────────
@@ -155,6 +158,88 @@ const SECONDARY_SCHEDULE: Array<{
   { persona: 'lenient', temperature: 0.4 },
 ]
 
+// ─── Reconciliation — adjudicate a low-confidence disagreement ─────────────────
+//
+// TODO Feature AG. A 'low' label today just tells the teacher "look closer"
+// and discards the ensemble's own reasoning. The primary already produced a
+// full justification (strengths/gaps); the secondaries contribute their raw
+// scores. This asks the model to weigh both and commit to one defensible
+// number instead of leaving the raw split on the table. Gated on
+// confidence === 'low' — the ensemble is already paid for at that point, so
+// this only stops throwing away signal on exactly the works dragging down
+// aggregate accuracy; it does not run on every graded work.
+
+export interface ReconciliationResult {
+  score:      number
+  grade:      GradeLetter
+  gradeLabel: string
+  note:       string   // 1–2 sentence, teacher-facing explanation of the adjudication
+}
+
+// Pure prompt assembly — kept separate from the chatJSON call so it's
+// unit-testable without mocking an LLM call (matches the calcVerifier /
+// citationChecker split of pure-logic vs. I/O in this codebase).
+export function buildReconciliationPrompt(
+  primary: Pick<GradeOnceResult, 'score' | 'grade' | 'strengths' | 'improvements'>,
+  samples: EnsembleSample[],
+): { system: string; user: string } {
+  const system =
+    `Вы старший преподаватель-эксперт, выступающий арбитром между несколькими ` +
+    `независимыми проверками одной и той же студенческой работы, которые дали ` +
+    `разные оценки. Взвесьте все точки зрения и определите наиболее обоснованный ` +
+    `итоговый балл. Отвечайте только валидным JSON.`
+
+  const bullets = (items: { text: string }[]) =>
+    items.length > 0 ? items.map((b) => `- ${sanitiseForPrompt(b.text)}`).join('\n') : '- (нет)'
+
+  const sampleLines = samples
+    .map((s) => {
+      const label = s.persona === 'neutral' && s.temperature == null ? 'основная проверка' : `${s.persona}`
+      const temp = s.temperature != null ? `, temperature ${s.temperature}` : ''
+      const provider = s.provider ? `, модель ${s.provider}` : ''
+      return `- ${label}${temp}${provider}: балл ${s.score}, оценка «${s.grade}»`
+    })
+    .join('\n')
+
+  const user =
+    `Независимые проверки одной работы разошлись во мнениях.\n\n` +
+    `## Основная проверка (полный анализ)\nБалл: ${primary.score}, оценка: «${primary.grade}»\n\n` +
+    `Сильные стороны:\n${bullets(primary.strengths)}\n\nЗамечания:\n${bullets(primary.improvements)}\n\n` +
+    `## Все проверки (балл и оценка)\n${sampleLines}\n\n` +
+    `Определите итоговый балл (0–100), взвесив основной анализ и характер разногласий между ` +
+    `проверками. Кратко (1–2 предложения, по-русски) объясните преподавателю, на что стоит ` +
+    `обратить особое внимание при проверке этой работы.\n\n` +
+    `Верните ТОЛЬКО JSON: {"score": число 0–100, "note": "краткое пояснение"}`
+
+  return { system, user }
+}
+
+export async function reconcileDisagreement(
+  primary: GradeOnceResult,
+  samples: EnsembleSample[],
+  context: CallContext,
+): Promise<ReconciliationResult> {
+  const { system, user } = buildReconciliationPrompt(primary, samples)
+  const raw = await chatJSON<{ score: number; note: string }>(
+    [{ role: 'system', content: system }, { role: 'user', content: user }],
+    'решение арбитра',
+    { context },
+  )
+  const score = clampScore(raw.score)
+  // Same score→grade enforcement gradeOnce/scoreOnce use — an arbiter that
+  // moves the score but leaves a stale letter would corrupt QWK the same way
+  // an uncalibrated one would.
+  const { grade, gradeLabel } = resolveGradeForScore(score, primary.grade, primary.gradeLabel)
+  const note = raw.note?.trim() ||
+    'Проверяющие разошлись в оценке; итоговый балл скорректирован по совокупности мнений.'
+  return { score, grade, gradeLabel, note }
+}
+
+function clampScore(n: unknown): number {
+  const num = typeof n === 'number' ? n : parseInt(String(n), 10)
+  return Math.max(0, Math.min(100, isNaN(num) ? 0 : num))
+}
+
 export async function gradeEnsemble(
   base: GradeOnceParams,
   cfg: EnsembleConfig = {},
@@ -207,14 +292,34 @@ export async function gradeEnsemble(
   const stats = computeDispersion(samples)
   const confidence = classifyConfidence(stats, await getActiveThresholds())
 
+  // Reconcile only the residual hard cases — best-effort, never blocks
+  // grading (same posture as calibration/RAG elsewhere): a failed
+  // reconciliation call just falls back to the primary's own score.
+  let reconciliation: ReconciliationResult | null = null
+  if (confidence === 'low') {
+    try {
+      reconciliation = await reconcileDisagreement(primary, samples, base.context)
+    } catch (err) {
+      logger.warn({
+        message: '[Ensemble] Reconciliation pass failed, keeping primary grade',
+        error: (err as Error).message,
+      })
+    }
+  }
+
+  const finalPrimary = reconciliation
+    ? { ...primary, score: reconciliation.score, grade: reconciliation.grade, gradeLabel: reconciliation.gradeLabel }
+    : primary
+
   return {
-    primary,
+    primary: finalPrimary,
     confidence,
     ensemble: {
       samples,
       score_std:       stats.scoreStd,
       score_spread:    stats.scoreSpread,
       grade_agreement: stats.gradeAgreement,
+      ...(reconciliation ? { reconciled: true, reconciliation_note: reconciliation.note } : {}),
     },
   }
 }

@@ -320,6 +320,12 @@ export interface AiEnsemble {
   score_std:       number
   score_spread:    number   // max − min
   grade_agreement: number   // fraction of samples matching the modal grade
+  // Set only when confidence was 'low' and a reconciliation pass ran to
+  // adjudicate a final score from the disagreement (see confidence.ts's
+  // reconcileDisagreement). Absent means no reconciliation was attempted —
+  // confidence wasn't low, or the pass failed and silently kept the primary.
+  reconciled?:          boolean
+  reconciliation_note?: string | null
 }
 
 export type RevisionStatus = 'addressed' | 'partial' | 'not_addressed'

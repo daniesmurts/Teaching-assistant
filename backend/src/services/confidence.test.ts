@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { computeDispersion, classifyConfidence, type ConfidenceInput } from './confidence'
-import type { GradeLetter } from '../../../shared/types'
+import { computeDispersion, classifyConfidence, buildReconciliationPrompt, type ConfidenceInput } from './confidence'
+import type { GradeLetter, EnsembleSample } from '../../../shared/types'
 
 const s = (score: number, grade: GradeLetter): ConfidenceInput => ({ score, grade })
 
@@ -78,5 +78,47 @@ describe('classifyConfidence', () => {
   it('is HIGH at the exact std boundary (≤ 5)', () => {
     const d = computeDispersion([s(85, '4'), s(90, '4')])  // std = 2.5
     expect(classifyConfidence(d)).toBe('high')
+  })
+})
+
+describe('buildReconciliationPrompt', () => {
+  const primary = {
+    score: 72,
+    grade: '4' as GradeLetter,
+    strengths: [{ text: 'Чёткая структура аргументации' }],
+    improvements: [{ text: 'Не хватает ссылок на источники' }],
+  }
+  const samples: EnsembleSample[] = [
+    { persona: 'neutral', temperature: null, score: 72, grade: '4' },
+    { persona: 'strict',  temperature: 0.8,  score: 58, grade: '2', provider: 'qwen' },
+    { persona: 'lenient', temperature: 0.8,  score: 88, grade: '5' },
+  ]
+
+  it('includes the primary score/grade and every sample', () => {
+    const { user } = buildReconciliationPrompt(primary, samples)
+    expect(user).toContain('Балл: 72, оценка: «4»')
+    expect(user).toContain('балл 72, оценка «4»')
+    expect(user).toContain('балл 58, оценка «2»')
+    expect(user).toContain('балл 88, оценка «5»')
+    expect(user).toContain('модель qwen')
+    expect(user).toContain('temperature 0.8')
+  })
+
+  it('includes the primary justification bullets', () => {
+    const { user } = buildReconciliationPrompt(primary, samples)
+    expect(user).toContain('Чёткая структура аргументации')
+    expect(user).toContain('Не хватает ссылок на источники')
+  })
+
+  it('renders a placeholder when the primary has no strengths/improvements', () => {
+    const { user } = buildReconciliationPrompt({ ...primary, strengths: [], improvements: [] }, samples)
+    expect(user).toContain('- (нет)')
+  })
+
+  it('asks for a JSON score + note', () => {
+    const { user, system } = buildReconciliationPrompt(primary, samples)
+    expect(user).toContain('"score"')
+    expect(user).toContain('"note"')
+    expect(system).toContain('арбитром')
   })
 })
