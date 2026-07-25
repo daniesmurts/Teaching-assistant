@@ -99,6 +99,8 @@ export async function createAssignment(data: {
   studentGroup?: string
   submissionText: string
   aiScore: number
+  /** Pre-calibration model score — kept so calibration refits train on raw output. */
+  aiScoreRaw?: number
   aiGrade: GradeLetter
   aiGradeLabel: string
   aiFeedback: string
@@ -127,13 +129,13 @@ export async function createAssignment(data: {
        ai_criteria_scores, ai_strengths, ai_improvements, criteria_snapshot,
        parent_assignment_id, ai_revision_check, ai_confidence, ai_ensemble,
        ai_verification_questions, ai_question_responses, ai_provider,
-       ai_calc_verification, ai_citation_check,
+       ai_calc_verification, ai_citation_check, ai_score_raw,
        revision_number, status
      ) VALUES (
        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
        $15,$16,$17,$18,
        $19,$20,$21,
-       $22,$23,
+       $22,$23,$24,
        COALESCE((SELECT revision_number + 1 FROM parent), 1),
        'pending'
      )
@@ -162,6 +164,7 @@ export async function createAssignment(data: {
       data.aiProvider ?? null,
       data.aiCalcVerification && data.aiCalcVerification.length > 0 ? JSON.stringify(data.aiCalcVerification) : null,
       data.aiCitationCheck && data.aiCitationCheck.length > 0 ? JSON.stringify(data.aiCitationCheck) : null,
+      data.aiScoreRaw ?? null,
     ]
   )
   return toAssignment(rows[0])

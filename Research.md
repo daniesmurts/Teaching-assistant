@@ -1357,3 +1357,251 @@ assessment forms — as a structured report, not a text diff.
 - **New work:** stop discarding the previous extraction on re-upload
   (retention column or history table), one comparison prompt, one report
   view.
+
+---
+
+## 10. Grading Accuracy & Wow Uplift (2026-07-24 brainstorm)
+
+### 10.0 Why this section exists
+
+Target: lift the **grading feature's accuracy and wow factor by ≥25%**. The
+pipeline is already mature — ensemble confidence (`confidence.ts`),
+criterion-level RAG (`criterion_rag_examples`), policy memos, the critic pass,
+calc/citation verification. So the cheap wins are spent; this section collects
+the next tier.
+
+**Accuracy is not a vibe here — it is instrumented.** `evalHarness.ts` already
+replays approved assignments through the pure `gradeOnce` path and computes
+`quadraticWeightedKappa`, `meanAbsoluteError`, and `spearman` vs teacher
+ground truth (`lib/evalMetrics.ts`). So "+25%" gets a concrete acceptance
+gate — e.g. **MAE −25%** or **QWK +0.10–0.15** on a held-out replay — and
+every item below is A/B-testable through that harness *before* it ships to
+production. Demonstrating the lift with the harness is itself part of the wow
+for an institutional buyer (§2.1 fairness-audit audience).
+
+The split: **§10.1–10.5 raise the number**; **§10.6–10.10 raise perceived
+quality/trust.** Ordered by leverage-per-effort within each group.
+
+**§10.1–10.4 are promoted to TODO.md as Features AF–AI** (2026-07-24); §10.1
+(AF, calibration) and §10.4 (AI, analytic aggregation) shipped v1 the same
+day — the two with the best proof-before-ship story (pure functions,
+zero/near-zero new LLM cost). §10.2 (AG) and §10.3 (AH) wait in the backlog;
+§10.5 onward stay here pending a demand signal, same posture as §9's
+wow-slate promotions.
+
+**The "prove it before it ships" gate from §10.0 above is itself built**, same
+day, for AF: `validateCalibrationSplit` (`lib/scoreCalibration.ts`) fits on the
+chronologically-earliest slice of a scope's approved history and scores
+MAE/Spearman on the later slice the fit never saw — leakage-safe by
+construction, no LLM replay needed (calibration only ever touches scores
+already in `assignments`). Exposed read-only at
+`GET /api/admin/evals/calibration/validate`, separate from the
+persistence-triggering `/calibration/fit`. This is the template for proving
+AG/AH's claims too whenever they're picked up — those two DO need real
+`gradeOnce` replay (like the existing flywheel/confidence harness), since
+they change what the model is asked, not just post-process its output.
+
+### 10.1 Per-course score calibration layer → **promoted to TODO.md Feature AF, 🟢 v1 shipped 2026-07-24**
+
+Today `grade()` trusts `clampScore(result.score)` raw. But each teacher runs
+systematically hot or cold and each course has its own grade distribution —
+exactly the bias QWK/MAE punish. We already hold the paired data:
+`approved_revisions` rows pair AI score → final teacher score over time. Fit a
+**monotonic calibration map** (isotonic / Platt) per course, backing off to
+teacher, then institution, when the sample is thin, and apply it as a
+post-processing step on the raw model score.
+
+- **Rides on:** existing `approved_revisions` / `assignments` history —
+  **zero extra LLM calls**. A pure function, so it drops straight into
+  `gradeOnce`'s replay path in `evalHarness.ts` and the lift is provable
+  offline before turning it on.
+- **Why accuracy:** corrects systematic per-grader bias, the largest MAE
+  driver, without touching the prompt.
+- **Relation to §1.1:** this is the *scoring-correction* sibling of implicit-
+  rubric inference — §1.1 learns *what* the teacher weights, §10.1 learns the
+  *scalar mapping* of their scale. Buildable now; share the same longitudinal
+  signal.
+- **Guardrails:** honour Non-Negotiable #3 (AI never final) — calibration
+  shifts the *suggested* score only; teacher approval still gates the training
+  signal. Cold-start (course with <N approvals) must pass through uncalibrated.
+- **Effort:** S–M. **Patent framing:** "monotonic recalibration of automated
+  scores from a per-grader longitudinal approval signal."
+
+### 10.2 Reconcile the ensemble instead of only flagging it → **promoted to TODO.md Feature AG**
+
+`gradeEnsemble` samples strict/lenient/cross-provider (Qwen) variants, measures
+dispersion, and on disagreement labels confidence `low` — then discards the
+disagreement itself. But the divergent samples *contain* the answer. On
+low-confidence cases, add a **reconciliation/judge pass**: feed the model the
+divergent scores + justifications and have it adjudicate a final grade.
+
+- **Rides on:** the ensemble is already being paid for — this only stops
+  throwing away signal. New work is one judge prompt gated on
+  `confidence === 'low'`.
+- **Why accuracy:** low-confidence works are exactly the ones dragging down
+  MAE; fixing *only those* moves the aggregate a lot for little marginal cost.
+- **Sequencing:** after §10.1 (calibrate first, then adjudicate the residual
+  hard cases). Test in the harness against the confidence-labelled subset.
+- **Prerequisite resolved (2026-07-25, TODO Feature AJ):** the secondaries
+  used to grade without the policy memo, without criterion descriptions, and
+  with examples reduced to bare grade labels — so the dispersion this feature
+  would adjudicate was partly an information asymmetry of our own making, not
+  disagreement about the work. Fixed; `scoreOnce` now sees the same evidence
+  the primary does. Adjudicating between deliberately worse-informed samples
+  would have been building on sand. Note that thresholds fitted before that
+  fix read too wide and should be refit before AG's gate is tuned.
+- **Patent framing:** extends §1.3's "selective human review gated on
+  inter-pass disagreement" with an **automated adjudication tier** between
+  ensemble and human.
+
+### 10.3 Evidence-first, then score (two-phase grading) → **promoted to TODO.md Feature AH, 🟢 shipped 2026-07-25**
+
+One call currently emits score + feedback + quotes together, letting the model
+anchor on a gestalt number then rationalise it. Split it: **phase 1** extracts
+per-criterion evidence (verbatim quotes, already run through `validateCitation`);
+**phase 2** scores *given only that evidence table*.
+
+- **Rides on:** existing citation-validation machinery and page markers
+  (`annotateWithPageMarkers`). Reuses the criteria snapshot.
+- **Why accuracy:** decouples the number from first-impression bias; tends to
+  lift per-criterion QWK. Also yields cleaner, better-anchored bullets — feeds
+  §10.10 (inline annotations).
+- **Cost:** one extra call per grade; gate behind `thorough` or the reasoner
+  path (§10.5) to keep the free tier cheap.
+
+### 10.4 Analytic aggregation for rubric grades → **promoted to TODO.md Feature AI, 🟢 shipped 2026-07-24**
+
+When criteria + weights exist, don't let the model free-hand the overall
+`score`. Have it score each criterion, then compute the overall as the
+**weighted sum deterministically** (the weights are already in
+`CriteriaSnapshotItem`).
+
+- **Rides on:** `resolveCriteriaSnapshot` already carries per-criterion
+  weights summing to 100 — the aggregation is arithmetic we currently trust
+  the model to do.
+- **Why accuracy:** removes holistic-drift and arithmetic error as a class;
+  makes the number auditable. Trivial to A/B in the harness (holistic overall
+  vs computed overall).
+- **Effort:** S. Interacts cleanly with §10.3 (per-criterion evidence →
+  per-criterion score → deterministic roll-up).
+
+### 10.4a Review quality ≠ score accuracy (measured 2026-07-25) → **TODO.md Feature AK, 🟢 shipped**
+
+§10.1–10.5 as first written were all about the **number**. A direct question —
+"how do we make the model actually review the work and give in-depth
+feedback?" — exposed that as a blind spot, and measuring the real output found
+the answer wasn't in any of them:
+
+- **15% of feedback bullets (42 of 269) carried a verified quote.** The prompt
+  said «Не выдумывайте цитаты — лучше null», making grounding opt-out; the one
+  mandatory-quote field (`verification_questions`) complied fine. Inverting the
+  default — demand a quote, tell the model it's machine-checked, tell it to
+  *swap the point* for one it can ground — took grounding to **89%** live,
+  with `validateCitation` still the safety net (which is what makes demanding
+  quotes safe rather than reckless).
+- **The Pro+ critic pass was net-harmful on 43% of works**: it judged
+  "is this grounded?" against `slice(0, 4000)` while the corpus averages
+  15.2k chars, so correctly-grounded bullets got dropped or vaguened. Now
+  windowed around each validated quote.
+- **Criteria had no level anchors** — one free-text description, so the model
+  inferred what «5» means from the criterion's *name*. Per-level descriptors
+  (migration 096) roughly doubled per-criterion feedback length (239 → 401–521
+  chars) and made it name the level reached and the gap to the next.
+- **Omission vs rejection was unobservable**, and the two have opposite fixes.
+  Now logged per grading; the first live run showed `absent: 0`, meaning the
+  residual loss is matcher strictness, not prompt wording.
+
+**Lesson for this section:** score-consistency work (§10.1/§10.4, AF/AI/AJ) and
+review-quality work are different axes, and the cheap wins were on the axis
+§10 wasn't looking at. Measure the artefact the teacher actually reads before
+ranking further items here.
+
+### 10.5 Reasoner model for hard essays, not just calc → **shipped with Feature AH (2026-07-25)**
+
+`gradeOnce` sets `reasoner: isCalc` — reasoning is reserved for calculation.
+Gate the reasoner on **difficulty** too: long submissions, low ensemble
+confidence, or high-stakes (ВКР long-review path). Selective use keeps cost
+sane while lifting accuracy where it's actually needed.
+
+- **Rides on:** the provider registry already exposes reasoner routing; this
+  is a routing-policy change, not new infra.
+- **Why accuracy:** the marginal QWK gain from reasoning concentrates on the
+  hard/long tail; spending it there is the efficient allocation.
+- **Sequencing:** cheap to trial; harness can bucket results by submission
+  length to confirm where the lift lands.
+
+### 10.6 Contrastive "why this grade, not the next one up"
+
+We already do contrastive RAG retrieval (`findContrastingAssignment` injects a
+nearest neighbour on the *other* side of the grade boundary). Surface it to the
+teacher: *"Оценка 4, а не 5 — в отличие от этих работ на «5», отсутствует X."*
+
+- **Rides on:** the contrastive neighbour is already retrieved and in context;
+  today it only shapes the score. New work is a short "boundary rationale"
+  field + one UI block in `GradingResult.tsx`.
+- **Why wow:** boundary explanations are what make a teacher *trust* the
+  number — the single most persuasive thing in a live demo. Turns a score into
+  a defensible decision.
+
+### 10.7 Ensemble as a live agreement meter
+
+`gradeEnsemble` computes `grade_agreement`, `score_std`, `score_spread` and
+hides them behind `ConfidenceBadge`. Render the actual panel: *"4 из 5
+экзаменаторов — «4», один — «3», σ 2.1,"* including the cross-provider (Qwen)
+vote.
+
+- **Rides on:** the `AiEnsemble` shape is already persisted and returned in
+  `GradeResponse.ai_ensemble` — this is purely a richer render of data we
+  already store.
+- **Why wow:** teachers viscerally understand a panel of examiners disagreeing;
+  reframes an opaque score as a committee decision. Pairs with §10.2 — show the
+  panel *and* the adjudication.
+
+### 10.8 Grade-boundary map from the embedding neighborhood
+
+Every submission is embedded and its neighbours retrieved. Plot this work among
+past approved works in that space — "sits here, between these «3»s and these
+«4»s."
+
+- **Rides on:** pgvector embeddings + `findSimilarAssignments` already there;
+  needs a 2-D projection (precomputed) + one visual. No new AI calls.
+- **Why wow:** a spatial "where does this land" view is a genuine *moment of
+  recognition*, built entirely from stored data. Doubles as the teacher-facing
+  face of the §2.1 fairness audit.
+- **Effort:** M (projection + viz). Sequence with §2.1.
+
+### 10.9 "Path to the next grade" — judge → coach
+
+Convert `improvements` into a ranked, actionable ladder: *"Исправьте эти два
+пункта → работа выходит на «5»."*
+
+- **Rides on:** improvement bullets already carry severity/action shape; this
+  reorders them by **grade-impact** and frames them as a path.
+- **Why wow:** reframes the product from *judge* to *coach* — the emotional
+  hook for teachers and (via published assignments, §5.1) students. Natural
+  input to §9.3's «разбор ошибок» loop at the cohort level.
+
+### 10.10 Inline annotations on the document
+
+Quotes already carry page/position via `annotateWithPageMarkers` +
+`validateCitation`. Render feedback as **margin annotations anchored to the
+exact text** instead of a detached bullet list.
+
+- **Rides on:** the anchoring data (validated verbatim quote + page) already
+  exists on every bullet; §10.3 makes the anchors even tighter.
+- **Why wow:** the difference between "an AI wrote a report" and "an examiner
+  marked up my paper" — highest perceived-quality jump per unit of effort.
+  Reuses the TipTap surface already built for `/write/:token` (§5.1).
+- **Effort:** M (annotation-anchoring UI). Highest wow-per-effort of the visual
+  items.
+
+### 10.11 Sequencing
+
+- **Accuracy track:** §10.1 (calibration, near-free) → §10.2 (reconciliation)
+  → §10.4 (analytic aggregation, near-free) → §10.3 (two-phase) → §10.5
+  (selective reasoner). Validate each in `evalHarness.ts` against the MAE/QWK
+  gate before production.
+- **Wow track:** §10.10 (inline annotations) → §10.6 (contrastive rationale)
+  → §10.7 (agreement meter) — all reuse already-persisted data.
+- **First two to build:** §10.1 and §10.10 — one proves the accuracy number
+  offline with zero prompt risk, the other is the strongest demo artefact.

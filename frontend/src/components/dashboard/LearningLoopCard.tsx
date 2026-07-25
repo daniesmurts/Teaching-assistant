@@ -29,7 +29,7 @@ export default function LearningLoopCard() {
     <div className="bg-surface border border-border rounded-lg p-4 flex flex-col h-full">
       <div className="flex items-center justify-between mb-3">
         <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">
-          ИИ учится у вас
+          ИСПУМ учится у вас
         </div>
         <span className="text-[10px] font-sans text-ink-tertiary">за 30 дней</span>
       </div>
@@ -45,7 +45,7 @@ export default function LearningLoopCard() {
             )}
           </div>
           <div className="text-xs font-sans text-ink-secondary leading-relaxed">
-            Похожесть оценки ИИ на ваш стиль
+            Похожесть оценки ИСПУМ на ваш стиль
           </div>
           <div className="text-[11px] font-sans text-ink-tertiary mt-2">
             На основе {style_match.sample_n_30d} утверждённых работ
@@ -54,7 +54,7 @@ export default function LearningLoopCard() {
       ) : (
         <div className="flex-1 flex flex-col justify-center">
           <div className="text-xs font-sans text-ink-secondary leading-relaxed">
-            Когда вы утвердите {MIN_SAMPLE}+ работ, мы покажем, насколько оценки ИИ совпадают с вашими решениями. Цифра будет расти по мере того, как система запоминает ваш стиль.
+            Когда вы утвердите {MIN_SAMPLE}+ работ, мы покажем, насколько оценки ИСПУМ совпадают с вашими решениями. Цифра будет расти по мере того, как система запоминает ваш стиль.
           </div>
         </div>
       )}

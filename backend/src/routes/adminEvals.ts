@@ -11,6 +11,8 @@ import {
   exportRunCsv, fitThresholdsForRun,
 } from '../services/evalHarness'
 import { getConfidenceConfig } from '../db/queries/confidenceConfig'
+import { getCalibration } from '../db/queries/scoreCalibration'
+import { fitCalibration, validateCalibration, type CalibrationScopeType } from '../services/scoreCalibration'
 import { findReplayTargets } from '../db/queries/assignments'
 import { logger } from '../lib/logger'
 
@@ -28,6 +30,59 @@ router.get('/', asyncHandler(async (_req, res) => {
 // GET /api/admin/evals/config — current calibrated thresholds (or null)
 router.get('/config', asyncHandler(async (_req, res) => {
   res.json(await getConfidenceConfig())
+}))
+
+const VALID_CALIBRATION_SCOPES: CalibrationScopeType[] = ['course', 'teacher', 'institution']
+
+// GET /api/admin/evals/calibration?scope_type=course&scope_id=... — fitted
+// score-calibration map for one scope (or null). Registered ahead of GET
+// /:id so "calibration" isn't swallowed as an eval-run id.
+router.get('/calibration', asyncHandler(async (req, res) => {
+  const scopeType = req.query.scope_type as string
+  const scopeId   = req.query.scope_id as string
+  if (!VALID_CALIBRATION_SCOPES.includes(scopeType as CalibrationScopeType) || !scopeId) {
+    throw new ValidationError('Укажите scope_type (course|teacher|institution) и scope_id')
+  }
+  res.json(await getCalibration(scopeType as CalibrationScopeType, scopeId))
+}))
+
+// POST /api/admin/evals/calibration/fit — fit + persist a calibration map
+// from that scope's approved grading history (Research §10.1 / Feature AF).
+router.post('/calibration/fit', asyncHandler(async (req, res) => {
+  const { scope_type, scope_id, min_samples } = req.body as {
+    scope_type?: string; scope_id?: string; min_samples?: number
+  }
+  if (!scope_type || !VALID_CALIBRATION_SCOPES.includes(scope_type as CalibrationScopeType) || !scope_id) {
+    throw new ValidationError('Укажите scope_type (course|teacher|institution) и scope_id')
+  }
+  const fit = await fitCalibration(scope_type as CalibrationScopeType, scope_id, min_samples)
+  if (!fit) throw new ValidationError('Недостаточно данных для калибровки — нужно больше подтверждённых работ')
+  res.json(fit)
+}))
+
+// GET /api/admin/evals/calibration/validate?scope_type=&scope_id=&train_fraction=&min_train=&min_test=
+// Read-only leakage-safe proof: fits on the chronologically-earlier slice of
+// approved history, scores MAE/Spearman on the later slice the fit never
+// saw, and reports baseline vs calibrated side by side. Never writes
+// score_calibration — safe to call before deciding to fitCalibration() for
+// real (Research §10.0's "prove it before it ships" gate).
+router.get('/calibration/validate', asyncHandler(async (req, res) => {
+  const scopeType = req.query.scope_type as string
+  const scopeId   = req.query.scope_id as string
+  if (!VALID_CALIBRATION_SCOPES.includes(scopeType as CalibrationScopeType) || !scopeId) {
+    throw new ValidationError('Укажите scope_type (course|teacher|institution) и scope_id')
+  }
+  const trainFraction = req.query.train_fraction != null ? Number(req.query.train_fraction) : undefined
+  const minTrain       = req.query.min_train != null ? Number(req.query.min_train) : undefined
+  const minTest         = req.query.min_test != null ? Number(req.query.min_test) : undefined
+
+  const result = await validateCalibration(scopeType as CalibrationScopeType, scopeId, {
+    trainFraction, minTrain, minTest,
+  })
+  if (!result) {
+    throw new ValidationError('Недостаточно данных для проверки — нужно больше подтверждённых работ (или другой train_fraction)')
+  }
+  res.json(result)
 }))
 
 const VALID_VARIANTS = ['baseline', 'contrastive', 'policyMemo', 'both'] as const

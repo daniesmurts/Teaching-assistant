@@ -143,12 +143,25 @@ export type CriterionSubject =
   | 'business' | 'economics' | 'law' | 'medicine'
   | 'engineering' | 'humanities' | 'general'
 
+/**
+ * What each level looks like for one criterion, keyed by the Russian 5-point
+ * grade letter. Every key optional — a teacher may anchor only the extremes.
+ *
+ * Injected into the grading prompt so the model reasons against explicit level
+ * anchors instead of inferring them from the criterion's name. Keyed by letter
+ * rather than a score range because the bands are already canonical
+ * (shared/grades.ts GRADE_BRACKETS) and teachers think «на пятёрку», not
+ * «[87,100]».
+ */
+export type CriterionLevelDescriptors = Partial<Record<GradeLetter, string>>
+
 export interface Criterion {
   id:                    string
   teacher_id:            string | null   // NULL for global templates
   course_id:             string | null
   name:                  string
   description:           string | null
+  level_descriptors:     CriterionLevelDescriptors | null
   subject:               CriterionSubject | null
   is_global_template:    boolean
   is_institution_shared: boolean
@@ -163,6 +176,9 @@ export interface CriteriaSnapshotItem {
   name:         string
   weight:       number          // 0–100, sum across items must be 100
   description:  string | null
+  // Snapshotted alongside the description so a past grading stays
+  // reproducible even after the teacher edits the criterion's anchors.
+  level_descriptors?: CriterionLevelDescriptors | null
   score?:       number
   feedback?:    string
 }

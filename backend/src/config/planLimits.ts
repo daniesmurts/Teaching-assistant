@@ -23,6 +23,7 @@ export const PLAN_LIMITS = {
     presentationHistory:   false,
     watermark:             true,
     feedbackCritic:        false,
+    evidenceFirst:         false,   // Feature AH — evidence-first two-phase grading
     cohortSynthesis:       false,
     calcVerification:      false,
     citationCheck:         false,
@@ -54,6 +55,7 @@ export const PLAN_LIMITS = {
     presentationHistory:   true,
     watermark:             false,
     feedbackCritic:        true,
+    evidenceFirst:         true,   // Feature AH — evidence-first two-phase grading
     cohortSynthesis:       true,
     calcVerification:      true,
     citationCheck:         true,
@@ -85,6 +87,7 @@ export const PLAN_LIMITS = {
     presentationHistory:   true,
     watermark:             false,
     feedbackCritic:        true,
+    evidenceFirst:         true,   // Feature AH — evidence-first two-phase grading
     cohortSynthesis:       true,
     calcVerification:      true,
     citationCheck:         true,

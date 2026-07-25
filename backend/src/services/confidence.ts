@@ -67,6 +67,13 @@ export function computeDispersion(samples: ConfidenceInput[]): DispersionStats {
 // ─── Pure: confidence classification ───────────────────────────────────────────
 
 // Default thresholds — used until a calibration run fits data-driven ones.
+//
+// NOTE: any thresholds fitted before the ensemble information-symmetry fix
+// (secondaries now receive the same policy memo, criteria descriptions and
+// retrieved examples as the primary) were fitted against a dispersion
+// distribution that included that asymmetry as noise, and read too wide.
+// Re-run a confidence replay + apply-thresholds to refit against the current
+// regime rather than trusting a stale confidence_config row.
 export const DEFAULT_THRESHOLDS = { highStdMax: 5, lowStdMin: 12 }
 const LOW_AGREE_MAX = 0.6  // grade vote split — not fit (grade agreement is categorical)
 
@@ -166,6 +173,11 @@ export async function gradeEnsemble(
       submissionText:    base.submissionText,
       criteria:          base.criteria,
       examples:          base.examples,
+      // Same policy memo the primary grades under — see ScoreOnceParams.
+      // Without it the secondaries were scoring from a different brief, so
+      // dispersion measured our own information asymmetry as if it were
+      // examiner disagreement.
+      policyMemo:        base.policyMemo,
       assignmentType:    base.assignmentType,
       referenceSolution: base.referenceSolution,
       assignmentContext: base.assignmentContext,

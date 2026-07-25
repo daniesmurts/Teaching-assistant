@@ -17,7 +17,8 @@ import {
 } from '../api/criteria'
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
-import type { Criterion, CriterionSubject } from '../types'
+import { GRADES, gradeColor } from '../lib/grades'
+import type { Criterion, CriterionSubject, CriterionLevelDescriptors, GradeLetter } from '../types'
 
 const SUBJECT_LABEL: Record<string, string> = {
   business: 'Бизнес', economics: 'Экономика', law: 'Право', medicine: 'Медицина',
@@ -40,8 +41,28 @@ interface FormState {
   description:  string
   course_id:    string
   subject:      CriterionSubject | ''
+  /** Per-level anchors, keyed by grade letter. Empty string = not set. */
+  levels:       Record<GradeLetter, string>
 }
-const emptyForm: FormState = { name: '', description: '', course_id: '', subject: '' }
+const emptyLevels: Record<GradeLetter, string> = { '5': '', '4': '', '3': '', '2': '' }
+
+const LEVEL_PLACEHOLDER: Record<GradeLetter, string> = {
+  '5': 'Например: тезис сформулирован явно, каждый довод опирается на источник, есть разбор контраргумента',
+  '4': 'Например: тезис ясен, доводы в основном обоснованы, но есть 1–2 утверждения без опоры',
+  '3': 'Например: тезис угадывается, доводы описательные, источники почти не привлекаются',
+  '2': 'Например: тезис отсутствует или противоречив, доводов нет',
+}
+const emptyForm: FormState = { name: '', description: '', course_id: '', subject: '', levels: { ...emptyLevels } }
+
+/** Form levels → API shape. Blank entries are omitted; all-blank becomes null. */
+function levelsToPayload(levels: Record<GradeLetter, string>): CriterionLevelDescriptors | null {
+  const out: CriterionLevelDescriptors = {}
+  for (const g of GRADES) {
+    const v = levels[g]?.trim()
+    if (v) out[g] = v
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
 
 export default function Criteria() {
   const qc = useQueryClient()
@@ -51,6 +72,7 @@ export default function Criteria() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<FormState>(emptyForm)
   const [suggestion, setSuggestion] = useState<string | null>(null)
+  const [showLevels, setShowLevels] = useState(false)
 
   const { data: criteria = [] }  = useQuery({ queryKey: ['criteria-all'], queryFn: () => getCriteria() })
   const { data: courses = [] }   = useQuery({ queryKey: ['courses'], queryFn: getCourses })
@@ -58,12 +80,14 @@ export default function Criteria() {
   const { data: shareTargets = [] } = useQuery({ queryKey: ['criteria-share-targets'], queryFn: getCriteriaShareTargets })
 
   const courseName = (id: string | null) => courses.find((c) => c.id === id)?.name
+  const filledLevelCount = GRADES.filter((g) => !!form.levels[g]?.trim()).length
 
   const saveMut = useMutation({
     mutationFn: (f: FormState) => {
       const payload: CriterionPayload = {
         name:        f.name,
         description: f.description || null,
+        level_descriptors: levelsToPayload(f.levels),
         course_id:   f.course_id || undefined,
         subject:     f.subject || undefined,
       }
@@ -118,27 +142,35 @@ export default function Criteria() {
     },
   })
 
-  function close() { setShowForm(false); setForm(emptyForm); setSuggestion(null) }
+  function close() { setShowForm(false); setForm(emptyForm); setSuggestion(null); setShowLevels(false) }
 
-  function openNew() { setForm(emptyForm); setSuggestion(null); setShowForm(true) }
+  function openNew() { setForm(emptyForm); setSuggestion(null); setShowLevels(false); setShowForm(true) }
   function openEdit(c: Criterion) {
+    const levels = { ...emptyLevels, ...(c.level_descriptors ?? {}) }
     setForm({
       id: c.id, name: c.name,
       description: c.description ?? '',
       course_id: c.course_id ?? '',
       subject: c.subject ?? '',
+      levels,
     })
     setSuggestion(null)
+    // Auto-expand when the criterion already has anchors, so editing doesn't
+    // hide them behind a collapsed section.
+    setShowLevels(GRADES.some((g) => !!levels[g]))
     setShowForm(true)
   }
   function fromTemplate(t: Criterion) {
+    const levels = { ...emptyLevels, ...(t.level_descriptors ?? {}) }
     setForm({
       name: t.name,
       description: t.description ?? '',
       course_id: '',
       subject: t.subject ?? '',
+      levels,
     })
     setSuggestion(null)
+    setShowLevels(GRADES.some((g) => !!levels[g]))
     setShowForm(true)
   }
 
@@ -224,6 +256,55 @@ export default function Criteria() {
                       <Button size="sm" onClick={acceptSuggestion}>Принять</Button>
                       <Button size="sm" variant="secondary" onClick={rejectSuggestion}>Отклонить</Button>
                     </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Per-level anchors. Collapsed by default: optional, and the
+                  form is already dense. Filling even two of the four
+                  materially sharpens both the score and the feedback, since
+                  otherwise the model infers the levels from the name alone. */}
+              <div className="border border-line rounded-md">
+                <button
+                  type="button"
+                  onClick={() => setShowLevels((v) => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2 text-left"
+                >
+                  <span className="text-xs font-sans font-medium text-ink-secondary">
+                    Уровни оценки
+                    <span className="text-ink-tertiary font-normal"> — необязательно</span>
+                    {filledLevelCount > 0 && (
+                      <span className="ml-2 text-[10px] font-sans text-amber">{filledLevelCount} из 4</span>
+                    )}
+                  </span>
+                  <span className={showLevels ? 'rotate-180 transition-transform' : 'transition-transform'}>
+                    <Icon name="chevron-down" size={14} />
+                  </span>
+                </button>
+                {showLevels && (
+                  <div className="px-3 pb-3 space-y-2">
+                    <p className="text-[11px] font-sans text-ink-tertiary leading-relaxed">
+                      Опишите, что по этому критерию соответствует каждой оценке. ИСПУМ будет
+                      определять балл по этим уровням, а не по общему впечатлению, и укажет
+                      студенту, чего не хватает до следующего уровня. Можно заполнить не все.
+                    </p>
+                    {GRADES.map((g) => (
+                      <div key={g} className="flex gap-2 items-start">
+                        <span
+                          className="shrink-0 w-6 h-6 mt-1 rounded flex items-center justify-center text-xs font-sans font-semibold"
+                          style={{ background: `${gradeColor(g)}1a`, color: gradeColor(g) }}
+                        >
+                          {g}
+                        </span>
+                        <textarea
+                          className={`${inputClass} resize-none`}
+                          rows={2}
+                          placeholder={LEVEL_PLACEHOLDER[g]}
+                          value={form.levels[g]}
+                          onChange={(e) => setForm((f) => ({ ...f, levels: { ...f.levels, [g]: e.target.value } }))}
+                        />
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

@@ -1,10 +1,12 @@
 import client from './client'
-import type { Criterion, CriterionSubject } from '../types'
+import type { Criterion, CriterionSubject, CriterionLevelDescriptors } from '../types'
 import type { ShareTarget } from './rubrics'
 
 export interface CriterionPayload {
   name:         string
   description?: string | null
+  /** Per-level anchors ({«5»: "...", …}); null clears them. */
+  level_descriptors?: CriterionLevelDescriptors | null
   course_id?:   string
   subject?:     CriterionSubject
 }

@@ -1,5 +1,5 @@
 import { pool } from '../connection'
-import type { Criterion, CriterionSubject } from '../../../../shared/types'
+import type { Criterion, CriterionSubject, CriterionLevelDescriptors } from '../../../../shared/types'
 
 interface CriterionRow {
   id: string
@@ -7,6 +7,7 @@ interface CriterionRow {
   course_id: string | null
   name: string
   description: string | null
+  level_descriptors: CriterionLevelDescriptors | null
   subject: string | null
   is_global_template: boolean
   is_institution_shared: boolean
@@ -21,6 +22,7 @@ function toCriterion(row: CriterionRow): Criterion {
     course_id:             row.course_id,
     name:                  row.name,
     description:           row.description,
+    level_descriptors:     row.level_descriptors ?? null,
     subject:               (row.subject ?? null) as CriterionSubject | null,
     is_global_template:    row.is_global_template,
     is_institution_shared: row.is_institution_shared,
@@ -168,14 +170,15 @@ export async function createCriterion(
   data: {
     name:        string
     description?: string
+    level_descriptors?: CriterionLevelDescriptors | null
     course_id?:  string
     subject?:    CriterionSubject
     is_institution_shared?: boolean
   }
 ): Promise<Criterion> {
   const { rows } = await pool.query<CriterionRow>(
-    `INSERT INTO criteria (teacher_id, course_id, name, description, subject, is_institution_shared)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO criteria (teacher_id, course_id, name, description, subject, is_institution_shared, level_descriptors)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
     [
       teacherId,
@@ -184,6 +187,7 @@ export async function createCriterion(
       data.description ?? null,
       data.subject ?? null,
       data.is_institution_shared ?? false,
+      data.level_descriptors ? JSON.stringify(data.level_descriptors) : null,
     ]
   )
   return toCriterion(rows[0])
@@ -195,6 +199,7 @@ export async function updateCriterion(
   data: {
     name?:        string
     description?: string | null
+    level_descriptors?: CriterionLevelDescriptors | null
     course_id?:   string | null
     subject?:     CriterionSubject | null
   }
@@ -204,7 +209,8 @@ export async function updateCriterion(
         SET name        = COALESCE($3, name),
             description = CASE WHEN $4::boolean THEN $5 ELSE description END,
             course_id   = CASE WHEN $6::boolean THEN $7::uuid ELSE course_id END,
-            subject     = CASE WHEN $8::boolean THEN $9 ELSE subject END
+            subject     = CASE WHEN $8::boolean THEN $9 ELSE subject END,
+            level_descriptors = CASE WHEN $10::boolean THEN $11::jsonb ELSE level_descriptors END
       WHERE id = $1 AND teacher_id = $2
       RETURNING *`,
     [
@@ -213,6 +219,8 @@ export async function updateCriterion(
       data.description !== undefined, data.description ?? null,
       data.course_id   !== undefined, data.course_id   ?? null,
       data.subject     !== undefined, data.subject     ?? null,
+      data.level_descriptors !== undefined,
+      data.level_descriptors ? JSON.stringify(data.level_descriptors) : null,
     ]
   )
   return rows[0] ? toCriterion(rows[0]) : null

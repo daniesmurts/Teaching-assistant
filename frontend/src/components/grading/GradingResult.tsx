@@ -286,7 +286,7 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
         <div className="mx-5 mt-3 px-3 py-2.5 bg-warning-bg border border-warning/20 rounded-md flex items-start gap-2.5">
           <span className="text-warning text-sm mt-0.5 flex-shrink-0">⚠</span>
           <div className="text-[12.5px] font-sans text-ink leading-relaxed">
-            <span className="font-medium">ИИ не уверен в этой оценке.</span>{' '}
+            <span className="font-medium">ИСПУМ не уверен в этой оценке.</span>{' '}
             <span className="text-ink-secondary">
               Варианты модели дали разные результаты
               {result.ai_ensemble && ` (${result.ai_ensemble.samples.map((s) => s.grade).join(', ')})`}

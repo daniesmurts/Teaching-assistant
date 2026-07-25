@@ -14,10 +14,39 @@ import { incrementUsage } from '../db/queries/usageCounters'
 import { improveCriterionDescription } from '../services/criteriaAssist'
 import { canShareToUnit } from '../services/orgScope'
 import { listShareTargetsForTeacher } from '../db/queries/orgUnits'
-import type { Criterion, CriterionSubject } from '../../../shared/types'
+import { GRADES } from '../../../shared/grades'
+import type { Criterion, CriterionSubject, CriterionLevelDescriptors, GradeLetter } from '../../../shared/types'
 
 const router = Router()
 router.use(authenticate)
+
+const MAX_DESCRIPTOR_CHARS = 600
+
+/**
+ * Whitelist client-supplied level descriptors down to {grade letter -> text}.
+ *
+ * This text is teacher-authored and lands in the grading prompt, so it takes
+ * the same posture as every other user string on that path: keys are accepted
+ * only if they're one of the four canonical grade letters, values only if
+ * they're non-empty strings, and each is length-capped. `sanitiseForPrompt`
+ * still runs at render time (buildLevelDescriptorLines) — this is shape
+ * validation at the boundary, not a substitute for it.
+ *
+ * Returns null for an empty/absent/garbage payload so the column clears rather
+ * than storing `{}`.
+ */
+function sanitiseLevelDescriptors(raw: unknown): CriterionLevelDescriptors | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const src = raw as Record<string, unknown>
+  const out: CriterionLevelDescriptors = {}
+  for (const grade of GRADES) {
+    const value = src[grade]
+    if (typeof value !== 'string') continue
+    const trimmed = value.trim()
+    if (trimmed) out[grade as GradeLetter] = trimmed.slice(0, MAX_DESCRIPTOR_CHARS)
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
 
 // GET /api/criteria — personal + shared via the org tree + global templates
 router.get('/', asyncHandler(async (req, res) => {
@@ -48,17 +77,19 @@ router.post(
   checkResourceLimit('criteria', 'maxCriteria'),
   validate(createCriterionRules),
   asyncHandler(async (req, res) => {
-    const { name, description, course_id, subject } = req.body as {
+    const { name, description, course_id, subject, level_descriptors } = req.body as {
       name: string
       description?: string
       course_id?: string
       subject?: CriterionSubject
+      level_descriptors?: unknown
     }
     const criterion = await createCriterion(req.teacher.id, {
       name,
       description,
       course_id,
       subject,
+      level_descriptors: sanitiseLevelDescriptors(level_descriptors),
     })
     res.status(201).json(criterion)
   })
@@ -98,9 +129,20 @@ router.get('/:id', asyncHandler(async (req, res) => {
 }))
 
 router.put('/:id', validate(updateCriterionRules), asyncHandler(async (req, res) => {
+  const { level_descriptors, ...rest } = req.body as {
+    name?: string; description?: string; course_id?: string
+    subject?: CriterionSubject; level_descriptors?: unknown
+  }
   const criterion = await updateCriterion(
     req.params.id, req.teacher.id,
-    req.body as { name?: string; description?: string; course_id?: string; subject?: CriterionSubject }
+    {
+      ...rest,
+      // Only touch the column when the client actually sent the field —
+      // updateCriterion's CASE WHEN treats `undefined` as "leave alone".
+      ...(level_descriptors !== undefined
+        ? { level_descriptors: sanitiseLevelDescriptors(level_descriptors) }
+        : {}),
+    }
   )
   if (!criterion) throw new NotFoundError('Критерий')
   res.json(criterion)

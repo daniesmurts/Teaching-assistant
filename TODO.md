@@ -2216,6 +2216,303 @@ idea of the whole session.**
   coordinate whichever ships second. v3 is demand-driven fast-follow
   material once РОПы/teachers are using the ledger.
 
+### AF. Per-course/teacher score calibration · Effort: S–M · 🟢 v1 SHIPPED (2026-07-24)
+
+Promoted from Research §10.1. The grading number was trusted raw
+(`clampScore(result.score)`); each teacher runs systematically hot or cold
+and each course has its own grade distribution, which is exactly the bias
+QWK/MAE punish hardest. `assignments` already pairs every `ai_score` with the
+teacher's final `approved_score` — enough history to fit a monotone
+correction map with zero extra LLM calls.
+
+- **`lib/scoreCalibration.ts`** (pure, unit-tested) — `fitIsotonicCalibration`
+  runs Pool Adjacent Violators over `{aiScore, teacherScore}` pairs, grouping
+  duplicate raw scores and merging adjacent violators until the map is
+  monotone non-decreasing; returns `null` below a minimum sample size (20) or
+  when the fit collapses into one block (no usable shape) — callers must
+  treat `null` as "pass the raw score through," never as zero correction.
+  `applyCalibration` interpolates linearly between breakpoints and
+  extrapolates **flat** beyond the fitted domain (isotonic regression has no
+  evidence outside the range it was trained on).
+- **`db/queries/scoreCalibration.ts`** + migration `094_score_calibration.sql`
+  — new `score_calibration` table, one row per `(scope_type, scope_id)`
+  where scope is `course`/`teacher`/`institution`; pair-fetching queries read
+  straight off `assignments.status = 'approved'`.
+- **`services/scoreCalibration.ts`** — `getActiveCalibrationMap` does
+  most-specific-first backoff (course → teacher → institution → none), each
+  hop cached 5 min (mirrors `confidence.ts`'s threshold cache) so grading
+  never does a live fit. `fitCalibration(scopeType, scopeId)` is the explicit
+  trigger — pulls pairs, fits, upserts, busts the cache — exposed via
+  `GET /api/admin/evals/calibration` + `POST /api/admin/evals/calibration/fit`
+  on the existing eval-harness admin surface (`routes/adminEvals.ts`),
+  mirroring `fitThresholdsForRun`'s pattern exactly.
+- **Wired into `grading.ts`'s `grade()`** — applied once, right after
+  `gradeOnce`/the ensemble produce the (possibly §10.4-aggregated) raw score
+  and before `createAssignment` persists it; wrapped in try/catch so a
+  lookup failure falls back to the raw score rather than blocking a grade
+  (same posture as RAG retrieval's failure handling).
+- **Leakage-safe validation harness (shipped same day)** — `lib/scoreCalibration.ts`'s
+  `validateCalibrationSplit` fits on the chronologically-earliest slice of a
+  scope's approved history only, then scores MAE/Spearman on the later slice
+  the fit never saw (mirrors `evalHarness.ts`'s `findSimilarAssignmentsBefore`
+  "no future leakage" posture for RAG replay) — proof the map generalises to
+  grades issued *after* it was fitted, not just a same-data fit-and-score
+  exercise that would let it memorise the evaluation set. No LLM calls
+  needed: unlike the flywheel/confidence replays, calibration only ever
+  operates on scores already sitting in `assignments`, so validating it is
+  pure arithmetic. `services/scoreCalibration.ts`'s `validateCalibration`
+  wraps it with the DB read; exposed read-only via
+  `GET /api/admin/evals/calibration/validate` (never writes
+  `score_calibration` — safe to call repeatedly while deciding whether a
+  scope is ready for the real `/calibration/fit`). 5 new unit tests,
+  including one that plants a systematic +15 bias across the *whole*
+  timeline, fits only on the first 65%, and confirms the held-out 35%'s
+  calibrated MAE collapses from ~15 to <2 (>85% improvement) — the
+  generalization claim, not just a fit-quality check. Smoke-tested against
+  the real dev DB (course/teacher/institution joins all execute correctly;
+  correctly returns `null` on too-little-data scopes rather than erroring).
+- **Deferred:** automatic/scheduled refitting (v1 is admin-triggered only).
+
+### AG. Ensemble reconciliation — adjudicate low-confidence disagreement · Effort: S
+
+Promoted from Research §10.2. `gradeEnsemble` (`confidence.ts`) already
+samples strict/lenient/cross-provider variants and computes dispersion, but
+today a `low`-confidence label just flags the work for closer teacher review
+— the divergent samples' own reasoning is discarded. Add a reconciliation
+pass gated on `confidence === 'low'`: feed the model the divergent
+scores + justifications and have it adjudicate a final grade instead of
+just reporting disagreement.
+
+- **Why:** the ensemble is already paid for; this only stops throwing away
+  signal. Low-confidence works are exactly the ones dragging down MAE, so
+  fixing only those moves the aggregate a lot for little marginal cost.
+- **Touches:** one new judge prompt in `confidence.ts` (or a sibling module),
+  gated behind the existing `EnsembleOutcome.confidence` check in
+  `grading.ts`'s `grade()`.
+- **Sequencing:** after AF — calibrate first, then adjudicate the residual
+  hard cases; validate in `evalHarness.ts` against the confidence-labelled
+  subset.
+
+### AH. Evidence-first two-phase grading + selective reasoner · Effort: M · 🟢 SHIPPED (2026-07-25)
+
+Promoted from Research §10.3 (+ §10.5). One `chatJSON` call produced score +
+feedback + quotes together, letting the model anchor on a gestalt number then
+rationalise it.
+
+- **Phase 1 — `extractEvidence`** (`grading.ts`): a call that pulls per-criterion
+  passages and is *explicitly forbidden from proposing a score* — if it scored,
+  phase 2 would anchor on **its** number and the problem would simply move.
+  Every extracted quote is validated verbatim against the submission before it
+  can reach phase 2, so the scoring prompt can never reason from text that
+  isn't in the work. Fails soft: a failed extraction degrades to plain
+  single-pass grading.
+- **Phase 2** — `buildEvidenceBlock` renders the validated table *ahead of* the
+  criteria and submission, so the model meets the passages before the scoring
+  instruction. The block explicitly says the list is not exhaustive, so the
+  model still reads the full work rather than treating the excerpt as the whole.
+- **Gating:** `evidenceFirst` is a new plan flag (Pro/Institution), and fires
+  only when the teacher opted into «тщательная проверка» — that path already
+  accepts extra latency and already runs the ensemble. Free tier and ordinary
+  gradings are unchanged in cost.
+- **Selective reasoner (§10.5)** — `shouldUseReasoner` extends reasoning beyond
+  calc to thorough-mode and long work. **Threshold deliberately set at 40k
+  chars, not the ~12–15k that "long" intuitively suggests:** the measured
+  corpus average is ~15.2k, so a 12–15k cut-off would route the *majority* of
+  gradings through the reasoner — a large silent spend increase, which is not
+  a change to make quietly one day after the DeepSeek 402 balance incident.
+  40k targets the genuine long tail below the 120k ВКР hand-off. Lowering it
+  is a cost decision to make with spend data.
+- **Verified live** (real DeepSeek call, criteria + level descriptors +
+  evidence-first): 6/7 bullets grounded, per-criterion feedback 401–521 chars,
+  score 60 → grade «3» consistent with the bands.
+
+### AK. Grading review-quality fixes — grounding, critic window, level descriptors · Effort: M · 🟢 SHIPPED (2026-07-25)
+
+Four defects found by measuring what the grader actually produces across a
+real 30-assignment corpus, rather than reasoning about the pipeline. These
+target *review quality* — whether the model reads the work and says something
+substantive — as opposed to Features AF/AI/AJ, which only made the **number**
+consistent.
+
+**Baseline measured before any change:** of 269 feedback bullets, only **42
+carried a verified quote (15%)**; per-criterion comments averaged 239 chars;
+overall feedback 865 chars; average submission 15,228 chars (max 117,383).
+
+**1. Grounding was opt-out, so 85% of feedback had no anchor.** The prompt
+said «Не выдумывайте цитаты — **лучше null**» — null is better — while the one
+field that *is* mandatory (`verification_questions`) demanded a quote and duly
+complied. The anti-hallucination framing was working too well: the model took
+the safe path and omitted. New shared `QUOTE_RULE` inverts the default — the
+quote is `ОБЯЗАТЕЛЬНОЕ поле`, the model is told quotes are machine-checked,
+and crucially it is told to **swap the point for one it can ground** rather
+than drop the quote. `validateCitation` stays the safety net (Non-Negotiable
+#2), which is exactly what makes demanding quotes safe rather than reckless.
+The `null` escape hatch survives **deliberately** for absence-type findings
+("no methodology section") — you cannot quote what isn't there, and pressuring
+the model to try is how fabrication starts.
+  - **Live result: grounding went 15% → 89%** (`accepted: 8, absent: 0,
+    rejectedNotFound: 1` on a real graded work), with the single ungrounded
+    bullet being exactly an absence-type point.
+
+**2. Nothing distinguished "no quote offered" from "quote rejected".** Those
+have opposite fixes (prompt vs matcher tolerance for hyphenation/OCR noise),
+and the split was invisible. New `CitationStats` threads an optional tally
+through `validateCitation`/`normaliseBullets`/`normaliseCriteriaScores` (kept
+optional so existing callers and tests are untouched), and `gradeOnce` logs one
+`[Grounding]` line per grading with the outcome breakdown and `groundedShare`.
+On the first live run this immediately answered the question the whole item
+existed for: `absent: 0` — under the new prompt the residual loss is
+*rejection*, not omission, so any further work belongs in matcher tolerance.
+
+**3. The critic pass was judging evidence it could not see.**
+`critiqueFeedback` asked "is this bullet grounded?" while receiving
+`submissionText.slice(0, 4000)` — a blind prefix. With a 15.2k average, **43%
+of the corpus (13/30) exceeded that window**, so bullets correctly grounded in
+later pages looked unsupported and were dropped or rewritten vaguer. Because
+it is gated on `feedbackCritic` (Pro+), paying users on long works were hit
+hardest. New pure `buildCriticContext` windows ±400 chars around each bullet's
+**already-validated** quote, merges overlapping windows, marks elisions with
+«[…]», keeps a head excerpt for framing, and caps total size. The critic is
+now also shown each bullet's own quote and told the quotes are pre-verified, so
+it can't discard a point merely because its passage wasn't in the excerpt.
+
+**4. Criteria had no level anchors.** The `criteria` table was `name` +
+free-text `description`, so nothing said what a 90 looks like versus a 70 *for
+that criterion* — the model inferred the boundaries from the name alone, which
+drives score noise and generic feedback simultaneously. Migration
+`096_criterion_level_descriptors.sql` adds `level_descriptors JSONB`, keyed by
+grade letter (`{"5": …, "4": …}`) because the bands are already canonical in
+`shared/grades.ts` and teachers think «на пятёрку», not «[87,100]». JSONB
+rather than a child table for the same reason as `brs_schemes.grade_thresholds`:
+a fixed-shape ≤4-entry map always read and written with its parent. Snapshotted
+into `criteria_snapshot` so past gradings stay reproducible after a teacher
+edits their anchors. Rendered by `buildLevelDescriptorLines` (highest grade
+first, blank levels skipped, `sanitiseForPrompt` applied per
+Non-Negotiable #1), with an instruction added only when at least one criterion
+actually carries anchors. Route-level `sanitiseLevelDescriptors` whitelists keys
+to the four canonical letters and caps each at 600 chars. Editable in
+`Criteria.tsx` behind a collapsed «Уровни оценки» disclosure (auto-expands when
+anchors exist, shows an «N из 4» badge, per-level placeholders); new
+`chevron-down` icon added to the design system for the toggle.
+  - **Live result:** per-criterion feedback rose from a 239-char average to
+    401–521 chars and explicitly named which level the work met and what was
+    missing to reach the next one.
+
+- **Tests:** 30 new unit tests (grounding telemetry incl.
+  omission-vs-rejection, `buildCriticContext` incl. a quote past the old 4k
+  window and overlap merging, `buildLevelDescriptorLines` incl. sanitisation,
+  `buildEvidenceBlock`, `shouldUseReasoner` thresholds). Backend 530 green,
+  frontend 41 green, both `tsc --noEmit` clean.
+- **One test caught my own wrong assumption:** I initially asserted
+  `sanitiseForPrompt` strips a plain `<system>` tag. It does not — it strips
+  `<|system|>`-style delimiters and phrase patterns (`promptSanitiser.ts`).
+  Test corrected to the real contract. **Noted, not fixed:** plain angle-bracket
+  pseudo-tags aren't in the pattern list; that's pre-existing and applies to
+  every user string on the prompt path, so it belongs in its own scoped change
+  rather than being folded in here.
+
+### AI. Analytic (deterministic) aggregation for rubric grades · Effort: S · 🟢 SHIPPED (2026-07-24)
+
+Promoted from Research §10.4. When criteria + weights exist, the model was
+previously free to hand back a holistic overall `score` disconnected from
+its own per-criterion numbers — an entire class of holistic-drift/arithmetic
+error that's pure arithmetic we can just compute instead of trusting the
+model to do it.
+
+- **`grading.ts`'s `aggregateWeightedScore`** (pure, unit-tested) —
+  Σ(criterion score · weight)/100 over the already-normalised
+  `criteriaScores`, matched to the criteria snapshot the same
+  case/whitespace-insensitive way `mergeScoresIntoSnapshot` already does.
+  Returns `null` (→ caller falls back to the model's own holistic score)
+  when any criterion has no matching AI score by name — never aggregates a
+  partial set, since that would silently understate the true weighted total.
+- **Wired into `gradeOnce`** — only overrides the numeric `score` when
+  `params.criteria.length > 0` (holistic grading, with no weights to
+  aggregate, is untouched).
+- **Correction (2026-07-25):** this entry originally claimed "there is no
+  fixed score→grade cutoff in this system to recompute it from." **That was
+  wrong.** The bands are real and canonical — `5: 87–100, 4: 73–86, 3: 60–72,
+  2: <60` — declared in four prompt strings *and* implemented as
+  `scoreToGrade` in the frontend. The backend simply never applied them.
+  Because aggregation moves the score while the letter stayed as the model
+  emitted it, this feature as first shipped could produce internally
+  contradictory records (weighted sum 71 labelled «Отлично»), and — since the
+  eval harness computes QWK on grade **letters** — delivered no QWK gain at
+  all. Fixed by Feature AJ below.
+- **Ships ahead of AF** in the same score-production pipeline: aggregation
+  corrects the model's own arithmetic first, calibration (AF) then corrects
+  the resulting number against the teacher's scale on top of that.
+
+### AJ. Grading-accuracy integrity fixes — score↔grade contract, calibration feedback loop, ensemble symmetry · Effort: S · 🟢 SHIPPED (2026-07-25)
+
+Three defects found by auditing the grading pipeline after AF/AI landed. Two
+were regressions introduced by AF/AI themselves; the third predated them and
+was silently corrupting the confidence signal. All three attacked accuracy at
+the measurement layer, which is why they outranked building AG/AH next.
+
+**1. Score and grade letter had come apart — and it nullified QWK.**
+The bands (`5: 87–100, 4: 73–86, 3: 60–72, 2: <60`) were declared in four
+prompt strings and implemented in `frontend/src/lib/grades.ts`, but the
+backend never applied them — it told the model the bands and trusted whatever
+letter came back. AI (aggregation) and AF (calibration) then both moved the
+*score* while leaving the *letter* untouched, so a weighted sum of 71 could
+persist alongside «Отлично», and the teacher's panel rendered that
+contradiction (the frontend's own score↔grade sync only fires when the teacher
+*edits* a field). Critically, `evalHarness.ts`'s `summariseRun` computes
+**QWK on grade letters** — so AF and AI improved MAE while contributing
+nothing to the headline agreement metric.
+  - Lifted the scale into new **`shared/grades.ts`** (`GRADES`,
+    `GRADE_BRACKETS`, `scoreToGrade`, `snapScoreToGrade`, `gradeLabel`) —
+    one definition for both sides, ending a duplication the frontend's own
+    comment had flagged ("mirrored from the grading prompt"). Frontend's
+    `lib/grades.ts` re-exports it and keeps only `gradeColor` (CSS-variable
+    presentation), so all 10 existing import sites and its 12 tests were
+    untouched.
+  - New pure **`resolveGradeForScore`** in `grading.ts` derives the letter
+    from the final score and regenerates the label only when the letter
+    actually moves (so label and letter can never disagree). Applied in
+    `gradeOnce` (post-aggregation), `scoreOnce`, and `grade()`
+    (post-calibration).
+**2. Calibration would have trained on its own output.**
+`grade()` persists the calibrated score into `assignments.ai_score`, and the
+refit queries read that same column — so once a map went live, every refit
+would learn "calibrated → teacher" while inference kept feeding a *raw*
+score, drifting train/inference apart and compounding the correction each
+refit. Fixed with migration `095_ai_score_raw.sql` (`ai_score_raw`) +
+`createAssignment` persisting the pre-calibration score; fitting now reads
+`COALESCE(ai_score_raw, ai_score)`. **No backfill needed** — rows written
+before 095 were graded with no map fitted, so their `ai_score` already *is*
+the raw score (verified against the dev DB: all 28 existing rows have
+`ai_score_raw IS NULL` and resolve correctly through the fallback).
+  - Deliberately **not** applied to the policy memo's delta query
+    (`db/queries/policyMemos.ts`) — that one *should* keep measuring the
+    residual disagreement remaining after calibration, so the prompt-level
+    memo and the calibration map correct complementary things instead of both
+    learning the same bias and double-correcting it.
+**3. The confidence ensemble was comparing unequally-informed graders.**
+`ScoreOnceParams` carried no policy memo, sent criteria as name+weight only
+(no descriptions), and reduced retrieved examples to bare labels
+(`"4 (78/100)"`) — while the primary saw the memo, full descriptions, and
+600-char excerpts with teacher feedback. So `score_std` mixed genuine
+disagreement about the work with an information asymmetry we created
+ourselves, inflating dispersion, over-reporting `low` confidence, and skewing
+the thresholds fitted on top of it. `scoreOnce` now receives the memo, the
+criteria descriptions, and the primary's own `buildExamplesBlock`.
+`criterionExamples` is deliberately still excluded — `scoreOnce` emits no
+per-criterion scores, so per-criterion exemplars have no output surface to act
+on, and they're the bulkiest of the three inputs.
+  - **Consequence flagged in `confidence.ts`:** any `confidence_config`
+    thresholds fitted before this change were fitted against a dispersion
+    distribution that included the asymmetry as noise and read too wide — they
+    should be refit (confidence replay → apply-thresholds) rather than trusted.
+- **Tests:** 5 new for `resolveGradeForScore` (incl. exact band boundaries and
+  the 71+«5» case) and a new `grading.scoreOnce.test.ts` (7 tests) asserting
+  prompt symmetry and score/grade consistency, using the house
+  `vi.hoisted` + `vi.mock('./deepseek')` pattern. Backend 503 tests green,
+  frontend 41 green, both `tsc --noEmit` clean.
+- **Unblocks AG:** reconciliation is only worth building on a dispersion
+  signal that means what it claims — fix 3 was a hard prerequisite.
+
 ---
 
 ## Build order — locked design (§5–§7)

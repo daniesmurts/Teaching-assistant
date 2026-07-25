@@ -10,6 +10,7 @@ export type {
   CourseLevel,
   Criterion,
   CriterionSubject,
+  CriterionLevelDescriptors,
   CriteriaSnapshotItem,
   Rubric,
   RubricItem,

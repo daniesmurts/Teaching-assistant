@@ -1,6 +1,7 @@
 import { chatJSON, embed, type CallContext } from './deepseek'
 import { getActiveProviderName } from './llm/registry'
 import { gradeEnsemble } from './confidence'
+import { getActiveCalibrationMap, applyCalibration } from './scoreCalibration'
 import { findCriteriaByIds } from '../db/queries/criteria'
 import {
   createAssignment,
@@ -23,9 +24,10 @@ import { syncGradeToLtiGradebook } from './ltiServices'
 import { verifyCalculation, toImprovementBullet } from './calcVerifier'
 import { checkCitations, toCitationBullet } from './citationChecker'
 import { canUseFeature } from '../config/planLimits'
+import { scoreToGrade, GRADES } from '../../../shared/grades'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import { logger } from '../lib/logger'
-import type { Assignment, GradeLetter, CriterionScore, CriteriaSnapshotItem, BulletItem, BulletSeverity, BulletAction, VerificationQuestion, QuestionResponse, CalcStepVerdict, CitationVerdict } from '../../../shared/types'
+import type { Assignment, GradeLetter, CriterionScore, CriteriaSnapshotItem, CriterionLevelDescriptors, BulletItem, BulletSeverity, BulletAction, VerificationQuestion, QuestionResponse, CalcStepVerdict, CitationVerdict } from '../../../shared/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -131,6 +133,9 @@ export async function resolveCriteriaSnapshot(
       name:         c.name,
       weight:       weights[i],
       description:  c.description,
+      // Snapshotted so a past grading stays reproducible after the teacher
+      // edits the criterion's anchors.
+      level_descriptors: c.level_descriptors ?? null,
       max_score:    100,
     } as CriteriaSnapshotItem & { max_score: number }
   })
@@ -235,6 +240,12 @@ export interface GradeOnceParams {
   // Populated by grade() from the submission's own embedding (no extra
   // embed() call); undefined/empty when nothing matched or RAG is off.
   criterionExamples?: Record<string, CriterionExample[]>
+  // Evidence-first grading (Research §10.3 / TODO Feature AH). Runs a cheap
+  // extraction pass FIRST — pull the passages that bear on each criterion —
+  // and feeds that validated evidence table into the scoring call, so the
+  // model reads before it judges instead of forming a gestalt number and
+  // back-filling justification. Costs one extra call; gated by the caller.
+  evidenceFirst?: boolean
 }
 
 export interface GradeOnceResult {
@@ -259,6 +270,37 @@ export interface GradingMessages {
 }
 
 /**
+ * Long analytical work is where a reasoning model earns its cost (Research
+ * §10.5). Calculation work always used it; this extends that to the deliberate
+ * «тщательная проверка» path (teacher already accepted extra latency) and to
+ * genuinely long submissions.
+ *
+ * The threshold is deliberately conservative. Measured on a real corpus the
+ * average submission is ~15k chars, so a 12–15k cut-off would route the
+ * MAJORITY of gradings through the reasoner — a large, silent spend increase,
+ * which is not a change to make quietly (see the 2026-07-24 DeepSeek 402
+ * balance incident). 40k targets the genuine long tail below the 120k mark
+ * where the ВКР long-review pipeline takes over instead.
+ *
+ * Lowering this is a cost decision, not a tuning detail — it should be made
+ * with spend data, not by intuition.
+ *
+ * Pure and exported so the threshold is testable and reviewable rather than
+ * buried in a conditional.
+ */
+export const REASONER_CHAR_THRESHOLD = 40000
+
+export function shouldUseReasoner(params: {
+  assignmentType?: 'essay' | 'calculation'
+  submissionText:  string
+  evidenceFirst?:  boolean
+}): boolean {
+  if (params.assignmentType === 'calculation') return true
+  if (params.evidenceFirst) return true
+  return params.submissionText.length >= REASONER_CHAR_THRESHOLD
+}
+
+/**
  * Deterministic prompt assembly — fully testable without network. Everything
  * that decides WHAT the model sees lives here; gradeOnce only adds the call
  * and response normalisation.
@@ -274,6 +316,8 @@ export function buildGradingMessages(params: {
   parent?:        Assignment | null
   persona?:       GradingPersona
   criterionExamples?: Record<string, CriterionExample[]>
+  /** Validated per-criterion passages from the evidence-first pass, if it ran. */
+  evidence?:      CriterionEvidence[]
 }): GradingMessages {
   const isCalc     = params.assignmentType === 'calculation'
   const isRevision = params.parent != null
@@ -319,7 +363,11 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
 
   const { text: annotated, pageCount } = annotateWithPageMarkers(params.submissionText)
 
-  const user = revisionBlock + assignmentContext + reference + (params.criteria.length > 0
+  // Evidence table (when phase 1 ran) sits ahead of the criteria/submission so
+  // the model meets the passages before it meets the scoring instruction.
+  const evidenceBlock = params.evidence?.length ? buildEvidenceBlock(params.evidence) : ''
+
+  const user = revisionBlock + assignmentContext + reference + evidenceBlock + (params.criteria.length > 0
     ? buildCriteriaPrompt(annotated, params.criteria, params.examples, params.policyMemo, isCalc, isRevision, pageCount, hasHandoutQuestions, params.criterionExamples)
     : buildHolisticPrompt(annotated, params.examples, params.policyMemo, isCalc, isRevision, pageCount, hasHandoutQuestions))
 
@@ -328,8 +376,21 @@ ${sanitiseForPrompt(params.referenceSolution.trim())}
 
 /** One grading call: prompt → model → normalised result. No DB writes. */
 export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResult> {
-  const { system, user, pageCount } = buildGradingMessages(params)
   const isCalc = params.assignmentType === 'calculation'
+
+  // Phase 1 (opt-in): read the work and extract per-criterion evidence before
+  // any number exists. Fails soft — a failed extraction degrades to plain
+  // single-pass grading rather than blocking the grade.
+  let evidence: CriterionEvidence[] = []
+  if (params.evidenceFirst) {
+    try {
+      evidence = await extractEvidence(params)
+    } catch (err) {
+      logger.warn({ message: '[EvidenceFirst] Extraction failed, grading in one pass', error: (err as Error).message })
+    }
+  }
+
+  const { system, user, pageCount } = buildGradingMessages({ ...params, evidence })
 
   const result = await chatJSON<AIGradingResult>(
     [
@@ -339,15 +400,21 @@ export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResul
     'результат оценивания',
     {
       context:          params.context,
-      reasoner:         isCalc,
+      // Reasoning was reserved for calculation work. The marginal gain from
+      // reasoning concentrates on the hard/long tail of analytical work too,
+      // so route those through it as well — see shouldUseReasoner.
+      reasoner:         shouldUseReasoner(params),
       temperature:      params.temperature,
       providerOverride: params.providerOverride,
     },
   )
 
-  const grade = normaliseGrade(result.grade)
-  let strengths    = normaliseBullets(result.strengths ?? [], params.submissionText, pageCount, params.criteria)
-  let improvements = normaliseBullets(result.improvements ?? [], params.submissionText, pageCount, params.criteria)
+  // One tally across every quote-bearing field this grading produced, so the
+  // omission-vs-rejection split is observable instead of guessed at.
+  const citationStats = newCitationStats()
+
+  let strengths    = normaliseBullets(result.strengths ?? [], params.submissionText, pageCount, params.criteria, citationStats)
+  let improvements = normaliseBullets(result.improvements ?? [], params.submissionText, pageCount, params.criteria, citationStats)
 
   if (params.critic) {
     try {
@@ -388,12 +455,47 @@ export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResul
     improvements = [...improvements, ...notFoundBullets]
   }
 
+  const criteriaScores = normaliseCriteriaScores(result.criteria_scores ?? [], params.submissionText, pageCount, citationStats)
+
+  // Grounding telemetry. `absent` means the model never offered a quote (a
+  // prompt problem); `rejectedNotFound` means it offered one that isn't in the
+  // submission (a matcher-tolerance or hallucination problem). Logged at info
+  // so the split is greppable in production without a schema change.
+  const citationTotal = citationStats.absent + citationStats.accepted +
+    citationStats.rejectedNotFound + citationStats.rejectedTooShort
+  if (citationTotal > 0) {
+    logger.info({
+      message: '[Grounding] citation outcomes for one grading',
+      ...citationStats,
+      total: citationTotal,
+      groundedShare: Math.round((citationStats.accepted / citationTotal) * 100) / 100,
+      submissionChars: params.submissionText.length,
+    })
+  }
+
+  // Deterministic aggregation (Research §10.4 / TODO Feature AI): when the
+  // grading is criteria-scoped, the weights already sum to 100 — don't trust
+  // the model's freehand holistic number, compute the overall as the weighted
+  // sum of its own per-criterion scores. Removes holistic-drift/arithmetic
+  // error as a failure class and makes the number auditable. Falls back to
+  // the model's raw score if a criterion's name didn't match (never silently
+  // aggregates a partial set). The grade LETTER is then re-derived from the
+  // aggregated score — see resolveGradeForScore.
+  const aggregated = params.criteria.length > 0
+    ? aggregateWeightedScore(criteriaScores, params.criteria)
+    : null
+
+  const score = aggregated ?? clampScore(result.score)
+  const { grade, gradeLabel } = resolveGradeForScore(
+    score, normaliseGrade(result.grade), result.grade_label,
+  )
+
   return {
-    score:          clampScore(result.score),
+    score,
     grade,
-    gradeLabel:     result.grade_label ?? gradeToLabel(grade),
+    gradeLabel,
     feedback:       result.feedback ?? '',
-    criteriaScores:        normaliseCriteriaScores(result.criteria_scores ?? [], params.submissionText, pageCount),
+    criteriaScores,
     strengths,
     improvements,
     verificationQuestions: normaliseVerificationQuestions(result.verification_questions ?? [], params.submissionText, pageCount),
@@ -404,6 +506,80 @@ export async function gradeOnce(params: GradeOnceParams): Promise<GradeOnceResul
     calcVerification,
     citationCheck,
   }
+}
+
+// ─── Evidence-first pass (Research §10.3 / TODO Feature AH) ──────────────────
+//
+// A single call that emits score + feedback + quotes together lets the model
+// anchor on a first-impression number and then rationalise it. Splitting the
+// job forces reading before judging: phase 1 extracts the passages that bear on
+// each criterion, every quote is validated verbatim the same way grading
+// citations are, and phase 2 scores with that evidence table in front of it.
+//
+// Deliberately extraction-only — this pass never proposes a score. If it did,
+// phase 2 would just anchor on *its* number and we'd have moved the problem.
+
+export interface CriterionEvidence {
+  criterion: string
+  quotes:    string[]
+}
+
+/** Pure — renders the validated evidence table into the scoring prompt. */
+export function buildEvidenceBlock(evidence: CriterionEvidence[]): string {
+  const usable = evidence.filter((e) => e.quotes.length > 0)
+  if (usable.length === 0) return ''
+  const body = usable
+    .map((e) => `### ${sanitiseForPrompt(e.criterion)}\n${e.quotes.map((q) => `- «${sanitiseForPrompt(q)}»`).join('\n')}`)
+    .join('\n')
+  return `## Выписанные из работы фрагменты по критериям
+Ниже — фрагменты, уже найденные в работе на предыдущем шаге (проверены дословно).
+Опирайтесь на них при выставлении баллов: сначала соотнесите фрагменты с уровнями критерия, затем ставьте балл.
+Это не полный список — если для вывода нужен другой фрагмент, найдите его в тексте работы сами.
+
+${body}
+
+`
+}
+
+async function extractEvidence(params: GradeOnceParams): Promise<CriterionEvidence[]> {
+  const { text: annotated } = annotateWithPageMarkers(params.submissionText)
+  const criteriaList = params.criteria.length > 0
+    ? params.criteria.map((c) => `- ${c.name}${c.description ? `: ${sanitiseForPrompt(c.description)}` : ''}`).join('\n')
+    : '- Общее качество работы (тезис, аргументация, выводы, оформление)'
+
+  const system = `Вы — внимательный читатель студенческих работ. На этом шаге вы НЕ выставляете оценку и НЕ пишете отзыв. ` +
+    `Ваша единственная задача — выписать из работы дословные фрагменты, которые относятся к каждому критерию: и подтверждающие сильные стороны, и показывающие недостатки. ` +
+    `Копируйте фрагменты ПОСИМВОЛЬНО из текста работы, ничего не перефразируя. Отвечайте только валидным JSON.`
+
+  const user = `## Критерии\n${criteriaList}\n\n## Работа студента\n<student_submission>\n${sanitiseForPrompt(annotated)}\n</student_submission>\n\n` +
+    `Верните JSON: {"evidence": [{"criterion": название критерия, "quotes": [2–4 дословных фрагмента по 5–20 слов]}]}. ` +
+    `Включите объект для КАЖДОГО критерия. Не оценивайте и не комментируйте — только фрагменты.`
+
+  const result = await chatJSON<{ evidence?: Array<{ criterion?: unknown; quotes?: unknown }> }>(
+    [{ role: 'system', content: system }, { role: 'user', content: user }],
+    'выписка фрагментов',
+    { context: params.context, providerOverride: params.providerOverride },
+  )
+
+  // Validate every extracted quote against the submission — an unverifiable
+  // fragment must never reach the scoring prompt, or phase 2 would reason from
+  // text that isn't in the work.
+  const haystack = params.submissionText.toLowerCase().replace(/\s+/g, ' ').trim()
+  const raw = Array.isArray(result.evidence) ? result.evidence : []
+  return raw
+    .map((e) => ({
+      criterion: typeof e.criterion === 'string' ? e.criterion.trim() : '',
+      quotes: (Array.isArray(e.quotes) ? e.quotes : [])
+        .filter((q): q is string => typeof q === 'string')
+        .map((q) => q.trim())
+        .filter((q) => {
+          const normalised = q.toLowerCase().replace(/\s+/g, ' ').trim()
+          return normalised.length >= 8 && haystack.includes(normalised)
+        })
+        .slice(0, 4)
+        .map((q) => q.slice(0, 200)),
+    }))
+    .filter((e) => e.criterion.length > 0)
 }
 
 // ─── Critic / verification pass ──────────────────────────────────────────────
@@ -419,6 +595,65 @@ export interface CritiqueVerdict {
   index:           number
   verdict:         'keep' | 'rewrite' | 'drop'
   rewritten_text?: string
+}
+
+/**
+ * Build the submission context the critic judges "is this bullet grounded?"
+ * against.
+ *
+ * This used to be `submissionText.slice(0, 4000)` — a blind prefix. Measured
+ * on a real corpus the average submission is ~15k chars (max 117k) and 43%
+ * exceed 4k, so the critic was ruling on evidence it could not see and
+ * dropping or vaguening bullets that were correctly grounded in later pages.
+ * Because it runs only for Pro+ (`feedbackCritic`), paying users on long works
+ * were hit hardest.
+ *
+ * Bullets already carry a quote that `validateCitation` verified appears in the
+ * submission, so instead of guessing we window around each real anchor. Falls
+ * back to a head excerpt only for bullets with no quote at all (absence-type
+ * findings), which is the one case where there is nothing to anchor to.
+ */
+export function buildCriticContext(
+  submissionText: string,
+  bullets: BulletItem[],
+  opts: { window?: number; headChars?: number; maxChars?: number } = {},
+): string {
+  const window    = opts.window    ?? 400
+  const headChars = opts.headChars ?? 1500
+  const maxChars  = opts.maxChars  ?? 12000
+
+  const haystack = submissionText.toLowerCase()
+  // Head excerpt always included: gives the critic the work's framing, and is
+  // the only context available for bullets about something being absent.
+  const segments: Array<[number, number]> = [[0, Math.min(headChars, submissionText.length)]]
+
+  for (const b of bullets) {
+    if (!b.quote) continue
+    const idx = haystack.indexOf(b.quote.toLowerCase())
+    if (idx === -1) continue
+    segments.push([
+      Math.max(0, idx - window),
+      Math.min(submissionText.length, idx + b.quote.length + window),
+    ])
+  }
+
+  // Merge overlapping/adjacent windows so the same passage isn't sent twice.
+  segments.sort((a, b) => a[0] - b[0])
+  const merged: Array<[number, number]> = []
+  for (const seg of segments) {
+    const last = merged[merged.length - 1]
+    if (last && seg[0] <= last[1]) last[1] = Math.max(last[1], seg[1])
+    else merged.push([...seg] as [number, number])
+  }
+
+  let out = ''
+  for (const [start, end] of merged) {
+    if (out.length >= maxChars) break
+    const piece = submissionText.slice(start, end)
+    const prefix = out ? (start > 0 ? '\n\n[…]\n\n' : '\n\n') : (start > 0 ? '[…]\n\n' : '')
+    out += prefix + piece.slice(0, Math.max(0, maxChars - out.length))
+  }
+  return out
 }
 
 /** Pure — applies critique verdicts to a bullet list. Unit-testable without an LLM call. */
@@ -452,8 +687,13 @@ async function critiqueFeedback(
 ): Promise<{ strengths: BulletItem[]; improvements: BulletItem[] }> {
   if (strengths.length === 0 && improvements.length === 0) return { strengths, improvements }
 
+  // Show the critic each bullet's own verified anchor, so "is this grounded?"
+  // is a question about the claim rather than a guess about unseen text.
   const listBlock = (kind: 'strength' | 'improvement', items: BulletItem[]) =>
-    items.map((b, i) => `[${kind} ${i}] ${b.text}`).join('\n')
+    items.map((b, i) =>
+      `[${kind} ${i}] ${b.text}` +
+      (b.quote ? `\n    цитата из работы: «${b.quote}»` : `\n    (без цитаты — замечание об отсутствии либо необоснованный пункт)`)
+    ).join('\n')
 
   const system = `Вы — строгий редактор обратной связи по студенческим работам. Ваша задача — проверить каждый пункт отзыва на два критерия: ` +
     `(1) ОБОСНОВАННОСТЬ — утверждение действительно подтверждается текстом работы, а не общими словами; ` +
@@ -461,8 +701,11 @@ async function critiqueFeedback(
     `Для каждого пункта верните вердикт: "keep" (уже хорош), "rewrite" (перепишите короче и конкретнее, сохраняя суть) или "drop" (пункт не по существу, ничем не обоснован). ` +
     `Отвечайте только валидным JSON.`
 
-  const user = `## Работа студента (фрагмент)\n${sanitiseForPrompt(submissionText).slice(0, 4000)}\n\n` +
+  const submissionContext = buildCriticContext(submissionText, [...strengths, ...improvements])
+
+  const user = `## Работа студента (начало работы + фрагменты вокруг каждой цитаты; «[…]» — пропущенный текст)\n${sanitiseForPrompt(submissionContext)}\n\n` +
     `## Пункты отзыва для проверки\n${listBlock('strength', strengths)}\n${listBlock('improvement', improvements)}\n\n` +
+    `Цитаты в списке уже проверены — они действительно взяты из работы. Не отбрасывайте пункт только потому, что относящийся к нему фрагмент не попал в показанные отрывки. ` +
     `Верните JSON: {"verdicts": [{"kind": "strength"|"improvement", "index": число, "verdict": "keep"|"rewrite"|"drop", "rewritten_text": строка (только если verdict="rewrite")}]}. ` +
     `Включите вердикт для КАЖДОГО пункта из списка выше.`
 
@@ -494,6 +737,12 @@ export interface ScoreOnceParams {
   submissionText: string
   criteria:       CriteriaSnapshotItem[]
   examples:       SimilarAssignment[]
+  // Same grading-policy memo the primary gets. Without it the secondaries
+  // scored under materially different information from the primary, so the
+  // ensemble's dispersion conflated genuine disagreement about the work with
+  // an information asymmetry we created ourselves — inflating score_std,
+  // over-reporting 'low' confidence, and skewing the fitted thresholds.
+  policyMemo?:    string | null
   assignmentType?: 'essay' | 'calculation'
   referenceSolution?: string
   assignmentContext?: string
@@ -522,16 +771,26 @@ export async function scoreOnce(params: ScoreOnceParams): Promise<ScoreOnceResul
   const reference = params.referenceSolution?.trim()
     ? `\n## Эталон\n<reference>\n${sanitiseForPrompt(params.referenceSolution.trim())}\n</reference>\n`
     : ''
+  // Criteria carry their DESCRIPTIONS here, not just name+weight — the
+  // description is what defines "good" for that criterion, and the primary
+  // always sees it. Same reasoning as policyMemo/examples below: the
+  // ensemble's job is to disagree about the work, not about the brief.
   const criteriaBlock = params.criteria.length > 0
-    ? `\n## Критерии\n${params.criteria.map((c) => `- ${c.name} (вес ${c.weight}%)`).join('\n')}\n`
+    ? `\n## Критерии\n${params.criteria
+        .map((c) => `- ${c.name} (вес ${c.weight}%)${c.description ? `: ${sanitiseForPrompt(c.description)}` : ''}`)
+        .join('\n')}\n`
     : ''
-  const examplesBlock = params.examples.length > 0
-    ? `\n## Примеры оценок по предмету (ориентир)\n${params.examples
-        .map((e) => `${e.approved_grade} (${e.approved_score}/100)`).join(', ')}\n`
-    : ''
+  // Reuse the primary's own examples block (submission excerpts + teacher
+  // feedback) instead of the bare grade labels this used to send, so both
+  // sides of the ensemble reason from identical retrieved evidence.
+  //
+  // criterionExamples is deliberately NOT plumbed through: scoreOnce emits no
+  // per-criterion scores, so per-criterion feedback exemplars have no output
+  // surface to act on, and they're the bulkiest input of the three.
+  const examplesBlock = buildExamplesBlock(params.examples)
 
   const user =
-    `${criteriaBlock}${examplesBlock}${assignmentContext}${reference}\n## Работа студента\n<submission>\n` +
+    `${buildPolicyMemoBlock(params.policyMemo)}${criteriaBlock}${examplesBlock}${assignmentContext}${reference}\n## Работа студента\n<submission>\n` +
     `${sanitiseForPrompt(params.submissionText)}\n</submission>\n\n` +
     `Верните ТОЛЬКО JSON: {"score": число 0–100, "grade": "5"|"4"|"3"|"2"} ` +
     `(5: 87–100, 4: 73–86, 3: 60–72, 2: ниже 60). Без пояснений.`
@@ -547,7 +806,12 @@ export async function scoreOnce(params: ScoreOnceParams): Promise<ScoreOnceResul
     },
   )
 
-  return { score: clampScore(result.score), grade: normaliseGrade(result.grade) }
+  // Same score→grade enforcement as gradeOnce. Matters here because
+  // computeDispersion derives `gradeAgreement` from these letters — an
+  // internally inconsistent (score, grade) pair would show up as ensemble
+  // disagreement that isn't really disagreement about the work's quality.
+  const score = clampScore(result.score)
+  return { score, grade: scoreToGrade(score) }
 }
 
 // ─── Grade (production path: resolve inputs → gradeOnce → persist) ───────────
@@ -607,6 +871,11 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     critic: canUseFeature(params.planTier, 'feedbackCritic'),
     calcVerification: params.assignmentType === 'calculation' && canUseFeature(params.planTier, 'calcVerification'),
     citationCheck: Boolean(params.checkCitations),
+    // Evidence-first (Feature AH) costs one extra call per grading, so it is
+    // tied to the explicit «тщательная проверка» opt-in rather than firing on
+    // every graded work — the teacher has already accepted extra latency
+    // there, and that path is also where the ensemble runs.
+    evidenceFirst: Boolean(params.thorough) && canUseFeature(params.planTier, 'evidenceFirst'),
   }
 
   // "Thorough" mode runs the confidence ensemble: the primary call still
@@ -617,6 +886,28 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     ? await gradeEnsemble(gradeParams)
     : null
   const result = ensemble ? ensemble.primary : await gradeOnce(gradeParams)
+
+  // Per-scope score calibration (Research §10.1 / TODO Feature AF) — corrects
+  // systematic per-teacher/per-course bias against the teacher's own scale.
+  // Course -> teacher -> institution backoff; passes the score through
+  // unchanged (never blocks grading) when no scope has enough approved
+  // history fitted yet, or the lookup itself fails.
+  let calibratedScore = result.score
+  try {
+    const calibrationMap = await getActiveCalibrationMap(
+      params.courseId ?? null, params.teacherId, params.institutionId ?? null,
+    )
+    calibratedScore = applyCalibration(result.score, calibrationMap)
+  } catch (err) {
+    logger.warn({ message: '[Calibration] Could not load calibration map, using raw score', error: (err as Error).message })
+  }
+
+  // Calibration moves the score, so the letter has to follow it — same
+  // contract gradeOnce enforces. Without this, calibration would improve MAE
+  // while leaving a stale letter, and QWK (computed on letters) would never
+  // see the gain.
+  const { grade: calibratedGrade, gradeLabel: calibratedGradeLabel } =
+    resolveGradeForScore(calibratedScore, result.grade, result.gradeLabel)
 
   // Merge AI per-criterion scores back into the snapshot so the history view
   // can reconstruct exactly what was graded against what.
@@ -639,9 +930,14 @@ export async function grade(params: GradeParams): Promise<GradeResponse> {
     studentEmail: params.studentEmail,
     studentGroup: params.studentGroup,
     submissionText: params.submissionText,
-    aiScore: result.score,
-    aiGrade: result.grade,
-    aiGradeLabel: result.gradeLabel,
+    aiScore: calibratedScore,
+    // Pre-calibration score, persisted so future refits train on the model's
+    // OWN output rather than on scores a previous calibration already
+    // corrected (which would make each refit learn "calibrated → teacher"
+    // and compound the correction). See db/queries/scoreCalibration.ts.
+    aiScoreRaw: result.score,
+    aiGrade: calibratedGrade,
+    aiGradeLabel: calibratedGradeLabel,
     aiFeedback: applyWatermark(result.feedback, params.planTier),
     aiCriteriaScores: result.criteriaScores,
     aiStrengths: result.strengths,
@@ -711,6 +1007,61 @@ function mergeScoresIntoSnapshot(
 }
 
 /**
+ * Enforce the score→grade contract the grading prompt already states
+ * (5: 87–100, 4: 73–86, 3: 60–72, 2: <60).
+ *
+ * Those bands were declared in four prompt strings and in the frontend's
+ * `scoreToGrade`, but never applied server-side — the persisted letter was
+ * whatever the model emitted. That broke in two ways:
+ *   1. Post-processing moves the score (deterministic weighted aggregation,
+ *      per-scope calibration) while the letter stays put, producing
+ *      internally contradictory records — a weighted sum of 71 labelled «5».
+ *   2. Even with no post-processing, a model can emit an inconsistent pair.
+ *
+ * This is load-bearing for accuracy measurement, not cosmetic: the eval
+ * harness computes QWK — the headline agreement metric — on grade LETTERS, so
+ * any score-only improvement stayed invisible to it while the letter was stale.
+ *
+ * The label follows the letter: kept as the model wrote it while the letter
+ * still agrees, regenerated whenever we moved the letter, so the two can never
+ * contradict each other.
+ */
+export function resolveGradeForScore(
+  score:      number,
+  modelGrade: GradeLetter,
+  modelLabel?: string | null,
+): { grade: GradeLetter; gradeLabel: string } {
+  const grade = scoreToGrade(score)
+  const gradeLabel = grade === modelGrade
+    ? (modelLabel?.trim() || gradeToLabel(grade))
+    : gradeToLabel(grade)
+  return { grade, gradeLabel }
+}
+
+/**
+ * Deterministic weighted-sum overall score (Research §10.4 / TODO Feature AI).
+ * `criteria` weights are validated at snapshot-resolution time to sum to 100
+ * (resolveCriteriaSnapshot), so the aggregate is just Σ(score·weight)/100.
+ * Returns null — signalling "fall back to the model's own holistic score" —
+ * when any criterion has no matching AI score by name (never aggregates a
+ * partial set, since that would silently understate the true weighted total).
+ */
+export function aggregateWeightedScore(
+  aiScores: CriterionScore[],
+  criteria: CriteriaSnapshotItem[]
+): number | null {
+  if (criteria.length === 0) return null
+  const byName = new Map(aiScores.map((s) => [s.name.toLowerCase().trim(), s.score]))
+  let total = 0
+  for (const c of criteria) {
+    const score = byName.get(c.name.toLowerCase().trim())
+    if (score == null) return null
+    total += score * c.weight
+  }
+  return clampScore(Math.round(total / 100))
+}
+
+/**
  * Convert form-feed page boundaries in the raw submission into "[стр. N]"
  * headers the AI can cite. Page 1 is implicit (no header before the first
  * page), subsequent pages are prefixed. Returns the annotated text plus the
@@ -733,7 +1084,8 @@ export function annotateWithPageMarkers(text: string): { text: string; pageCount
 export function normaliseCriteriaScores(
   scores: CriterionScore[],
   submissionText: string,
-  pageCount: number
+  pageCount: number,
+  stats?: CitationStats,
 ): CriterionScore[] {
   const haystack = submissionText.toLowerCase().replace(/\s+/g, ' ').trim()
   return scores.map((s) => {
@@ -746,7 +1098,7 @@ export function normaliseCriteriaScores(
       quote:    null,
       page:     null,
     }
-    const validated = validateCitation(s.quote, s.page, haystack, pageCount)
+    const validated = validateCitation(s.quote, s.page, haystack, pageCount, stats)
     next.quote = validated.quote
     next.page  = validated.page
     return next
@@ -763,6 +1115,7 @@ export function normaliseBullets(
   submissionText: string,
   pageCount: number,
   criteriaSnapshot: CriteriaSnapshotItem[] = [],
+  stats?: CitationStats,
 ): BulletItem[] {
   const haystack = submissionText.toLowerCase().replace(/\s+/g, ' ').trim()
   const validCriterionIds = new Set(
@@ -773,9 +1126,10 @@ export function normaliseBullets(
       const text = extractBulletText(b)
       if (!text) return null
       if (typeof b === 'string') {
+        if (stats) stats.absent++
         return { text, quote: null, page: null, question: null, criterion_id: null }
       }
-      const { quote, page } = validateCitation(b.quote, b.page, haystack, pageCount)
+      const { quote, page } = validateCitation(b.quote, b.page, haystack, pageCount, stats)
       // Pass-through question: a short follow-up the teacher could ask the
       // student about the same passage. Capped at 240 chars; longer = wasted.
       let question: string | null = null
@@ -871,22 +1225,49 @@ export function normaliseVerificationQuestions(
     .slice(0, 4)
 }
 
+/**
+ * Per-grading tally of what happened to every quote the model was asked for.
+ *
+ * Without this, a bullet arriving with `quote: null` is indistinguishable
+ * between "the model never offered one" and "it offered one that failed
+ * verbatim validation" — and those have opposite fixes (tighten the prompt vs
+ * loosen the matcher for hyphenation/OCR noise). Measured on a real 30-work
+ * corpus, only ~15% of bullets carried a surviving quote, so knowing which
+ * half of that is omission decides where the work goes.
+ */
+export interface CitationStats {
+  absent:           number   // model returned no quote at all
+  accepted:         number   // quote verified verbatim against the submission
+  rejectedNotFound: number   // quote supplied but absent from the submission (hallucinated/paraphrased)
+  rejectedTooShort: number   // quote supplied but under the 8-char floor
+}
+
+export function newCitationStats(): CitationStats {
+  return { absent: 0, accepted: 0, rejectedNotFound: 0, rejectedTooShort: 0 }
+}
+
 function validateCitation(
   rawQuote: unknown,
   rawPage:  unknown,
   haystack: string,
   pageCount: number,
+  stats?: CitationStats,
 ): { quote: string | null; page: number | null } {
   let quote: string | null = null
-  if (typeof rawQuote === 'string') {
+  if (typeof rawQuote === 'string' && rawQuote.trim()) {
     const trimmed = rawQuote.trim()
-    if (trimmed) {
-      const normalised = trimmed.toLowerCase().replace(/\s+/g, ' ').trim()
-      // Accept the quote only if it shows up verbatim (case- and whitespace-insensitive).
-      if (normalised.length >= 8 && haystack.includes(normalised)) {
-        quote = trimmed.slice(0, 200)
-      }
+    const normalised = trimmed.toLowerCase().replace(/\s+/g, ' ').trim()
+    // Accept the quote only if it shows up verbatim (case- and whitespace-insensitive).
+    if (normalised.length < 8) {
+      if (stats) stats.rejectedTooShort++
+    } else if (haystack.includes(normalised)) {
+      quote = trimmed.slice(0, 200)
+      if (stats) stats.accepted++
+    } else {
+      if (stats) stats.rejectedNotFound++
     }
+  } else if (stats) {
+    stats.absent++
   }
   let page: number | null = null
   if (typeof rawPage === 'number' && Number.isInteger(Math.round(rawPage))) {
@@ -1049,6 +1430,22 @@ ${items}
  * Renders the distilled per-course policy memo (patterns in how this teacher
  * corrects the AI draft) as a calibration note ahead of the submission.
  */
+/**
+ * Render one criterion's teacher-authored level anchors, highest grade first.
+ * Returns '' when the teacher hasn't set any, so the prompt is byte-identical
+ * to the pre-migration-096 shape for criteria without descriptors.
+ */
+export function buildLevelDescriptorLines(
+  descriptors: CriterionLevelDescriptors | null | undefined,
+): string {
+  if (!descriptors) return ''
+  const lines = GRADES
+    .filter((g) => typeof descriptors[g] === 'string' && descriptors[g]!.trim())
+    .map((g) => `    «${g}» — ${sanitiseForPrompt(descriptors[g]!.trim())}`)
+  if (lines.length === 0) return ''
+  return `  Уровни по этому критерию (что соответствует какой оценке):\n${lines.join('\n')}`
+}
+
 function buildPolicyMemoBlock(memo: string | null | undefined): string {
   if (!memo) return ''
   return `## Особенности оценивания этого преподавателя
@@ -1081,6 +1478,31 @@ const QUESTION_RESPONSES_INSTRUCTION =
   `Каждый объект: {"question": исходный вопрос, "status": "answered" | "partial" | "unanswered", "note": 1-2 предложения о том, ответил ли студент в этой версии работы и насколько полно}. ` +
   `Включите КАЖДЫЙ вопрос, даже если ответ полный.`
 
+// Quote requirement, shared by every quote-bearing field in both prompt
+// variants.
+//
+// This used to read «Не выдумывайте цитаты — лучше null» ("don't invent quotes
+// — null is better"), which is an opt-out: measured on a real 30-work corpus,
+// only ~15% of strengths/improvements arrived with a surviving quote, so ~85%
+// of what the teacher read had no anchor in the work at all. The anti-
+// hallucination framing was doing its job too well — the model took the safe
+// path and omitted.
+//
+// The fix is to invert the default without inviting fabrication: demand a
+// verbatim quote, tell the model the quote is machine-checked, and — crucially
+// — instruct it to SWAP THE POINT for one it can ground rather than drop the
+// quote. validateCitation stays the safety net (Non-Negotiable #2), which is
+// what makes demanding quotes safe rather than reckless.
+//
+// The `null` escape hatch survives deliberately for absence-type findings ("no
+// methodology section") — you cannot quote what isn't in the work, and
+// pressuring the model to try is exactly how fabrication starts.
+const QUOTE_RULE =
+  `Цитату копируйте из работы ДОСЛОВНО, посимвольно — не пересказывайте, не исправляйте и не сокращайте её. ` +
+  `Цитаты проверяются автоматически по тексту работы: неточная цитата отбрасывается, и пункт остаётся без подтверждения. ` +
+  `Если для пункта не находится дословного подтверждения — замените сам пункт на другой, который вы можете подтвердить цитатой, а не ставьте null. ` +
+  `null допустим только для замечаний об ОТСУТСТВИИ чего-либо в работе (нет раздела, нет источников) — то, чего в тексте нет, процитировать нельзя.`
+
 // Verification questions field — present in both prompt variants. The intent
 // is "ask the student to verify they understand their own writing", NOT to
 // accuse — phrasing should be a neutral pedagogical probe.
@@ -1102,14 +1524,24 @@ function buildCriteriaPrompt(
   const criteriaBlock = snapshot
     .map((c) => {
       const base = `- [id: ${c.criterion_id ?? 'null'}] ${c.name} (вес: ${c.weight}%)${c.description ? `: ${sanitiseForPrompt(c.description)}` : ''}`
+      const parts = [base]
+      // Teacher-authored level anchors (migration 096). Without them the model
+      // infers what a «5» means for this criterion from its name alone, which
+      // is a major source of both score noise and generic feedback.
+      const levels = buildLevelDescriptorLines(c.level_descriptors)
+      if (levels) parts.push(levels)
       const matches = criterionExamples?.[c.name.toLowerCase().trim()]
-      if (!matches?.length) return base
-      const snippets = matches
-        .map((m) => `«${m.feedback.slice(0, 200)}${m.feedback.length > 200 ? '…' : ''}» (${m.score}/100)`)
-        .join('; ')
-      return `${base}\n  Похожие прошлые оценки по этому критерию: ${snippets}`
+      if (matches?.length) {
+        const snippets = matches
+          .map((m) => `«${m.feedback.slice(0, 200)}${m.feedback.length > 200 ? '…' : ''}» (${m.score}/100)`)
+          .join('; ')
+        parts.push(`  Похожие прошлые оценки по этому критерию: ${snippets}`)
+      }
+      return parts.join('\n')
     })
     .join('\n')
+
+  const anyLevels = snapshot.some((c) => buildLevelDescriptorLines(c.level_descriptors))
 
   // The criterion-id linking hint is only meaningful when criteria have ids
   // (holistic mode hits this code path with no snapshot at all, but criteria
@@ -1128,9 +1560,16 @@ function buildCriteriaPrompt(
     ? ` Маркеры [стр. N] в цитату НЕ ВКЛЮЧАЙТЕ.`
     : ''
 
+  // Only stated when at least one criterion actually carries anchors —
+  // otherwise it would point at a section of the prompt that isn't there.
+  const levelsInstruction = anyLevels
+    ? `\nДля критериев, где указаны уровни, определяйте балл по НИМ, а не по общему впечатлению: найдите уровень, которому работа соответствует фактически, и в "feedback" по критерию назовите, какой это уровень и чего не хватает до следующего.`
+    : ''
+
   return `${buildPolicyMemoBlock(policyMemo)}${buildExamplesBlock(examples)}## Критерии оценки
 
 ${criteriaBlock}
+${levelsInstruction}
 
 ## Работа студента${pageCount > 1 ? ` (страницы помечены маркерами [стр. N])` : ''}
 <student_submission>
@@ -1146,21 +1585,21 @@ ${sanitiseForPrompt(text)}
 - "criteria_scores": массив объектов по каждому критерию выше. КАЖДЫЙ объект:
     {"name": точное название критерия,
      "score": число 0–100,
-     "feedback": краткое обоснование оценки (2–4 предложения),
-     "quote": ДОСЛОВНАЯ цитата из работы студента (5–12 слов), на которую опирается ваш вывод — используйте её ТОЛЬКО если в работе действительно есть такой фрагмент. Если опереть вывод не на что — null,
-     "page": ${pageInstruction}}${markerWarning} Не выдумывайте цитаты — лучше null, чем неточная цитата.
+     "feedback": обоснование оценки: сначала что именно в работе вы увидели (с опорой на цитату), затем как это соотносится с описанием критерия и его уровнями, затем вывод о балле (3–5 предложений),
+     "quote": ОБЯЗАТЕЛЬНОЕ поле — ДОСЛОВНАЯ цитата из работы студента (5–12 слов), на которую опирается ваш вывод по этому критерию,
+     "page": ${pageInstruction}}${markerWarning} ${QUOTE_RULE}
 ${verificationFieldInstruction(pageInstruction)}
 - "strengths": массив из 3–5 конкретных достоинств. КАЖДЫЙ объект:
-    {"text": конкретное достоинство (1 предложение),
-     "quote": ДОСЛОВНАЯ цитата из работы студента (5–12 слов), которая подтверждает этот пункт. Используйте ТОЛЬКО если в работе есть такой фрагмент; иначе null,
+    {"text": конкретное достоинство — что именно сделано хорошо и почему это существенно для этой работы (1–2 предложения, без общих формулировок вроде «хорошая структура»),
+     "quote": ОБЯЗАТЕЛЬНОЕ поле — ДОСЛОВНАЯ цитата из работы студента (5–12 слов), подтверждающая этот пункт,
      "page": ${pageInstruction},
-     "criterion_id": ${haveIds ? 'id критерия из списка выше, к которому относится пункт; null если ни к какому' : 'всегда null'}}${markerWarning} Не выдумывайте цитаты — лучше null.
+     "criterion_id": ${haveIds ? 'id критерия из списка выше, к которому относится пункт; null если ни к какому' : 'всегда null'}}${markerWarning} ${QUOTE_RULE}
 - "improvements": массив из 3–5 конкретных областей для улучшения. КАЖДЫЙ объект:
-    {"text": пункт что улучшить (1 предложение),
-     "quote": ДОСЛОВНАЯ цитата из работы — фрагмент, который требует доработки, либо null,
+    {"text": что именно улучшить И как — конкретное действие, применимое к этой работе, а не общий совет (1–2 предложения),
+     "quote": ОБЯЗАТЕЛЬНОЕ поле — ДОСЛОВНАЯ цитата из работы: фрагмент, который требует доработки (null только если замечание об отсутствии чего-либо),
      "page": ${pageInstruction},
      "criterion_id": ${haveIds ? 'id критерия из списка выше, к которому относится пункт; null если ни к какому' : 'всегда null'},
-     "question": ОБЯЗАТЕЛЬНО заполните — ОДИН конкретный вопрос, который преподаватель может задать студенту по этому пункту. Вопрос должен требовать живого ответа, который сложно подготовить заранее, и быть привязан к конкретному фрагменту или утверждению, а не общим. Никогда не оставляйте это поле пустым или null.}${criterionIdHint ? `\n${criterionIdHint}` : ''}${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}${hasHandoutQuestions ? `\n${QUESTION_RESPONSES_INSTRUCTION}` : ''}
+     "question": ОБЯЗАТЕЛЬНО заполните — ОДИН конкретный вопрос, который преподаватель может задать студенту по этому пункту. Вопрос должен требовать живого ответа, который сложно подготовить заранее, и быть привязан к конкретному фрагменту или утверждению, а не общим. Никогда не оставляйте это поле пустым или null.}${markerWarning} ${QUOTE_RULE}${criterionIdHint ? `\n${criterionIdHint}` : ''}${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}${hasHandoutQuestions ? `\n${QUESTION_RESPONSES_INSTRUCTION}` : ''}
 
 Ответьте ТОЛЬКО JSON-объектом, без пояснений.`
 }
@@ -1191,18 +1630,18 @@ ${sanitiseForPrompt(text)}
 - "score": итоговый балл от 0 до 100
 - "grade": одно из "5", "4", "3", "2"  (5: 87–100, 4: 73–86, 3: 60–72, 2: ниже 60)
 - "grade_label": одно из "Отлично", "Хорошо", "Удовлетворительно", "Неудовлетворительно"
-- "feedback": общий отзыв на 2–3 абзаца на русском языке
+- "feedback": общий отзыв на 2–3 абзаца на русском языке. Разбирайте КОНКРЕТНОЕ содержание этой работы — тезисы, доводы, данные, выводы автора, — а не общие свойства текста. Формулировки, которые подошли бы к любой работе по теме, не годятся.
 - "criteria_scores": [] (пустой массив — без критериев)
 ${verificationFieldInstruction(pageInstruction)}
 - "strengths": массив из 3–5 конкретных достоинств. КАЖДЫЙ объект:
-    {"text": конкретное достоинство (1 предложение),
-     "quote": ДОСЛОВНАЯ цитата из работы студента (5–12 слов), которая подтверждает этот пункт. Используйте ТОЛЬКО если в работе есть такой фрагмент; иначе null,
-     "page": ${pageInstruction}}${markerWarning} Не выдумывайте цитаты — лучше null.
+    {"text": конкретное достоинство — что именно сделано хорошо и почему это существенно для этой работы (1–2 предложения, без общих формулировок вроде «хорошая структура»),
+     "quote": ОБЯЗАТЕЛЬНОЕ поле — ДОСЛОВНАЯ цитата из работы студента (5–12 слов), подтверждающая этот пункт,
+     "page": ${pageInstruction}}${markerWarning} ${QUOTE_RULE}
 - "improvements": массив из 3–5 конкретных областей для улучшения. КАЖДЫЙ объект:
-    {"text": пункт что улучшить (1 предложение),
-     "quote": ДОСЛОВНАЯ цитата из работы, либо null,
+    {"text": что именно улучшить И как — конкретное действие, применимое к этой работе, а не общий совет (1–2 предложения),
+     "quote": ОБЯЗАТЕЛЬНОЕ поле — ДОСЛОВНАЯ цитата из работы: фрагмент, который требует доработки (null только если замечание об отсутствии чего-либо),
      "page": ${pageInstruction},
-     "question": ОБЯЗАТЕЛЬНО заполните — ОДИН конкретный вопрос к студенту по этому пункту, требующий живого ответа, который сложно подготовить заранее. Вопрос привязан к конкретному утверждению, не общий. Никогда не оставляйте поле пустым или null.}${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}${hasHandoutQuestions ? `\n${QUESTION_RESPONSES_INSTRUCTION}` : ''}
+     "question": ОБЯЗАТЕЛЬНО заполните — ОДИН конкретный вопрос к студенту по этому пункту, требующий живого ответа, который сложно подготовить заранее. Вопрос привязан к конкретному утверждению, не общий. Никогда не оставляйте поле пустым или null.}${markerWarning} ${QUOTE_RULE}${isRevision ? `\n${REVISION_FIELD_INSTRUCTION}` : ''}${hasHandoutQuestions ? `\n${QUESTION_RESPONSES_INSTRUCTION}` : ''}
 
 Ответьте ТОЛЬКО JSON-объектом, без пояснений.`
 }

@@ -32,6 +32,7 @@ export type IconName =
   | 'message-chat'    // grounded document chat ("Спросить документ")
   | 'copy'            // copy-to-clipboard actions
   | 'import'          // bulk import from an external page (sveden discovery)
+  | 'chevron-down'    // disclosure toggle (rotate 180° for the open state)
 
 const PATHS: Record<IconName, JSX.Element> = {
   home: (
@@ -204,6 +205,10 @@ const PATHS: Record<IconName, JSX.Element> = {
       <path d="M7 10l5 5 5-5" />
       <path d="M4 19h16" />
     </>
+  ),
+
+  'chevron-down': (
+    <path d="M6 9l6 6 6-6" />
   ),
 
   scale: (
