@@ -573,6 +573,7 @@ async function buildPlanData(
       citationCheck:         canUseFeature(tier, 'citationCheck'),
       challengeFeedback:     canUseFeature(tier, 'challengeFeedback'),
       rpdMonitor:            canUseFeature(tier, 'rpdMonitor'),
+      pptxExport:            canUseFeature(tier, 'pptxExport'),
     },
   }
 }

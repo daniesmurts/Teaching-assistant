@@ -105,12 +105,9 @@ export default function Presentations() {
         title="Презентации"
         actions={
           (result || openHistory) ? (
-            <button
-              onClick={reset}
-              className="text-xs font-sans text-ink-secondary hover:text-ink transition-colors"
-            >
+            <Button size="sm" variant="secondary" onClick={reset}>
               ← Новая презентация
-            </button>
+            </Button>
           ) : undefined
         }
       />

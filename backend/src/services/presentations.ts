@@ -32,6 +32,7 @@ export interface GenerateParams {
   audienceLevel?: string
   style?: string
   slideCountTarget?: number
+  sourceText?: string   // pasted lecture notes — takes priority over RAG retrieval, same as quizzes.ts
 }
 
 export interface GenerateResult {
@@ -51,9 +52,15 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
     ? await findCourseById(params.courseId, params.teacherId)
     : null
 
-  const sources = params.courseId
-    ? await retrieveSources(params)
-    : []
+  // A pasted conspectus is the teacher's own material — building the deck
+  // from a course's uploaded reference chunks on top of it would mix two
+  // different sources of truth for the same lecture. Same precedence as
+  // quizzes.ts's sourceText.
+  const sources = params.sourceText
+    ? []
+    : params.courseId
+      ? await retrieveSources(params)
+      : []
 
   const previousTopics = params.courseId
     ? await getPreviousTopics(params.teacherId, params.courseId, params.lectureNumber)
@@ -191,6 +198,12 @@ function buildPrompt(
   if (previousTopics.length > 0) {
     lines.push(`## Предыдущие лекции (не повторять материал)`)
     previousTopics.forEach((t, i) => lines.push(`${i + 1}. ${t}`))
+    lines.push('')
+  }
+
+  if (params.sourceText) {
+    lines.push(`## Конспект лекции (стройте слайды строго по этому материалу, не добавляя фактов от себя)`)
+    lines.push(sanitiseForPrompt(params.sourceText))
     lines.push('')
   }
 

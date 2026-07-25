@@ -31,6 +31,7 @@ export const PLAN_LIMITS = {
     fosGenerator:          false,
     rpdMonitor:            false,
     brsEngine:             false,   // Feature AE v1 — БРС semester ledger — Pro/Institution
+    pptxExport:            false,   // Feature D — real PowerPoint export
     liveSessionsPerMonth:  1,
     monthlySpendCapUsd:    3,
   },
@@ -63,6 +64,7 @@ export const PLAN_LIMITS = {
     fosGenerator:          true,
     rpdMonitor:            false,
     brsEngine:             true,
+    pptxExport:            true,   // Feature D — real PowerPoint export
     liveSessionsPerMonth:  Infinity,
     monthlySpendCapUsd:    30,
   },
@@ -95,6 +97,7 @@ export const PLAN_LIMITS = {
     fosGenerator:          true,
     rpdMonitor:            true,
     brsEngine:             true,
+    pptxExport:            true,   // Feature D — real PowerPoint export
     liveSessionsPerMonth:  Infinity,
     monthlySpendCapUsd:    150,
   },

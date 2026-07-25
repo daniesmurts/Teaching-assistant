@@ -51,7 +51,7 @@ export function checkMonthlyLimit(
 // ─── Boolean feature gates ────────────────────────────────────────────────────
 
 export function checkFeatureAccess(
-  feature: 'documentUpload' | 'ragFlywheel' | 'emailGeneration' | 'presentationHistory' | 'verificationQuestions' | 'handout' | 'publishedAssignments' | 'feedbackCritic' | 'cohortSynthesis' | 'calcVerification' | 'challengeFeedback' | 'fosGenerator' | 'rpdMonitor' | 'brsEngine'
+  feature: 'documentUpload' | 'ragFlywheel' | 'emailGeneration' | 'presentationHistory' | 'verificationQuestions' | 'handout' | 'publishedAssignments' | 'feedbackCritic' | 'cohortSynthesis' | 'calcVerification' | 'challengeFeedback' | 'fosGenerator' | 'rpdMonitor' | 'brsEngine' | 'pptxExport'
 ) {
   return (req: Request, res: Response, next: NextFunction): void => {
     if (!canUseFeature(req.teacher.plan_tier, feature)) {

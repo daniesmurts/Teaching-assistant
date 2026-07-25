@@ -33,6 +33,7 @@ export default function PresentationForm({ onResult }: Props) {
   })
   const [goals, setGoals]     = useState<string[]>([])
   const [goalInput, setGoalInput] = useState('')
+  const [sourceText, setSourceText] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
 
@@ -67,6 +68,7 @@ export default function PresentationForm({ onResult }: Props) {
         audience_level:   form.audience_level || undefined,
         style:            form.style || undefined,
         slide_count_target: form.slide_count_target ? Number(form.slide_count_target) : undefined,
+        source_text:      sourceText.trim() || undefined,
       })
       onResult(res)
     } catch (err: unknown) {
@@ -151,6 +153,24 @@ export default function PresentationForm({ onResult }: Props) {
             {STYLES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
         </div>
+      </div>
+
+      {/* Own lecture notes — most teachers already have a conspectus and would
+          rather the deck follow it than have the model invent content from
+          just the topic. Mirrors Quizzes.tsx's identical field: when present,
+          it replaces course RAG retrieval as the source (see
+          services/presentations.ts's generatePresentation). */}
+      <div>
+        <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">
+          Свой конспект (опционально)
+        </label>
+        <textarea
+          className={`${selectClass} min-h-[100px] resize-y`}
+          value={sourceText}
+          onChange={(e) => setSourceText(e.target.value)}
+          placeholder="Вставьте текст своего конспекта — презентация будет построена строго по нему, без привязки к загруженным материалам предмета"
+          maxLength={20000}
+        />
       </div>
 
       {/* Learning goals */}

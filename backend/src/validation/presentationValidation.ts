@@ -46,4 +46,8 @@ export const generatePresentationRules = [
     .optional()
     .isIn(['theory_heavy', 'case_study', 'discussion_based', ''])
     .withMessage('Неверный стиль подачи'),
+
+  body('source_text')
+    .optional({ nullable: true, checkFalsy: true })
+    .isLength({ max: 20000 }).withMessage('Конспект слишком длинный (макс. 20000 символов)'),
 ]

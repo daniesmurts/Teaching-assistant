@@ -1,4 +1,5 @@
 import client from './client'
+import { downloadCsv } from './download'
 import type {
   Presentation, PresentationSource, Slide, SlideImage, ImageCandidate,
 } from '../types'
@@ -12,6 +13,7 @@ export interface GenerateRequest {
   audience_level?: string
   style?: string
   slide_count_target?: number
+  source_text?: string
 }
 
 export interface GenerateResponse {
@@ -40,6 +42,13 @@ export async function getPresentation(id: string): Promise<Presentation> {
 
 export async function deletePresentation(id: string): Promise<void> {
   await client.delete(`/api/presentations/${id}`)
+}
+
+// Blob fetch (so the JWT interceptor authenticates the request) — a plain
+// <a href> can't send the Authorization header, same reasoning as downloadCsv's
+// other callers (fos.ts, InstitutionProgramDetail's PDF export).
+export async function downloadPresentationPptx(id: string): Promise<void> {
+  await downloadCsv(`/api/presentations/${id}/export.pptx`)
 }
 
 // ── Image picker for diagram slides ──────────────────────────────────────────

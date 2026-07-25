@@ -4,9 +4,10 @@ import { validate } from '../middleware/validate'
 import { aiLimiter } from '../middleware/rateLimits'
 import { asyncHandler } from '../lib/asyncHandler'
 import { NotFoundError, ValidationError } from '../errors/AppError'
-import { checkMonthlyLimit } from '../middleware/checkPlan'
+import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
 import { generatePresentationRules } from '../validation/presentationValidation'
 import { generatePresentation } from '../services/presentations'
+import { generatePresentationPptx } from '../services/presentationExport'
 import { yandexImageSearch } from '../services/yandexImages'
 import {
   findPresentationsByTeacher, findPresentationById, deletePresentation, setSlideImage,
@@ -25,11 +26,11 @@ router.post(
   asyncHandler(async (req, res) => {
     const {
       course_id, lecture_number, topic, duration_minutes,
-      learning_goals, audience_level, style, slide_count_target,
+      learning_goals, audience_level, style, slide_count_target, source_text,
     } = req.body as {
       topic: string; duration_minutes: number; learning_goals?: string[]
       course_id?: string; lecture_number?: number; audience_level?: string
-      style?: string; slide_count_target?: number
+      style?: string; slide_count_target?: number; source_text?: string
     }
 
     const result = await generatePresentation({
@@ -42,6 +43,7 @@ router.post(
       audienceLevel:    audience_level,
       style,
       slideCountTarget: slide_count_target ? Number(slide_count_target) : undefined,
+      sourceText:       source_text,
     })
     res.status(201).json(result)
   })
@@ -66,6 +68,28 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   if (!deleted) throw new NotFoundError('Презентация')
   res.status(204).send()
 }))
+
+// GET /api/presentations/:id/export.pptx — real, editable PowerPoint download
+// (TODO.md Feature D). Gated separately from generation itself — a free-tier
+// teacher can still generate and copy-paste slides; the native .pptx file is
+// the Pro differentiator.
+router.get('/:id/export.pptx',
+  checkFeatureAccess('pptxExport'),
+  asyncHandler(async (req, res) => {
+    const presentation = await findPresentationById(req.params.id, req.teacher.id)
+    if (!presentation) throw new NotFoundError('Презентация')
+    if (!presentation.slides || presentation.slides.length === 0) {
+      throw new ValidationError('Эта презентация ещё в старом текстовом формате и не может быть экспортирована в PPTX — сгенерируйте новую.')
+    }
+
+    const pptx = await generatePresentationPptx(presentation)
+    const fname = `${(presentation.topic || 'presentation').replace(/[^\w.-]/g, '_')}.pptx`
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
+    res.setHeader('Content-Disposition', `attachment; filename="${fname}"`)
+    res.setHeader('Content-Length', pptx.length)
+    res.end(pptx)
+  })
+)
 
 // POST /api/presentations/:id/slides/:idx/images — fetch image candidates
 // from Yandex Images for the diagram slide at index :idx. Picker UI calls

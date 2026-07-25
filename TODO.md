@@ -101,18 +101,6 @@ land in History.
 - **Pricing hook:** worth gating to Pro; institution tier could add
   per-batch templates.
 
-### D. Real PPTX export · Effort: M
-
-Explicitly excluded by CLAUDE.md for MVP, but every demo ends with "and can
-I get it as PowerPoint?"
-
-- **Why:** Removes the #1 objection in sales conversations. Pro feature
-  with real perceived value.
-- **Touches:** `services/presentations.ts` adds export path,
-  [routes/presentations.ts](backend/src/routes/presentations.ts) new
-  `GET /api/presentations/:id/pptx` endpoint, `pptxgenjs` (Node lib),
-  Yandex-academic template asset.
-
 ### E. Public read-only feedback links · Effort: S
 
 Teacher approves → "Скопировать ссылку для студента" → time-boxed signed

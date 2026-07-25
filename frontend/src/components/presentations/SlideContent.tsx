@@ -9,6 +9,52 @@ import { slidesToText, legacySlidesToText } from './slideText'
 import { slidesToHtml, legacySlidesToHtml } from './slideHtml'
 import { copyRich } from './clipboard'
 import CopyAllButton from '../ui/CopyAllButton'
+import LoadingSpinner from '../ui/LoadingSpinner'
+import { usePlan } from '../../hooks/usePlan'
+import { useUIStore } from '../../store/uiStore'
+import { downloadPresentationPptx } from '../../api/presentations'
+
+// ─── PPTX export (TODO.md Feature D) ───────────────────────────────────────
+//
+// Only shown for a persisted presentation with the typed slide array — a
+// legacy text-DSL row (no `slides`) has nothing structured to export from.
+// Pro-gated (`pptxExport`): generation itself stays available on Free, the
+// native .pptx download is the differentiator.
+
+const DownloadIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <path d="M7 10l5 5 5-5" /><path d="M12 15V3" />
+  </svg>
+)
+
+function PptxDownloadButton({ presentationId }: { presentationId: string }) {
+  const { can } = usePlan()
+  const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
+  const [downloading, setDownloading] = useState(false)
+
+  async function handleClick() {
+    if (!can('pptxExport')) { showUpgradeModal('FEATURE_NOT_IN_PLAN'); return }
+    setDownloading(true)
+    try {
+      await downloadPresentationPptx(presentationId)
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={downloading}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-surface border border-border-mid text-xs font-sans font-medium text-ink-secondary shadow-sm whitespace-nowrap shrink-0 hover:border-amber hover:text-amber transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {downloading ? <LoadingSpinner size={13} /> : <DownloadIcon />}
+      {downloading ? 'Экспортируем…' : 'Скачать PPTX'}
+    </button>
+  )
+}
 
 // ─── RichText ─────────────────────────────────────────────────────────────────
 //
@@ -650,7 +696,10 @@ export default function SlideContent({
         <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">
           {totalSlides} слайдов
         </div>
-        <CopyAllButton onCopy={copyAll} />
+        <div className="flex items-center gap-2">
+          <CopyAllButton onCopy={copyAll} />
+          {useTyped && presentationId && <PptxDownloadButton presentationId={presentationId} />}
+        </div>
       </div>
 
       {useTyped

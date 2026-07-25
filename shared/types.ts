@@ -62,6 +62,7 @@ export interface PlanState {
     citationCheck:         boolean
     challengeFeedback:     boolean
     rpdMonitor:             boolean
+    pptxExport:             boolean
   }
 }
 

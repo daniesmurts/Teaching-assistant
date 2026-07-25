@@ -74,9 +74,9 @@ export default function Topics() {
       <TopBar
         title="Генератор тем"
         actions={result && (
-          <button onClick={() => setResult(null)} className="text-xs font-sans text-ink-secondary hover:text-ink transition-colors">
+          <Button size="sm" variant="secondary" onClick={() => setResult(null)}>
             ← Новый запрос
-          </button>
+          </Button>
         )}
       />
       <div className="flex-1 overflow-y-auto">
