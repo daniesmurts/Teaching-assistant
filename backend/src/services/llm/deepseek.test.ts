@@ -21,7 +21,7 @@ vi.mock('axios', () => ({
 vi.mock('../../db/queries/usageLog', () => ({ createUsageLog: createUsageLogMock }))
 vi.mock('../../lib/telegramAlert', () => ({ sendTelegramAlert: sendTelegramAlertMock }))
 
-import { DeepSeekProvider } from './deepseek'
+import { DeepSeekProvider, TruncatedResponseError } from './deepseek'
 
 function axiosError(status: number | undefined) {
   const err: Record<string, unknown> = { isAxiosError: true, message: `status ${status}` }
@@ -30,7 +30,16 @@ function axiosError(status: number | undefined) {
 }
 
 function okResponse(content = 'ok') {
-  return { data: { choices: [{ message: { content } }], usage: { prompt_tokens: 10, completion_tokens: 5 } } }
+  return { data: { choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } } }
+}
+
+function truncatedResponse(content = '{"incomplete') {
+  return {
+    data: {
+      choices: [{ message: { content }, finish_reason: 'length' }],
+      usage: { prompt_tokens: 10, completion_tokens: 8192 },
+    },
+  }
 }
 
 const ENV_KEYS = [
@@ -171,5 +180,65 @@ describe('DeepSeekProvider — multi-account fallback', () => {
     expect(createUsageLogMock).toHaveBeenCalledTimes(2)
     expect(createUsageLogMock.mock.calls[0][0]).toMatchObject({ success: false, errorCode: 'HTTP_402' })
     expect(createUsageLogMock.mock.calls[1][0]).toMatchObject({ success: true })
+  })
+
+  // TODO.md Improvement #10 — a truncated response used to come back as a
+  // normal (successful) `chat()` result, so chatJSON's JSON.parse would fail
+  // on the cut-off content and burn a second, identically-doomed call before
+  // surfacing an error. Covers: chat() fails fast on truncation, doesn't
+  // retry another account, chatJSON doesn't attempt its repair-retry, and
+  // exactly one accurately-costed usage log row is written per truncation.
+  describe('truncated responses (finish_reason = length)', () => {
+    it('chat() throws TruncatedResponseError instead of returning the cut-off content', async () => {
+      setAccounts(1)
+      postMock.mockResolvedValueOnce(truncatedResponse())
+
+      await expect(new DeepSeekProvider().chat([{ role: 'user', content: 'hi' }]))
+        .rejects.toBeInstanceOf(TruncatedResponseError)
+    })
+
+    it('does not fall back to another account — a truncation is not an account-level problem', async () => {
+      setAccounts(2)
+      postMock.mockResolvedValueOnce(truncatedResponse())
+
+      await expect(new DeepSeekProvider().chat([{ role: 'user', content: 'hi' }])).rejects.toBeTruthy()
+
+      expect(postMock).toHaveBeenCalledTimes(1)
+      expect(sendTelegramAlertMock).not.toHaveBeenCalled()
+    })
+
+    it('chatJSON does not attempt its JSON-repair retry on a truncated response', async () => {
+      setAccounts(1)
+      postMock.mockResolvedValueOnce(truncatedResponse())
+
+      await expect(new DeepSeekProvider().chatJSON([{ role: 'user', content: 'hi' }]))
+        .rejects.toBeInstanceOf(TruncatedResponseError)
+
+      // Only the one truncated attempt — no second "please return valid JSON" call.
+      expect(postMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('writes exactly one usage log row, errorCode TRUNCATED, with the real (non-zero) token counts', async () => {
+      setAccounts(1)
+      postMock.mockResolvedValueOnce(truncatedResponse())
+
+      await expect(new DeepSeekProvider().chat(
+        [{ role: 'user', content: 'hi' }],
+        { context: { teacherId: 't1', feature: 'presentation' } }
+      )).rejects.toBeInstanceOf(TruncatedResponseError)
+
+      expect(createUsageLogMock).toHaveBeenCalledTimes(1)
+      expect(createUsageLogMock.mock.calls[0][0]).toMatchObject({
+        success: false, errorCode: 'TRUNCATED', inputTokens: 10, outputTokens: 8192,
+      })
+    })
+
+    it('a normal (non-truncated) response is unaffected', async () => {
+      setAccounts(1)
+      postMock.mockResolvedValueOnce(okResponse('hello'))
+
+      const result = await new DeepSeekProvider().chat([{ role: 'user', content: 'hi' }])
+      expect(result).toBe('hello')
+    })
   })
 })

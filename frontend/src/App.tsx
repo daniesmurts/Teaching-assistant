@@ -73,6 +73,7 @@ import InstitutionPrograms from './pages/institution/InstitutionPrograms'
 import InstitutionProgramDetail from './pages/institution/InstitutionProgramDetail'
 import InstitutionStructure from './pages/institution/InstitutionStructure'
 import RpdMonitor from './pages/institution/RpdMonitor'
+import UmcDashboard from './pages/institution/UmcDashboard'
 import NewVersionToast from './components/NewVersionToast'
 import LoadingSpinner from './components/ui/LoadingSpinner'
 
@@ -206,7 +207,8 @@ function InstitutionRoute({ children }: { children: React.ReactNode }) {
     // InstitutionLayout filters the NAV to what the grant actually covers.
     (!!teacher.curriculum_access && teacher.curriculum_access !== 'none') ||
     (!!teacher.teaching_access && teacher.teaching_access !== 'none') ||
-    (!!teacher.platform_access && teacher.platform_access !== 'none')
+    (!!teacher.platform_access && teacher.platform_access !== 'none') ||
+    (!!teacher.umu_access && teacher.umu_access !== 'none')
   if (!canAdmin) return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }
@@ -331,6 +333,7 @@ export default function App() {
             <Route index           element={<InstitutionOverview />} />
             <Route path="structure" element={<InstitutionStructure />} />
             <Route path="rpd"       element={<RpdMonitor />} />
+            <Route path="umc"       element={<UmcDashboard />} />
             <Route path="usage"    element={<InstitutionUsage />} />
             <Route path="teachers" element={<InstitutionTeachers />} />
             <Route path="rubrics"  element={<InstitutionRubrics />} />

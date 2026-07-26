@@ -17,15 +17,25 @@ export function levelAtLeast(have: AccessLevel, need: AccessLevel): boolean {
   return LEVEL_RANK[have] >= LEVEL_RANK[need]
 }
 
-export interface DomainGrant {
-  level:        AccessLevel
-  // Materialised paths of every unit this level was granted on for this
-  // domain. Carried for Phase 3 (subtree query filtering) — Phase 1 callers
-  // only check presence/level, not pathPrefixes.
-  pathPrefixes: string[]
+/** One held grant, kept intact. Levels are NOT collapsed across grants — see
+ *  getAccessScope's contract below. */
+export interface DomainGrantRow {
+  level: AccessLevel
+  path:  string    // materialised path of the unit the grant sits on
 }
 
-export type AccessScope = Partial<Record<Domain, DomainGrant>>
+/** Every grant a teacher holds, grouped by domain. A domain-`all` grant is
+ *  expanded into one row per concrete domain. */
+export type AccessScope = Partial<Record<Domain, DomainGrantRow[]>>
+
+/** The per-request resolved view for one (domain, minLevel) pair — what
+ *  `requireDomain` hands downstream as `req.domainScope`. Shape unchanged
+ *  from before the multi-grant fix, so path-filtering callers
+ *  (routes/institution.ts, routes/orgUnits.ts) need no changes. */
+export interface DomainGrant {
+  level:        AccessLevel   // highest level held among the QUALIFYING grants
+  pathPrefixes: string[]      // every unit path where the teacher meets minLevel
+}
 
 interface TeacherIdentity {
   id:                 string
@@ -33,14 +43,26 @@ interface TeacherIdentity {
   institution_id:     string | null
 }
 
-/** Resolve every domain a teacher has access to, and at what level. Single
- *  round trip (reuses listRoleScopesForTeacher). A grant with domain='all'
- *  applies to every concrete domain — this is what keeps every existing
- *  institution-root admin's access unchanged after the Phase 1 migration. */
+/**
+ * Resolve every grant a teacher holds, per domain. Single round trip (reuses
+ * listRoleScopesForTeacher). A grant with domain='all' applies to every
+ * concrete domain — this is what keeps every existing institution-root
+ * admin's access unchanged since the Phase 1 migration.
+ *
+ * **Grants are returned intact, never collapsed to one level per domain.**
+ * That collapse was a real bug for multi-hat users: a Проректор holding
+ * `view × teaching × root` who is *also* made Заведующий кафедрой
+ * (`admin × teaching × кафедра`) had the higher level win AND the root path
+ * discarded — so `resolveTeachingPrefixes` narrowed them to just their
+ * kafedra and their university-wide oversight silently vanished. Gaining a
+ * second role made them see strictly less. Callers now pick the grants that
+ * satisfy the level they actually need (see resolveGrant).
+ */
 export async function getAccessScope(teacher: TeacherIdentity): Promise<AccessScope> {
   if (teacher.is_platform_admin) {
-    const grant: DomainGrant = { level: 'admin', pathPrefixes: ['/'] }
-    return Object.fromEntries(DOMAINS.map((d) => [d, grant])) as AccessScope
+    return Object.fromEntries(
+      DOMAINS.map((d) => [d, [{ level: 'admin' as AccessLevel, path: '/' }]])
+    ) as AccessScope
   }
   if (!teacher.institution_id) return {}
 
@@ -53,14 +75,43 @@ export async function getAccessScope(teacher: TeacherIdentity): Promise<AccessSc
 
     const domains: readonly Domain[] = row.domain === 'all' ? DOMAINS : [row.domain as Domain]
     for (const domain of domains) {
-      const existing = scope[domain]
-      if (!existing || LEVEL_RANK[level] > LEVEL_RANK[existing.level]) {
-        scope[domain] = { level, pathPrefixes: [row.path] }
-      } else if (LEVEL_RANK[level] === LEVEL_RANK[existing.level]) {
-        existing.pathPrefixes.push(row.path)
-      }
+      ;(scope[domain] ??= []).push({ level, path: row.path })
     }
   }
 
   return scope
+}
+
+/**
+ * Narrow a scope to the grants that actually satisfy `minLevel`, unioning
+ * their paths. Returns null when the teacher doesn't reach `minLevel` in
+ * this domain at all.
+ *
+ * Paths of grants BELOW minLevel are deliberately excluded: a route needing
+ * `edit` must not have its subtree filter widened by a `view`-only grant
+ * elsewhere in the tree.
+ */
+export function resolveGrant(
+  scope:    AccessScope,
+  domain:   Domain,
+  minLevel: AccessLevel,
+): DomainGrant | null {
+  const qualifying = (scope[domain] ?? []).filter((g) => levelAtLeast(g.level, minLevel))
+  if (qualifying.length === 0) return null
+  const level = qualifying.reduce<AccessLevel>(
+    (best, g) => (LEVEL_RANK[g.level] > LEVEL_RANK[best] ? g.level : best),
+    qualifying[0].level,
+  )
+  return { level, pathPrefixes: [...new Set(qualifying.map((g) => g.path))] }
+}
+
+/** Highest level held in a domain, ignoring where. Powers the coarse
+ *  `*_access` flags in the auth payload (frontend nav gating). */
+export function maxLevel(scope: AccessScope, domain: Domain): AccessLevel | null {
+  const grants = scope[domain] ?? []
+  if (grants.length === 0) return null
+  return grants.reduce<AccessLevel>(
+    (best, g) => (LEVEL_RANK[g.level] > LEVEL_RANK[best] ? g.level : best),
+    grants[0].level,
+  )
 }

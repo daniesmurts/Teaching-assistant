@@ -17,35 +17,6 @@ the line to `CHANGELOG.md` and delete here.
 
 ## Improvements
 
-### 10. Don't retry token-truncated LLM responses · Effort: S
-
-`chatJSON`'s parse-and-retry loop (`services/llm/deepseek.ts`, mirrored in
-`qwen.ts`/`yandex.ts`) can't tell "model emitted malformed JSON — retry may
-help" from "output hit the token ceiling — retrying the identical request is
-guaranteed to fail". The presentations incident (2026-07-15, see CHANGELOG)
-burned a full doomed second call (~60s + double token cost) on every
-truncation before failing. The root cause there is fixed at the source
-(`presentationMaxTokens()` + the slide_count_target 40→30 cap), so today this
-is a latency/cost optimization for a now-rare path, not a correctness bug.
-
-- **Why** — a truncated response currently costs one wasted LLM call and
-  ~30–60s of extra user-facing latency before the error surfaces; it also
-  muddies incident forensics (two identical pinned-at-ceiling usage_log rows
-  instead of one clearly-labeled truncation error).
-- **Cheap v1 (recommended)** — in the DeepSeek provider only: check
-  `choices[0].finish_reason === 'length'` and throw a distinct
-  `TruncatedResponseError` immediately instead of returning content that
-  `chatJSON` will parse-fail and retry. ~10 lines, one file, no interface
-  change. Do it opportunistically next time someone's in that file.
-- **Full version (only if truncations recur)** — thread `finish_reason`
-  through the `LLMProvider` interface so the registry and all three providers
-  expose it uniformly. High blast radius: touches every AI feature routing
-  through `llm/registry.ts` (grading, ВКР, quizzes, program analysis, …) —
-  not worth it while the CLIENT_ABORT/INTERNAL_ERROR monitors would flag any
-  new route developing the same pattern within hours.
-- **Touches** — `services/llm/deepseek.ts` (v1); `services/llm/types.ts` +
-  `registry.ts` + `qwen.ts`/`yandex.ts` (full version).
-
 ### 11. Мониторинг РПД — email the reminder letters, don't just download them · Effort: S
 
 v1 (see CHANGELOG) generates per-institute reminder letters (.docx + copy-text)
@@ -441,36 +412,6 @@ add a copy to their own library.
   export and the embedding-dedup check can ship as a fast-follow rather than
   in v1.
 
-### V. УМЦ dashboard — УМК readiness/quality statistics + export · Effort: M
-
-Institution admin request (2026-07-08, HR/УМЦ feature ideas). A dashboard for
-methodology-office staff (УМЦ): a readiness matrix (programme × course × УМК
-artifact — syllabus exists? reviewed? conformant? last updated?) with quality
-scores rolled up by department, plus data export.
-
-- **Why:** almost entirely assembly, not new capability — `curriculumAnalysis`,
-  `syllabusReview`, `programAnalysis`, and `programReportPdf` already compute
-  the underlying quality signals; the org tree (§7) already supports scoped
-  roles. Low political risk (methodology QA, not teacher evaluation), visible
-  value fast, sells the institution tier to exactly the people who hold that
-  budget line.
-- **Design decisions:**
-  - **Role:** УМЦ's access pattern is horizontal (all syllabi across
-    faculties, no grading/student data) rather than the vertical cascade
-    `org_unit_roles` currently expresses. Worth a distinct methodologist role
-    rather than overloading `viewer`/`head` on an org unit — resolve before
-    building, since it affects the authorisation helper in
-    [services/orgScope.ts](backend/src/services/orgScope.ts).
-  - **Export:** existing report generation is PDF-only
-    ([services/programReportPdf.ts](backend/src/services/programReportPdf.ts)).
-    УМЦ explicitly asked for "выгрузка" — add XLSX (they live in Excel), not
-    just a nicer PDF.
-- **Touches:** new aggregation queries (readiness matrix rollup by org unit),
-  new `pages/institution/UmcDashboard.tsx` (or similar), XLSX export endpoint,
-  methodologist role addition to `org_unit_roles` if that path is chosen.
-- **Sequencing:** do this before W — same underlying aggregation layer, lower
-  risk, and it's a natural first slice of that layer.
-
 ### W. HR faculty profile ("аватар ППС") + development trajectory · Effort: L (needs further design)
 
 Institution admin request (2026-07-08). HR wants to identify ППС strengths/
@@ -515,14 +456,19 @@ proper design pass) before implementation.
 - **Open questions to resolve before scoping:** what survey format(s) do
   target institutions actually use (single tool, or per-institution
   variance)? What's the minimum viable typology (how many "types," defined
-  how, and by whom — HR or us)? Does this need a new role distinct from the
-  УМЦ methodologist role in V, or can HR reuse it?
+  how, and by whom — HR or us)? Feature V (shipped, see CHANGELOG) answered
+  the access-model question this used to point at: no new "methodologist
+  role" was needed, the existing `curriculum` domain grant (§7.10) already
+  gives УМЦ the horizontal, cross-faculty read access this needs too — HR
+  can reuse the same `requireDomain('curriculum', 'view')` gate rather than
+  inventing a distinct role.
 - **Touches (provisional, will change with design):** new survey-import
-  endpoint + table, new aggregation layer shared with V (per-teacher/course
-  quality rollup), new `services/facultyProfile.ts`, new HR-facing pages,
-  likely a Research.md design section before any of this is final.
-- **Sequencing:** after V — reuses the aggregation layer V builds, and V's
-  lower-risk shape is a better first proof point for this kind of
+  endpoint + table, new aggregation layer alongside `services/umcDashboard.ts`'s
+  (per-teacher/course quality rollup — same pattern, different source rows),
+  new `services/facultyProfile.ts`, new HR-facing pages, likely a Research.md
+  design section before any of this is final.
+- **Sequencing:** after V (shipped) — reuses its aggregation-layer pattern,
+  and its lower-risk shape was the better first proof point for this kind of
   institution-facing analytics before tackling the trust-sensitive one.
 
 ### X. ФОС generator — «Собрать ФОС» · Effort: L · 🟢 v1 SHIPPED
@@ -1034,8 +980,8 @@ trajectory panel (Feature B) already does per-criterion movement matching.
   process question — ask the metodist's university how they'd route it
   before designing v2's UI.
 - **Sequencing:** v1 is independent and could follow Z's pilot; it needs
-  no new data sources, only shipped tables. v2 after V (shared aggregation
-  layer + precedent). v3 after real LTI/АСУ adoption at a pilot
+  no new data sources, only shipped tables. v2 can follow V's (shipped)
+  aggregation-layer precedent. v3 after real LTI/АСУ adoption at a pilot
   institution. Related: W (same trust architecture, teacher-side twin),
   O (concept-level diagnosis upgrade), Q (telemetry signals), Z/AA
   (unrelated data planes — no dependency either way).
@@ -1108,16 +1054,16 @@ IT conversation.
 - **Touches (v1):** new structured-extraction pass in a
   `services/asuExport.ts` (or extend `services/documents.ts`), Кошка
   field-model config (per-institution JSON, not hardcoded — feeds the
-  adapter interface), УМЦ review queue page (shared surface with V —
-  build V first or co-scope), export endpoint. (v2: `services/asuSync.ts`
-  write path per #12's touches.)
+  adapter interface), УМЦ review queue page (natural extension of the
+  shipped `pages/institution/UmcDashboard.tsx` surface, Feature V), export
+  endpoint. (v2: `services/asuSync.ts` write path per #12's touches.)
 - **Gating:** Institution tier — this is an УМЦ/institution workflow
   end-to-end; no per-teacher plan story.
 - **Sequencing:** v0 now (awaiting greenlight). v1 after the field-model
-  spec exists (ask 2 is a hard prerequisite — don't guess the template)
-  and ideally alongside/after V, which owns the УМЦ review surface it
-  needs. #12's auto-fetch rides the same v0 outcome and should ship
-  under whatever access mechanism this negotiates.
+  spec exists (ask 2 is a hard prerequisite — don't guess the template);
+  V's УМЦ dashboard already exists to extend rather than build. #12's
+  auto-fetch rides the same v0 outcome and should ship under whatever
+  access mechanism this negotiates.
 
 ### AE. БРС engine + native interactive activities — the semester ledger governed by the РПД · Effort: v1 M, full track L · 🟢 v1 SHIPPED (2026-07-23)
 

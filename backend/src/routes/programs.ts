@@ -176,7 +176,8 @@ router.get('/pickable-units', asyncHandler(async (req, res) => {
     return
   }
   if (scope.kind === 'specific') {
-    res.json(await listProgramUnitsByIds(scope.programUnitIds))
+    // Pickable = where a NEW programme may be linked, so editable-only.
+    res.json(await listProgramUnitsByIds(scope.editableUnitIds))
     return
   }
   // all-ro (no active role today) — nothing to pick from
@@ -206,7 +207,7 @@ router.post('/', validate(createProgramRules), asyncHandler(async (req, res) => 
   if (scope.kind === 'specific') {
     const unit = req.body.org_unit_id
     if (!unit) throw new ValidationError('Выберите вашу образовательную программу в структуре — обязательно для РОП')
-    if (!scope.programUnitIds.includes(unit)) {
+    if (!scope.editableUnitIds.includes(unit)) {
       throw new ForbiddenError('Можно связать программу только с подразделением, которым вы руководите')
     }
   }
@@ -237,7 +238,7 @@ router.post(
     if (scope.kind === 'specific') {
       const unit = String(req.body.org_unit_id ?? '')
       if (!unit) throw new ValidationError('Выберите вашу образовательную программу в структуре — обязательно для РОП')
-      if (!scope.programUnitIds.includes(unit)) {
+      if (!scope.editableUnitIds.includes(unit)) {
         throw new ForbiddenError('Можно связать программу только с подразделением, которым вы руководите')
       }
     }

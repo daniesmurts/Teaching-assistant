@@ -10,11 +10,18 @@ import { useAuthStore } from '../../store/authStore'
 // a lower-level grant doesn't see a tab that would just 403 (RPD monitor and
 // criteria/rubrics writes require 'edit'; the Phase 2 teaching routes are
 // all read-only so 'view' suffices; org-structure CRUD requires 'admin').
-type NavDomain = 'curriculum' | 'teaching' | 'platform'
-const NAV: { to: string; label: string; end: boolean; domain?: NavDomain; minLevel?: 'view' | 'edit' | 'admin' }[] = [
+type NavDomain = 'curriculum' | 'teaching' | 'platform' | 'umu'
+// `group` renders a small section header above the first item of that group
+// — purely a sidebar grouping label, NOT a new access-control axis. УМУ
+// (Учебно-методическое управление) is real-world department framing for
+// features already gated by the 'curriculum' domain grant; grouped items
+// must stay adjacent in this array (the renderer only checks the
+// immediately-preceding visible item, not a full re-sort).
+const NAV: { to: string; label: string; end: boolean; domain?: NavDomain; minLevel?: 'view' | 'edit' | 'admin'; group?: string }[] = [
   { to: '/institution',           label: 'Обзор',         end: true, domain: 'teaching', minLevel: 'view' },
   { to: '/institution/structure', label: 'Структура',     end: false, domain: 'platform', minLevel: 'admin' },
-  { to: '/institution/rpd',       label: 'Мониторинг РПД', end: false, domain: 'curriculum', minLevel: 'edit' },
+  { to: '/institution/rpd',       label: 'Мониторинг РПД', end: false, domain: 'umu', minLevel: 'view', group: 'УМУ' },
+  { to: '/institution/umc',       label: 'Готовность УМК', end: false, domain: 'curriculum', minLevel: 'view', group: 'УМУ' },
   { to: '/institution/usage',     label: 'Использование', end: false, domain: 'teaching', minLevel: 'view' },
   { to: '/institution/teachers', label: 'Преподаватели', end: false, domain: 'teaching', minLevel: 'view' },
   { to: '/institution/rubrics',  label: 'Критерии',      end: false, domain: 'curriculum', minLevel: 'view' },
@@ -32,12 +39,13 @@ const DOMAIN_LEVEL_RANK: Record<string, number> = { view: 1, edit: 2, admin: 3 }
 /** The teacher's access level for a NAV item's domain, ranked. 0 = no access
  *  (item.domain undefined items are handled separately — admin-only). */
 function domainRank(
-  teacher: { curriculum_access?: string; teaching_access?: string; platform_access?: string } | null,
+  teacher: { curriculum_access?: string; teaching_access?: string; platform_access?: string; umu_access?: string } | null,
   domain?: NavDomain
 ): number {
   if (!domain) return 0
   const value = domain === 'curriculum' ? teacher?.curriculum_access
     : domain === 'teaching' ? teacher?.teaching_access
+    : domain === 'umu' ? teacher?.umu_access
     : teacher?.platform_access
   return DOMAIN_LEVEL_RANK[value ?? ''] ?? 0
 }
@@ -88,17 +96,31 @@ export default function InstitutionLayout() {
         </div>
 
         <nav className="flex-1 px-2 py-3 space-y-0.5">
-          {visibleNav.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end}>
-              {({ isActive }) => (
-                <div className={`px-3 py-2 rounded-md text-sm font-sans transition-colors ${
-                  isActive ? 'bg-sidebar-active text-ink-inverse font-medium' : 'text-ink-inv-muted hover:bg-sidebar-hover'
-                }`}>
-                  {item.label}
-                </div>
-              )}
-            </NavLink>
-          ))}
+          {visibleNav.map((item, i) => {
+            // Header shows once, right before the first VISIBLE item of its
+            // group — comparing against the previous VISIBLE entry (not the
+            // full NAV array) means a group missing from visibleNav entirely
+            // (no access) never leaves a dangling header.
+            const showHeader = !!item.group && item.group !== visibleNav[i - 1]?.group
+            return (
+              <div key={item.to}>
+                {showHeader && (
+                  <div className="px-3 pt-3 pb-1 text-[10px] font-sans font-semibold text-ink-inv-muted/70 uppercase tracking-wider">
+                    {item.group}
+                  </div>
+                )}
+                <NavLink to={item.to} end={item.end}>
+                  {({ isActive }) => (
+                    <div className={`px-3 py-2 rounded-md text-sm font-sans transition-colors ${
+                      isActive ? 'bg-sidebar-active text-ink-inverse font-medium' : 'text-ink-inv-muted hover:bg-sidebar-hover'
+                    }`}>
+                      {item.label}
+                    </div>
+                  )}
+                </NavLink>
+              </div>
+            )
+          })}
         </nav>
 
         <div className="px-3 py-3 border-t border-white/5 space-y-1">

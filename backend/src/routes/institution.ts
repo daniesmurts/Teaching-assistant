@@ -171,6 +171,56 @@ router.get('/teachers', requireDomain('teaching', 'view'), asyncHandler(async (r
   res.json(await listInstitutionTeachers(institutionId(req), prefixes))
 }))
 
+// ─── Стратегия развития (platform:edit — see docs/ACCESS-MATRIX.md) ───────────
+//
+// One grounded document — the university's «стратегия развития» — that
+// РОП Студия's market-evidence generator can cite alongside its Plane-1
+// vacancy data (routes/programs.ts).
+//
+// Gated at `platform:edit` rather than root-admin, so the Проректор can own
+// the strategy document without being handed org-structure CRUD (which sits
+// a level up at `platform:admin`). The other institution-wide settings below
+// (LTI, shared RAG, model choice) deliberately stay root-admin-only.
+
+router.get('/strategy-document', requireDomain('platform', 'edit'), asyncHandler(async (req, res) => {
+  const doc = await getStrategyDocumentByInstitution(institutionId(req))
+  res.json(doc ? {
+    file_name:         doc.file_name,
+    uploaded_at:       doc.uploaded_at,
+    processing_status: doc.processing_status,
+  } : null)
+}))
+
+router.post(
+  '/strategy-document',
+  requireDomain('platform', 'edit'),
+  uploadConfig.single('file'),
+  verifyFileContent,
+  asyncHandler(async (req, res) => {
+    const file = req.file
+    if (!file) throw new ValidationError('Файл не предоставлен')
+
+    const doc = await uploadStrategyDocument({
+      institutionId: institutionId(req),
+      teacherId:     req.teacher.id,
+      fileBuffer:    file.buffer,
+      fileName:      file.originalname,
+      mimeType:      file.mimetype,
+    })
+    res.status(201).json({
+      file_name:         doc.file_name,
+      uploaded_at:       doc.uploaded_at,
+      processing_status: doc.processing_status,
+    })
+  })
+)
+
+router.delete('/strategy-document', requireDomain('platform', 'edit'), asyncHandler(async (req, res) => {
+  const deleted = await deleteStrategyDocument(institutionId(req))
+  if (!deleted) throw new NotFoundError('Документ стратегии развития')
+  res.status(204).end()
+}))
+
 // ─── Everything below stays institution-root-admin-only ───────────────────────
 
 router.use(requireInstitutionAdmin)
@@ -322,50 +372,6 @@ router.get('/shared-rag', asyncHandler(async (req, res) => {
 
 // ─── Strategy document (Feature Z Plane-2 pilot) ──────────────────────────────
 //
-// One grounded document — the university's «стратегия развития» — that
-// РОП Студия's market-evidence generator can cite alongside its Plane-1
-// vacancy data (routes/programs.ts). Root-admin-only like every other
-// institution-wide setting in this file (LTI, shared RAG, model choice) —
-// not delegated to a curriculum/teaching-domain grant.
-
-router.get('/strategy-document', asyncHandler(async (req, res) => {
-  const doc = await getStrategyDocumentByInstitution(institutionId(req))
-  res.json(doc ? {
-    file_name:         doc.file_name,
-    uploaded_at:       doc.uploaded_at,
-    processing_status: doc.processing_status,
-  } : null)
-}))
-
-router.post(
-  '/strategy-document',
-  uploadConfig.single('file'),
-  verifyFileContent,
-  asyncHandler(async (req, res) => {
-    const file = req.file
-    if (!file) throw new ValidationError('Файл не предоставлен')
-
-    const doc = await uploadStrategyDocument({
-      institutionId: institutionId(req),
-      teacherId:     req.teacher.id,
-      fileBuffer:    file.buffer,
-      fileName:      file.originalname,
-      mimeType:      file.mimetype,
-    })
-    res.status(201).json({
-      file_name:         doc.file_name,
-      uploaded_at:       doc.uploaded_at,
-      processing_status: doc.processing_status,
-    })
-  })
-)
-
-router.delete('/strategy-document', asyncHandler(async (req, res) => {
-  const deleted = await deleteStrategyDocument(institutionId(req))
-  if (!deleted) throw new NotFoundError('Документ стратегии развития')
-  res.status(204).end()
-}))
-
 // ─── Model sovereignty (Phase 4) ──────────────────────────────────────────────
 //
 // GET surfaces the current preferred provider + breakdown of recent grades by

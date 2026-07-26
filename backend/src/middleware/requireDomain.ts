@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import { ForbiddenError } from '../errors/AppError'
-import { getAccessScope, levelAtLeast, type AccessLevel, type DomainGrant } from '../services/accessScope'
+import { getAccessScope, resolveGrant, type AccessLevel, type DomainGrant } from '../services/accessScope'
 import type { Domain } from '../db/queries/orgUnits'
 
 // Extends the request with the resolved grant so downstream handlers can read
@@ -29,8 +29,12 @@ export function requireDomain(domain: Domain, minLevel: AccessLevel) {
         is_platform_admin: req.teacher.is_platform_admin,
         institution_id:    req.teacher.institution_id,
       })
-      const grant = scope[domain]
-      if (grant && levelAtLeast(grant.level, minLevel)) {
+      // Every grant meeting minLevel contributes its path — so a teacher who
+      // holds a broad `view` grant AND a narrow `admin` one keeps the broad
+      // reach on view-level routes instead of being silently narrowed to the
+      // admin grant's subtree (see getAccessScope's contract).
+      const grant = resolveGrant(scope, domain, minLevel)
+      if (grant) {
         req.domainScope = grant
         next()
         return

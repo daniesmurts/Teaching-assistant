@@ -101,6 +101,11 @@ export interface Teacher {
   // settings, which stay root-admin-only): an institute director can hold
   // admin access scoped to their own subtree without being a root admin.
   platform_access?:      'none' | 'view' | 'edit' | 'admin'
+  // docs/ACCESS-MATRIX.md — the 'umu' domain (Учебно-методическое управление):
+  // РПД monitoring and future УМУ/УМЦ office tooling. Split out of
+  // `curriculum` so a Заведующий кафедрой can hold curriculum:edit (to author
+  // criteria) without seeing institution-wide filing compliance.
+  umu_access?:           'none' | 'view' | 'edit' | 'admin'
   institution_id?: string | null
   // Mirror of the teacher's institution's shared_rag_enabled flag — surfaced
   // here so the Courses page can decide whether to show / enable the "поделиться
@@ -1377,6 +1382,51 @@ export interface ProgramDocumentDiff {
   new_document_id: string
   result:          DocumentDiffResult
   created_at:      string
+}
+
+// ─── УМЦ dashboard (TODO Feature V) ────────────────────────────────────────
+// Institution-wide readiness matrix — one row per (programme, discipline),
+// assembled entirely from existing signals (program_documents,
+// program_document_reviews): does a working РПД exist, has it been checked
+// against its claimed competencies, when. No new analysis engine — this is
+// aggregation over what curriculumAnalysis/documentReview already compute.
+
+export interface UmcReadinessRow {
+  program_id:              string
+  program_name:            string
+  program_code:            string | null
+  department_org_unit_id:  string | null
+  department_name:         string | null   // 'Без подразделения' when the programme has no org-tree link
+  discipline_id:           string
+  discipline_name:         string
+  semester:                number
+  has_syllabus:            boolean
+  syllabus_uploaded_at:    string | null
+  reviewed:                boolean
+  overall_coverage:        number | null   // 0-100, from the latest program_document_reviews row
+  review_created_at:       string | null
+}
+
+export interface UmcDepartmentSummary {
+  department_org_unit_id: string | null
+  department_name:        string
+  discipline_count:       number
+  syllabus_count:         number
+  reviewed_count:         number
+  avg_coverage:           number | null   // average overall_coverage among REVIEWED disciplines only
+}
+
+export interface UmcDashboardTotals {
+  discipline_count: number
+  syllabus_count:   number
+  reviewed_count:   number
+  avg_coverage:     number | null
+}
+
+export interface UmcDashboardResult {
+  rows:        UmcReadinessRow[]
+  departments: UmcDepartmentSummary[]
+  totals:      UmcDashboardTotals
 }
 
 export interface ProgramDetail extends Program {

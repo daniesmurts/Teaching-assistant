@@ -94,13 +94,14 @@ export type UnitRole = 'admin' | 'edit' | 'view'
 // grant-time wildcard ("full access", today's institution-root admins); the
 // concrete domains are the surfaces a grant can be narrowed to. 'admin' role
 // is always paired with domain 'all' (enforced server-side).
-export type GrantDomain = 'all' | 'platform' | 'curriculum' | 'teaching'
+export type GrantDomain = 'all' | 'platform' | 'curriculum' | 'teaching' | 'umu'
 
 export const DOMAIN_LABEL: Record<GrantDomain, string> = {
   all:        'Все области',
   platform:   'Платформа (устройство организации)',
   curriculum: 'Учебно-методическая работа',
   teaching:   'Учебный процесс',
+  umu:        'УМУ (мониторинг РПД)',
 }
 
 export interface InstitutionMember {

@@ -63,6 +63,24 @@ function isRetryable(err: unknown): boolean {
   return RETRYABLE_STATUS.has(err.response.status)
 }
 
+// TODO.md Improvement #10. A response cut off by the token ceiling isn't an
+// account problem (retrying on another account truncates identically — same
+// model, same max_tokens, same prompt) and isn't a "malformed JSON, retry
+// might help" case either (chatJSON's parse-retry sends a corrective nudge,
+// not a shorter prompt, so it truncates again too). Distinguishing this from
+// a generic failure lets both retry loops fail fast instead of burning a
+// second doomed call. Not an AxiosError, so isRetryable() above already
+// treats it as non-retryable without any extra casing.
+export class TruncatedResponseError extends Error {
+  constructor(model: string, maxTokens?: number) {
+    super(
+      `DeepSeek response truncated at the token ceiling (model=${model}` +
+      `${maxTokens != null ? `, max_tokens=${maxTokens}` : ''}) — retrying the identical request would truncate again.`
+    )
+    this.name = 'TruncatedResponseError'
+  }
+}
+
 // How long a failed account is deprioritized (not excluded — see
 // orderAccounts below) after a retryable failure. Short enough that a
 // transient blip (one rate-limit spike) doesn't sideline an account for
@@ -201,6 +219,33 @@ export class DeepSeekProvider implements LLMProvider {
       const usage        = response.data.usage as { prompt_tokens: number; completion_tokens: number }
       const inputTokens  = usage?.prompt_tokens     ?? 0
       const outputTokens = usage?.completion_tokens ?? 0
+      const choice       = response.data.choices[0]
+
+      // TODO.md Improvement #10 — a truncated response hit the token ceiling,
+      // not a transient failure; returning it would let chatJSON's parse-retry
+      // burn a second identical (and identically doomed) call. Log it as its
+      // own clearly-labeled, accurately-costed row (real token counts, not the
+      // catch block's 0/0) rather than the two generic failed-call rows this
+      // used to produce, then fail fast.
+      if (choice.finish_reason === 'length') {
+        if (opts.context) {
+          createUsageLog({
+            ...opts.context,
+            model:        `deepseek:${model}`,
+            inputTokens,
+            outputTokens,
+            costUsd:      calculateDeepSeekCost(inputTokens, outputTokens, model),
+            durationMs:   Date.now() - start,
+            success:      false,
+            errorCode:    'TRUNCATED',
+          }).catch((e) => logger.warn({ message: 'Failed to write usage log', error: e.message }))
+        }
+        logger.warn({
+          message: 'DeepSeek response truncated at token ceiling — not retrying (identical request would truncate again)',
+          feature: opts.context?.feature, model, account: account.label, outputTokens, maxTokens: opts.maxTokens,
+        })
+        throw new TruncatedResponseError(model, opts.maxTokens)
+      }
 
       if (opts.context) {
         createUsageLog({
@@ -217,9 +262,13 @@ export class DeepSeekProvider implements LLMProvider {
       // In V4 thinking mode the chain-of-thought is in message.reasoning_content
       // (billed as output tokens); the actual answer stays in message.content.
       // We deliberately return only content — never the CoT.
-      return response.data.choices[0].message.content as string
+      return choice.message.content as string
 
     } catch (err) {
+      // Already logged (with accurate token counts) and warned above — avoid
+      // a second, less-informative "HTTP_0"/0-token failure row for the same event.
+      if (err instanceof TruncatedResponseError) throw err
+
       const errorCode = axios.isAxiosError(err) ? `HTTP_${err.response?.status ?? 0}` : 'UNKNOWN'
 
       if (opts.context) {

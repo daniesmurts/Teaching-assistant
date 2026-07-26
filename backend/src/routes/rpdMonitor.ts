@@ -20,9 +20,26 @@ import {
 
 const router = Router()
 router.use(authenticate)
-// Research.md §7.10 Phase 1 — 'curriculum' domain, not institution-root admin.
-// An institution admin's domain='all' grant still satisfies this.
-router.use(requireDomain('curriculum', 'edit'))
+// docs/ACCESS-MATRIX.md — the РПД monitor moved from `curriculum` to its own
+// `umu` domain: a Заведующий кафедрой needs `curriculum:edit` to author
+// criteria but must NOT see institution-wide filing compliance, and two
+// features on the same domain+level can't be told apart.
+//
+// Read/write split: viewing the numbers only needs `view`, so leadership can
+// be given read access without the ability to upload snapshots or redraw the
+// кафедра→институт mapping. An institution admin's domain='all' grant still
+// satisfies both.
+router.use(requireDomain('umu', 'view'))
+
+const requireUmuEdit = requireDomain('umu', 'edit')
+router.use((req, res, next) => {
+  // Reminder letters are a GET (they stream a .docx) but drafting outbound
+  // notices to departments is an УМУ action, not passive viewing.
+  const isWrite = req.method !== 'GET' || req.path.startsWith('/reminders/')
+  if (!isWrite) return next()
+  return requireUmuEdit(req, res, next)
+})
+
 router.use(checkFeatureAccess('rpdMonitor'))
 
 const upload = multer({

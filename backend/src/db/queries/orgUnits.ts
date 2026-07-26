@@ -27,7 +27,15 @@ export type UnitRole = (typeof UNIT_ROLES)[number]
 // Research.md §7.10 — the functional-authority axis. 'all' is a grant-time
 // wildcard (today's institution-root admins) that the resolver
 // (services/accessScope.ts) expands across every concrete domain below.
-export const DOMAINS = ['platform', 'curriculum', 'teaching'] as const
+//
+// 'umu' (docs/ACCESS-MATRIX.md) separates УМУ/УМЦ office tooling — today the
+// РПД monitor — from `curriculum` content authority. Without it a Заведующий
+// кафедрой, who legitimately needs `curriculum:edit` to author criteria,
+// would also see institution-wide РПД filing compliance: two features at the
+// same domain+level can't be told apart, so the split has to be a domain.
+// No migration needed — org_unit_roles.domain is free-text (087), and the
+// only grants in existence are domain='all', which expands to include it.
+export const DOMAINS = ['platform', 'curriculum', 'teaching', 'umu'] as const
 export type Domain = (typeof DOMAINS)[number]
 export const GRANT_DOMAINS = ['all', ...DOMAINS] as const
 export type GrantDomain = (typeof GRANT_DOMAINS)[number]

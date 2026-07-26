@@ -153,7 +153,12 @@ export default function Sidebar({ onClose }: Props) {
   // «Организация» panel too (Структура), scoped the same way.
   const hasPlatformAccess =
     !!teacher?.platform_access && teacher.platform_access !== 'none'
-  const canSeeInstitutionPanel = isInstitutionAdmin || hasCurriculumAccess || hasTeachingAccess || hasPlatformAccess
+  // docs/ACCESS-MATRIX.md — a umu-domain grant (Методист/Нач. УМУ, РУМЦ)
+  // reaches the panel for Мониторинг РПД, scoped the same way.
+  const hasUmuAccess =
+    !!teacher?.umu_access && teacher.umu_access !== 'none'
+  const canSeeInstitutionPanel =
+    isInstitutionAdmin || hasCurriculumAccess || hasTeachingAccess || hasPlatformAccess || hasUmuAccess
 
   function logout() { clearAuth(); navigate('/login') }
 

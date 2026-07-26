@@ -41,7 +41,7 @@ import { verifyMarketingUnsubToken } from '../services/marketingEmails'
 import { setMarketingEmailsEnabled } from '../db/queries/teachers'
 import { hasLeadershipRole } from '../db/queries/leadership'
 import { getProgramAccessScope } from '../services/programAccess'
-import { getAccessScope } from '../services/accessScope'
+import { getAccessScope, maxLevel } from '../services/accessScope'
 import { recordAudit } from '../db/queries/audit'
 
 // Client metadata for auth audit rows. Auth routes are unauthenticated, so the
@@ -84,9 +84,10 @@ async function adminFlags(row: { id: string; institution_id: string | null; is_p
     is_institution_admin,
     is_leader:         is_platform_admin || has_role,
     program_access:    program_scope.kind,
-    curriculum_access: access_scope.curriculum?.level ?? 'none',
-    teaching_access:   access_scope.teaching?.level ?? 'none',
-    platform_access:   access_scope.platform?.level ?? 'none',
+    curriculum_access: maxLevel(access_scope, 'curriculum') ?? 'none',
+    teaching_access:   maxLevel(access_scope, 'teaching')   ?? 'none',
+    platform_access:   maxLevel(access_scope, 'platform')   ?? 'none',
+    umu_access:        maxLevel(access_scope, 'umu')        ?? 'none',
   }
 }
 

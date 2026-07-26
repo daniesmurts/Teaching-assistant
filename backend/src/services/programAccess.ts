@@ -31,7 +31,11 @@ import { pool } from '../db/connection'
 export type ProgramAccessScope =
   | { kind: 'all-rw' }
   | { kind: 'all-ro' }
-  | { kind: 'specific'; programUnitIds: string[] }
+  // `programUnitIds` = readable; `editableUnitIds` ⊆ readable = writable.
+  // The two differ when a teacher holds `view` on one subtree and `edit` on
+  // another — collapsing them would silently grant edit over the view-only
+  // subtree.
+  | { kind: 'specific'; programUnitIds: string[]; editableUnitIds: string[] }
   | { kind: 'none' }
 
 interface TeacherIdentity {
@@ -57,49 +61,71 @@ export async function getProgramAccessScope(teacher: TeacherIdentity): Promise<P
   // role-assignment UI added the 'teaching' domain option) would silently
   // unlock program-editing rights it was never meant to have — same class of
   // cross-domain leak as the Phase 2 leadership-dashboard fix.
+  // `view` is included as well as admin/edit (docs/ACCESS-MATRIX.md fix):
+  // it used to be filtered out entirely, so a read-only role — Ректор or
+  // Проректор holding `curriculum:view` — resolved to `none` and couldn't
+  // see a single programme. View grants now yield read-only access at the
+  // same breadth their unit type implies.
   const { rows } = await pool.query<{ type_code: string; role: string; org_unit_id: string }>(
     `SELECT u.type_code, our.role, our.org_unit_id
        FROM org_unit_roles our
        JOIN org_units u ON u.id = our.org_unit_id
       WHERE our.teacher_id    = $1
         AND u.institution_id  = $2
-        AND our.role IN ('admin', 'edit')
+        AND our.role IN ('admin', 'edit', 'view')
         AND our.domain IN ('all', 'curriculum')`,
     [teacher.id, teacher.institution_id]
   )
 
+  const writable = rows.filter((r) => r.role === 'admin' || r.role === 'edit')
+
   // Institution-root admin wins outright — full read/write.
-  if (rows.some((r) => r.role === 'admin' && r.type_code === 'institution')) {
+  if (writable.some((r) => r.role === 'admin' && r.type_code === 'institution')) {
     return { kind: 'all-rw' }
   }
 
   // Governance or admin_office head/admin → institution-wide read + write.
   // Default-on per unit type: any grant of these types implies collaborative
   // authorship rights on all programmes (проректор, начальник УМЦ).
-  if (rows.some((r) => r.type_code === 'governance' || r.type_code === 'admin_office')) {
+  if (writable.some((r) => r.type_code === 'governance' || r.type_code === 'admin_office')) {
     return { kind: 'all-rw' }
+  }
+
+  // Same unit types held at `view` only → institution-wide, read-only.
+  if (rows.some((r) => r.type_code === 'governance' || r.type_code === 'admin_office' || r.type_code === 'institution')) {
+    return { kind: 'all-ro' }
   }
 
   // Everything else — cluster (polygroup), division (institute), department
   // (kafedra), or program (РОП) — is subtree-scoped. Walk the materialised
   // path of every held unit and collect every `program` unit within. Dual
   // roles (e.g. polygroup head + direct РОП) fall out of the DISTINCT.
-  const authorityIds = rows.map((r) => r.org_unit_id)
-  if (authorityIds.length === 0) return { kind: 'none' }
+  if (rows.length === 0) return { kind: 'none' }
 
-  const { rows: programRows } = await pool.query<{ id: string }>(
+  const [readable, editable] = await Promise.all([
+    programUnitsUnder(rows.map((r) => r.org_unit_id)),
+    programUnitsUnder(writable.map((r) => r.org_unit_id)),
+  ])
+  if (readable.length === 0) return { kind: 'none' }
+
+  return { kind: 'specific', programUnitIds: readable, editableUnitIds: editable }
+}
+
+/** Every `program`/`program_direction` unit inside the subtree of any given
+ *  unit. Empty input short-circuits — a teacher with only view grants has no
+ *  editable units, and `= ANY('{}')` would still cost a round trip. */
+async function programUnitsUnder(unitIds: string[]): Promise<string[]> {
+  if (unitIds.length === 0) return []
+  const { rows } = await pool.query<{ id: string }>(
     `SELECT DISTINCT p.id
        FROM org_units p
        JOIN org_units auth ON auth.institution_id = p.institution_id
                           AND p.path LIKE auth.path || '%'
       WHERE p.type_code IN ('program', 'program_direction')
         AND auth.id = ANY($1::uuid[])`,
-    [authorityIds]
+    [unitIds]
   )
-  const programUnitIds = programRows.map((r) => r.id)
-  if (programUnitIds.length === 0) return { kind: 'none' }
-
-  return { kind: 'specific', programUnitIds }
+  return rows.map((r) => r.id)
 }
 
 /** True if the scope grants edit access on the program identified by its
@@ -109,7 +135,7 @@ export async function getProgramAccessScope(teacher: TeacherIdentity): Promise<P
 export function canEditProgram(scope: ProgramAccessScope, programOrgUnitId: string | null): boolean {
   if (scope.kind === 'all-rw') return true
   if (scope.kind === 'specific' && programOrgUnitId) {
-    return scope.programUnitIds.includes(programOrgUnitId)
+    return scope.editableUnitIds.includes(programOrgUnitId)
   }
   return false
 }

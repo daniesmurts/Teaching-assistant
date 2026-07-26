@@ -32,6 +32,7 @@ export const PLAN_LIMITS = {
     rpdMonitor:            false,
     brsEngine:             false,   // Feature AE v1 — БРС semester ledger — Pro/Institution
     pptxExport:            false,   // Feature D — real PowerPoint export
+    umcDashboard:          false,   // Feature V — УМЦ readiness dashboard, Institution only
     liveSessionsPerMonth:  1,
     monthlySpendCapUsd:    3,
   },
@@ -65,6 +66,7 @@ export const PLAN_LIMITS = {
     rpdMonitor:            false,
     brsEngine:             true,
     pptxExport:            true,   // Feature D — real PowerPoint export
+    umcDashboard:          false,  // Feature V — Institution only, same tier as rpdMonitor
     liveSessionsPerMonth:  Infinity,
     monthlySpendCapUsd:    30,
   },
@@ -98,6 +100,7 @@ export const PLAN_LIMITS = {
     rpdMonitor:            true,
     brsEngine:             true,
     pptxExport:            true,   // Feature D — real PowerPoint export
+    umcDashboard:          true,   // Feature V — УМЦ readiness dashboard
     liveSessionsPerMonth:  Infinity,
     monthlySpendCapUsd:    150,
   },
