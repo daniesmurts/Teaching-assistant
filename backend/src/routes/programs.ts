@@ -12,8 +12,9 @@ import {
   listPrograms, listProgramsForUnits, createProgram, findProgram, getProgramDetail, updateProgram, deleteProgram,
   replaceDisciplines, replaceCompetencies, saveAnalysis, getLatestAnalysis,
   listProgramUnitsForInstitution, listProgramUnitsByIds,
-  fillDisciplineCompetencyCodesIfEmpty,
+  fillDisciplineCompetencyCodesIfEmpty, setDisciplineResponsible,
 } from '../db/queries/programs'
+import { isTeacherInInstitution } from '../db/queries/orgUnits'
 import { canEditProgram, canReadProgram } from '../services/programAccess'
 import { listAncestorsOfUnit } from '../db/queries/orgUnits'
 import { analyzeProgram } from '../services/programAnalysis'
@@ -869,6 +870,33 @@ router.post('/:id/documents/discover', asyncHandler(async (req, res) => {
     available_years: availableYears,
     selected_year:   selectedYear,
   })
+}))
+
+// PUT /:id/disciplines/:disciplineId/responsible — assign (or clear) the
+// teacher who must author and submit this discipline's РПД
+// (docs/RPD-WORKFLOW.md phase 4a). Body: { teacherId: string | null }.
+//
+// Separate from PUT /:id/disciplines (the plan structure) on purpose: saving
+// the учебный план must never silently reassign or clear РПД ownership.
+router.put('/:id/disciplines/:disciplineId/responsible', asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  assertEdit(req, detail.org_unit_id)
+
+  const discipline = detail.disciplines.find((d) => d.id === req.params.disciplineId)
+  if (!discipline) throw new NotFoundError('Дисциплина')
+
+  const raw = req.body?.teacherId
+  const teacherId = raw === null || raw === undefined || raw === '' ? null : String(raw)
+
+  // Only a member of this institution can be made responsible — otherwise a
+  // guessed uuid would hand a stranger a submission surface into this plan.
+  if (teacherId && !(await isTeacherInInstitution(teacherId, institutionId(req)))) {
+    throw new ValidationError('Преподаватель не найден в вашей организации')
+  }
+
+  const ok = await setDisciplineResponsible(detail.id, discipline.id!, teacherId)
+  if (!ok) throw new NotFoundError('Дисциплина')
+  res.json({ ok: true, responsible_teacher_id: teacherId })
 }))
 
 // POST /:id/disciplines/:disciplineId/review — Feature K scoped to a

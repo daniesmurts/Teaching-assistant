@@ -87,6 +87,8 @@ interface DisciplineRow {
   control_form: string | null
   competency_codes: string[]
   sort_order: number
+  responsible_teacher_id?: string | null
+  responsible_teacher_name?: string | null
 }
 
 function toDiscipline(r: DisciplineRow): ProgramDiscipline {
@@ -99,6 +101,8 @@ function toDiscipline(r: DisciplineRow): ProgramDiscipline {
     control_form: r.control_form,
     competency_codes: r.competency_codes ?? [],
     sort_order: r.sort_order,
+    responsible_teacher_id:   r.responsible_teacher_id ?? null,
+    responsible_teacher_name: r.responsible_teacher_name ?? null,
   }
 }
 
@@ -182,9 +186,13 @@ export async function getProgramDetail(id: string, institutionId: string): Promi
 
   const [disciplines, competencies] = await Promise.all([
     pool.query<DisciplineRow>(
-      `SELECT id, course_id, name, semester, credits, control_form, competency_codes, sort_order
-       FROM program_disciplines WHERE program_id = $1
-       ORDER BY semester, sort_order`,
+      `SELECT d.id, d.course_id, d.name, d.semester, d.credits, d.control_form,
+              d.competency_codes, d.sort_order, d.responsible_teacher_id,
+              t.name AS responsible_teacher_name
+         FROM program_disciplines d
+         LEFT JOIN teachers t ON t.id = d.responsible_teacher_id
+        WHERE d.program_id = $1
+        ORDER BY d.semester, d.sort_order`,
       [id]
     ),
     pool.query<CompetencyRow>(
@@ -440,4 +448,96 @@ export async function listProgramUnitsByIds(ids: string[]): Promise<PickableProg
     [ids]
   )
   return rows
+}
+
+// ─── «Ответственный за дисциплину» (migration 097, docs/RPD-WORKFLOW.md) ──────
+
+/**
+ * Assign (or clear, with `null`) the teacher responsible for authoring this
+ * discipline's РПД. Scoped by program_id as well as discipline id so a
+ * caller authorised for programme A can't reassign programme B's discipline
+ * by guessing an id.
+ *
+ * Deliberately its own endpoint rather than a field on replaceDisciplines:
+ * re-saving the учебный план must never silently clear who owns each РПД.
+ */
+export async function setDisciplineResponsible(
+  programId:    string,
+  disciplineId: string,
+  teacherId:    string | null,
+): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE program_disciplines
+        SET responsible_teacher_id = $3
+      WHERE id = $1 AND program_id = $2`,
+    [disciplineId, programId, teacherId]
+  )
+  return (rowCount ?? 0) > 0
+}
+
+export interface MySyllabusRow {
+  discipline_id:    string
+  discipline_name:  string
+  semester:         number
+  competency_codes: string[]
+  course_id:        string | null
+  program_id:       string
+  program_name:     string
+  program_code:     string | null
+  has_document:     boolean
+  document_uploaded_at: string | null
+}
+
+/**
+ * Every discipline a teacher is responsible for, across all programmes —
+ * the whole data set behind the teacher-facing `/api/my-syllabi` surface.
+ *
+ * This is intentionally NOT reachable through the programmes router: that
+ * one is gated by requireProgramAccess, which a plain teacher fails, and
+ * widening it for one role is the same class of leak already caught twice
+ * on the domain axis. Responsibility — not a subtree grant — is the key.
+ */
+export async function findDisciplinesForResponsibleTeacher(
+  teacherId: string
+): Promise<MySyllabusRow[]> {
+  const { rows } = await pool.query<{
+    discipline_id: string; discipline_name: string; semester: number
+    competency_codes: string[]; course_id: string | null
+    program_id: string; program_name: string; program_code: string | null
+    document_uploaded_at: Date | null
+  }>(
+    `SELECT d.id            AS discipline_id,
+            d.name          AS discipline_name,
+            d.semester,
+            d.competency_codes,
+            d.course_id,
+            p.id            AS program_id,
+            p.name          AS program_name,
+            p.code          AS program_code,
+            doc.uploaded_at AS document_uploaded_at
+       FROM program_disciplines d
+       JOIN programs p ON p.id = d.program_id
+       LEFT JOIN LATERAL (
+         SELECT uploaded_at FROM program_documents
+          WHERE discipline_id = d.id
+            AND kind = 'working_programme'
+            AND superseded_at IS NULL
+          LIMIT 1
+       ) doc ON true
+      WHERE d.responsible_teacher_id = $1
+      ORDER BY p.name, d.semester, d.sort_order`,
+    [teacherId]
+  )
+  return rows.map((r) => ({
+    discipline_id:    r.discipline_id,
+    discipline_name:  r.discipline_name,
+    semester:         r.semester,
+    competency_codes: r.competency_codes ?? [],
+    course_id:        r.course_id,
+    program_id:       r.program_id,
+    program_name:     r.program_name,
+    program_code:     r.program_code,
+    has_document:     r.document_uploaded_at !== null,
+    document_uploaded_at: r.document_uploaded_at ? r.document_uploaded_at.toISOString() : null,
+  }))
 }

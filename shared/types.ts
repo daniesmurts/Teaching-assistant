@@ -1194,6 +1194,13 @@ export interface ProgramDiscipline {
   control_form:      string | null    // форма контроля: экзамен / зачёт / …
   competency_codes:  string[]         // program competency codes this discipline develops
   sort_order:        number
+  // «Ответственный за дисциплину» (migration 097, docs/RPD-WORKFLOW.md) — who
+  // must author and submit this discipline's РПД. READ-ONLY on this shape:
+  // assigned through its own endpoint, deliberately NOT part of the plan
+  // structure that replaceDisciplines rewrites, so re-saving the учебный план
+  // never clears it. `_name` is denormalised for display only.
+  responsible_teacher_id?:   string | null
+  responsible_teacher_name?: string | null
 }
 
 export interface Program {
