@@ -70,8 +70,8 @@ export function aggregateUmcDashboard(rows: UmcReadinessRow[]): { departments: U
   return { departments, totals }
 }
 
-export async function getUmcDashboard(institutionId: string): Promise<UmcDashboardResult> {
-  const rows = await findReadinessRows(institutionId)
+export async function getUmcDashboard(institutionId: string, unitPathPrefixes?: string[]): Promise<UmcDashboardResult> {
+  const rows = await findReadinessRows(institutionId, unitPathPrefixes)
   const { departments, totals } = aggregateUmcDashboard(rows)
   return { rows, departments, totals }
 }

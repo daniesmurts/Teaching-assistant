@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getUmcDashboard, downloadUmcDashboardXlsx } from '../../api/umcDashboard'
 import { useUIStore } from '../../store/uiStore'
+import SubmissionStatusBadge from '../../components/rpd/SubmissionStatusBadge'
 import type { UmcReadinessRow } from '../../types'
 
 // TODO.md Feature V — read-only readiness matrix for methodology-office
@@ -162,6 +163,7 @@ export default function UmcDashboard() {
                     <th className="text-left px-4 py-2 font-medium">Дисциплина</th>
                     <th className="text-right px-4 py-2 font-medium">Семестр</th>
                     <th className="text-right px-4 py-2 font-medium">Покрытие</th>
+                    <th className="text-left px-4 py-2 font-medium">Согласование</th>
                     <th className="text-right px-4 py-2 font-medium">Обновлено</th>
                   </tr>
                 </thead>
@@ -178,6 +180,11 @@ export default function UmcDashboard() {
                       <td className="px-4 py-2 text-right text-ink-secondary">{r.semester}</td>
                       <td className="px-4 py-2 text-right text-ink-secondary">
                         {r.reviewed ? fmtPct(r.overall_coverage) : (r.has_syllabus ? 'не проверено' : '—')}
+                      </td>
+                      <td className="px-4 py-2">
+                        {r.submission_status ? <SubmissionStatusBadge status={r.submission_status} /> : (
+                          <span className="text-xs font-sans text-ink-tertiary">не начато</span>
+                        )}
                       </td>
                       <td className="px-4 py-2 text-right text-ink-tertiary">
                         {fmtDate(r.review_created_at ?? r.syllabus_uploaded_at)}

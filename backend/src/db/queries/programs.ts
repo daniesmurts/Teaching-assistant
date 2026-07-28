@@ -385,13 +385,30 @@ export async function replaceCompetencies(
   }
 }
 
+// Topology graph substrate (docs/topology-spec.md, Increment 0) — resolves
+// program_competencies onto the canonical ФГОС registry (migration 099's
+// fgos_competency_id column). Independent, idempotent per-row writes — no
+// transaction needed, unlike replaceDisciplines/replaceCompetencies above,
+// since each update is a standalone fact with no all-or-nothing requirement.
+export async function setCompetencyFgosLinks(
+  matches: { competencyId: string; fgosCompetencyId: string }[]
+): Promise<void> {
+  for (const m of matches) {
+    await pool.query(
+      'UPDATE program_competencies SET fgos_competency_id = $2 WHERE id = $1',
+      [m.competencyId, m.fgosCompetencyId]
+    )
+  }
+}
+
 // ── Cached analysis ──────────────────────────────────────────────────────────
 
-export async function saveAnalysis(programId: string, result: ProgramAnalysis): Promise<void> {
-  await pool.query(
-    'INSERT INTO program_analyses (program_id, result) VALUES ($1, $2)',
+export async function saveAnalysis(programId: string, result: ProgramAnalysis): Promise<{ id: string }> {
+  const { rows } = await pool.query<{ id: string }>(
+    'INSERT INTO program_analyses (program_id, result) VALUES ($1, $2) RETURNING id',
     [programId, JSON.stringify(result)]
   )
+  return rows[0]
 }
 
 export async function getLatestAnalysis(programId: string): Promise<ProgramAnalysis | null> {
@@ -540,4 +557,50 @@ export async function findDisciplinesForResponsibleTeacher(
     has_document:     r.document_uploaded_at !== null,
     document_uploaded_at: r.document_uploaded_at ? r.document_uploaded_at.toISOString() : null,
   }))
+}
+
+export interface AssignableTeacher {
+  id:    string
+  name:  string | null
+  email: string
+}
+
+/**
+ * Lean institution-wide teacher list for the «Ответственный за дисциплину»
+ * picker (docs/RPD-WORKFLOW.md phase 4a) — deliberately not
+ * listInstitutionTeachers (institutions.ts), which is gated `teaching:view`
+ * and returns grading-usage fields this picker doesn't need. A РОП typically
+ * holds `curriculum` access without a `teaching` grant (docs/ACCESS-MATRIX.md
+ * Table A), so reusing that gate would 403 exactly the caller who needs this.
+ */
+export async function listAssignableTeachers(institutionId: string): Promise<AssignableTeacher[]> {
+  const { rows } = await pool.query<AssignableTeacher>(
+    `SELECT id, name, email FROM teachers
+      WHERE institution_id = $1 AND is_active = true
+      ORDER BY name NULLS LAST, email`,
+    [institutionId]
+  )
+  return rows
+}
+
+export interface DisciplineNotificationInfo {
+  discipline_name:         string
+  program_id:              string
+  program_name:            string
+  program_org_unit_id:     string | null
+  responsible_teacher_id:  string | null
+}
+
+/** Lean lookup for services/rpdNotifications.ts (docs/RPD-WORKFLOW.md phase
+ *  4d) — everything one transition-event email needs and nothing more. */
+export async function getDisciplineNotificationInfo(disciplineId: string): Promise<DisciplineNotificationInfo | null> {
+  const { rows } = await pool.query<DisciplineNotificationInfo>(
+    `SELECT d.name AS discipline_name, p.id AS program_id, p.name AS program_name,
+            p.org_unit_id AS program_org_unit_id, d.responsible_teacher_id
+       FROM program_disciplines d
+       JOIN programs p ON p.id = d.program_id
+      WHERE d.id = $1`,
+    [disciplineId]
+  )
+  return rows[0] ?? null
 }

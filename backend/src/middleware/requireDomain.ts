@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express'
 import { ForbiddenError } from '../errors/AppError'
-import { getAccessScope, resolveGrant, type AccessLevel, type DomainGrant } from '../services/accessScope'
-import type { Domain } from '../db/queries/orgUnits'
+import { getAccessScope, resolveGrant, resolveGrantOnUnitTypes, type AccessLevel, type DomainGrant } from '../services/accessScope'
+import type { Domain, OrgUnitType } from '../db/queries/orgUnits'
 
 // Extends the request with the resolved grant so downstream handlers can read
 // pathPrefixes without re-resolving (same pattern as requireProgramAccess).
@@ -34,6 +34,34 @@ export function requireDomain(domain: Domain, minLevel: AccessLevel) {
       // reach on view-level routes instead of being silently narrowed to the
       // admin grant's subtree (see getAccessScope's contract).
       const grant = resolveGrant(scope, domain, minLevel)
+      if (grant) {
+        req.domainScope = grant
+        next()
+        return
+      }
+      next(new ForbiddenError('Недостаточно прав для выполнения этого действия'))
+    } catch (err) {
+      next(err)
+    }
+  }
+}
+
+/** Like `requireDomain`, but additionally requires the qualifying grant to
+ *  sit on a unit whose type is in `allowedTypes` (root/`all`-domain admin
+ *  grants always qualify — see resolveGrantOnUnitTypes). For surfaces where
+ *  domain+level alone conflates roles that were never meant to share access
+ *  — see docs/ACCESS-MATRIX.md on Критерии/Рубрики institution curation. */
+export function requireDomainOnUnitTypes(domain: Domain, minLevel: AccessLevel, allowedTypes: readonly OrgUnitType[]) {
+  return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+    try {
+      if (req.teacher?.is_platform_admin) { next(); return }
+
+      const scope = await getAccessScope({
+        id:                req.teacher.id,
+        is_platform_admin: req.teacher.is_platform_admin,
+        institution_id:    req.teacher.institution_id,
+      })
+      const grant = resolveGrantOnUnitTypes(scope, domain, minLevel, allowedTypes)
       if (grant) {
         req.domainScope = grant
         next()

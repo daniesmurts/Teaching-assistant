@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
@@ -6,6 +5,7 @@ import ChallengeButton from '../components/grading/ChallengeButton'
 import { getCourses } from '../api/courses'
 import { reviewSyllabus } from '../api/curriculum'
 import { useUIStore } from '../store/uiStore'
+import { useSessionStorageState } from '../hooks/useSessionStorageState'
 import type {
   SyllabusReview, SyllabusCoverageItem, CoverageStatus, ContentSection,
   RequirementKind, ParsedSyllabusReport,
@@ -45,8 +45,8 @@ function scoreColor(score: number): string {
 export default function CurriculumConformance() {
   const addToast = useUIStore((s) => s.addToast)
 
-  const [courseId, setCourseId] = useState('')
-  const [result, setResult]     = useState<SyllabusReview | null>(null)
+  const [courseId, setCourseId] = useSessionStorageState('curriculum:conformance:courseId', '')
+  const [result, setResult]     = useSessionStorageState<SyllabusReview | null>('curriculum:conformance:result', null)
 
   const { data: courses = [] } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
 

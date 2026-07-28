@@ -122,6 +122,17 @@ export interface Requirement {
 
 // ── Parser pass — RPD → structured sections ───────────────────────────────────
 
+// Topology graph substrate (docs/topology-spec.md, Increment 0) — the
+// content-unit extractor (services/programContentUnits.ts) reuses this same
+// whole-section parse instead of re-implementing РПД section splitting; it
+// only needs the `content` blobs, not the requirements/competencies side of
+// the parse.
+export async function parseSyllabusContentSections(
+  teacherId: string, text: string
+): Promise<Record<ContentSection, string | null>> {
+  return (await parseSyllabusStructure(teacherId, text)).content
+}
+
 async function parseSyllabusStructure(teacherId: string, text: string): Promise<ParsedSyllabus> {
   const system =
     'Вы — методист российского вуза. Вы извлекаете из текста рабочей программы дисциплины (РПД) ' +

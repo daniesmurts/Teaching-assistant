@@ -6,12 +6,13 @@ import Select from '../../components/ui/Select'
 import LoadingSpinner from '../../components/ui/LoadingSpinner'
 import UrlUploadField from '../../components/ui/UrlUploadField'
 import SvedenImportModal from '../../components/programs/SvedenImportModal'
+import CurriculumGraph from '../../components/programs/CurriculumGraph'
 import Icon from '../../components/ui/Icon'
 import {
-  getProgram, getAnalysis, saveDisciplines, saveCompetencies, analyzeProgram, deleteProgram,
+  getProgram, getAnalysis, getProgramTopology, saveDisciplines, saveCompetencies, analyzeProgram, deleteProgram,
   downloadAnalysisPdf, updateProgram, uploadProgramDocument, deleteProgramDocument,
   downloadProgramDocument, reviewDiscipline, getDisciplineReviews, openDisciplineInStudio,
-  diffDiscipline,
+  diffDiscipline, getAssignableTeachers, setDisciplineResponsible, type AssignableTeacher,
 } from '../../api/programs'
 import { getCourses } from '../../api/courses'
 import { getPickableProgramUnits } from '../../api/programs'
@@ -27,6 +28,7 @@ import { useUIStore } from '../../store/uiStore'
 import type {
   ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramAnalysis,
   CompetencyProgressionRow, CoverageLevel, PrerequisiteEdge,
+  ProgramTopology, ProgramPrerequisite,
 } from '../../types'
 
 type EditDiscipline = ProgramDiscipline & { _k: string }
@@ -39,7 +41,7 @@ const withKeyC = (c: ProgramCompetency): EditCompetency => ({ ...c, _k: nextKey(
 const stripD = ({ _k, ...d }: EditDiscipline): ProgramDiscipline => d
 const stripC = ({ _k, ...c }: EditCompetency): ProgramCompetency => c
 
-type Tab = 'builder' | 'report' | 'documents'
+type Tab = 'builder' | 'report' | 'topology' | 'documents'
 
 export default function InstitutionProgramDetail() {
   const { id = '' } = useParams()
@@ -56,6 +58,13 @@ export default function InstitutionProgramDetail() {
   const { data: program } = useQuery({ queryKey: ['program', id], queryFn: () => getProgram(id) })
   const { data: courses = [] } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
   const { data: cachedAnalysis } = useQuery({ queryKey: ['program-analysis', id], queryFn: () => getAnalysis(id) })
+  // Lazy — only fetched once the tab is actually opened, since it's read-only
+  // and adds nothing to the builder/report tabs.
+  const { data: topology } = useQuery({
+    queryKey: ['program-topology', id],
+    queryFn:  () => getProgramTopology(id),
+    enabled:  tab === 'topology',
+  })
   const { data: disciplineReviews = [] } = useQuery({
     queryKey: ['program-discipline-reviews', id],
     queryFn:  () => getDisciplineReviews(id),
@@ -274,6 +283,9 @@ export default function InstitutionProgramDetail() {
           <TabButton active={tab === 'report'} onClick={() => setTab('report')}>
             Анализ{analysis ? '' : ' —'}
           </TabButton>
+          <TabButton active={tab === 'topology'} onClick={() => setTab('topology')}>
+            Топология{analysis ? '' : ' —'}
+          </TabButton>
           <TabButton active={tab === 'documents'} onClick={() => setTab('documents')}>
             Документы{(program?.documents?.length ?? 0) > 0 ? ` · ${program!.documents!.length}` : ''}
           </TabButton>
@@ -353,6 +365,21 @@ export default function InstitutionProgramDetail() {
                   )}
                 </>
               )
+        )}
+
+        {tab === 'topology' && (
+          analysis
+            ? (
+              <TopologyTab
+                analysis={analysis} topology={topology} program={program}
+                duration={maxSemester}
+              />
+            )
+            : (
+              <div className="text-center py-16 text-sm font-sans text-ink-secondary">
+                Анализ ещё не запускался. Нажмите «Анализировать», чтобы построить граф.
+              </div>
+            )
         )}
 
         {tab === 'documents' && program && (
@@ -1226,6 +1253,146 @@ function DisciplineCoverageSection({
   )
 }
 
+// ─── «Топология» tab (docs/topology-spec.md, Increment 1) ──────────────────
+//
+// Findings are derived client-side from the already-fetched ProgramAnalysis
+// (no new backend computation, per the spec's §4.2 "findings first, no
+// composite score" decision) — but the GRAPH below reads from the newly
+// persisted, id-based program_prerequisites/program_competency_links tables
+// (via `topology`), not from this same cached report. That split is
+// deliberate: it's what actually proves Increment 0's substrate is real and
+// queryable, not just decoration over the existing cached blob.
+
+type FindingKey = 'coverage' | 'progression' | 'control' | 'sequencing' | 'load' | 'duplication'
+
+interface Finding { key: FindingKey; label: string; count: number | null; danger: boolean; note?: string }
+
+function deriveFindings(analysis: ProgramAnalysis): Finding[] {
+  const { sequencing, progression, orphans, load_check, mapping_confidence } = analysis
+  // Purely a mapping-confidence caveat (docs/topology-spec.md §4.2) — attaches
+  // to the three dials whose count depends on the declared competency_codes
+  // mapping, so "uncovered" reads as a possible data gap, not an accusation.
+  const mappingNote = mapping_confidence?.low
+    ? 'Мало дисциплин с заявленными кодами компетенций — возможен пробел в разметке, а не в плане.'
+    : undefined
+
+  const uncovered = progression.filter((r) => r.status === 'uncovered').length
+  const thinOrLate = progression.filter((r) => r.status === 'thin' || r.status === 'late').length
+  const loadIssues = load_check?.issues.length ?? 0
+
+  return [
+    { key: 'coverage',    label: 'Покрытие',           count: uncovered,  danger: uncovered > 0,  note: mappingNote },
+    { key: 'progression', label: 'Прогрессия',         count: thinOrLate, danger: thinOrLate > 0, note: mappingNote },
+    { key: 'control',     label: 'Контроль',           count: null,       danger: false, note: 'Ожидает интеграции ФОС (Increment 3a)' },
+    { key: 'sequencing',  label: 'Последовательность', count: sequencing.inversions.length, danger: sequencing.inversions.length > 0 },
+    { key: 'load',        label: 'Нагрузка',           count: loadIssues, danger: loadIssues > 0 },
+    { key: 'duplication', label: 'Дублирование',       count: orphans.length, danger: orphans.length > 0, note: mappingNote },
+  ]
+}
+
+// Non-interactive since the graph below moved to its own click-to-select
+// mechanic (a discipline/competency node, not a finding tile) — these are
+// now purely the six headline counts (docs/topology-spec.md §4.2).
+function FindingsGrid({ findings }: { findings: Finding[] }) {
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      {findings.map((f) => (
+        <div key={f.key} className="bg-surface border border-border rounded-lg p-4">
+          <div className="font-display text-3xl font-bold leading-none" style={{
+            color: f.count === null ? 'var(--color-ink-tertiary)' : f.danger ? 'var(--color-danger)' : 'var(--color-ink)',
+          }}>
+            {f.count === null ? '—' : f.count}
+          </div>
+          <div className="text-xs font-sans text-ink-secondary mt-1.5">{f.label}</div>
+          {f.note && <div className="text-[10px] font-sans text-ink-tertiary mt-1 leading-snug">{f.note}</div>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Resolves a persisted, id-based prerequisite edge back into the name-based
+// PrerequisiteEdge shape EdgeCard already renders — a small mapper, not a
+// new card component. Returns null if either discipline was since removed
+// (the edge row would be gone too via cascade delete, but guards regardless).
+function toPrerequisiteEdge(p: ProgramPrerequisite, disciplineById: Map<string, ProgramDiscipline>): PrerequisiteEdge | null {
+  const from = disciplineById.get(p.prerequisite_discipline_id)
+  const to = disciplineById.get(p.discipline_id)
+  if (!from || !to) return null
+  return {
+    from_name: from.name, from_semester: from.semester,
+    to_name:   to.name,   to_semester:   to.semester,
+    reason: p.reason, inverted: p.inverted,
+    recommendation: p.inverted
+      ? `«${to.name}» (сем. ${to.semester}) опирается на «${from.name}» (сем. ${from.semester}), но изучается раньше.`
+      : '',
+  }
+}
+
+function TopologyTab({
+  analysis, topology, program, duration,
+}: {
+  analysis:  ProgramAnalysis
+  topology?: ProgramTopology
+  program?:  ProgramDetail
+  duration:  number
+}) {
+  const findings = useMemo(() => deriveFindings(analysis), [analysis])
+  const disciplineById = useMemo(() => {
+    const m = new Map<string, ProgramDiscipline>()
+    for (const d of program?.disciplines ?? []) if (d.id) m.set(d.id, d)
+    return m
+  }, [program])
+
+  if (!program) return null
+  if (!topology) {
+    return <div className="text-center py-16 text-sm font-sans text-ink-secondary">Загружаем граф…</div>
+  }
+
+  const hasTopologyData = topology.prerequisites.length > 0 || topology.competencyLinks.length > 0
+  const invertedEdges = topology.prerequisites
+    .filter((p) => p.inverted)
+    .map((p) => ({ p, edge: toPrerequisiteEdge(p, disciplineById) }))
+    .filter((x): x is { p: ProgramPrerequisite; edge: PrerequisiteEdge } => x.edge != null)
+
+  return (
+    <div className="space-y-6">
+      {/* Verdict first — "does this student come out fully formed" is the
+          actual question, answered before the six dials or the graph. */}
+      {analysis.outcome_delivery && <OutcomeDeliveryCard d={analysis.outcome_delivery} />}
+
+      <FindingsGrid findings={findings} />
+
+      {!hasTopologyData && program.disciplines.length > 0 && (
+        <div className="text-sm font-sans text-ink-secondary bg-surface border border-border rounded-lg p-4">
+          Граф ещё не построен для этой программы. Запустите «Анализировать» на вкладке «Конструктор», чтобы связать дисциплины с компетенциями.
+        </div>
+      )}
+
+      {hasTopologyData && (
+        <>
+          <section>
+            <SectionLabel>Граф программы</SectionLabel>
+            <p className="text-xs font-sans text-ink-tertiary mb-2">
+              Дисциплины по семестрам слева направо, компетенции — справа. Нажмите на дисциплину или компетенцию, чтобы увидеть связи.
+            </p>
+            <CurriculumGraph program={program} topology={topology} duration={duration} analysis={analysis} />
+          </section>
+
+          {invertedEdges.length > 0 && (
+            <section>
+              <SectionLabel>Нарушения последовательности</SectionLabel>
+              <div className="space-y-2">
+                {invertedEdges.map(({ p, edge }) => <EdgeCard key={p.id} edge={edge} inverted />)}
+              </div>
+            </section>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 function Stat({ label, value, danger = false }: { label: string; value: number; danger?: boolean }) {
   return (
     <div className="bg-surface border border-border rounded-lg p-4">
@@ -1262,6 +1429,19 @@ function DocumentsPanel({
   const [reviewingId, setReviewingId] = useState<string | null>(null)
   // Bulk РПД import from the /sveden/education disclosure page (Feature AD).
   const [svedenOpen, setSvedenOpen] = useState(false)
+  // «Ответственный за дисциплину» (docs/RPD-WORKFLOW.md phase 4a) — fetched
+  // once for the whole panel, not per row; a programme's teacher pool rarely
+  // changes within one editing session.
+  const { data: assignableTeachers = [] } = useQuery({
+    queryKey: ['assignable-teachers'],
+    queryFn: getAssignableTeachers,
+  })
+  const assignMut = useMutation({
+    mutationFn: ({ disciplineId, teacherId }: { disciplineId: string; teacherId: string | null }) =>
+      setDisciplineResponsible(programId, disciplineId, teacherId),
+    onSuccess: () => { addToast('Ответственный назначен', 'success'); onChanged() },
+    onError: () => addToast('Не удалось назначить ответственного', 'error'),
+  })
   // Which discipline rows have their inline coverage breakdown open. On a
   // freshly completed review we auto-open the row that was just checked (the
   // user just clicked «Проверить» — the answer should be visible immediately,
@@ -1440,6 +1620,9 @@ function DocumentsPanel({
                 onUploadUrl={(fileUrl) => attachOne({ fileUrl, kind: 'working_programme', disciplineId: d.id })}
                 onRemove={(doc) => removeOne(doc)}
                 onReview={() => runReview(d)}
+                assignableTeachers={assignableTeachers}
+                assigning={assignMut.isPending && assignMut.variables?.disciplineId === d.id}
+                onAssignResponsible={(teacherId) => d.id && assignMut.mutate({ disciplineId: d.id, teacherId })}
               />
             ))}
           </div>
@@ -1556,6 +1739,62 @@ function RowActionChip({
   )
 }
 
+// «Ответственный за дисциплину» (docs/RPD-WORKFLOW.md phase 4a) — who must
+// author and submit this discipline's РПД. A plain display + "Изменить"
+// toggle rather than an always-open select: most disciplines, most of the
+// time, aren't being reassigned, and a bare select sitting open on every row
+// reads as "click here" noise across a long plan.
+function ResponsibleTeacherControl({
+  discipline, teachers, canEdit, assigning, onAssign,
+}: {
+  discipline: ProgramDiscipline
+  teachers:   AssignableTeacher[]
+  canEdit:    boolean
+  assigning:  boolean
+  onAssign:   (teacherId: string | null) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  if (!canEdit) {
+    return discipline.responsible_teacher_name ? (
+      <div className="text-[11px] font-sans text-ink-tertiary mt-0.5">
+        Ответственный: {discipline.responsible_teacher_name}
+      </div>
+    ) : null
+  }
+
+  if (editing || (!discipline.responsible_teacher_id && teachers.length > 0)) {
+    return (
+      <div className="mt-1 max-w-[280px] flex items-center gap-2">
+        <Select
+          value={discipline.responsible_teacher_id ?? ''}
+          onChange={(v) => { onAssign(v || null); setEditing(false) }}
+          options={[
+            { value: '', label: 'Не назначен' },
+            ...teachers.map((t) => ({ value: t.id, label: t.name ?? t.email })),
+          ]}
+          ariaLabel="Ответственный за дисциплину"
+          size="sm"
+        />
+        {assigning && <LoadingSpinner size={13} />}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 mt-0.5">
+      <span className="text-[11px] font-sans text-ink-tertiary">
+        Ответственный: {discipline.responsible_teacher_name ?? 'не назначен'}
+      </span>
+      <button
+        onClick={() => setEditing(true)}
+        className="text-[11px] font-sans text-amber hover:underline"
+      >
+        Изменить
+      </button>
+    </div>
+  )
+}
+
 // One discipline's РПД slot: upload affordance if empty, otherwise the file
 // plus a "Проверить соответствие" trigger that scores it against the
 // discipline's declared competency_codes (disabled with an explanatory
@@ -1564,6 +1803,7 @@ function DisciplineDocumentRow({
   discipline, doc, review, expanded, onToggleExpanded,
   versionCount, diff, diffExpanded, onToggleDiffExpanded, diffing, onDiff,
   programId, canEdit, uploading, reviewing, onUpload, onUploadUrl, onRemove, onReview,
+  assignableTeachers, assigning, onAssignResponsible,
 }: {
   discipline:            ProgramDiscipline
   doc:                   ProgramDocument | null
@@ -1586,6 +1826,9 @@ function DisciplineDocumentRow({
   onUploadUrl:           (url: string) => void
   onRemove:              (doc: ProgramDocument) => void
   onReview:              () => void
+  assignableTeachers:    AssignableTeacher[]
+  assigning:             boolean
+  onAssignResponsible:   (teacherId: string | null) => void
 }) {
   const hasCodes = discipline.competency_codes.length > 0
   const kb = doc ? Math.round(doc.file_size / 1024) : 0
@@ -1626,6 +1869,13 @@ function DisciplineDocumentRow({
           <div className="text-sm font-sans text-ink truncate">
             {discipline.name} <span className="text-ink-tertiary text-xs">· сем. {discipline.semester}</span>
           </div>
+          <ResponsibleTeacherControl
+            discipline={discipline}
+            teachers={assignableTeachers}
+            canEdit={canEdit}
+            assigning={assigning}
+            onAssign={onAssignResponsible}
+          />
           {doc ? (
             <>
               <div className="text-xs font-sans text-ink-secondary truncate mt-0.5">{doc.file_name}</div>

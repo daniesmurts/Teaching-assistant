@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { getAccessScope, levelAtLeast, resolveGrant, maxLevel } from './accessScope'
+import { getAccessScope, levelAtLeast, resolveGrant, resolveGrantOnUnitTypes, maxLevel } from './accessScope'
 import * as orgUnitsQueries from '../db/queries/orgUnits'
 import type { TeacherRoleScope } from '../db/queries/orgUnits'
 
@@ -33,36 +33,36 @@ describe('getAccessScope', () => {
   })
 
   it("expands a domain='all' admin grant (today's institution-root admin) across every domain", async () => {
-    mockScopes([{ org_unit_id: 'root', role: 'admin', domain: 'all', path: '/inst/' }])
+    mockScopes([{ org_unit_id: 'root', role: 'admin', domain: 'all', path: '/inst/', type_code: 'institution' }])
     const scope = await getAccessScope({ id: 't1', is_platform_admin: false, institution_id: 'inst1' })
-    expect(scope.platform).toEqual([{ level: 'admin', path: '/inst/' }])
-    expect(scope.curriculum).toEqual([{ level: 'admin', path: '/inst/' }])
-    expect(scope.teaching).toEqual([{ level: 'admin', path: '/inst/' }])
-    expect(scope.umu).toEqual([{ level: 'admin', path: '/inst/' }])
+    expect(scope.platform).toEqual([{ level: 'admin', path: '/inst/', unitType: 'institution' }])
+    expect(scope.curriculum).toEqual([{ level: 'admin', path: '/inst/', unitType: 'institution' }])
+    expect(scope.teaching).toEqual([{ level: 'admin', path: '/inst/', unitType: 'institution' }])
+    expect(scope.umu).toEqual([{ level: 'admin', path: '/inst/', unitType: 'institution' }])
   })
 
   it("a scoped domain='curriculum' edit grant reaches only curriculum", async () => {
-    mockScopes([{ org_unit_id: 'umc', role: 'edit', domain: 'curriculum', path: '/inst/umc/' }])
+    mockScopes([{ org_unit_id: 'umc', role: 'edit', domain: 'curriculum', path: '/inst/umc/', type_code: 'admin_office' }])
     const scope = await getAccessScope({ id: 't1', is_platform_admin: false, institution_id: 'inst1' })
-    expect(scope.curriculum).toEqual([{ level: 'edit', path: '/inst/umc/' }])
+    expect(scope.curriculum).toEqual([{ level: 'edit', path: '/inst/umc/', unitType: 'admin_office' }])
     expect(scope.platform).toBeUndefined()
     expect(scope.teaching).toBeUndefined()
   })
 
   it('keeps every grant intact instead of collapsing to one level per domain', async () => {
     mockScopes([
-      { org_unit_id: 'root', role: 'view', domain: 'curriculum', path: '/inst/' },
-      { org_unit_id: 'umc',  role: 'edit', domain: 'curriculum', path: '/inst/umc/' },
+      { org_unit_id: 'root', role: 'view', domain: 'curriculum', path: '/inst/', type_code: 'institution' },
+      { org_unit_id: 'umc',  role: 'edit', domain: 'curriculum', path: '/inst/umc/', type_code: 'department' },
     ])
     const scope = await getAccessScope({ id: 't1', is_platform_admin: false, institution_id: 'inst1' })
     expect(scope.curriculum).toEqual([
-      { level: 'view', path: '/inst/' },
-      { level: 'edit', path: '/inst/umc/' },
+      { level: 'view', path: '/inst/', unitType: 'institution' },
+      { level: 'edit', path: '/inst/umc/', unitType: 'department' },
     ])
   })
 
   it('ignores an unrecognised role value defensively', async () => {
-    mockScopes([{ org_unit_id: 'x', role: 'bogus', domain: 'curriculum', path: '/inst/x/' }])
+    mockScopes([{ org_unit_id: 'x', role: 'bogus', domain: 'curriculum', path: '/inst/x/', type_code: 'department' }])
     const scope = await getAccessScope({ id: 't1', is_platform_admin: false, institution_id: 'inst1' })
     expect(scope).toEqual({})
   })
@@ -76,8 +76,8 @@ describe('resolveGrant', () => {
   // and their university-wide oversight silently disappeared.
   const multiHat = {
     teaching: [
-      { level: 'view'  as const, path: '/inst/' },
-      { level: 'admin' as const, path: '/inst/div/kaf/' },
+      { level: 'view'  as const, path: '/inst/', unitType: 'institution' as const },
+      { level: 'admin' as const, path: '/inst/div/kaf/', unitType: 'department' as const },
     ],
   }
 
@@ -95,7 +95,7 @@ describe('resolveGrant', () => {
   })
 
   it('returns null when no grant reaches the required level', () => {
-    expect(resolveGrant({ curriculum: [{ level: 'view', path: '/inst/' }] }, 'curriculum', 'edit')).toBeNull()
+    expect(resolveGrant({ curriculum: [{ level: 'view', path: '/inst/', unitType: 'institution' }] }, 'curriculum', 'edit')).toBeNull()
   })
 
   it('returns null for a domain with no grants at all', () => {
@@ -104,16 +104,62 @@ describe('resolveGrant', () => {
 
   it('deduplicates repeated paths', () => {
     const grant = resolveGrant(
-      { curriculum: [{ level: 'edit', path: '/inst/' }, { level: 'admin', path: '/inst/' }] },
+      { curriculum: [
+        { level: 'edit', path: '/inst/', unitType: 'department' },
+        { level: 'admin', path: '/inst/', unitType: 'department' },
+      ] },
       'curriculum', 'edit',
     )
     expect(grant?.pathPrefixes).toEqual(['/inst/'])
   })
 })
 
+describe('resolveGrantOnUnitTypes', () => {
+  // Real-world case: a РОП's curriculum:admin grant sits on their `program`
+  // unit — same domain+level a ЗК's curriculum:edit grant on `department`
+  // would have, but Критерии/Рубрики curation is department/institute
+  // leadership territory, not a programme head's.
+  it("rejects a qualifying-level grant whose unit type isn't in allowedTypes (a РОП's `program` grant)", () => {
+    const scope = { curriculum: [{ level: 'admin' as const, path: '/inst/prog/', unitType: 'program' as const }] }
+    expect(resolveGrantOnUnitTypes(scope, 'curriculum', 'view', ['department', 'division'])).toBeNull()
+  })
+
+  it("accepts a grant whose unit type IS in allowedTypes (a ЗК's `department` grant)", () => {
+    const scope = { curriculum: [{ level: 'edit' as const, path: '/inst/dept/', unitType: 'department' as const }] }
+    const grant = resolveGrantOnUnitTypes(scope, 'curriculum', 'view', ['department', 'division'])
+    expect(grant?.pathPrefixes).toEqual(['/inst/dept/'])
+  })
+
+  it('always accepts a grant on the institution root regardless of allowedTypes (root/all-domain admin)', () => {
+    const scope = { curriculum: [{ level: 'admin' as const, path: '/inst/', unitType: 'institution' as const }] }
+    const grant = resolveGrantOnUnitTypes(scope, 'curriculum', 'edit', ['department', 'division'])
+    expect(grant?.pathPrefixes).toEqual(['/inst/'])
+  })
+
+  it('still enforces minLevel on top of the unit-type filter', () => {
+    const scope = { curriculum: [{ level: 'view' as const, path: '/inst/dept/', unitType: 'department' as const }] }
+    expect(resolveGrantOnUnitTypes(scope, 'curriculum', 'edit', ['department'])).toBeNull()
+  })
+
+  it('unions paths only from grants that pass BOTH the level and type filters', () => {
+    const scope = {
+      curriculum: [
+        { level: 'edit' as const, path: '/inst/dept-a/', unitType: 'department' as const },  // qualifies
+        { level: 'admin' as const, path: '/inst/prog-b/', unitType: 'program' as const },     // wrong type
+        { level: 'view' as const, path: '/inst/dept-c/', unitType: 'department' as const },   // below minLevel
+      ],
+    }
+    const grant = resolveGrantOnUnitTypes(scope, 'curriculum', 'edit', ['department'])
+    expect(grant?.pathPrefixes).toEqual(['/inst/dept-a/'])
+  })
+})
+
 describe('maxLevel', () => {
   it('reports the highest level held anywhere in the domain', () => {
-    expect(maxLevel({ teaching: [{ level: 'view', path: '/a/' }, { level: 'admin', path: '/b/' }] }, 'teaching')).toBe('admin')
+    expect(maxLevel({ teaching: [
+      { level: 'view', path: '/a/', unitType: 'department' },
+      { level: 'admin', path: '/b/', unitType: 'division' },
+    ] }, 'teaching')).toBe('admin')
   })
 
   it('returns null for a domain with no grants', () => {

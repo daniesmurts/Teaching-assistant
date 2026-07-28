@@ -106,6 +106,23 @@ export interface Teacher {
   // `curriculum` so a Заведующий кафедрой can hold curriculum:edit (to author
   // criteria) without seeing institution-wide filing compliance.
   umu_access?:           'none' | 'view' | 'edit' | 'admin'
+  // docs/ACCESS-MATRIX.md — «Критерии/Рубрики» institution-curation access.
+  // NOT the same as curriculum_access: that domain is shared by every
+  // content-facing role (incl. РОП/РПГ/УМУ/РУМЦ/МУМЦ), but institution-shared
+  // criteria curation is meant for department/institute leadership only
+  // (ЗК/ДИ/ДЕК) plus a read-only view for top institutional leadership
+  // (РЕК/ПР/ОА). Computed from getAccessScope filtered to the unit TYPE a
+  // curriculum grant sits on — a plain `curriculum` level check can't tell a
+  // РОП's grant on their `program` unit apart from a ЗК's on `department`.
+  criteria_access?:      'none' | 'view' | 'edit' | 'admin'
+  // docs/ACCESS-MATRIX.md — «Организация» overview surfaces (Обзор/
+  // Использование/Преподаватели-чтение). Same shape as criteria_access and
+  // the same reason: `teaching_access` alone is shared by every unit-scoped
+  // role (incl. РОП on `program`, РПГ on `cluster`), but institution
+  // oversight is department/institute leadership territory — a programme or
+  // polygroup head's own subtree activity belongs on /leadership instead,
+  // an unrelated gate this doesn't touch.
+  org_overview_access?:  'none' | 'view' | 'edit' | 'admin'
   institution_id?: string | null
   // Mirror of the teacher's institution's shared_rag_enabled flag — surfaced
   // here so the Courses page can decide whether to show / enable the "поделиться
@@ -1391,6 +1408,45 @@ export interface ProgramDocumentDiff {
   created_at:      string
 }
 
+// ─── РПД approval workflow (docs/RPD-WORKFLOW.md, phase 4b) ────────────────
+// State machine over a discipline's РПД submission. Five states, not six:
+// `returned` is one state, and WHICH stage returned it is a separate field
+// (derivable from which status the return happened from, but stored
+// explicitly — submitted->returned is always 'rop', forwarded->returned is
+// always 'umc').
+
+export type RpdSubmissionStatus = 'draft' | 'submitted' | 'returned' | 'forwarded' | 'approved'
+export type RpdSubmissionStage  = 'rop' | 'umc'
+export type RpdSubmissionAction = 'submit' | 'return' | 'forward' | 'approve'
+
+export interface RpdSubmissionEvent {
+  id:          string
+  from_status: RpdSubmissionStatus | null
+  to_status:   RpdSubmissionStatus
+  actor_id:    string | null
+  actor_name:  string | null
+  comment:     string | null
+  created_at:  string
+}
+
+export interface RpdSubmission {
+  id:                string
+  program_id:        string
+  discipline_id:     string
+  document_id:       string | null
+  status:            RpdSubmissionStatus
+  returned_by_stage: RpdSubmissionStage | null
+  submitted_by:      string | null
+  submitted_at:      string | null
+  updated_at:        string
+  // Denormalised for list/queue views — avoids an extra join per consumer.
+  discipline_name?:   string
+  program_name?:      string
+  program_code?:      string | null
+  responsible_teacher_name?: string | null
+  coverage?:          number | null   // latest program_document_reviews.overall_coverage, if any
+}
+
 // ─── УМЦ dashboard (TODO Feature V) ────────────────────────────────────────
 // Institution-wide readiness matrix — one row per (programme, discipline),
 // assembled entirely from existing signals (program_documents,
@@ -1412,6 +1468,11 @@ export interface UmcReadinessRow {
   reviewed:                boolean
   overall_coverage:        number | null   // 0-100, from the latest program_document_reviews row
   review_created_at:       string | null
+  // Phase 4c (docs/RPD-WORKFLOW.md) — the approval-stage this discipline's
+  // РПД is at, distinct from has_syllabus/reviewed (which only say whether a
+  // file exists and whether the AI checked it, not where it sits in the
+  // human approval route). NULL = never submitted through the workflow.
+  submission_status:       RpdSubmissionStatus | null
 }
 
 export interface UmcDepartmentSummary {
@@ -1461,8 +1522,10 @@ export interface ProgramDetail extends Program {
 export interface PrerequisiteEdge {
   from_name:      string    // prerequisite (foundation)
   from_semester:  number
+  from_id?:       string    // program_disciplines.id — set when from_name resolved to a real discipline
   to_name:        string    // dependent discipline
   to_semester:    number
+  to_id?:         string    // program_disciplines.id — set when to_name resolved to a real discipline
   reason:         string    // why `to` depends on `from`
   inverted:       boolean
   recommendation: string    // RU fix (e.g. «перенести … на 3 семестр»)
@@ -1496,6 +1559,11 @@ export interface SequencingResult {
   // Whole-plan structure derived from `edges`. Optional — legacy cached
   // analyses (run before this shipped) won't have it; the UI guards for it.
   structure?:     SequencingStructure
+  // Discipline names the LLM returned as an edge endpoint that didn't match
+  // any discipline in the plan (topology substrate, docs/topology-spec.md
+  // §3.1) — previously silently dropped. Optional — legacy cached analyses
+  // won't have it.
+  unmatched_names?: string[]
 }
 
 export type CoverageLevel = 'introduce' | 'develop' | 'master'
@@ -1504,12 +1572,14 @@ export interface CompetencyTimelineCell {
   semester: number
   level:    CoverageLevel
   via:      string         // discipline delivering it at this point
+  via_discipline_id?: string  // program_disciplines.id — set when `via` resolved to a real discipline
 }
 
 export interface CompetencyProgressionRow {
   kind:        CompetencyKind
   code:        string | null
   title:       string
+  competency_id?: string                  // program_competencies.id — the source row's id, always known (not LLM-derived)
   cells:       CompetencyTimelineCell[]   // chronological coverage points
   status:      'ok' | 'late' | 'thin' | 'uncovered'  // never-covered / once-only / too-late / fine
   note:        string                     // RU explanation + recommendation
@@ -1610,6 +1680,61 @@ export interface ProgramAnalysis {
   // these so a section that came back empty is understood as a transient
   // failure, not a real "no data".
   warnings?: string[]
+}
+
+// ─── Topology graph substrate (docs/topology-spec.md, Increment 0+) ────────────
+//
+// Read-side shapes for the persisted prerequisite/competency-link edges
+// (migration 099) — the id-based rows programAnalysis.ts's LLM passes now
+// write to, instead of only a discard-after-render report. Write-side DB
+// params (Replace*Input) stay local to backend/src/db/queries/programTopology.ts
+// — not part of this cross-boundary contract.
+
+export type PrerequisiteOrigin = 'extracted' | 'manual' | 'confirmed'
+export type CompetencyLinkStage = 'introduce' | 'develop' | 'master'
+
+export interface ProgramPrerequisite {
+  id:                          string
+  program_id:                  string
+  discipline_id:               string
+  prerequisite_discipline_id:  string
+  reason:                      string
+  inverted:                    boolean
+  origin:                      PrerequisiteOrigin
+  analysis_id:                 string | null
+  created_at:                  string
+  updated_at:                  string
+}
+
+export interface ProgramCompetencyLink {
+  id:               string
+  program_id:       string
+  discipline_id:    string
+  content_unit_id:  string | null
+  competency_id:    string
+  stage:            CompetencyLinkStage
+  origin:           PrerequisiteOrigin
+  analysis_id:      string | null
+  evidence_quote:   string | null
+  created_at:       string
+  updated_at:       string
+}
+
+export interface ProgramTopology {
+  prerequisites:    ProgramPrerequisite[]
+  competencyLinks:  ProgramCompetencyLink[]
+}
+
+export interface ProgramContentUnit {
+  id:             string
+  discipline_id:  string
+  section:        ContentSection
+  title:          string
+  topics:         string[]
+  source_doc_id:  string | null
+  provenance:     'approved' | 'latest'
+  sort_order:     number
+  created_at:     string
 }
 
 // ─── API error shape ──────────────────────────────────────────────────────────

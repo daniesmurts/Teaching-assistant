@@ -42,7 +42,7 @@ import { verifyMarketingUnsubToken } from '../services/marketingEmails'
 import { setMarketingEmailsEnabled } from '../db/queries/teachers'
 import { hasLeadershipRole } from '../db/queries/leadership'
 import { getProgramAccessScope } from '../services/programAccess'
-import { getAccessScope, maxLevel } from '../services/accessScope'
+import { getAccessScope, maxLevel, resolveGrantOnUnitTypes, CRITERIA_READ_UNIT_TYPES, TEACHING_OVERVIEW_UNIT_TYPES } from '../services/accessScope'
 import { recordAudit } from '../db/queries/audit'
 
 // Client metadata for auth audit rows. Auth routes are unauthenticated, so the
@@ -89,6 +89,16 @@ async function adminFlags(row: { id: string; institution_id: string | null; is_p
     teaching_access:   maxLevel(access_scope, 'teaching')   ?? 'none',
     platform_access:   maxLevel(access_scope, 'platform')   ?? 'none',
     umu_access:        maxLevel(access_scope, 'umu')        ?? 'none',
+    // Narrower than curriculum_access — see CRITERIA_READ_UNIT_TYPES's doc
+    // comment (accessScope.ts). Drives the «Критерии»/«Рубрики» institution
+    // nav entries specifically; other curriculum-domain surfaces keep using
+    // curriculum_access unchanged.
+    criteria_access:   resolveGrantOnUnitTypes(access_scope, 'curriculum', 'view', CRITERIA_READ_UNIT_TYPES)?.level ?? 'none',
+    // Narrower than teaching_access — see TEACHING_OVERVIEW_UNIT_TYPES's doc
+    // comment (accessScope.ts). Drives «Обзор»/«Использование»/
+    // «Преподаватели-чтение» specifically — /leadership stays on its own
+    // separate is_leader gate, unaffected.
+    org_overview_access: resolveGrantOnUnitTypes(access_scope, 'teaching', 'view', TEACHING_OVERVIEW_UNIT_TYPES)?.level ?? 'none',
   }
 }
 

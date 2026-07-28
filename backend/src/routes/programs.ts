@@ -1,6 +1,7 @@
 import { Router, Request } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { requireProgramAccess } from '../middleware/requireProgramAccess'
+import { requireDomain } from '../middleware/requireDomain'
 import { validate } from '../middleware/validate'
 import { aiLimiter } from '../middleware/rateLimits'
 import { asyncHandler } from '../lib/asyncHandler'
@@ -12,12 +13,14 @@ import {
   listPrograms, listProgramsForUnits, createProgram, findProgram, getProgramDetail, updateProgram, deleteProgram,
   replaceDisciplines, replaceCompetencies, saveAnalysis, getLatestAnalysis,
   listProgramUnitsForInstitution, listProgramUnitsByIds,
-  fillDisciplineCompetencyCodesIfEmpty, setDisciplineResponsible,
+  fillDisciplineCompetencyCodesIfEmpty, setDisciplineResponsible, listAssignableTeachers,
 } from '../db/queries/programs'
 import { isTeacherInInstitution } from '../db/queries/orgUnits'
+import { listSubmittedForPrograms, findSubmissionByDiscipline } from '../db/queries/rpdSubmissions'
+import { transitionSubmission } from '../services/rpdSubmissions'
 import { canEditProgram, canReadProgram } from '../services/programAccess'
 import { listAncestorsOfUnit } from '../db/queries/orgUnits'
-import { analyzeProgram } from '../services/programAnalysis'
+import { analyzeProgram, persistTopology, persistContentUnits } from '../services/programAnalysis'
 import { reviewDocumentCoverage, detectDeclaredCompetencyCodes } from '../services/documentReview'
 import { diffWorkingProgrammes } from '../services/programDiff'
 import { generateProgramReportPdf } from '../services/programReportPdf'
@@ -25,12 +28,14 @@ import { uploadFields, verifyFileContent } from '../middleware/fileValidation'
 import { extractText } from '../services/documentExtractor'
 import { parseStudyPlan, parseDescription, parseCompetencyMatrix } from '../services/programImport'
 import { setProgramDocs, setReportedSemesterTotals } from '../db/queries/programs'
-import { uploadObject, downloadObject, deleteObject } from '../services/objectStorage'
+import { getProgramTopology, listContentUnitsByDiscipline } from '../db/queries/programTopology'
+import { downloadObject, deleteObject } from '../services/objectStorage'
 import {
-  insertProgramDocument, listProgramDocuments, findProgramDocument, deleteProgramDocument,
+  listProgramDocuments, findProgramDocument, deleteProgramDocument,
   findWorkingProgrammeForDiscipline, supersedeWorkingProgrammeForDiscipline, deletePracticeForType,
   listWorkingProgrammeVersions,
 } from '../db/queries/programDocuments'
+import { attachProgramDocument } from '../services/programDocumentAttach'
 import { insertReview, getLatestReviewByDiscipline, getLatestReviewForDiscipline } from '../db/queries/programDocumentReviews'
 import { insertDiff, findDiff } from '../db/queries/programDocumentDiffs'
 import {
@@ -42,6 +47,7 @@ import { parseSvedenPage, selectProgramRow, matchDiscipline } from '../services/
 import { getLimits } from '../config/planLimits'
 import { logger } from '../lib/logger'
 import { getProfstandardRefsForDirection } from '../db/queries/fgos'
+import { inferFgosLevel } from '../services/fgosMatch'
 import { getLatestMarketEvidence, createMarketEvidence, updateMarketEvidenceText } from '../db/queries/programMarketEvidence'
 import { fetchVacancySnapshot, SUPPORTED_REGIONS } from '../services/labourMarket'
 import { generateMarketEvidenceSection, type StrategyExcerpt } from '../services/marketEvidenceGenerator'
@@ -52,60 +58,6 @@ import type {
   ProgramPracticeType, ProgramDocumentKind,
 } from '../../../shared/types'
 import { PROGRAM_PRACTICE_TYPES } from '../../../shared/types'
-
-// Filename sanitisation for object-storage keys — cognate of the helper in
-// services/documents.ts. Keeps the extension intact.
-function sanitiseName(name: string): string {
-  return name.replace(/[^\w.\-]/g, '_').slice(0, 120)
-}
-
-function documentStoragePath(programId: string, docId: string, fileName: string): string {
-  return `programs/${programId}/${docId}_${sanitiseName(fileName)}`
-}
-
-// Uploads a single file to object storage and inserts a program_documents
-// row. Returns the created row's id. Failures leave nothing behind — we
-// upload first, insert second; a failed insert means an orphaned object,
-// which we log and best-effort clean.
-async function attachProgramDocument(params: {
-  programId:     string
-  kind:          ProgramDocumentKind
-  practiceType:  ProgramPracticeType | null
-  disciplineId?: string | null
-  extractedText?: string | null
-  // FetchedFile is a structural subset of Express.Multer.File (buffer /
-  // originalname / mimetype / size) — a real upload is assignable to it, so
-  // both the multipart and URL-fetch paths flow through here unchanged.
-  file:          FetchedFile
-  uploadedBy:    string
-}): Promise<string> {
-  // Pre-generate an id so the storage key can include it before the row exists.
-  // Any UUID works; the DB regenerates its own default anyway.
-  const tempId = (globalThis.crypto as Crypto).randomUUID()
-  const key    = documentStoragePath(params.programId, tempId, params.file.originalname)
-  await uploadObject(params.file.buffer, key, params.file.mimetype)
-
-  try {
-    const row = await insertProgramDocument({
-      programId:     params.programId,
-      kind:          params.kind,
-      practiceType:  params.practiceType,
-      disciplineId:  params.disciplineId ?? null,
-      fileName:      params.file.originalname,
-      fileSize:      params.file.size,
-      mimeType:      params.file.mimetype,
-      storagePath:   key,
-      extractedText: params.extractedText ?? null,
-      uploadedBy:    params.uploadedBy,
-    })
-    return row.id
-  } catch (err) {
-    // DB insert failed after upload — clean up the object so we don't leave
-    // orphaned files sitting in storage.
-    await deleteObject(key)
-    throw err
-  }
-}
 
 // Academic programs (учебные планы). Access is role-driven — see
 // services/programAccess.ts for the resolution rule. Every handler still
@@ -183,6 +135,16 @@ router.get('/pickable-units', asyncHandler(async (req, res) => {
   }
   // all-ro (no active role today) — nothing to pick from
   res.json([])
+}))
+
+// GET /teachers — lean institution-wide list for the «Ответственный за
+// дисциплину» picker (docs/RPD-WORKFLOW.md phase 4a). Deliberately its own
+// endpoint on THIS router rather than institution.ts's /teachers (gated
+// `teaching:view`) — a РОП typically holds `curriculum` access without a
+// `teaching` grant (docs/ACCESS-MATRIX.md Table A), so that gate would 403
+// exactly the caller who needs this picker.
+router.get('/teachers', asyncHandler(async (req, res) => {
+  res.json(await listAssignableTeachers(institutionId(req)))
 }))
 
 // ── Programs CRUD ───────────────────────────────────────────────────────────────
@@ -500,13 +462,47 @@ router.post('/:id/analyze', aiLimiter, asyncHandler(async (req, res) => {
     institutionId: req.teacher.institution_id ?? undefined,
     program:       detail,
   })
-  await saveAnalysis(detail.id, analysis)
+  const saved = await saveAnalysis(detail.id, analysis)
+  // Best-effort — a topology-persistence failure must never break the
+  // analysis report the РОП is waiting on (docs/topology-spec.md, Inc 0).
+  // Edges/links/ФГОС-matching are cheap (no extra LLM calls) — awaited so
+  // they're ready the moment the caller opens the Топология tab.
+  await persistTopology(detail, analysis, saved.id, req.teacher.id).catch((err) => {
+    logger.warn({ message: 'Topology persistence failed', programId: detail.id, error: (err as Error).message })
+  })
+  // Content-unit extraction is NOT awaited — one LLM round trip per uploaded
+  // РПД, which on a real programme can run for minutes past this point (see
+  // persistContentUnits' own comment). Never block the response on it.
+  persistContentUnits(detail, req.teacher.id).catch((err) => {
+    logger.warn({ message: 'Content-unit persistence failed', programId: detail.id, error: (err as Error).message })
+  })
   res.json(analysis)
 }))
 
 router.get('/:id/analysis', asyncHandler(async (req, res) => {
   const detail = await loadReadable(req)
   res.json(await getLatestAnalysis(detail.id))
+}))
+
+// GET /:id/topology — read-side for the «Топология» tab (Increment 1). Gated
+// explicitly on the curriculum domain (docs/topology-spec.md §6) — sibling
+// routes in this file rely only on requireProgramAccess + the SQL-level
+// domain filter in getProgramAccessScope; this is the first to state the
+// domain per-route, as the spec calls for.
+router.get('/:id/topology', requireDomain('curriculum', 'view'), asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  res.json(await getProgramTopology(detail.id))
+}))
+
+// GET /:id/disciplines/:disciplineId/content-units — lazy per-discipline
+// lookup for the Топология graph's detail panel (docs/topology-spec.md,
+// pulling Increment 2's read path forward — the extraction itself shipped
+// with Increment 0b, nothing read it back until now).
+router.get('/:id/disciplines/:disciplineId/content-units', requireDomain('curriculum', 'view'), asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  const discipline = detail.disciplines.find((d) => d.id === req.params.disciplineId)
+  if (!discipline) throw new NotFoundError('Дисциплина')
+  res.json(await listContentUnitsByDiscipline(discipline.id!))
 }))
 
 // GET /:id/analysis.pdf — server-rendered premium PDF of the latest analysis.
@@ -531,29 +527,6 @@ router.get('/:id/analysis.pdf', asyncHandler(async (req, res) => {
 // shape as program_analyses above. Never auto-published anywhere — the РОП
 // edits the text in place (rule #3), same posture as every other AI-assisted
 // authoring surface in the app.
-
-const PROGRAM_LEVEL_TO_FGOS_LEVEL: Record<string, string> = {
-  bachelor: 'бакалавриат', master: 'магистратура', specialist: 'специалитет',
-}
-
-// FGOS registry level terms — used as a fallback below to read a level out
-// of `education_level` (free text, e.g. "Высшее образование — бакалавриат",
-// set by the programme import form's «Уровень образования» field) when the
-// separate `level` enum column was never populated. The two columns are
-// filled by different code paths (`level` only by direct program creation,
-// `education_level` by the sveden.ru bulk-import flow) and nothing links
-// them — found 2026-07-24 when every real imported programme had
-// `education_level` set but `level` null, so a РОП who'd genuinely filled in
-// "Уровень образования" at import time still hit "не указан уровень
-// образования" here. `fgos_standards.level` is already these exact Russian
-// terms, so a substring match needs no further mapping.
-const FGOS_LEVEL_TERMS = ['бакалавриат', 'магистратура', 'специалитет', 'аспирантура']
-
-function inferFgosLevel(detail: { level: string | null; education_level: string | null }): string | null {
-  if (detail.level && PROGRAM_LEVEL_TO_FGOS_LEVEL[detail.level]) return PROGRAM_LEVEL_TO_FGOS_LEVEL[detail.level]
-  const text = (detail.education_level ?? '').toLowerCase()
-  return FGOS_LEVEL_TERMS.find((term) => text.includes(term)) ?? null
-}
 
 router.get('/:id/market-evidence', asyncHandler(async (req, res) => {
   const detail = await loadReadable(req)
@@ -897,6 +870,42 @@ router.put('/:id/disciplines/:disciplineId/responsible', asyncHandler(async (req
   const ok = await setDisciplineResponsible(detail.id, discipline.id!, teacherId)
   if (!ok) throw new NotFoundError('Дисциплина')
   res.json({ ok: true, responsible_teacher_id: teacherId })
+}))
+
+// ─── РПД approval — РОП's review queue (docs/RPD-WORKFLOW.md phase 4b) ────────
+
+// GET /:id/submissions — 'submitted' items for this programme, i.e. the
+// РОП's own review queue scoped to one plan (the frontend calls this once
+// per programme the РОП holds — see /rop-studio's aggregate queue view).
+router.get('/:id/submissions', asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  res.json(await listSubmittedForPrograms([detail.id]))
+}))
+
+// POST /:id/disciplines/:disciplineId/submission/:action — 'return' or
+// 'forward'. Only the transitions valid FROM 'submitted' — trying either on
+// a submission not currently 'submitted' (e.g. already forwarded to УМЦ)
+// fails via rpdSubmissionState's own table, not a route-level guess.
+router.post('/:id/disciplines/:disciplineId/submission/:action', asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  assertEdit(req, detail.org_unit_id)
+
+  const action = req.params.action
+  if (action !== 'return' && action !== 'forward') {
+    throw new ValidationError('Недопустимое действие — только return или forward')
+  }
+
+  const submission = await findSubmissionByDiscipline(req.params.disciplineId)
+  if (!submission || submission.program_id !== detail.id) throw new NotFoundError('Заявка на проверку')
+
+  const comment = typeof req.body?.comment === 'string' ? req.body.comment.trim().slice(0, 2000) : undefined
+  if (action === 'return' && !comment) {
+    throw new ValidationError('Укажите замечания — без них преподаватель не поймёт, что исправлять')
+  }
+
+  const result = await transitionSubmission(submission.id, action, req.teacher.id, comment)
+  if ('error' in result) throw new ValidationError(result.error)
+  res.json(result.submission)
 }))
 
 // POST /:id/disciplines/:disciplineId/review — Feature K scoped to a

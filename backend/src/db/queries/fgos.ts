@@ -122,6 +122,25 @@ export async function getProfstandardRefsForDirection(
   return rows
 }
 
+// Topology graph substrate (docs/topology-spec.md, Increment 0) — resolves a
+// programme's declared competency codes onto the canonical registry. Unlike
+// getProfstandardRefsForDirection above, this filters to published standards
+// only: a draft row is unconfirmed by a platform admin and must never become
+// authoritative for a programme's competency identity.
+export async function findPublishedFgosCompetencies(
+  directionCode: string,
+  level: string
+): Promise<FgosCompetencyRow[]> {
+  const { rows } = await pool.query<FgosCompetencyRow>(
+    `SELECT c.* FROM fgos_competencies c
+       JOIN fgos_standards s ON s.id = c.fgos_standard_id
+      WHERE s.direction_code = $1 AND s.level = $2 AND s.status = 'published'
+      ORDER BY c.sort_order`,
+    [directionCode, level]
+  )
+  return rows
+}
+
 export async function getFgosStandardById(id: string): Promise<FgosStandardWithChildren | null> {
   const { rows } = await pool.query<FgosStandardRow>(
     `SELECT * FROM fgos_standards WHERE id = $1`,

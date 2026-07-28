@@ -44,6 +44,7 @@ import challengesRouter from './routes/challenges'
 import rpdMonitorRouter from './routes/rpdMonitor'
 import umcDashboardRouter from './routes/umcDashboard'
 import mySyllabiRouter from './routes/mySyllabi'
+import rpdApprovalsRouter from './routes/rpdApprovals'
 // Side-effect import — registers per-institution provider resolution into the
 // LLM registry before any AI call goes through.
 import './services/llm/institutionResolver'
@@ -171,6 +172,7 @@ app.use('/api/institution/programs',  programsRouter)      // before /api/instit
 app.use('/api/institution/structure', orgStructureRouter)  // before /api/institution so it isn't shadowed
 app.use('/api/institution/rpd',       rpdMonitorRouter)    // before /api/institution so it isn't shadowed
 app.use('/api/institution/umc-dashboard', umcDashboardRouter)  // before /api/institution so it isn't shadowed
+app.use('/api/institution/rpd-approvals', rpdApprovalsRouter)  // before /api/institution so it isn't shadowed
 app.use('/api/my-syllabi', mySyllabiRouter)   // teacher-scoped — see routes/mySyllabi.ts
 app.use('/api/leadership', leadershipRouter)
 app.use('/api/institution',   institutionRouter)

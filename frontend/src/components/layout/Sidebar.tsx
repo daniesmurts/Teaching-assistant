@@ -38,6 +38,7 @@ const NAV_GROUPS: NavGroup[] = [
     // Essential so fresh accounts (РОП pilot) see the студия without needing
     // a first grading to unlock the full nav.
     { icon: 'layers',       label: 'РПД-студия',     to: '/curriculum', essential: true },
+    { icon: 'list-checks',  label: 'Мои РПД',        to: '/my-syllabi' },
     { icon: 'list-checks',  label: 'Критерии',       to: '/criteria' },
     { icon: 'list-checks',  label: 'Рубрики',        to: '/rubrics' },
     { icon: 'sparkle',      label: 'Учебный цикл',   to: '/learning-loop' },
@@ -139,27 +140,35 @@ export default function Sidebar({ onClose }: Props) {
   // программы» entry. Server resolves the actual per-row scope.
   const canSeePrograms =
     (teacher?.program_access && teacher.program_access !== 'none') || isInstitutionAdmin
-  // Research.md §7.10 Phase 1 — a curriculum-domain grant (e.g. УМЦ head)
-  // reaches the «Организация» panel too, scoped to what it covers
-  // (InstitutionLayout filters the NAV), without being an institution admin.
-  const hasCurriculumAccess =
-    !!teacher?.curriculum_access && teacher.curriculum_access !== 'none'
-  // Research.md §7.10 Phase 2 — a teaching-domain grant (e.g. ПР УР) reaches
-  // the «Организация» panel too (Обзор/Использование/roster read), scoped by
-  // InstitutionLayout the same way curriculum access is.
-  const hasTeachingAccess =
-    !!teacher?.teaching_access && teacher.teaching_access !== 'none'
+  // docs/ACCESS-MATRIX.md — «Критерии/Рубрики» institution curation, gated on
+  // the narrower `criteria_access` flag (department/institute leadership
+  // only — ЗК/ДИ/ДЕК — not every `curriculum`-domain role). NOT plain
+  // curriculum_access: no NAV item in InstitutionLayout is gated on the
+  // broad `curriculum` domain anymore — a РОП/РПГ/УМУ/РУМЦ/МУМЦ holding only
+  // that would otherwise see «Организация» in the sidebar and land on an
+  // empty panel inside.
+  const hasCriteriaAccess =
+    !!teacher?.criteria_access && teacher.criteria_access !== 'none'
+  // docs/ACCESS-MATRIX.md — Обзор/Использование/Преподаватели-чтение, gated
+  // on the narrower `org_overview_access` flag (same department/institute-
+  // leadership restriction as criteria_access — a plain `teaching_access`
+  // check no longer gates anything in InstitutionLayout, since a РОП/РПГ
+  // holding only that would otherwise see «Организация» and land on an
+  // empty panel inside; their own subtree's activity is /leadership).
+  const hasOrgOverviewAccess =
+    !!teacher?.org_overview_access && teacher.org_overview_access !== 'none'
   // Research.md §7.10 Phase 3 slice B — a platform-domain grant (e.g. an
   // institute director scoped to their own subtree) reaches the
   // «Организация» panel too (Структура), scoped the same way.
   const hasPlatformAccess =
     !!teacher?.platform_access && teacher.platform_access !== 'none'
   // docs/ACCESS-MATRIX.md — a umu-domain grant (Методист/Нач. УМУ, РУМЦ)
-  // reaches the panel for Мониторинг РПД, scoped the same way.
+  // reaches the panel for Мониторинг РПД / Готовность УМК / Согласование
+  // РПД, scoped the same way.
   const hasUmuAccess =
     !!teacher?.umu_access && teacher.umu_access !== 'none'
   const canSeeInstitutionPanel =
-    isInstitutionAdmin || hasCurriculumAccess || hasTeachingAccess || hasPlatformAccess || hasUmuAccess
+    isInstitutionAdmin || hasCriteriaAccess || hasOrgOverviewAccess || hasPlatformAccess || hasUmuAccess
 
   function logout() { logoutApi().catch(() => {}); clearAuth(); navigate('/login') }
 

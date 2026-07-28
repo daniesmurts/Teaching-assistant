@@ -6,27 +6,32 @@ import { logout as logoutApi } from '../../api/auth'
 // `undefined` = institution-root admin only (permanently, for the
 // invite/deactivate/settings surfaces — see Phase 3 slice B's "explicitly
 // excluded" note in TODO.md: centrally-owned provisioning, not delegated).
-// 'curriculum'/'teaching'/'platform' entries additionally open for that
+// 'curriculum'/'teaching'/'platform'/'umu' entries additionally open for that
 // domain's grant; `minLevel` matches the backend's requireDomain minimum so
-// a lower-level grant doesn't see a tab that would just 403 (RPD monitor and
-// criteria/rubrics writes require 'edit'; the Phase 2 teaching routes are
-// all read-only so 'view' suffices; org-structure CRUD requires 'admin').
-type NavDomain = 'curriculum' | 'teaching' | 'platform' | 'umu'
+// a lower-level grant doesn't see a tab that would just 403 (org-structure
+// CRUD requires 'admin'; the Phase 2 teaching routes are all read-only so
+// 'view' suffices). 'criteria' and 'orgOverview' are NOT real domains —
+// they're narrower `criteria_access`/`org_overview_access` flags
+// (docs/ACCESS-MATRIX.md: department/institute leadership only, not every
+// role holding the underlying `curriculum`/`teaching` domain grant — see
+// accessScope.ts's CRITERIA_READ_UNIT_TYPES / TEACHING_OVERVIEW_UNIT_TYPES).
+type NavDomain = 'curriculum' | 'teaching' | 'platform' | 'umu' | 'criteria' | 'orgOverview'
 // `group` renders a small section header above the first item of that group
 // — purely a sidebar grouping label, NOT a new access-control axis. УМУ
 // (Учебно-методическое управление) is real-world department framing for
-// features already gated by the 'curriculum' domain grant; grouped items
-// must stay adjacent in this array (the renderer only checks the
-// immediately-preceding visible item, not a full re-sort).
+// features already gated by the 'umu' domain grant; grouped items must stay
+// adjacent in this array (the renderer only checks the immediately-preceding
+// visible item, not a full re-sort).
 const NAV: { to: string; label: string; end: boolean; domain?: NavDomain; minLevel?: 'view' | 'edit' | 'admin'; group?: string }[] = [
-  { to: '/institution',           label: 'Обзор',         end: true, domain: 'teaching', minLevel: 'view' },
+  { to: '/institution',           label: 'Обзор',         end: true, domain: 'orgOverview', minLevel: 'view' },
   { to: '/institution/structure', label: 'Структура',     end: false, domain: 'platform', minLevel: 'admin' },
   { to: '/institution/rpd',       label: 'Мониторинг РПД', end: false, domain: 'umu', minLevel: 'view', group: 'УМУ' },
-  { to: '/institution/umc',       label: 'Готовность УМК', end: false, domain: 'curriculum', minLevel: 'view', group: 'УМУ' },
-  { to: '/institution/usage',     label: 'Использование', end: false, domain: 'teaching', minLevel: 'view' },
-  { to: '/institution/teachers', label: 'Преподаватели', end: false, domain: 'teaching', minLevel: 'view' },
-  { to: '/institution/rubrics',  label: 'Критерии',      end: false, domain: 'curriculum', minLevel: 'view' },
-  { to: '/institution/rubric-presets', label: 'Рубрики',  end: false, domain: 'curriculum', minLevel: 'view' },
+  { to: '/institution/umc',       label: 'Готовность УМК', end: false, domain: 'umu', minLevel: 'view', group: 'УМУ' },
+  { to: '/institution/rpd-approvals', label: 'Согласование РПД', end: false, domain: 'umu', minLevel: 'view', group: 'УМУ' },
+  { to: '/institution/usage',     label: 'Использование', end: false, domain: 'orgOverview', minLevel: 'view' },
+  { to: '/institution/teachers', label: 'Преподаватели', end: false, domain: 'orgOverview', minLevel: 'view' },
+  { to: '/institution/rubrics',  label: 'Критерии',      end: false, domain: 'criteria', minLevel: 'view' },
+  { to: '/institution/rubric-presets', label: 'Рубрики',  end: false, domain: 'criteria', minLevel: 'view' },
   { to: '/programs',              label: 'Образовательные программы', end: false },
   { to: '/institution/shared-rag', label: 'Общий цикл',  end: false },
   { to: '/institution/strategy-document', label: 'Стратегия развития', end: false },
@@ -40,13 +45,15 @@ const DOMAIN_LEVEL_RANK: Record<string, number> = { view: 1, edit: 2, admin: 3 }
 /** The teacher's access level for a NAV item's domain, ranked. 0 = no access
  *  (item.domain undefined items are handled separately — admin-only). */
 function domainRank(
-  teacher: { curriculum_access?: string; teaching_access?: string; platform_access?: string; umu_access?: string } | null,
+  teacher: { curriculum_access?: string; teaching_access?: string; platform_access?: string; umu_access?: string; criteria_access?: string; org_overview_access?: string } | null,
   domain?: NavDomain
 ): number {
   if (!domain) return 0
   const value = domain === 'curriculum' ? teacher?.curriculum_access
     : domain === 'teaching' ? teacher?.teaching_access
     : domain === 'umu' ? teacher?.umu_access
+    : domain === 'criteria' ? teacher?.criteria_access
+    : domain === 'orgOverview' ? teacher?.org_overview_access
     : teacher?.platform_access
   return DOMAIN_LEVEL_RANK[value ?? ''] ?? 0
 }

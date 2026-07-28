@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { deriveStructure, deriveOutcomeDelivery, deriveMappingConfidence, deriveLoadCheck, deriveContentConfidence } from './programAnalysis'
+import {
+  deriveStructure, deriveOutcomeDelivery, deriveMappingConfidence, deriveLoadCheck, deriveContentConfidence,
+  resolveSequencingEdges,
+} from './programAnalysis'
 import type { PrerequisiteEdge, ProgramDiscipline, CompetencyProgressionRow, SemesterLoad } from '../../../shared/types'
 
 const sem = (semester: number, credits: number | null): SemesterLoad => ({ semester, discipline_count: 1, credits })
@@ -7,8 +10,8 @@ const sem = (semester: number, credits: number | null): SemesterLoad => ({ semes
 const row = (status: CompetencyProgressionRow['status']): CompetencyProgressionRow =>
   ({ kind: 'competency', code: 'X', title: 'x', cells: [], status, note: '' })
 
-const disc = (name: string, semester: number): ProgramDiscipline =>
-  ({ name, semester, course_id: null, credits: null, control_form: null, competency_codes: [], sort_order: 0 })
+const disc = (name: string, semester: number, id?: string): ProgramDiscipline =>
+  ({ id, name, semester, course_id: null, credits: null, control_form: null, competency_codes: [], sort_order: 0 })
 
 const edge = (from: string, fromSem: number, to: string, toSem: number): PrerequisiteEdge =>
   ({ from_name: from, from_semester: fromSem, to_name: to, to_semester: toSem, reason: '', inverted: toSem < fromSem, recommendation: '' })
@@ -59,6 +62,62 @@ describe('deriveStructure', () => {
     expect(s.layers).toHaveLength(0)
     expect(s.longest_chains).toHaveLength(0)
     expect(s.isolated.map((x) => x.name)).toEqual(['A'])
+  })
+})
+
+describe('resolveSequencingEdges', () => {
+  it('resolves both endpoints to their program_disciplines.id', () => {
+    const disciplines = [disc('Математика', 1, 'd1'), disc('Механика', 3, 'd2')]
+    const { edges, unmatchedNames } = resolveSequencingEdges(
+      [{ from: 'Математика', to: 'Механика', reason: 'основа' }], disciplines
+    )
+    expect(edges).toHaveLength(1)
+    expect(edges[0]).toMatchObject({ from_id: 'd1', to_id: 'd2', from_name: 'Математика', to_name: 'Механика' })
+    expect(unmatchedNames).toEqual([])
+  })
+
+  it('matches by normalized name (case/whitespace-insensitive) same as before', () => {
+    const disciplines = [disc('Математика', 1, 'd1'), disc('Механика', 3, 'd2')]
+    const { edges } = resolveSequencingEdges(
+      [{ from: '  математика  ', to: 'МЕХАНИКА', reason: '' }], disciplines
+    )
+    expect(edges).toHaveLength(1)
+    expect(edges[0].from_id).toBe('d1')
+    expect(edges[0].to_id).toBe('d2')
+  })
+
+  it('surfaces an unmatched endpoint instead of silently dropping it', () => {
+    const disciplines = [disc('Математика', 1, 'd1')]
+    const { edges, unmatchedNames } = resolveSequencingEdges(
+      [{ from: 'Математика', to: 'Несуществующая дисциплина', reason: '' }], disciplines
+    )
+    expect(edges).toHaveLength(0)
+    expect(unmatchedNames).toEqual(['Несуществующая дисциплина'])
+  })
+
+  it('still resolves an edge even when a discipline has no id (id is optional, name matching still works)', () => {
+    const disciplines = [disc('Математика', 1), disc('Механика', 3)]   // no ids — e.g. an unsaved draft plan
+    const { edges, unmatchedNames } = resolveSequencingEdges(
+      [{ from: 'Математика', to: 'Механика', reason: '' }], disciplines
+    )
+    expect(edges).toHaveLength(1)
+    expect(edges[0].from_id).toBeUndefined()
+    expect(edges[0].to_id).toBeUndefined()
+    expect(unmatchedNames).toEqual([])
+  })
+
+  it('dedups repeated pairs', () => {
+    const disciplines = [disc('A', 1, 'd1'), disc('B', 2, 'd2')]
+    const { edges } = resolveSequencingEdges(
+      [{ from: 'A', to: 'B', reason: 'x' }, { from: 'A', to: 'B', reason: 'y' }], disciplines
+    )
+    expect(edges).toHaveLength(1)
+  })
+
+  it('flags inverted edges (dependent taught earlier than its prerequisite)', () => {
+    const disciplines = [disc('A', 3, 'd1'), disc('B', 1, 'd2')]
+    const { edges } = resolveSequencingEdges([{ from: 'A', to: 'B', reason: '' }], disciplines)
+    expect(edges[0].inverted).toBe(true)
   })
 })
 

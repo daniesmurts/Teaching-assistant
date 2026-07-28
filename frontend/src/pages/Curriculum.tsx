@@ -9,6 +9,7 @@ import { analyzeOverlap } from '../api/curriculum'
 import CurriculumConformance from './CurriculumConformance'
 import CurriculumStudio from './CurriculumStudio'
 import { useUIStore } from '../store/uiStore'
+import { useSessionStorageState } from '../hooks/useSessionStorageState'
 import type { CurriculumAnalysis, OverlapPair, OverlapType } from '../types'
 
 // Display metadata for each overlap class. Order = how strongly it matters.
@@ -57,9 +58,12 @@ export default function Curriculum() {
             </TabButton>
           </div>
 
-          {tab === 'overlap' && <OverlapTab />}
-          {tab === 'conformance' && <CurriculumConformance />}
-          {tab === 'studio' && <CurriculumStudio />}
+          {/* All three tabs stay mounted so switching between them doesn't
+              discard an in-progress or completed analysis — only visibility
+              toggles. sessionStorage (below / in each tab) covers refresh. */}
+          <div className={tab === 'overlap' ? '' : 'hidden'}><OverlapTab /></div>
+          <div className={tab === 'conformance' ? '' : 'hidden'}><CurriculumConformance /></div>
+          <div className={tab === 'studio' ? '' : 'hidden'}><CurriculumStudio /></div>
         </div>
       </div>
     </div>
@@ -82,8 +86,8 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
 function OverlapTab() {
   const addToast = useUIStore((s) => s.addToast)
 
-  const [selected, setSelected] = useState<string[]>([])
-  const [result, setResult]     = useState<CurriculumAnalysis | null>(null)
+  const [selected, setSelected] = useSessionStorageState<string[]>('curriculum:overlap:selected', [])
+  const [result, setResult]     = useSessionStorageState<CurriculumAnalysis | null>('curriculum:overlap:result', null)
 
   const { data: courses = [] } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
 

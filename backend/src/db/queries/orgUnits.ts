@@ -78,13 +78,14 @@ export interface UnitRoleRow {
   created_at:  Date
 }
 
-/** A teacher's role rows joined to the unit `path` — enough to evaluate scope
- *  in memory without a second round trip. */
+/** A teacher's role rows joined to the unit `path` (and `type_code`) — enough
+ *  to evaluate scope in memory without a second round trip. */
 export interface TeacherRoleScope {
   org_unit_id: string
   role:        string
   domain:      string
   path:        string
+  type_code:   string
 }
 
 // ─── Reads ────────────────────────────────────────────────────────────────────
@@ -202,7 +203,7 @@ export async function getRootUnitForInstitution(institutionId: string): Promise<
  *  caller can answer many access questions from this single fetch. */
 export async function listRoleScopesForTeacher(teacherId: string): Promise<TeacherRoleScope[]> {
   const { rows } = await pool.query<TeacherRoleScope>(
-    `SELECT our.org_unit_id, our.role, our.domain, u.path
+    `SELECT our.org_unit_id, our.role, our.domain, u.path, u.type_code
        FROM org_unit_roles our
        JOIN org_units u ON u.id = our.org_unit_id
       WHERE our.teacher_id = $1`,
@@ -245,6 +246,36 @@ export async function teacherCanActOnUnit(
     [teacherId, targetUnitId, roles as string[], domain]
   )
   return rows[0]?.ok ?? false
+}
+
+/**
+ * Every teacher who holds `roles` on `targetUnitId` or any of its ancestors —
+ * the "who" counterpart to teacherCanActOnUnit's "does this one teacher"
+ * check, same ancestor-or-self path match. Used by
+ * services/rpdNotifications.ts to find the РОП(s) to notify when a
+ * discipline is submitted for review (docs/RPD-WORKFLOW.md phase 4d) — a
+ * programme's `org_unit_id` may have more than one admin/edit holder
+ * (co-РОП, institute director covering it too), and all of them should hear
+ * about it, not just whichever one the caller happens to know about.
+ */
+export async function listRoleHoldersForUnit(
+  targetUnitId: string,
+  roles:        readonly string[],
+  domain:       GrantDomain,
+): Promise<{ id: string; email: string; name: string | null }[]> {
+  const { rows } = await pool.query<{ id: string; email: string; name: string | null }>(
+    `SELECT DISTINCT t.id, t.email, t.name
+       FROM org_unit_roles our
+       JOIN org_units holder ON holder.id = our.org_unit_id
+       JOIN org_units target ON target.id = $1
+       JOIN teachers t ON t.id = our.teacher_id
+      WHERE our.role = ANY($2::text[])
+        AND (our.domain = 'all' OR our.domain = $3)
+        AND target.path LIKE holder.path || '%'
+        AND t.is_active = true`,
+    [targetUnitId, roles as string[], domain]
+  )
+  return rows
 }
 
 /**

@@ -1,12 +1,132 @@
 import { useState, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { listPrograms, getMarketEvidence, generateMarketEvidence, updateMarketEvidence, getSupportedRegions } from '../api/programs'
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  listPrograms, getMarketEvidence, generateMarketEvidence, updateMarketEvidence, getSupportedRegions,
+  getSubmissionQueue, actOnSubmission,
+} from '../api/programs'
 import Button from '../components/ui/Button'
 import Select from '../components/ui/Select'
 import MultiSelect from '../components/ui/MultiSelect'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import Icon from '../components/ui/Icon'
+import SubmissionStatusBadge from '../components/rpd/SubmissionStatusBadge'
 import { useUIStore } from '../store/uiStore'
+import type { RpdSubmission } from '../types'
+
+// ─── Проверка РПД — the РОП's review queue (docs/RPD-WORKFLOW.md phase 4b) ────
+// 'submitted' items across every programme this РОП holds, aggregated
+// client-side (one query per programme — a РОП typically holds a handful,
+// so this stays cheap without a dedicated cross-programme aggregate endpoint).
+
+function coveragePct(s: RpdSubmission): string {
+  return s.coverage != null ? `${s.coverage}%` : '—'
+}
+
+function SubmissionQueueCard({ submission, onAct, busy }: {
+  submission: RpdSubmission
+  onAct: (programId: string, disciplineId: string, action: 'return' | 'forward', comment?: string) => void
+  busy: boolean
+}) {
+  const [comment, setComment] = useState('')
+  const [showReturn, setShowReturn] = useState(false)
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-sans text-sm font-medium text-ink">{submission.discipline_name}</h3>
+            <SubmissionStatusBadge status={submission.status} />
+          </div>
+          <div className="text-xs font-sans text-ink-tertiary mt-1">
+            {submission.program_code && <span>{submission.program_code} · </span>}
+            {submission.program_name}
+            {submission.responsible_teacher_name && <span> · {submission.responsible_teacher_name}</span>}
+          </div>
+        </div>
+        <div className="text-right flex-shrink-0">
+          <div className="text-[10px] font-sans text-ink-tertiary uppercase tracking-wider">Покрытие ИИ</div>
+          <div className="text-sm font-sans font-medium text-ink">{coveragePct(submission)}</div>
+        </div>
+      </div>
+
+      {showReturn ? (
+        <div className="mt-3 space-y-2">
+          <textarea
+            className="w-full text-xs font-sans bg-canvas border border-border rounded-md px-2.5 py-1.5 min-h-[70px] resize-y"
+            placeholder="Замечания — что нужно исправить"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <Button
+              size="sm" variant="danger" disabled={busy || !comment.trim()}
+              onClick={() => onAct(submission.program_id, submission.discipline_id, 'return', comment.trim())}
+            >
+              Вернуть с замечаниями
+            </Button>
+            <Button size="sm" variant="secondary" disabled={busy} onClick={() => setShowReturn(false)}>Отмена</Button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 flex gap-2">
+          <Button size="sm" disabled={busy} onClick={() => onAct(submission.program_id, submission.discipline_id, 'forward')}>
+            {busy ? <LoadingSpinner size={13} /> : null} Передать в УМЦ
+          </Button>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => setShowReturn(true)}>Вернуть</Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SubmissionsQueueTab() {
+  const qc = useQueryClient()
+  const addToast = useUIStore((s) => s.addToast)
+  const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: listPrograms })
+
+  const queueQueries = useQueries({
+    queries: programs.map((p) => ({
+      queryKey: ['rop-submission-queue', p.id],
+      queryFn: () => getSubmissionQueue(p.id),
+      enabled: programs.length > 0,
+    })),
+  })
+  const loading = queueQueries.some((q) => q.isLoading)
+  const submissions = queueQueries.flatMap((q) => q.data ?? [])
+
+  const actMut = useMutation({
+    mutationFn: (args: { programId: string; disciplineId: string; action: 'return' | 'forward'; comment?: string }) =>
+      actOnSubmission(args.programId, args.disciplineId, args.action, args.comment),
+    onSuccess: (_data, args) => {
+      qc.invalidateQueries({ queryKey: ['rop-submission-queue', args.programId] })
+      addToast(args.action === 'forward' ? 'Передано в УМЦ' : 'Возвращено на доработку', 'success')
+    },
+    onError: () => addToast('Не удалось выполнить действие', 'error'),
+  })
+
+  if (loading) return <div className="py-12 text-center text-xs font-sans text-ink-tertiary">Загрузка…</div>
+  if (submissions.length === 0) {
+    return (
+      <p className="text-sm font-sans text-ink-secondary py-8 text-center">
+        Нет дисциплин, ожидающих проверки.
+      </p>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {submissions.map((s) => (
+        <SubmissionQueueCard
+          key={s.id}
+          submission={s}
+          busy={actMut.isPending}
+          onAct={(programId, disciplineId, action, comment) => actMut.mutate({ programId, disciplineId, action, comment })}
+        />
+      ))}
+    </div>
+  )
+}
 
 // РОП Студия v0 (TODO.md Feature Z, Phase 0 pilot) — generates one
 // citation-grounded «обоснование актуальности» section per programme from
@@ -23,6 +143,7 @@ import { useUIStore } from '../store/uiStore'
 export default function RopStudio() {
   const qc = useQueryClient()
   const addToast = useUIStore((s) => s.addToast)
+  const [tab, setTab] = useState<'evidence' | 'submissions'>('evidence')
   const [programId, setProgramId] = useState<string | null>(null)
   const [regionCodes, setRegionCodes] = useState<string[]>([])
   const [professionsInput, setProfessionsInput] = useState('')
@@ -77,6 +198,24 @@ export default function RopStudio() {
           </p>
         </div>
 
+        <div className="flex gap-1 border-b border-border">
+          {(['evidence', 'submissions'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-3 py-2 text-sm font-sans font-medium border-b-2 -mb-px transition-colors ${
+                tab === t ? 'border-amber text-ink' : 'border-transparent text-ink-tertiary hover:text-ink-secondary'
+              }`}
+            >
+              {t === 'evidence' ? 'Обоснование' : 'Проверка РПД'}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'submissions' ? (
+          <SubmissionsQueueTab />
+        ) : (
+        <>
         <div className="max-w-sm">
           <Select
             value={programId ?? ''}
@@ -278,6 +417,8 @@ export default function RopStudio() {
               </p>
             )}
           </>
+        )}
+        </>
         )}
       </div>
     </div>

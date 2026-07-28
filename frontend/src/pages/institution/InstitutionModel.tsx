@@ -66,14 +66,14 @@ export default function InstitutionModel() {
         <ProviderCard
           name="deepseek"
           label="DeepSeek"
-          description="Текущий по умолчанию. Лучшее качество, особенно на длинных русскоязычных работах. Не РФ-резидент (либо размещён на серверах ИСПУМ — уточняйте)."
+          description="Текущий по умолчанию. Лучшее качество, особенно на длинных русскоязычных работах."
           chosen={current === null || current === 'deepseek'}
           onClick={() => pick(current === 'deepseek' ? null : 'deepseek')}
         />
         <ProviderCard
           name="yandex"
           label="Yandex GPT"
-          description="РФ-резидент. Без VPN. На сложных задачах может уступать DeepSeek на 5–10%, но соответствие отечественной нормативке полное."
+          description="РФ-резидент. Без VPN. На сложных задачах может уступать DeepSeek на 5–10%."
           chosen={current === 'yandex'}
           onClick={() => pick('yandex')}
         />
@@ -94,7 +94,7 @@ export default function InstitutionModel() {
           </li>
           <li>
             При сбое выбранного провайдера система автоматически перезапускает запрос на DeepSeek —
-            проверка не сорвётся. Долгосрочно DeepSeek будет размещён на серверах ИСПУМ в РФ.
+            проверка не сорвётся.
           </li>
         </ul>
       </div>

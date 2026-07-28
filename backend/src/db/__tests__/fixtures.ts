@@ -7,7 +7,9 @@ import bcrypt from 'bcryptjs'
 import { pool } from '../connection'
 import { createTeacher } from '../queries/teachers'
 import { createCourse, updateCourse } from '../queries/courses'
-import type { Teacher, Course } from '../../../../shared/types'
+import { createProgram, replaceDisciplines, replaceCompetencies, getProgramDetail } from '../queries/programs'
+import { createFgosStandardDraft, publishFgosStandard, getFgosStandardById } from '../queries/fgos'
+import type { Teacher, Course, Program, ProgramDiscipline, ProgramCompetency } from '../../../../shared/types'
 
 let counter = 0
 function unique(prefix: string): string {
@@ -121,6 +123,105 @@ export async function createTestAssignment(
  * unitVector256(0) and unitVector256(128) is always 0 (orthogonal, furthest)
  * — makes RAG ordering assertions exact instead of relying on random luck.
  */
+export async function createTestProgram(
+  institutionId: string, createdBy: string,
+  overrides?: { name?: string; code?: string | null; level?: string | null }
+): Promise<Program> {
+  return createProgram(institutionId, createdBy, {
+    name:  overrides?.name ?? unique('Test Program'),
+    code:  overrides?.code,
+    level: overrides?.level,
+  })
+}
+
+/** Replaces (sets) a programme's full discipline list and returns the rows
+ *  with their assigned ids — replaceDisciplines() itself returns void, so
+ *  this re-fetches via getProgramDetail() (the real read path) rather than
+ *  reconstructing ids from raw SQL. replaceDisciplines is id-preserving
+ *  (see its own doc comment): pass back a previous call's `id` on any entry
+ *  that should keep its identity (and any FK rows pointing at it) rather
+ *  than being deleted and recreated as a new row. */
+export async function createTestProgramDisciplines(
+  institutionId: string, programId: string,
+  disciplines: { id?: string; name: string; semester?: number; competencyCodes?: string[] }[]
+): Promise<ProgramDiscipline[]> {
+  await replaceDisciplines(programId, disciplines.map((d, i) => ({
+    id:                d.id,
+    course_id:         null,
+    name:              d.name,
+    semester:          d.semester ?? 1,
+    credits:           null,
+    control_form:      null,
+    competency_codes:  d.competencyCodes ?? [],
+    sort_order:        i,
+  })))
+  const detail = await getProgramDetail(programId, institutionId)
+  return detail!.disciplines
+}
+
+/** Same replace-then-refetch pattern as createTestProgramDisciplines, for
+ *  program_competencies. */
+export async function createTestProgramCompetencies(
+  institutionId: string, programId: string,
+  competencies: { code: string; title?: string }[]
+): Promise<ProgramCompetency[]> {
+  await replaceCompetencies(programId, competencies.map((c, i) => ({
+    kind:       'competency',
+    code:       c.code,
+    title:      c.title ?? c.code,
+    sort_order: i,
+  })))
+  const detail = await getProgramDetail(programId, institutionId)
+  return detail!.competencies
+}
+
+export interface TestFgosStandard {
+  id:             string
+  direction_code: string
+  level:          string
+  competencies:   { id: string; type: 'УК' | 'ОПК'; code: string }[]
+}
+
+/** Draft-then-publish, same two-step flow routes/adminFgos.ts uses — a
+ *  draft standard is never authoritative (findPublishedFgosCompetencies
+ *  filters to status='published'), so tests need the real publish step too,
+ *  not just the draft insert. */
+export async function createTestFgosStandard(
+  createdBy: string,
+  overrides?: {
+    directionCode?: string
+    level?: string
+    competencies?: { type: 'УК' | 'ОПК'; code: string; formulation?: string }[]
+  }
+): Promise<TestFgosStandard> {
+  // No uniqueness needed — each integration test runs inside its own rolled-
+  // back transaction (see transactionalTestIsolation.ts), so a fixed default
+  // never collides across tests.
+  const directionCode = overrides?.directionCode ?? '09.03.01'
+  const level = overrides?.level ?? 'бакалавриат'
+  const comps = overrides?.competencies ?? [
+    { type: 'УК' as const,  code: 'УК-1',  formulation: 'Test УК-1 formulation' },
+    { type: 'ОПК' as const, code: 'ОПК-1', formulation: 'Test ОПК-1 formulation' },
+  ]
+  const payload = {
+    standard: { direction_code: directionCode, level, title: unique('Test FGOS Standard') },
+    competencies: comps.map((c) => ({
+      type: c.type, code: c.code, formulation: c.formulation ?? c.code, is_verbatim_verified: true,
+    })),
+    structureRequirements: [],
+    profstandardRefs: [],
+  }
+  const draft = await createFgosStandardDraft(payload, createdBy)
+  await publishFgosStandard(draft.id, payload)
+  const full = await getFgosStandardById(draft.id)
+  return {
+    id:             full!.id,
+    direction_code: full!.direction_code,
+    level:          full!.level,
+    competencies:   full!.competencies.map((c) => ({ id: c.id, type: c.type, code: c.code })),
+  }
+}
+
 export function unitVector256(index: number, perturbation = 0): number[] {
   const v = new Array(256).fill(0)
   v[index % 256] = 1

@@ -441,3 +441,69 @@ ${btn(videoUrl, 'Смотреть видео и попробовать')}
       `Отписаться от подсказок: ${unsubUrl}\n\nИСПУМ · ispum.ru`,
   }
 }
+
+// ─── РПД approval workflow (docs/RPD-WORKFLOW.md phase 4d) ────────────────────
+
+function myRpdUrl(): string {
+  return `${process.env.FRONTEND_URL ?? ''}/my-syllabi`
+}
+
+export function rpdSubmittedEmail(
+  ropName: string, disciplineName: string, programName: string,
+): Omit<EmailPayload, 'to'> {
+  return {
+    subject: `На проверку сдана РПД «${disciplineName}»`,
+    html: wrap(`
+      <p>Здравствуйте, ${escapeHtml(firstName(ropName))}!</p>
+      <p>Рабочая программа дисциплины <strong>«${escapeHtml(disciplineName)}»</strong>
+         (${escapeHtml(programName)}) отправлена на проверку.</p>
+      <p>ИИ уже проверил покрытие компетенций — отчёт ждёт вас в очереди проверки в РОП Студии.</p>
+      ${btn(`${process.env.FRONTEND_URL ?? ''}/rop-studio`, 'Открыть очередь проверки')}
+    `),
+    text:
+      `Здравствуйте, ${firstName(ropName)}!\n\n` +
+      `РПД «${disciplineName}» (${programName}) отправлена на проверку.\n\n` +
+      `Открыть очередь: ${process.env.FRONTEND_URL ?? ''}/rop-studio\n\nИСПУМ · ispum.ru`,
+  }
+}
+
+export function rpdReturnedEmail(
+  teacherName: string, disciplineName: string, comment: string | null,
+): Omit<EmailPayload, 'to'> {
+  return {
+    subject: `РПД «${disciplineName}» возвращена на доработку`,
+    html: wrap(`
+      <p>Здравствуйте, ${escapeHtml(firstName(teacherName))}!</p>
+      <p>Ваша рабочая программа дисциплины <strong>«${escapeHtml(disciplineName)}»</strong>
+         возвращена на доработку.</p>
+      ${comment ? `
+      <div style="margin:16px 0;padding:14px 18px;background:#FEF6E0;border-radius:8px">
+        <strong>Замечания:</strong><br>${escapeHtml(comment)}
+      </div>` : ''}
+      ${btn(myRpdUrl(), 'Открыть «Мои РПД»')}
+    `),
+    text:
+      `Здравствуйте, ${firstName(teacherName)}!\n\n` +
+      `РПД «${disciplineName}» возвращена на доработку.\n\n` +
+      (comment ? `Замечания: ${comment}\n\n` : '') +
+      `Открыть: ${myRpdUrl()}\n\nИСПУМ · ispum.ru`,
+  }
+}
+
+export function rpdApprovedEmail(
+  teacherName: string, disciplineName: string,
+): Omit<EmailPayload, 'to'> {
+  return {
+    subject: `РПД «${disciplineName}» согласована`,
+    html: wrap(`
+      <p>Здравствуйте, ${escapeHtml(firstName(teacherName))}!</p>
+      <p>Рабочая программа дисциплины <strong>«${escapeHtml(disciplineName)}»</strong>
+         прошла проверку РОП и согласована УМЦ.</p>
+      ${btn(myRpdUrl(), 'Открыть «Мои РПД»')}
+    `),
+    text:
+      `Здравствуйте, ${firstName(teacherName)}!\n\n` +
+      `РПД «${disciplineName}» согласована УМЦ.\n\n` +
+      `Открыть: ${myRpdUrl()}\n\nИСПУМ · ispum.ru`,
+  }
+}

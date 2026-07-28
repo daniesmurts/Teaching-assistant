@@ -1,6 +1,18 @@
 import ExcelJS from 'exceljs'
 import { STATUS_FILL_HEX } from './rpdMonitor'
-import type { UmcDashboardResult, UmcReadinessRow } from '../../../shared/types'
+import type { UmcDashboardResult, UmcReadinessRow, RpdSubmissionStatus } from '../../../shared/types'
+
+// Same five labels as the frontend's SubmissionStatusBadge — kept as its own
+// small map rather than a shared import since this is a server-rendered
+// Excel cell value, not a React component; duplication here is cheaper than
+// a cross-boundary import for four strings.
+const STATUS_LABEL: Record<RpdSubmissionStatus, string> = {
+  draft:     'Черновик',
+  submitted: 'На проверке у РОП',
+  returned:  'Возвращён',
+  forwarded: 'На согласовании в УМЦ',
+  approved:  'Согласован',
+}
 
 // TODO.md Feature V. Mirrors rpdReportXlsx.ts's structure and colour tiers
 // (same STATUS_FILL_HEX — a colour always means the same thing everywhere in
@@ -44,6 +56,7 @@ function autoWidth(ws: ExcelJS.Worksheet): void {
 const ROW_HEADERS = [
   'Подразделение', 'Программа', 'Код направления', 'Дисциплина', 'Семестр',
   'РПД загружена', 'Дата загрузки', 'Проверена', 'Покрытие компетенций, %', 'Дата проверки',
+  'Статус согласования',
 ]
 
 function fmtDate(iso: string | null): string {
@@ -82,6 +95,7 @@ export async function generateUmcDashboardXlsx(data: UmcDashboardResult): Promis
       r.department_name ?? 'Без подразделения', r.program_name, r.program_code ?? '', r.discipline_name, r.semester,
       r.has_syllabus ? 'Да' : 'Нет', fmtDate(r.syllabus_uploaded_at),
       r.reviewed ? 'Да' : 'Нет', r.overall_coverage ?? '', fmtDate(r.review_created_at),
+      r.submission_status ? STATUS_LABEL[r.submission_status] : '—',
     ])
     const status = coverageStatus(r)
     if (status) row.eachCell((c) => { c.fill = STATUS_FILLS[status] })

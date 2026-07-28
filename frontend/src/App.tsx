@@ -26,6 +26,7 @@ import Presentations from './pages/Presentations'
 import Topics from './pages/Topics'
 import Curriculum from './pages/Curriculum'
 import RopStudio from './pages/RopStudio'
+import MySyllabi from './pages/MySyllabi'
 import Quizzes from './pages/Quizzes'
 import FosStudio from './pages/FosStudio'
 import BrsStudio from './pages/BrsStudio'
@@ -74,6 +75,7 @@ import InstitutionProgramDetail from './pages/institution/InstitutionProgramDeta
 import InstitutionStructure from './pages/institution/InstitutionStructure'
 import RpdMonitor from './pages/institution/RpdMonitor'
 import UmcDashboard from './pages/institution/UmcDashboard'
+import RpdApprovals from './pages/institution/RpdApprovals'
 import NewVersionToast from './components/NewVersionToast'
 import LoadingSpinner from './components/ui/LoadingSpinner'
 
@@ -201,12 +203,16 @@ function InstitutionRoute({ children }: { children: React.ReactNode }) {
   const canAdmin =
     (teacher.is_platform_admin ?? teacher.role === 'platform_admin') ||
     (teacher.is_institution_admin ?? teacher.role === 'institution_admin') ||
-    // Research.md §7.10 — a curriculum-, teaching-, or platform-domain grant
-    // (e.g. УМЦ head, ПР УР, or a subtree-scoped institute director) reaches
-    // this panel too, without being an institution-root admin.
-    // InstitutionLayout filters the NAV to what the grant actually covers.
-    (!!teacher.curriculum_access && teacher.curriculum_access !== 'none') ||
-    (!!teacher.teaching_access && teacher.teaching_access !== 'none') ||
+    // docs/ACCESS-MATRIX.md — a criteria-, org-overview-, platform-, or umu-
+    // access grant (e.g. a ЗК/ДИ, ПР УР, subtree-scoped institute director,
+    // or УМЦ head) reaches this panel too, without being an institution-root
+    // admin. InstitutionLayout filters the NAV to what the grant actually
+    // covers. `criteria_access`/`org_overview_access`, NOT plain
+    // `curriculum_access`/`teaching_access` — no NAV item is gated on those
+    // broad domains anymore, so a РОП/РПГ/УМУ/РУМЦ/МУМЦ holding only those
+    // would land on an empty panel.
+    (!!teacher.criteria_access && teacher.criteria_access !== 'none') ||
+    (!!teacher.org_overview_access && teacher.org_overview_access !== 'none') ||
     (!!teacher.platform_access && teacher.platform_access !== 'none') ||
     (!!teacher.umu_access && teacher.umu_access !== 'none')
   if (!canAdmin) return <Navigate to="/dashboard" replace />
@@ -296,6 +302,7 @@ export default function App() {
             <Route path="/presentations" element={<Presentations />} />
             <Route path="/topics"        element={<Topics />} />
             <Route path="/curriculum"    element={<Curriculum />} />
+            <Route path="/my-syllabi"    element={<MySyllabi />} />
             <Route path="/quizzes"       element={<Quizzes />} />
             <Route path="/fos"          element={<FosStudio />} />
             <Route path="/brs"          element={<BrsStudio />} />
@@ -334,6 +341,7 @@ export default function App() {
             <Route path="structure" element={<InstitutionStructure />} />
             <Route path="rpd"       element={<RpdMonitor />} />
             <Route path="umc"       element={<UmcDashboard />} />
+            <Route path="rpd-approvals" element={<RpdApprovals />} />
             <Route path="usage"    element={<InstitutionUsage />} />
             <Route path="teachers" element={<InstitutionTeachers />} />
             <Route path="rubrics"  element={<InstitutionRubrics />} />

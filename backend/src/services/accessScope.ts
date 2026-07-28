@@ -1,4 +1,4 @@
-import { DOMAINS, type Domain, listRoleScopesForTeacher } from '../db/queries/orgUnits'
+import { DOMAINS, type Domain, type OrgUnitType, listRoleScopesForTeacher } from '../db/queries/orgUnits'
 
 // Research.md §7.10 — the functional-authority axis, resolved alongside the
 // existing subtree (§7.3) axis. A grant is (level) x (domain) x (subtree);
@@ -20,8 +20,9 @@ export function levelAtLeast(have: AccessLevel, need: AccessLevel): boolean {
 /** One held grant, kept intact. Levels are NOT collapsed across grants — see
  *  getAccessScope's contract below. */
 export interface DomainGrantRow {
-  level: AccessLevel
-  path:  string    // materialised path of the unit the grant sits on
+  level:    AccessLevel
+  path:     string        // materialised path of the unit the grant sits on
+  unitType: OrgUnitType    // type of the unit the grant sits on — see hasGrantOnUnitTypes
 }
 
 /** Every grant a teacher holds, grouped by domain. A domain-`all` grant is
@@ -61,7 +62,7 @@ interface TeacherIdentity {
 export async function getAccessScope(teacher: TeacherIdentity): Promise<AccessScope> {
   if (teacher.is_platform_admin) {
     return Object.fromEntries(
-      DOMAINS.map((d) => [d, [{ level: 'admin' as AccessLevel, path: '/' }]])
+      DOMAINS.map((d) => [d, [{ level: 'admin' as AccessLevel, path: '/', unitType: 'institution' as OrgUnitType }]])
     ) as AccessScope
   }
   if (!teacher.institution_id) return {}
@@ -75,7 +76,7 @@ export async function getAccessScope(teacher: TeacherIdentity): Promise<AccessSc
 
     const domains: readonly Domain[] = row.domain === 'all' ? DOMAINS : [row.domain as Domain]
     for (const domain of domains) {
-      ;(scope[domain] ??= []).push({ level, path: row.path })
+      ;(scope[domain] ??= []).push({ level, path: row.path, unitType: row.type_code as OrgUnitType })
     }
   }
 
@@ -114,4 +115,51 @@ export function maxLevel(scope: AccessScope, domain: Domain): AccessLevel | null
     (best, g) => (LEVEL_RANK[g.level] > LEVEL_RANK[best] ? g.level : best),
     grants[0].level,
   )
+}
+
+// docs/ACCESS-MATRIX.md — «Критерии/Рубрики» institution-curation unit
+// types. Single source of truth shared by routes/institution.ts (the actual
+// gate) and routes/auth.ts (the `criteria_access` flag the frontend nav
+// reads) — duplicating this list between them would let the two drift.
+export const CRITERIA_READ_UNIT_TYPES:   OrgUnitType[] = ['governance', 'division', 'department']
+export const CRITERIA_CREATE_UNIT_TYPES: OrgUnitType[] = ['division', 'department']
+
+// docs/ACCESS-MATRIX.md — «Организация» overview surfaces (Обзор/Использование/
+// Преподаватели-чтение). Same shape as CRITERIA_READ_UNIT_TYPES and same
+// reason: `teaching:view` alone doesn't distinguish a РОП's grant on their
+// `program` unit (or a РПГ's on `cluster`) from a ЗК/ДИ/ДЕК's on
+// `department`/`division` — but these are institution-oversight surfaces,
+// not something a single programme or polygroup head needs. A separate
+// constant (not a reuse of CRITERIA_READ_UNIT_TYPES) even though the values
+// match today — the two policies are independent and may diverge.
+export const TEACHING_OVERVIEW_UNIT_TYPES: OrgUnitType[] = ['governance', 'division', 'department']
+
+/**
+ * Like `resolveGrant`, but additionally requires the grant to sit on a unit
+ * whose TYPE is in `allowedTypes` — for surfaces where domain+level alone
+ * can't tell roles apart (docs/ACCESS-MATRIX.md: a plain `curriculum` check
+ * can't distinguish a РОП's grant on their `program` unit from a ЗК's on
+ * `department`, but "Критерии/Рубрики" institution curation is meant for
+ * department/institute leadership, not every content-facing role).
+ *
+ * A grant on the institution root itself always qualifies regardless of
+ * `allowedTypes` — that's the root/`all`-domain admin's expanded grant
+ * (see getAccessScope), and root admin must never be narrower than a
+ * type-specific policy aimed at everyone else.
+ */
+export function resolveGrantOnUnitTypes(
+  scope:        AccessScope,
+  domain:       Domain,
+  minLevel:     AccessLevel,
+  allowedTypes: readonly OrgUnitType[],
+): DomainGrant | null {
+  const qualifying = (scope[domain] ?? []).filter(
+    (g) => levelAtLeast(g.level, minLevel) && (g.unitType === 'institution' || allowedTypes.includes(g.unitType))
+  )
+  if (qualifying.length === 0) return null
+  const level = qualifying.reduce<AccessLevel>(
+    (best, g) => (LEVEL_RANK[g.level] > LEVEL_RANK[best] ? g.level : best),
+    qualifying[0].level,
+  )
+  return { level, pathPrefixes: [...new Set(qualifying.map((g) => g.path))] }
 }

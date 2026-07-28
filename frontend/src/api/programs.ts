@@ -2,7 +2,7 @@ import client from './client'
 import type {
   Program, ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramAnalysis,
   ProgramPracticeType, ProgramDocumentKind, ProgramDocument, ProgramDocumentReview,
-  ProgramDocumentDiff, MarketEvidence, SupportedRegion,
+  ProgramDocumentDiff, MarketEvidence, SupportedRegion, RpdSubmission, ProgramTopology, ProgramContentUnit,
 } from '../types'
 
 // Academic programs (учебные планы) — institution-admin feature.
@@ -229,6 +229,46 @@ export async function getDisciplineReviews(programId: string): Promise<ProgramDo
   return res.data
 }
 
+// ─── РПД approval — РОП side (docs/RPD-WORKFLOW.md phase 4b) ──────────────────
+
+export interface AssignableTeacher {
+  id:    string
+  name:  string | null
+  email: string
+}
+
+/** Lean institution-wide teacher list for the «Ответственный» picker — see
+ *  the backend route's comment for why this isn't institution.ts's /teachers. */
+export async function getAssignableTeachers(): Promise<AssignableTeacher[]> {
+  const res = await client.get<AssignableTeacher[]>('/api/institution/programs/teachers')
+  return res.data
+}
+
+/** Assign (or clear, with `null`) the teacher responsible for authoring this
+ *  discipline's РПД. Separate from saveDisciplines — never bundled into a
+ *  plan-structure save. */
+export async function setDisciplineResponsible(
+  programId: string, disciplineId: string, teacherId: string | null,
+): Promise<void> {
+  await client.put(`/api/institution/programs/${programId}/disciplines/${disciplineId}/responsible`, { teacherId })
+}
+
+/** 'submitted' items for one programme — the РОП's own review queue. */
+export async function getSubmissionQueue(programId: string): Promise<RpdSubmission[]> {
+  const res = await client.get<RpdSubmission[]>(`/api/institution/programs/${programId}/submissions`)
+  return res.data
+}
+
+export async function actOnSubmission(
+  programId: string, disciplineId: string, action: 'return' | 'forward', comment?: string,
+): Promise<RpdSubmission> {
+  const res = await client.post<RpdSubmission>(
+    `/api/institution/programs/${programId}/disciplines/${disciplineId}/submission/${action}`,
+    { comment }
+  )
+  return res.data
+}
+
 // ─── Year-over-year РПД diff (migration 084, Research.md §9.6) ────────────────
 
 /** «Что изменилось с прошлого года» — compares the discipline's current РПД against the version it superseded. Cached server-side per document pair. */
@@ -290,6 +330,18 @@ export async function analyzeProgram(id: string): Promise<ProgramAnalysis> {
 
 export async function getAnalysis(id: string): Promise<ProgramAnalysis | null> {
   const res = await client.get<ProgramAnalysis | null>(`/api/institution/programs/${id}/analysis`)
+  return res.data
+}
+
+export async function getProgramTopology(id: string): Promise<ProgramTopology> {
+  const res = await client.get<ProgramTopology>(`/api/institution/programs/${id}/topology`)
+  return res.data
+}
+
+export async function getDisciplineContentUnits(programId: string, disciplineId: string): Promise<ProgramContentUnit[]> {
+  const res = await client.get<ProgramContentUnit[]>(
+    `/api/institution/programs/${programId}/disciplines/${disciplineId}/content-units`
+  )
   return res.data
 }
 

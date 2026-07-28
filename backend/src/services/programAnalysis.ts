@@ -2,7 +2,16 @@ import { chatJSON, embed } from './deepseek'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { findCourseById } from '../db/queries/courses'
 import { getLatestKnowledgeText } from '../db/queries/documents'
-import { listWorkingProgrammesByDiscipline } from '../db/queries/programDocuments'
+import { listWorkingProgrammesByDiscipline, findWorkingProgrammeForDiscipline } from '../db/queries/programDocuments'
+import { findApprovedDocumentForDiscipline } from '../db/queries/rpdSubmissions'
+import {
+  replacePrerequisites, replaceCompetencyLinks, replaceContentUnits, hasContentUnitsForDocument,
+  type ReplaceCompetencyLinkInput,
+} from '../db/queries/programTopology'
+import { findPublishedFgosCompetencies } from '../db/queries/fgos'
+import { setCompetencyFgosLinks } from '../db/queries/programs'
+import { inferFgosLevel, matchProgramCompetenciesToFgos } from './fgosMatch'
+import { extractContentUnits } from './programContentUnits'
 import { ValidationError } from '../errors/AppError'
 import { logger } from '../lib/logger'
 import type {
@@ -128,6 +137,94 @@ export async function analyzeProgram(params: {
     content_confidence: deriveContentConfidence(disciplines, docTextByDiscipline),
     load_check:         deriveLoadCheck(load, disciplines, program.duration_semesters, program.reported_semester_totals),
     warnings:           warnings.length > 0 ? warnings : undefined,
+  }
+}
+
+// Topology graph substrate (docs/topology-spec.md, Increment 0). Best-effort
+// side-effect called by the route AFTER analyzeProgram + saveAnalysis: turns
+// the id-resolved edges/cells above into queryable program_prerequisites /
+// program_competency_links rows, and resolves program_competencies onto the
+// canonical ФГОС registry (УК/ОПК only — ПК has no federal registry entry).
+// Never throws — a failure here must not break the analysis report teachers
+// already depend on; the caller logs and moves on.
+export async function persistTopology(
+  program: ProgramDetail, analysis: ProgramAnalysis, analysisId: string, teacherId: string
+): Promise<void> {
+  const prereqEdges = analysis.sequencing.edges
+    .filter((e): e is PrerequisiteEdge & { from_id: string; to_id: string } => !!e.from_id && !!e.to_id)
+    .map((e) => ({
+      disciplineId:              e.to_id,
+      prerequisiteDisciplineId:  e.from_id,
+      reason:                    e.reason,
+      inverted:                  e.inverted,
+    }))
+  await replacePrerequisites(program.id, prereqEdges, analysisId)
+
+  const linkKey = (l: ReplaceCompetencyLinkInput) => `${l.disciplineId}>${l.competencyId}>${l.stage}`
+  const competencyLinks = new Map<string, ReplaceCompetencyLinkInput>()
+  for (const row of analysis.progression) {
+    if (!row.competency_id) continue
+    for (const cell of row.cells) {
+      if (!cell.via_discipline_id) continue
+      const link: ReplaceCompetencyLinkInput = {
+        disciplineId: cell.via_discipline_id,
+        competencyId: row.competency_id,
+        stage:        cell.level,
+      }
+      competencyLinks.set(linkKey(link), link)
+    }
+  }
+  await replaceCompetencyLinks(program.id, [...competencyLinks.values()], analysisId)
+
+  if (program.code) {
+    const fgosLevel = inferFgosLevel(program)
+    if (fgosLevel) {
+      const fgosCompetencies = await findPublishedFgosCompetencies(program.code, fgosLevel)
+      const matches = matchProgramCompetenciesToFgos(program.competencies, fgosCompetencies)
+      if (matches.length > 0) await setCompetencyFgosLinks(matches)
+    }
+  }
+}
+
+// Content-unit extraction (docs/topology-spec.md, Increment 0). Deliberately
+// NOT part of persistTopology above and NOT awaited by the route — each
+// discipline with an uploaded РПД costs its own LLM round trip (structure
+// parse + one call per non-empty section), so across a real programme
+// (confirmed live against a 59-discipline plan) this can run many minutes
+// past the point edges/links already finished, which would otherwise push
+// the whole /analyze request past its 180s client timeout for no benefit —
+// nothing in this increment's UI reads content units yet (that's Increment
+// 2). Same fire-and-forget posture as generateAndStoreEmbedding
+// (services/embeddings.ts): the caller logs and moves on, never awaits.
+export async function persistContentUnits(program: ProgramDetail, teacherId: string): Promise<void> {
+  for (const d of program.disciplines) {
+    if (!d.id) continue
+    try {
+      const approved = await findApprovedDocumentForDiscipline(d.id)
+      let documentId: string, extractedText: string | null, provenance: 'approved' | 'latest'
+      if (approved) {
+        documentId = approved.documentId
+        extractedText = approved.extractedText
+        provenance = 'approved'
+      } else {
+        const latest = await findWorkingProgrammeForDiscipline(program.id, d.id)
+        if (!latest) continue
+        documentId = latest.document.id
+        extractedText = latest.extractedText
+        provenance = 'latest'
+      }
+      if (!extractedText || extractedText.trim().length < 80) continue
+      if (await hasContentUnitsForDocument(d.id, documentId)) continue
+
+      const units = await extractContentUnits(teacherId, extractedText, d.name)
+      await replaceContentUnits(
+        d.id,
+        units.map((u, i) => ({ section: u.section, title: u.title, topics: u.topics, sortOrder: i })),
+        documentId, provenance,
+      )
+    } catch (err) {
+      logger.warn({ message: 'Content-unit extraction failed', disciplineId: d.id, error: (err as Error).message })
+    }
   }
 }
 
@@ -376,7 +473,6 @@ async function analyzeSequencing(
   teacherId: string, institutionId: string | undefined, disciplines: ProgramDiscipline[]
 ): Promise<SequencingResult> {
   const layout = buildLayout(disciplines)
-  const semesterOf = new Map(disciplines.map((d) => [norm(d.name), d.semester]))
 
   const system =
     'Вы — методист российского вуза, эксперт по проектированию учебных планов. Вы выявляете ' +
@@ -412,32 +508,7 @@ async function analyzeSequencing(
     { context: { teacherId, institutionId, feature: 'grading' }, maxTokens: 3500 },
   )
 
-  const edges: PrerequisiteEdge[] = []
-  const seen = new Set<string>()
-  for (const e of result.edges ?? []) {
-    const fromName = String(e.from ?? '').trim()
-    const toName   = String(e.to ?? '').trim()
-    const fromSem  = semesterOf.get(norm(fromName))
-    const toSem    = semesterOf.get(norm(toName))
-    if (fromSem == null || toSem == null) continue   // unmatched name — skip
-    const key = `${norm(fromName)}>${norm(toName)}`
-    if (seen.has(key)) continue
-    seen.add(key)
-
-    // Strict inversion only: dependent is taught in an EARLIER semester than its
-    // prerequisite. Same-semester links are valid (intra-semester order is the
-    // teacher's call) and stay as ordinary justified links.
-    const inverted = toSem < fromSem
-    edges.push({
-      from_name: fromName, from_semester: fromSem,
-      to_name: toName,     to_semester: toSem,
-      reason: String(e.reason ?? '').trim(),
-      inverted,
-      recommendation: inverted
-        ? `«${toName}» (сем. ${toSem}) опирается на «${fromName}» (сем. ${fromSem}), но изучается раньше — перенесите «${fromName}» на более ранний семестр или «${toName}» на более поздний.`
-        : '',
-    })
-  }
+  const { edges, unmatchedNames } = resolveSequencingEdges(result.edges ?? [], disciplines)
 
   const inversions = edges.filter((e) => e.inverted)
   // Append a verdict sentence that always agrees with the deterministic count,
@@ -453,7 +524,54 @@ async function analyzeSequencing(
     edges,
     inversions,
     structure:  deriveStructure(edges, disciplines),
+    unmatched_names: unmatchedNames.length > 0 ? unmatchedNames : undefined,
   }
+}
+
+// Pure edge resolution — separated from analyzeSequencing so the id-lookup +
+// unmatched-name behaviour is unit-testable without a live LLM call (topology
+// substrate, docs/topology-spec.md §3.1: edges used to be matched by
+// discipline name with unmatched names silently dropped; this now also
+// resolves the persistable program_disciplines.id and surfaces what didn't
+// match instead of discarding it).
+export function resolveSequencingEdges(
+  rawEdges: { from?: string; to?: string; reason?: string }[],
+  disciplines: ProgramDiscipline[],
+): { edges: PrerequisiteEdge[]; unmatchedNames: string[] } {
+  const refOf = new Map<string, { semester: number; id?: string }>(
+    disciplines.map((d) => [norm(d.name), { semester: d.semester, id: d.id }])
+  )
+
+  const edges: PrerequisiteEdge[] = []
+  const unmatchedNames = new Set<string>()
+  const seen = new Set<string>()
+  for (const e of rawEdges) {
+    const fromName = String(e.from ?? '').trim()
+    const toName   = String(e.to ?? '').trim()
+    const from = refOf.get(norm(fromName))
+    const to   = refOf.get(norm(toName))
+    if (!from) { if (fromName) unmatchedNames.add(fromName); continue }
+    if (!to)   { if (toName) unmatchedNames.add(toName); continue }
+    const key = `${norm(fromName)}>${norm(toName)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    // Strict inversion only: dependent is taught in an EARLIER semester than its
+    // prerequisite. Same-semester links are valid (intra-semester order is the
+    // teacher's call) and stay as ordinary justified links.
+    const inverted = to.semester < from.semester
+    edges.push({
+      from_name: fromName, from_semester: from.semester, from_id: from.id,
+      to_name: toName,     to_semester: to.semester,     to_id: to.id,
+      reason: String(e.reason ?? '').trim(),
+      inverted,
+      recommendation: inverted
+        ? `«${toName}» (сем. ${to.semester}) опирается на «${fromName}» (сем. ${from.semester}), но изучается раньше — перенесите «${fromName}» на более ранний семестр или «${toName}» на более поздний.`
+        : '',
+    })
+  }
+
+  return { edges, unmatchedNames: [...unmatchedNames] }
 }
 
 // ── Holistic structure derived from the prerequisite edges ──────────────────
@@ -566,7 +684,7 @@ async function analyzeProgression(
   disciplines: ProgramDiscipline[], competencies: ProgramCompetency[]
 ): Promise<CompetencyProgressionRow[]> {
   const layout = buildLayout(disciplines, true)
-  const semesterOf = new Map(disciplines.map((d) => [norm(d.name), d.semester]))
+  const refOf = new Map(disciplines.map((d) => [norm(d.name), { semester: d.semester, id: d.id }]))
 
   // Chunk competencies so ALL of them are analysed (was capped at 28, dropping
   // the tail silently — a plan with 31 competencies showed the last 3 as never
@@ -581,7 +699,7 @@ async function analyzeProgression(
   const results = await Promise.all(
     batches.map((batch, batchIdx) =>
       analyzeProgressionBatch({
-        teacherId, institutionId, layout, semesterOf,
+        teacherId, institutionId, layout, refOf,
         // Global ref index so refs remain unique across batches (defensive:
         // batches are separate LLM calls but the debug/logging is cleaner).
         batchOffset: batchIdx * BATCH_SIZE,
@@ -596,11 +714,11 @@ async function analyzeProgressionBatch(params: {
   teacherId:     string
   institutionId: string | undefined
   layout:        string
-  semesterOf:    Map<string, number>
+  refOf:         Map<string, { semester: number; id?: string }>
   batchOffset:   number
   competencies:  ProgramCompetency[]
 }): Promise<CompetencyProgressionRow[]> {
-  const { teacherId, institutionId, layout, semesterOf, batchOffset, competencies } = params
+  const { teacherId, institutionId, layout, refOf, batchOffset, competencies } = params
 
   // Stable refs (batch-local so the model doesn't have to see huge numbers) —
   // used only for round-trip identity, mapped back to the source competency
@@ -653,11 +771,13 @@ async function analyzeProgressionBatch(params: {
     const raw = byRef.get(ref.toUpperCase())
     const cells: CompetencyTimelineCell[] = (raw?.cells ?? [])
       .map((cell) => {
-        const sem = semesterOf.get(norm(String(cell.discipline ?? ''))) ?? Number(cell.semester)
+        const ref = refOf.get(norm(String(cell.discipline ?? '')))
+        const sem = ref?.semester ?? Number(cell.semester)
         return {
           semester: Number.isFinite(sem) ? Number(sem) : 0,
           level: (VALID_LEVEL.includes(cell.level as CoverageLevel) ? cell.level : 'introduce') as CoverageLevel,
           via: String(cell.discipline ?? '').trim(),
+          via_discipline_id: ref?.id,
         }
       })
       .filter((cell) => cell.via.length > 0)
@@ -671,6 +791,7 @@ async function analyzeProgressionBatch(params: {
       kind:   c.kind,
       code:   c.code,
       title:  c.title,
+      competency_id: c.id,
       cells,
       status,
       note:   String(raw?.note ?? '').trim(),

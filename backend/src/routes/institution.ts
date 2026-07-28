@@ -1,7 +1,8 @@
 import { Router, type Request } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { requireInstitutionAdmin } from '../middleware/requireRole'
-import { requireDomain } from '../middleware/requireDomain'
+import { requireDomain, requireDomainOnUnitTypes } from '../middleware/requireDomain'
+import { CRITERIA_READ_UNIT_TYPES, CRITERIA_CREATE_UNIT_TYPES, TEACHING_OVERVIEW_UNIT_TYPES } from '../services/accessScope'
 import { uploadConfig, verifyFileContent } from '../middleware/fileValidation'
 import { validate } from '../middleware/validate'
 import { asyncHandler } from '../lib/asyncHandler'
@@ -51,18 +52,31 @@ function institutionId(req: { teacher: { institution_id: string | null } }): str
   return id
 }
 
-// ─── Shared criteria / rubrics (Research.md §7.10 Phase 1 — 'curriculum' ──────
-// domain, NOT institution-root admin). Declared before the router-wide
-// requireInstitutionAdmin gate below so a curriculum-domain-only grant (e.g.
-// УМЦ head) can reach these without also reaching teacher invites, LTI/SSO,
-// LLM model choice, or the audit log. Each route sets its own selfAudited —
-// it no longer inherits the router-level assignment below.
-
-router.get('/criteria', requireDomain('curriculum', 'view'), asyncHandler(async (req, res) => {
+// ─── Shared criteria / rubrics (docs/ACCESS-MATRIX.md — 'curriculum' domain, ──
+// NOT institution-root admin, AND unit-type-restricted). Declared before the
+// router-wide requireInstitutionAdmin gate below so a qualifying grant can
+// reach these without also reaching teacher invites, LTI/SSO, LLM model
+// choice, or the audit log.
+//
+// `curriculum` alone isn't enough here — it's shared by every content-facing
+// role (РОП, РПГ, УМУ, РУМЦ, МУМЦ included), but institution-shared-criteria
+// curation is department/institute leadership territory (ЗК/ДИ/ДЕК), not a
+// programme head's or a УМУ/УМЦ office role's. `requireDomainOnUnitTypes`
+// additionally requires the qualifying grant to sit on a `department` or
+// `division` unit — a plain `curriculum:view` grant on `program` (РОП),
+// `cluster` (РПГ) or `admin_office` (УМУ/РУМЦ/МУМЦ) no longer satisfies it
+// (root/`all`-domain admin grants still always do). Read stays open one
+// level wider — CRITERIA_READ_TYPES adds `governance` — so top institutional
+// leadership (РЕК/ПР, granted on `institution`/`governance`) keeps read-only
+// oversight of what's shared, per ACCESS-MATRIX.md §4's "видят ... только
+// когда РУМЦ поделится" principle: visibility, not authorship. Each route
+// sets its own selfAudited — it no longer inherits the router-level
+// assignment below.
+router.get('/criteria', requireDomainOnUnitTypes('curriculum', 'view', CRITERIA_READ_UNIT_TYPES), asyncHandler(async (req, res) => {
   res.json(await findCriteriaByInstitution(institutionId(req)))
 }))
 
-router.post('/criteria', requireDomain('curriculum', 'edit'), validate(createCriterionRules), asyncHandler(async (req, res) => {
+router.post('/criteria', requireDomainOnUnitTypes('curriculum', 'edit', CRITERIA_CREATE_UNIT_TYPES), validate(createCriterionRules), asyncHandler(async (req, res) => {
   res.locals.selfAudited = true
   institutionId(req) // ensure scoped
   const { name, description, course_id, subject } = req.body as {
@@ -77,11 +91,11 @@ router.post('/criteria', requireDomain('curriculum', 'edit'), validate(createCri
   res.status(201).json(shared)
 }))
 
-router.get('/rubrics', requireDomain('curriculum', 'view'), asyncHandler(async (req, res) => {
+router.get('/rubrics', requireDomainOnUnitTypes('curriculum', 'view', CRITERIA_READ_UNIT_TYPES), asyncHandler(async (req, res) => {
   res.json(await findRubricsByInstitution(institutionId(req)))
 }))
 
-router.post('/rubrics', requireDomain('curriculum', 'edit'), validate(createRubricRules), asyncHandler(async (req, res) => {
+router.post('/rubrics', requireDomainOnUnitTypes('curriculum', 'edit', CRITERIA_CREATE_UNIT_TYPES), validate(createRubricRules), asyncHandler(async (req, res) => {
   res.locals.selfAudited = true
   institutionId(req) // ensure scoped
   const { name, description, subject, items } = req.body as {
@@ -110,12 +124,21 @@ router.post('/rubrics', requireDomain('curriculum', 'edit'), validate(createRubr
   res.status(201).json(shared)
 }))
 
-// ─── Overview / usage / roster read (Research.md §7.10 Phase 2 — 'teaching' ───
-// domain, read-only, NOT institution-root admin). Same reasoning as the
-// criteria/rubrics block above: a ПР УР holding view×teaching×root reaches
-// these without also reaching invites, LTI/SSO, model choice, or the audit
-// log. All four routes are pure reads — no recordAudit/selfAudited needed
-// (the global auditLog middleware only logs mutating verbs).
+// ─── Overview / usage / roster read (docs/ACCESS-MATRIX.md — 'teaching' ──────
+// domain, read-only, NOT institution-root admin, AND unit-type-restricted).
+// Same reasoning as the criteria/rubrics block above: `teaching:view` alone
+// doesn't distinguish a РОП's grant on their `program` unit (or a РПГ's on
+// `cluster`) from a ЗК/ДИ/ДЕК's on `department`/`division` — Обзор/
+// Использование/Преподаватели-чтение are institution-oversight surfaces, not
+// something a single programme or polygroup head needs (their own subtree's
+// teaching activity is what `/leadership` is for, an unrelated gate).
+// `requireDomainOnUnitTypes` additionally requires the qualifying grant to
+// sit on a unit whose type is in TEACHING_OVERVIEW_UNIT_TYPES (root/`all`-
+// domain admin grants still always qualify). A ПР УР holding view×teaching
+// ×root still reaches these without also reaching invites, LTI/SSO, model
+// choice, or the audit log. All four routes are pure reads — no
+// recordAudit/selfAudited needed (the global auditLog middleware only logs
+// mutating verbs).
 //
 // Phase 3 — subtree query scoping. A sub-unit grant (e.g. an institute
 // director holding view×teaching×their-division) must only see their own
@@ -134,7 +157,7 @@ async function resolveTeachingPrefixes(req: Request): Promise<string[] | undefin
   return req.domainScope.pathPrefixes
 }
 
-router.get('/overview', requireDomain('teaching', 'view'), asyncHandler(async (req, res) => {
+router.get('/overview', requireDomainOnUnitTypes('teaching', 'view', TEACHING_OVERVIEW_UNIT_TYPES), asyncHandler(async (req, res) => {
   const id = institutionId(req)
   const prefixes = await resolveTeachingPrefixes(req)
   const [institution, overview] = await Promise.all([
@@ -147,13 +170,13 @@ router.get('/overview', requireDomain('teaching', 'view'), asyncHandler(async (r
   })
 }))
 
-router.get('/usage/daily', requireDomain('teaching', 'view'), asyncHandler(async (req, res) => {
+router.get('/usage/daily', requireDomainOnUnitTypes('teaching', 'view', TEACHING_OVERVIEW_UNIT_TYPES), asyncHandler(async (req, res) => {
   const days = Math.min(parseInt((req.query.days as string) ?? '30', 10) || 30, 365)
   const prefixes = await resolveTeachingPrefixes(req)
   res.json(await getInstitutionDailyUsage(institutionId(req), days, prefixes))
 }))
 
-router.get('/usage/export', requireDomain('teaching', 'view'), asyncHandler(async (req, res) => {
+router.get('/usage/export', requireDomainOnUnitTypes('teaching', 'view', TEACHING_OVERVIEW_UNIT_TYPES), asyncHandler(async (req, res) => {
   const days = Math.min(parseInt((req.query.days as string) ?? '90', 10) || 90, 365)
   const prefixes = await resolveTeachingPrefixes(req)
   const rows = await getInstitutionDailyUsage(institutionId(req), days, prefixes)
@@ -166,7 +189,7 @@ router.get('/usage/export', requireDomain('teaching', 'view'), asyncHandler(asyn
   res.send(csv)
 }))
 
-router.get('/teachers', requireDomain('teaching', 'view'), asyncHandler(async (req, res) => {
+router.get('/teachers', requireDomainOnUnitTypes('teaching', 'view', TEACHING_OVERVIEW_UNIT_TYPES), asyncHandler(async (req, res) => {
   const prefixes = await resolveTeachingPrefixes(req)
   res.json(await listInstitutionTeachers(institutionId(req), prefixes))
 }))

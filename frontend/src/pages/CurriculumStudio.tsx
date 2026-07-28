@@ -8,6 +8,7 @@ import {
   draftSyllabus, reviewSyllabusText, getSavedSyllabusDraft, saveSyllabusDraft, type DraftCompetency,
 } from '../api/curriculum'
 import { useUIStore } from '../store/uiStore'
+import { useSessionStorageState } from '../hooks/useSessionStorageState'
 import type { SyllabusSection, SyllabusReview } from '../types'
 
 // Debounce for autosaving freehand edits — long enough that normal typing
@@ -20,8 +21,10 @@ export default function CurriculumStudio() {
 
   // Preselect from ?course=<id> — the programme detail page's «Открыть в
   // РПД-студии» bridge deep-links here with the предмет it just found/created.
+  // Falls back to the last-selected discipline (sessionStorage) so a plain
+  // refresh doesn't drop back to an empty picker.
   const [searchParams] = useSearchParams()
-  const [courseId, setCourseId]   = useState(() => searchParams.get('course') ?? '')
+  const [courseId, setCourseId] = useSessionStorageState('curriculum:studio:courseId', searchParams.get('course') ?? '')
   const [sections, setSections]   = useState<SyllabusSection[] | null>(null)
   const [targets, setTargets]     = useState<{ competencies: DraftCompetency[]; goals: string[] }>({ competencies: [], goals: [] })
   const [review, setReview]       = useState<SyllabusReview | null>(null)

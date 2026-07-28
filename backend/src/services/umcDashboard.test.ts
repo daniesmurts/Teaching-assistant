@@ -19,6 +19,7 @@ function row(overrides: Partial<UmcReadinessRow>): UmcReadinessRow {
     reviewed:                overrides.reviewed ?? false,
     overall_coverage:        overrides.overall_coverage ?? null,
     review_created_at:       overrides.review_created_at ?? null,
+    submission_status:       overrides.submission_status ?? null,
   }
 }
 

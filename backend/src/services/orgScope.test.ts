@@ -7,6 +7,7 @@ const scope = (role: string, path: string, domain = 'all'): TeacherRoleScope => 
   role,
   domain,
   path,
+  type_code: 'department',  // irrelevant to the pure evaluator, same as org_unit_id
 })
 
 describe('pathIsAncestorOrSelf', () => {
