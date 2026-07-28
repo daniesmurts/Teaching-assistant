@@ -24,6 +24,7 @@ function fakeTeacher(overrides: Partial<AuthTeacher> & { id: string; plan_tier: 
   return {
     email: 'test@example.test', role: 'teacher', institution_id: null,
     is_active: true, primary_org_unit_id: null, is_platform_admin: false,
+    draft_key_seed: 'test-seed',
     ...overrides,
   }
 }

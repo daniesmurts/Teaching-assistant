@@ -3,13 +3,18 @@ import type { Request, Response, NextFunction } from 'express'
 import { pool } from '../db/connection'
 import { authenticate } from './authenticate'
 import { signToken } from '../lib/jwt'
+import { SESSION_COOKIE_NAME } from '../lib/session'
 import { createTestTeacher, createTestInstitution } from '../db/__tests__/fixtures'
 
 beforeEach(async () => { await pool.query('BEGIN') })
 afterEach(async () => { await pool.query('ROLLBACK') })
 
 function mockReqRes(token: string) {
-  const req = { headers: { authorization: `Bearer ${token}` } } as unknown as Request
+  const req = {
+    method:  'GET',
+    headers: {},
+    cookies: { [SESSION_COOKIE_NAME]: token },
+  } as unknown as Request
   const json = vi.fn()
   const status = vi.fn(() => ({ json }))
   const res = { status } as unknown as Response
@@ -20,7 +25,7 @@ function mockReqRes(token: string) {
 describe('authenticate middleware — DB-dependent paths', () => {
   it('populates req.teacher from a valid token against a real teacher row', async () => {
     const teacher = await createTestTeacher()
-    const token = signToken({ id: teacher.id, email: teacher.email })
+    const { token } = signToken({ id: teacher.id, email: teacher.email })
     const { req, next } = mockReqRes(token)
 
     await authenticate(req, {} as Response, next)
@@ -34,7 +39,7 @@ describe('authenticate middleware — DB-dependent paths', () => {
   it('rejects a deactivated account with 401 ACCOUNT_DISABLED', async () => {
     const teacher = await createTestTeacher()
     await pool.query('UPDATE teachers SET is_active = FALSE WHERE id = $1', [teacher.id])
-    const token = signToken({ id: teacher.id, email: teacher.email })
+    const { token } = signToken({ id: teacher.id, email: teacher.email })
     const { req, res, status, json, next } = mockReqRes(token)
 
     await authenticate(req, res, next)
@@ -53,7 +58,7 @@ describe('authenticate middleware — DB-dependent paths', () => {
       `UPDATE teachers SET plan_tier = 'pro', plan_expires_at = NOW() - INTERVAL '1 day' WHERE id = $1`,
       [teacher.id]
     )
-    const token = signToken({ id: teacher.id, email: teacher.email })
+    const { token } = signToken({ id: teacher.id, email: teacher.email })
     const { req, next } = mockReqRes(token)
 
     await authenticate(req, {} as Response, next)
@@ -64,7 +69,7 @@ describe('authenticate middleware — DB-dependent paths', () => {
 
   it('rejects a token issued before the account\'s password was changed', async () => {
     const teacher = await createTestTeacher()
-    const token = signToken({ id: teacher.id, email: teacher.email })
+    const { token } = signToken({ id: teacher.id, email: teacher.email })
     // Simulate a password change happening AFTER the token was issued.
     await pool.query(`UPDATE teachers SET password_changed_at = NOW() + INTERVAL '1 hour' WHERE id = $1`, [teacher.id])
     const { req, res, status, json, next } = mockReqRes(token)

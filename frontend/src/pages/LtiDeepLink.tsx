@@ -10,8 +10,9 @@ import {
 /**
  * Content-item picker shown when a teacher adds GradeAssist as a Moodle
  * activity ("External tool" → Deep Linking flow). Reached via a 302 from
- * POST /api/lti/launch (backend/src/routes/lti.ts) carrying a session JWT +
- * a short-lived `session` id (lti_deep_link_sessions).
+ * POST /api/lti/launch (backend/src/routes/lti.ts), which already set the
+ * HttpOnly session cookie on the redirect, carrying a short-lived `session`
+ * id (lti_deep_link_sessions).
  *
  * On selection, the backend mints a signed LtiDeepLinkingResponse and this
  * page auto-submits it back to Moodle's deep_link_return_url as a real form
@@ -35,12 +36,11 @@ export default function LtiDeepLink() {
     if (ran.current) return
     ran.current = true
 
-    const token = params.get('token')
-    if (!token || !sessionId) { setPhase('error'); return }
+    if (!sessionId) { setPhase('error'); return }
 
-    getMe(token)
-      .then(({ teacher, plan }) => {
-        setAuth(token, teacher, plan)
+    getMe()
+      .then(({ teacher, plan, draftKeySeed }) => {
+        setAuth(teacher, plan, draftKeySeed)
         return getDeepLinkSession(sessionId)
       })
       .then((info) => { setSession(info); setPhase('ready') })

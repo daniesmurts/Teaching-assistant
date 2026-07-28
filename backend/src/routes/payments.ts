@@ -2,7 +2,7 @@ import { Router } from 'express'
 import crypto from 'crypto'
 import { authenticate } from '../middleware/authenticate'
 import { asyncHandler } from '../lib/asyncHandler'
-import { aiLimiter } from '../middleware/rateLimits'
+import { aiLimiter, webhookLimiter } from '../middleware/rateLimits'
 import { ValidationError, NotFoundError } from '../errors/AppError'
 import { logger } from '../lib/logger'
 import { config } from '../lib/config'
@@ -68,6 +68,7 @@ router.post(
 
 router.post(
   '/webhook',
+  webhookLimiter,
   asyncHandler(async (req, res) => {
     const body = req.body as Record<string, unknown>
 

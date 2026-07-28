@@ -4,10 +4,11 @@ import { getMe } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
 
 // Landing page after a successful LTI launch from Moodle. Mirrors
-// SsoCallback.tsx exactly — the backend redirects here with ?token=<jwt>
-// (identical session JWT shape to password/SAML) and ?courseId=<uuid> (the
-// course auto-resolved/created from the Moodle context), so the teacher
-// lands directly in the grading view for the course they launched from.
+// SsoCallback.tsx exactly — the backend already set the HttpOnly session
+// cookie on the redirect that brought us here, and carries
+// ?courseId=<uuid> (the course auto-resolved/created from the Moodle
+// context), so the teacher lands directly in the grading view for the
+// course they launched from.
 export default function LtiCallback() {
   const [params] = useSearchParams()
   const setAuth  = useAuthStore((s) => s.setAuth)
@@ -18,13 +19,11 @@ export default function LtiCallback() {
     if (ran.current) return
     ran.current = true
 
-    const token = params.get('token')
     const courseId = params.get('courseId')
-    if (!token) { setError(true); return }
 
-    getMe(token)
-      .then(({ teacher, plan }) => {
-        setAuth(token, teacher, plan)
+    getMe()
+      .then(({ teacher, plan, draftKeySeed }) => {
+        setAuth(teacher, plan, draftKeySeed)
         const dest = courseId ? `/grading?courseId=${courseId}` : '/dashboard'
         window.location.assign(dest)
       })

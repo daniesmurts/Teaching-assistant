@@ -46,14 +46,18 @@ export function authErrorMessage(err: unknown): string {
   return ae?.response?.data?.error ?? 'Не удалось войти. Попробуйте ещё раз.'
 }
 
-// GET /api/auth/me returns the teacher fields flat, with `plan` as a sibling.
-// `token` overrides the stored JWT — used by the SSO callback, where the token
-// arrives in the URL before it's committed to the auth store.
-export async function getMe(token?: string): Promise<{ teacher: Teacher; plan: PlanState }> {
-  const res = await client.get<Teacher & { plan: PlanState }>('/api/auth/me',
-    token ? { headers: { Authorization: `Bearer ${token}` } } : undefined)
-  const { plan, ...teacher } = res.data
-  return { teacher, plan }
+// GET /api/auth/me returns the teacher fields flat, with `plan` and
+// `draftKeySeed` as siblings. The session cookie is attached automatically —
+// no token to pass in, including from the SSO/LTI callback pages (the
+// backend already set the cookie on the redirect that landed here).
+export async function getMe(): Promise<{ teacher: Teacher; plan: PlanState; draftKeySeed: string }> {
+  const res = await client.get<Teacher & { plan: PlanState; draftKeySeed: string }>('/api/auth/me')
+  const { plan, draftKeySeed, ...teacher } = res.data
+  return { teacher, plan, draftKeySeed }
+}
+
+export async function logout(): Promise<void> {
+  await client.post('/api/auth/logout', undefined, { skipErrorToast: true })
 }
 
 // Re-send the email-verification link (in-app banner). Idempotent — the

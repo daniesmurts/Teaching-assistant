@@ -3,29 +3,28 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { getMe } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
 
-// Landing page after a successful SAML login. The backend redirects here with
-// ?token=<jwt> (and an optional ?next= relative path). We exchange the token
-// for the teacher + plan, commit to the store, then hard-reload into the app
-// — the same reload the password login does, so any public-page analytics
-// session is torn down before authenticated pages render.
+// Landing page after a successful SAML login. The backend already set the
+// HttpOnly session cookie on the redirect that brought us here (and carries
+// an optional ?next= relative path). We fetch the teacher + plan, commit to
+// the store, then hard-reload into the app — the same reload the password
+// login does, so any public-page analytics session is torn down before
+// authenticated pages render.
 export default function SsoCallback() {
   const [params] = useSearchParams()
   const setAuth  = useAuthStore((s) => s.setAuth)
   const [error, setError] = useState(false)
-  // StrictMode double-invokes effects in dev; guard so we don't exchange twice.
+  // StrictMode double-invokes effects in dev; guard so we don't fetch twice.
   const ran = useRef(false)
 
   useEffect(() => {
     if (ran.current) return
     ran.current = true
 
-    const token = params.get('token')
-    const next  = params.get('next')
-    if (!token) { setError(true); return }
+    const next = params.get('next')
 
-    getMe(token)
-      .then(({ teacher, plan }) => {
-        setAuth(token, teacher, plan)
+    getMe()
+      .then(({ teacher, plan, draftKeySeed }) => {
+        setAuth(teacher, plan, draftKeySeed)
         const dest = next && next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard'
         window.location.assign(dest)
       })

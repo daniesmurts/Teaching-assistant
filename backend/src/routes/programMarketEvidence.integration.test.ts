@@ -5,6 +5,7 @@ import request from 'supertest'
 import { app } from '../app'
 import { pool } from '../db/connection'
 import { signToken } from '../lib/jwt'
+import { SESSION_COOKIE_NAME } from '../lib/session'
 import { createTestTeacher, createTestInstitution } from '../db/__tests__/fixtures'
 import { createProgram } from '../db/queries/programs'
 import { createFgosStandardDraft } from '../db/queries/fgos'
@@ -50,7 +51,7 @@ async function platformAdminSetup() {
   const institution = await createTestInstitution({})
   const teacher = await createTestTeacher({ institutionId: institution.id })
   await pool.query('UPDATE teachers SET is_platform_admin = TRUE WHERE id = $1', [teacher.id])
-  const token = signToken({ id: teacher.id, email: teacher.email })
+  const { token } = signToken({ id: teacher.id, email: teacher.email })
 
   await createFgosStandardDraft({
     standard: { direction_code: '15.03.02', level: 'бакалавриат', title: 'Технологические машины и оборудование', generation: '3++' },
@@ -76,7 +77,7 @@ async function platformAdminSetupNoLevelEnum() {
   const institution = await createTestInstitution({})
   const teacher = await createTestTeacher({ institutionId: institution.id })
   await pool.query('UPDATE teachers SET is_platform_admin = TRUE WHERE id = $1', [teacher.id])
-  const token = signToken({ id: teacher.id, email: teacher.email })
+  const { token } = signToken({ id: teacher.id, email: teacher.email })
 
   await createFgosStandardDraft({
     standard: { direction_code: '15.03.02', level: 'бакалавриат', title: 'Технологические машины и оборудование', generation: '3++' },
@@ -98,7 +99,7 @@ describe('market evidence — generate, read, edit', () => {
     const { token, program } = await platformAdminSetup()
 
     const res = await request(app).post(`/api/institution/programs/${program.id}/market-evidence`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
       .send({ region_codes: ['1600000000000'], professions: ['инженер-технолог'] })
 
     expect(res.status).toBe(201)
@@ -110,16 +111,16 @@ describe('market evidence — generate, read, edit', () => {
   it('GET returns the latest generated evidence', async () => {
     const { token, program } = await platformAdminSetup()
     await request(app).post(`/api/institution/programs/${program.id}/market-evidence`)
-      .set('Authorization', `Bearer ${token}`).send({ region_codes: ['1600000000000'], professions: ['инженер-технолог'] })
+      .set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send({ region_codes: ['1600000000000'], professions: ['инженер-технолог'] })
 
-    const res = await request(app).get(`/api/institution/programs/${program.id}/market-evidence`).set('Authorization', `Bearer ${token}`)
+    const res = await request(app).get(`/api/institution/programs/${program.id}/market-evidence`).set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(res.status).toBe(200)
     expect(res.body.section_text).toContain('86 вакансий')
   })
 
   it('GET returns null when nothing has been generated yet', async () => {
     const { token, program } = await platformAdminSetup()
-    const res = await request(app).get(`/api/institution/programs/${program.id}/market-evidence`).set('Authorization', `Bearer ${token}`)
+    const res = await request(app).get(`/api/institution/programs/${program.id}/market-evidence`).set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(res.status).toBe(200)
     expect(res.body).toBeNull()
   })
@@ -127,10 +128,10 @@ describe('market evidence — generate, read, edit', () => {
   it('PUT edits only section_text, leaving the snapshot fields untouched', async () => {
     const { token, program } = await platformAdminSetup()
     const create = await request(app).post(`/api/institution/programs/${program.id}/market-evidence`)
-      .set('Authorization', `Bearer ${token}`).send({ region_codes: ['1600000000000'], professions: ['инженер-технолог'] })
+      .set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send({ region_codes: ['1600000000000'], professions: ['инженер-технолог'] })
 
     const put = await request(app).put(`/api/institution/programs/${program.id}/market-evidence/${create.body.id}`)
-      .set('Authorization', `Bearer ${token}`).send({ section_text: 'Отредактированный РОПом текст.' })
+      .set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send({ section_text: 'Отредактированный РОПом текст.' })
 
     expect(put.status).toBe(200)
     expect(put.body.section_text).toBe('Отредактированный РОПом текст.')
@@ -141,7 +142,7 @@ describe('market evidence — generate, read, edit', () => {
   it('generates successfully when only education_level (free text) is set, not the level enum', async () => {
     const { token, program } = await platformAdminSetupNoLevelEnum()
     const res = await request(app).post(`/api/institution/programs/${program.id}/market-evidence`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
       .send({ region_codes: ['1600000000000'], professions: ['инженер-технолог'] })
 
     expect(res.status).toBe(201)
@@ -151,28 +152,28 @@ describe('market evidence — generate, read, edit', () => {
   it('rejects generation with an unknown region code', async () => {
     const { token, program } = await platformAdminSetup()
     const res = await request(app).post(`/api/institution/programs/${program.id}/market-evidence`)
-      .set('Authorization', `Bearer ${token}`).send({ region_codes: ['0000000000000'], professions: ['инженер'] })
+      .set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send({ region_codes: ['0000000000000'], professions: ['инженер'] })
     expect(res.status).toBe(400)
   })
 
   it('rejects generation with no regions selected', async () => {
     const { token, program } = await platformAdminSetup()
     const res = await request(app).post(`/api/institution/programs/${program.id}/market-evidence`)
-      .set('Authorization', `Bearer ${token}`).send({ region_codes: [], professions: ['инженер'] })
+      .set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send({ region_codes: [], professions: ['инженер'] })
     expect(res.status).toBe(400)
   })
 
   it('rejects generation with no profession terms', async () => {
     const { token, program } = await platformAdminSetup()
     const res = await request(app).post(`/api/institution/programs/${program.id}/market-evidence`)
-      .set('Authorization', `Bearer ${token}`).send({ region_codes: ['1600000000000'], professions: [] })
+      .set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send({ region_codes: ['1600000000000'], professions: [] })
     expect(res.status).toBe(400)
   })
 
   it('accepts a request naming multiple region codes (validation passes both through to fetchVacancySnapshot)', async () => {
     const { token, program } = await platformAdminSetup()
     const res = await request(app).post(`/api/institution/programs/${program.id}/market-evidence`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
       .send({ region_codes: ['1600000000000', '7700000000000'], professions: ['инженер-технолог'] })
     // The mocked fetchVacancySnapshot always returns a fixed single-region
     // snapshot regardless of input — this test's job is only to confirm the
@@ -185,15 +186,15 @@ describe('market evidence — generate, read, edit', () => {
   it('a teacher with no program access is refused', async () => {
     const { program } = await platformAdminSetup()
     const outsider = await createTestTeacher({})
-    const token = signToken({ id: outsider.id, email: outsider.email })
-    const res = await request(app).get(`/api/institution/programs/${program.id}/market-evidence`).set('Authorization', `Bearer ${token}`)
+    const { token } = signToken({ id: outsider.id, email: outsider.email })
+    const res = await request(app).get(`/api/institution/programs/${program.id}/market-evidence`).set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(res.status).toBe(403)
   })
 
   it('leaves strategy_excerpts empty when the institution has no strategy document', async () => {
     const { token, program } = await platformAdminSetup()
     const res = await request(app).post(`/api/institution/programs/${program.id}/market-evidence`)
-      .set('Authorization', `Bearer ${token}`).send({ region_codes: ['1600000000000'], professions: ['инженер-технолог'] })
+      .set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send({ region_codes: ['1600000000000'], professions: ['инженер-технолог'] })
     expect(res.status).toBe(201)
     expect(res.body.strategy_excerpts).toEqual([])
   })
@@ -213,7 +214,7 @@ describe('market evidence — generate, read, edit', () => {
     )
 
     const res = await request(app).post(`/api/institution/programs/${program.id}/market-evidence`)
-      .set('Authorization', `Bearer ${token}`).send({ region_codes: ['1600000000000'], professions: ['инженер-технолог'] })
+      .set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send({ region_codes: ['1600000000000'], professions: ['инженер-технолог'] })
 
     expect(res.status).toBe(201)
     expect(res.body.strategy_excerpts).toEqual([

@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import { logout as logoutApi } from '../../api/auth'
 import Icon from '../../components/ui/Icon'
 import type { IconName } from '../../components/ui/Icon'
 
@@ -64,7 +65,7 @@ export default function AdminLayout() {
             ← В приложение
           </button>
           <button
-            onClick={() => { clearAuth(); navigate('/login') }}
+            onClick={() => { logoutApi().catch(() => {}); clearAuth(); navigate('/login') }}
             className="w-full text-left text-xs font-sans text-ink-inv-muted hover:text-ink-inverse transition-colors px-3 py-1.5"
           >
             Выйти ({teacher?.email})

@@ -13,13 +13,16 @@ declare module 'axios' {
 const client = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? '',
   timeout: 120_000, // AI calls can be slow — the reasoning model (calc grading) especially
-})
-
-// Attach JWT to every request
-client.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().token
-  if (token) config.headers.Authorization = `Bearer ${token}`
-  return config
+  // Session lives in an HttpOnly cookie now (not a header we attach) — the
+  // browser only sends it cross-origin if the request opts in.
+  withCredentials: true,
+  headers: {
+    // Defense-in-depth CSRF check the backend requires on mutating requests
+    // (see middleware/authenticate.ts) — a plain cross-site <form> POST can't
+    // set a custom header, and a fetch/XHR from an origin outside our CORS
+    // allow-list can't get this past preflight either.
+    'X-Requested-With': 'ISPUM',
+  },
 })
 
 // Pull a *string* error message out of whatever the server (or an upstream

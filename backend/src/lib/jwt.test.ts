@@ -9,10 +9,17 @@ import { signToken, verifyToken } from './jwt'
 
 describe('signToken / verifyToken', () => {
   it('round-trips id and email through a valid token', () => {
-    const token = signToken({ id: 'teacher-1', email: 'test@example.test' })
+    const { token, draftKeySeed } = signToken({ id: 'teacher-1', email: 'test@example.test' })
     const payload = verifyToken(token)
     expect(payload.id).toBe('teacher-1')
     expect(payload.email).toBe('test@example.test')
+    expect(payload.dks).toBe(draftKeySeed)
+  })
+
+  it('generates a fresh draft key seed on every call', () => {
+    const a = signToken({ id: 'teacher-1', email: 'test@example.test' })
+    const b = signToken({ id: 'teacher-1', email: 'test@example.test' })
+    expect(a.draftKeySeed).not.toBe(b.draftKeySeed)
   })
 
   it('throws the expired-session message for an expired token', () => {
@@ -25,7 +32,7 @@ describe('signToken / verifyToken', () => {
   })
 
   it('throws the invalid-session message for a tampered signature', () => {
-    const token = signToken({ id: 'teacher-1', email: 'test@example.test' })
+    const { token } = signToken({ id: 'teacher-1', email: 'test@example.test' })
     const tampered = token.slice(0, -4) + 'abcd'
     expect(() => verifyToken(tampered)).toThrowError('Недействительная сессия')
   })

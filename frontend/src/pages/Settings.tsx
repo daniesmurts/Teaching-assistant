@@ -6,6 +6,7 @@ import Button from '../components/ui/Button'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 import { deleteAccount, downloadAccountExport, updateProfileName } from '../api/account'
+import { logout as logoutApi } from '../api/auth'
 
 const CONFIRM_WORD = 'УДАЛИТЬ'
 
@@ -79,6 +80,7 @@ export default function Settings() {
     setLoading(true)
     try {
       await deleteAccount(password)
+      logoutApi().catch(() => {})
       clearAuth()
       addToast('Аккаунт удалён', 'success')
       navigate('/')

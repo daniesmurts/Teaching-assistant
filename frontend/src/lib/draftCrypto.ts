@@ -2,34 +2,33 @@
 // (TODO.md #4 — student `submission_text` sat there in plaintext between
 // sessions; a stolen unlocked laptop is a real 152-ФЗ posture concern).
 //
-// Key is derived from the current JWT via SHA-256, so it rotates whenever
-// the teacher logs in again with a new token, and old encrypted drafts
+// Key is derived from the per-login draft key seed via SHA-256, so it
+// rotates whenever the teacher logs in again, and old encrypted drafts
 // become unreadable (harmless — clearGradingDrafts() already wipes them on
 // logout; this is defense-in-depth for the window before that runs, e.g. a
-// token that expired without an explicit logout).
+// session that expired without an explicit logout).
 //
-// Kept as a plain SHA-256-of-token key (not a proper KDF like HKDF) — the
-// JWT itself is already a high-entropy secret an attacker reading
-// localStorage would also have direct access to, so this only defends
-// against someone reading the disk file *without* also having the live
-// browser session (e.g. a cold copy of the profile directory).
+// The seed itself isn't a proper KDF input (not HKDF) but it also isn't the
+// session credential anymore — the JWT lives in an HttpOnly cookie this code
+// can never read, so the seed is a separate, purpose-built random value with
+// no ability to authenticate API calls on its own.
 
-import { getAuthToken } from './authToken'
+import { getDraftKeySeed } from './authToken'
 
 let cachedKeyPromise: Promise<CryptoKey> | null = null
-let cachedForToken: string | null = null
+let cachedForSeed: string | null = null
 
 function getKey(): Promise<CryptoKey> | null {
-  const token = getAuthToken()
-  if (!token) return null
-  if (cachedForToken === token && cachedKeyPromise) return cachedKeyPromise
-  cachedForToken = token
-  cachedKeyPromise = deriveKey(token)
+  const seed = getDraftKeySeed()
+  if (!seed) return null
+  if (cachedForSeed === seed && cachedKeyPromise) return cachedKeyPromise
+  cachedForSeed = seed
+  cachedKeyPromise = deriveKey(seed)
   return cachedKeyPromise
 }
 
-async function deriveKey(token: string): Promise<CryptoKey> {
-  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+async function deriveKey(seed: string): Promise<CryptoKey> {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(seed))
   return crypto.subtle.importKey('raw', hash, 'AES-GCM', false, ['encrypt', 'decrypt'])
 }
 

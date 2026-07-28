@@ -15,10 +15,19 @@ async function ageTeacher(teacherId: string, hoursAgo: number): Promise<void> {
   )
 }
 
+// findNudgeCandidates requires a verified email (migration 076 — nudging an
+// unverified/possibly-mistyped address risks bounces). createTestTeacher()
+// leaves new teachers unverified, matching real signups, so any test that
+// expects its teacher to actually surface as a candidate must verify it explicitly.
+async function verifyTeacher(teacherId: string): Promise<void> {
+  await pool.query(`UPDATE teachers SET email_verified_at = NOW() WHERE id = $1`, [teacherId])
+}
+
 describe('findNudgeCandidates', () => {
   it('returns a 30h-old teacher with no grades for the 24h nudge', async () => {
     const t = await createTestTeacher()
     await ageTeacher(t.id, 30)
+    await verifyTeacher(t.id)
     const hits = await findNudgeCandidates('activation_24h', 24, 72)
     expect(hits.map((h) => h.id)).toContain(t.id)
   })
@@ -53,6 +62,7 @@ describe('findNudgeCandidates', () => {
   it('excludes teachers already sent this nudge type, but not other types', async () => {
     const t = await createTestTeacher()
     await ageTeacher(t.id, 80)   // inside the 72h–7d window
+    await verifyTeacher(t.id)
     await claimNudge(t.id, 'activation_24h')
     const hits24 = await findNudgeCandidates('activation_24h', 24, 72)
     const hits72 = await findNudgeCandidates('activation_72h', 72, 7 * 24)

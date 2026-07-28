@@ -117,14 +117,14 @@ const queryClient = new QueryClient({
 // initMetrica() counts the first view itself, so the initial mount skips the hit.
 function RouteTracker() {
   const location = useLocation()
-  const token = useAuthStore((s) => s.token)
+  const authenticated = useAuthStore((s) => s.authenticated)
   const first = useRef(true)
   useEffect(() => {
-    if (token || !isPublicPath(location.pathname)) return
+    if (authenticated || !isPublicPath(location.pathname)) return
     initMetrica()
     if (first.current) { first.current = false; return }
     metricaHit(window.location.href)
-  }, [location, token])
+  }, [location, authenticated])
   return null
 }
 
@@ -150,11 +150,11 @@ function ScrollToHash() {
 //     within a moment, no logout needed)
 // Silent + non-blocking; a 401 is handled by the axios client.
 function PlanSync() {
-  const token = useAuthStore((s) => s.token)
+  const authenticated = useAuthStore((s) => s.authenticated)
   const updateAccount = useAuthStore((s) => s.updateAccount)
 
   useEffect(() => {
-    if (!token) return
+    if (!authenticated) return
 
     let last = 0
     const refresh = () => {
@@ -176,13 +176,13 @@ function PlanSync() {
       window.removeEventListener('focus', refresh)
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [token, updateAccount])
+  }, [authenticated, updateAccount])
   return null
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const token = useAuthStore((s) => s.token)
-  return token ? <>{children}</> : <Navigate to="/login" replace />
+  const authenticated = useAuthStore((s) => s.authenticated)
+  return authenticated ? <>{children}</> : <Navigate to="/login" replace />
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {

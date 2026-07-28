@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../store/authStore'
+import { logout as logoutApi } from '../../api/auth'
 import { getCourses } from '../../api/courses'
 import { getGradingStats } from '../../api/grading'
 import Icon, { type IconName } from '../ui/Icon'
@@ -160,7 +161,7 @@ export default function Sidebar({ onClose }: Props) {
   const canSeeInstitutionPanel =
     isInstitutionAdmin || hasCurriculumAccess || hasTeachingAccess || hasPlatformAccess || hasUmuAccess
 
-  function logout() { clearAuth(); navigate('/login') }
+  function logout() { logoutApi().catch(() => {}); clearAuth(); navigate('/login') }
 
   return (
     <aside className="w-[210px] h-full min-h-screen bg-sidebar flex flex-col flex-shrink-0">

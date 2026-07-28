@@ -1,5 +1,6 @@
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import { logout as logoutApi } from '../../api/auth'
 
 // Research.md §7.10 — each entry declares which domain-grant reaches it.
 // `undefined` = institution-root admin only (permanently, for the
@@ -131,7 +132,7 @@ export default function InstitutionLayout() {
             ← В приложение
           </button>
           <button
-            onClick={() => { clearAuth(); navigate('/login') }}
+            onClick={() => { logoutApi().catch(() => {}); clearAuth(); navigate('/login') }}
             className="w-full text-left text-xs font-sans text-ink-inv-muted hover:text-ink-inverse transition-colors px-3 py-1.5"
           >
             Выйти ({teacher?.email})

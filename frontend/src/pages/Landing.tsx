@@ -5,10 +5,10 @@ import PublicHeader from '../components/layout/PublicHeader'
 import PublicFooter from '../components/layout/PublicFooter'
 
 export default function Landing() {
-  const token = useAuthStore((s) => s.token)
+  const authenticated = useAuthStore((s) => s.authenticated)
   const [billing, setBilling] = useState<'monthly' | 'annual'>('annual')
 
-  if (token) {
+  if (authenticated) {
     return <Navigate to="/dashboard" replace />
   }
 

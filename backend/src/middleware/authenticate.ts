@@ -1,8 +1,11 @@
 import { Request, Response, NextFunction } from 'express'
 import { verifyToken } from '../lib/jwt'
+import { SESSION_COOKIE_NAME } from '../lib/session'
 import { findTeacherRowById, touchLastSeen } from '../db/queries/teachers'
 import { computeEffectiveTier } from '../lib/planTier'
-import { UnauthorizedError } from '../errors/AppError'
+import { UnauthorizedError, ForbiddenError } from '../errors/AppError'
+
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 // ─── Extended teacher context attached to every authenticated request ─────────
 
@@ -16,6 +19,7 @@ export interface AuthTeacher {
   // §7 org tree — additive, alongside the legacy `role` until routes migrate.
   primary_org_unit_id: string | null
   is_platform_admin:   boolean       // orthogonal platform-owner flag (preferred over role)
+  draft_key_seed:      string       // see lib/jwt.ts — local drafts-encryption key material, not an auth credential
 }
 
 declare global {
@@ -29,6 +33,7 @@ declare global {
 interface JwtPayload {
   id:    string
   email: string
+  dks:   string
   iat:   number
   exp:   number
 }
@@ -40,13 +45,20 @@ export async function authenticate(
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  const authHeader = req.headers.authorization
-  if (!authHeader?.startsWith('Bearer ')) {
+  const token = req.cookies?.[SESSION_COOKIE_NAME] as string | undefined
+  if (!token) {
     res.status(401).json({ error: 'Требуется авторизация', code: 'UNAUTHORIZED' })
     return
   }
 
-  const token = authHeader.slice(7)
+  // Defense-in-depth against CSRF: SameSite=Lax already keeps this cookie off
+  // cross-site POST/PUT/PATCH/DELETE, but a plain cross-site <form> also
+  // can't set a custom header, and a fetch/XHR from an origin our CORS
+  // allow-list doesn't recognise can't get it past preflight either.
+  if (MUTATING_METHODS.has(req.method) && req.headers['x-requested-with'] !== 'ISPUM') {
+    next(new ForbiddenError('Запрос отклонён (отсутствует ожидаемый заголовок)'))
+    return
+  }
 
   let payload: JwtPayload
   try {
@@ -91,6 +103,7 @@ export async function authenticate(
       is_active:           row.is_active,
       primary_org_unit_id: row.primary_org_unit_id ?? null,
       is_platform_admin:   row.is_platform_admin   ?? false,
+      draft_key_seed:      payload.dks,
     }
     touchLastSeen(row.id)   // throttled fire-and-forget activity mark
     next()

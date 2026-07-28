@@ -5,6 +5,7 @@ import { validate } from '../middleware/validate'
 import { authLimiter, publicFormLimiter } from '../middleware/rateLimits'
 import { asyncHandler } from '../lib/asyncHandler'
 import { signToken } from '../lib/jwt'
+import { setSessionCookie, clearSessionCookie } from '../lib/session'
 import { escapeHtml } from '../lib/escapeHtml'
 import { ValidationError, NotFoundError } from '../errors/AppError'
 import {
@@ -154,7 +155,8 @@ router.post(
       !!inviteEmail && inviteEmail.toLowerCase() === teacher.email.toLowerCase()
     if (verifiedViaInvite) await setEmailVerified(teacher.id)
 
-    const token = signToken({ id: teacher.id, email: teacher.email })
+    const { token, draftKeySeed } = signToken({ id: teacher.id, email: teacher.email })
+    setSessionCookie(res, token)
 
     // Welcome email — fire-and-forget
     if (name || email) {
@@ -186,7 +188,7 @@ router.post(
     // `teacher` was materialised before setEmailVerified ran — patch the flag
     // rather than re-fetching the row for one field.
     res.status(201).json({
-      token,
+      draftKeySeed,
       teacher: { ...teacher, email_verified: teacher.email_verified || verifiedViaInvite },
       plan,
     })
@@ -396,7 +398,8 @@ router.post(
     recordAudit({ institutionId: row.institution_id ?? null, actorTeacherId: row.id,
       actorEmail: row.email, action: 'auth.login', ...reqMeta(req) })
 
-    const token = signToken({ id: row.id, email: row.email })
+    const { token, draftKeySeed } = signToken({ id: row.id, email: row.email })
+    setSessionCookie(res, token)
 
     // Effective tier (expiry + institution inheritance) — same helper the
     // authenticate middleware uses, so login and /me always agree.
@@ -404,7 +407,7 @@ router.post(
     const plan = await buildPlanData(row.id, effectiveTier, row.plan_expires_at, row.auto_renew, row.renewal_failed_at)
 
     res.json({
-      token,
+      draftKeySeed,
       teacher: {
         id:                              row.id,
         email:                           row.email,
@@ -439,9 +442,19 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
     institution_id:                  row.institution_id ?? null,
     institution_shared_rag_enabled:  row.institution_shared_rag_enabled ?? false,
     email_verified:                  row.email_verified_at != null,
+    draftKeySeed:                    req.teacher.draft_key_seed,
     ...(await adminFlags(row)),
     plan,
   })
+}))
+
+// ─── POST /api/auth/logout ────────────────────────────────────────────────────
+// Clears the session cookie. Always succeeds, even with a missing/expired
+// cookie, so a stuck client can always get back to a clean logged-out state.
+
+router.post('/logout', asyncHandler(async (_req, res) => {
+  clearSessionCookie(res)
+  res.json({ ok: true })
 }))
 
 // ─── POST /api/auth/forgot-password ──────────────────────────────────────────

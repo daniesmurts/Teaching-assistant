@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { asyncHandler } from '../lib/asyncHandler'
 import { authLimiter } from '../middleware/rateLimits'
 import { signToken } from '../lib/jwt'
+import { setSessionCookie } from '../lib/session'
 import { logger } from '../lib/logger'
 import { AppError, ValidationError } from '../errors/AppError'
 import {
@@ -141,7 +142,8 @@ router.post('/:institutionId/acs', asyncHandler(async (req, res) => {
     throw new AppError('Аккаунт деактивирован', 403, 'ACCOUNT_DISABLED')
   }
 
-  const token = signToken({ id: teacher.id, email: teacher.email })
+  const { token } = signToken({ id: teacher.id, email: teacher.email })
+  setSessionCookie(res, token)
 
   // RelayState may carry a relative return path (e.g. /app/dashboard). Only
   // accept relative paths — never honour an external URL passed via SSO.
@@ -154,7 +156,6 @@ router.post('/:institutionId/acs', asyncHandler(async (req, res) => {
 
   const frontend = process.env.FRONTEND_URL ?? 'http://localhost:5173'
   const callbackUrl = new URL('/sso/callback', frontend)
-  callbackUrl.searchParams.set('token', token)
   if (safeNext) callbackUrl.searchParams.set('next', safeNext)
   res.redirect(callbackUrl.toString())
 }))

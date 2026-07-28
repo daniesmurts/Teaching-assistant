@@ -3,6 +3,7 @@ import { asyncHandler } from '../lib/asyncHandler'
 import { authenticate } from '../middleware/authenticate'
 import { ltiLimiter } from '../middleware/rateLimits'
 import { signToken } from '../lib/jwt'
+import { setSessionCookie } from '../lib/session'
 import { logger } from '../lib/logger'
 import { AppError, ValidationError, NotFoundError } from '../errors/AppError'
 import { toolPublicJwks } from '../lib/ltiJwks'
@@ -163,9 +164,9 @@ router.post('/launch', ltiLimiter, asyncHandler(async (req, res) => {
       passthroughData:   claims.deepLinkingSettings.data,
     })
 
-    const token = signToken({ id: teacher.id, email: teacher.email })
+    const { token } = signToken({ id: teacher.id, email: teacher.email })
+    setSessionCookie(res, token)
     const pickerUrl = new URL('/lti/deep-link', frontend)
-    pickerUrl.searchParams.set('token', token)
     pickerUrl.searchParams.set('session', sessionId)
     res.redirect(pickerUrl.toString())
     return
@@ -216,9 +217,9 @@ router.post('/launch', ltiLimiter, asyncHandler(async (req, res) => {
       }))
     }
 
-    const token = signToken({ id: teacher.id, email: teacher.email })
+    const { token } = signToken({ id: teacher.id, email: teacher.email })
+    setSessionCookie(res, token)
     const callbackUrl = new URL('/lti/callback', frontend)
-    callbackUrl.searchParams.set('token', token)
     callbackUrl.searchParams.set('courseId', courseId)
     res.redirect(callbackUrl.toString())
     return

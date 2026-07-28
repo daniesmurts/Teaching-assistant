@@ -62,6 +62,22 @@ export const ltiLimiter = rateLimit({
   message: { error: 'Слишком много запросов LTI. Попробуйте позже.' },
 })
 
+// ─── Payment webhook — server-to-server, but still bounded per source IP ──────
+// T-Bank's callback endpoint sits behind generalLimiter today (200/15min),
+// which is shared with every other unauthenticated route hitting that IP —
+// a dedicated, tighter-windowed limiter keyed the same way (IP) bounds a
+// flood of forged webhook POSTs without needing to touch the DB-backed
+// per-account HMAC check to reject them. 120/min comfortably covers T-Bank's
+// own retry behaviour (a handful of retries per order, not per-second) while
+// still capping abuse well below what unbounded flooding could reach.
+export const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests' },
+})
+
 // ─── General API — broad IP-based catch-all ───────────────────────────────────
 // All other endpoints: 200 requests per 15 minutes per IP
 export const generalLimiter = rateLimit({

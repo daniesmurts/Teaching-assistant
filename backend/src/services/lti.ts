@@ -136,10 +136,27 @@ export interface PlatformOpenIdConfiguration {
   registration_endpoint: string
 }
 
+const DISCOVERY_FETCH_TIMEOUT_MS = 10_000
+
 /** GETs the platform's OpenID Connect discovery document — the URL Moodle
- *  passes us as `openid_configuration`, not authenticated on our side. */
+ *  passes us as `openid_configuration`, not authenticated on our side (the
+ *  registration session token gates *who* can trigger this, not *what* URL
+ *  they can point it at — bounded with a timeout so a slow/hanging target
+ *  can't tie up the request indefinitely). */
 export async function fetchPlatformOpenIdConfiguration(url: string): Promise<PlatformOpenIdConfiguration> {
-  const response = await fetch(url)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), DISCOVERY_FETCH_TIMEOUT_MS)
+  let response: Response
+  try {
+    response = await fetch(url, { signal: controller.signal })
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new AppError('Платформа не ответила вовремя', 504, 'LTI_DISCOVERY_TIMEOUT')
+    }
+    throw err
+  } finally {
+    clearTimeout(timeout)
+  }
   if (!response.ok) {
     throw new AppError(`Не удалось получить конфигурацию платформы (${response.status})`, 502, 'LTI_DISCOVERY_FAILED')
   }

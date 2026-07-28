@@ -1,4 +1,5 @@
 import type { EmailPayload } from '../services/emailTransport'
+import { escapeHtml } from './escapeHtml'
 
 // ─── Base layout ──────────────────────────────────────────────────────────────
 
@@ -54,7 +55,7 @@ export function renewalFailedEmail(name: string, accessUntil: Date): Omit<EmailP
   return {
     subject: 'Не удалось продлить подписку ИСПУМ',
     html: wrap(`
-      <p>Здравствуйте, ${fn}!</p>
+      <p>Здравствуйте, ${escapeHtml(fn)}!</p>
       <p>Мы не смогли списать оплату за продление подписки <strong>ИСПУМ Pro</strong> —
          возможно, у карты истёк срок действия или недостаточно средств.</p>
       <p>Доступ к Pro сохраняется до <strong>${fmtRu(accessUntil)}</strong>.
@@ -77,7 +78,7 @@ export function subscriptionEndedEmail(name: string): Omit<EmailPayload, 'to'> {
   return {
     subject: 'Подписка ИСПУМ Pro завершена',
     html: wrap(`
-      <p>Здравствуйте, ${fn}!</p>
+      <p>Здравствуйте, ${escapeHtml(fn)}!</p>
       <p>Подписка <strong>ИСПУМ Pro</strong> завершена, так как не удалось продлить оплату.
          Ваш аккаунт переведён на бесплатный тариф.</p>
       <p>Вы можете вернуться к Pro в любой момент — все ваши данные сохранены.</p>
@@ -103,7 +104,7 @@ export function registrationEmail(name: string, verifyUrl?: string): Omit<EmailP
   return {
     subject: 'Добро пожаловать в ИСПУМ',
     html: wrap(`
-      <p>Здравствуйте, ${fn}!</p>
+      <p>Здравствуйте, ${escapeHtml(fn)}!</p>
       <p>Ваш аккаунт ИСПУМ создан. Вы готовы приступить к работе.</p>
       ${verifyBlock}
       ${btn(url, 'Перейти в ИСПУМ')}
@@ -126,7 +127,7 @@ export function verifyEmailResendEmail(name: string, verifyUrl: string): Omit<Em
   return {
     subject: 'Подтвердите адрес эл. почты — ИСПУМ',
     html: wrap(`
-      <p>Здравствуйте, ${fn}!</p>
+      <p>Здравствуйте, ${escapeHtml(fn)}!</p>
       <p>Нажмите кнопку ниже, чтобы подтвердить, что этот адрес принадлежит вам.
          Это нужно, чтобы вы могли восстановить доступ к аккаунту ИСПУМ,
          если забудете пароль.</p>
@@ -149,7 +150,7 @@ export function proGrantedEmail(
   return {
     subject: 'Вам предоставлен бесплатный доступ к ИСПУМ Pro',
     html: wrap(`
-      <p>Здравствуйте, ${fn}!</p>
+      <p>Здравствуйте, ${escapeHtml(fn)}!</p>
       <p>Поздравляем — вам предоставлен <strong>бесплатный доступ к ИСПУМ Pro</strong> на ${days} ${pluralDays(days)}.</p>
       <p style="color:#6B6560;font-size:13px">
         Доступ активен до <strong>${fmtRu(expiresAt)}</strong>. По истечении срока аккаунт автоматически вернётся на бесплатный план — оплата не списывается.
@@ -202,7 +203,7 @@ export function passwordResetEmail(
     category: 'security',
     subject: 'Сброс пароля ИСПУМ',
     html: wrap(`
-      <p>Здравствуйте, ${fn}!</p>
+      <p>Здравствуйте, ${escapeHtml(fn)}!</p>
       <p>Мы получили запрос на сброс пароля для вашего аккаунта.</p>
       ${btn(resetUrl, 'Сбросить пароль')}
       <p style="color:#6B6560;font-size:13px">
@@ -226,7 +227,7 @@ export function passwordChangedEmail(name: string): Omit<EmailPayload, 'to'> {
     category: 'security',
     subject: 'Пароль ИСПУМ изменён',
     html: wrap(`
-      <p>Здравствуйте, ${fn}!</p>
+      <p>Здравствуйте, ${escapeHtml(fn)}!</p>
       <p>Пароль вашего аккаунта ИСПУМ был успешно изменён.</p>
       <p style="color:#6B6560;font-size:13px">
         Если это были не вы, немедленно свяжитесь с нами:
@@ -251,9 +252,9 @@ export function adminSignupEmail(data: {
     html: wrap(`
       <p><strong>Новый преподаватель зарегистрировался в ИСПУМ.</strong></p>
       <p>
-        Имя: ${data.name || '—'}<br>
-        Эл. почта: ${data.email}<br>
-        Организация: ${data.university || '—'}<br>
+        Имя: ${escapeHtml(data.name || '—')}<br>
+        Эл. почта: ${escapeHtml(data.email)}<br>
+        Организация: ${escapeHtml(data.university || '—')}<br>
         ${data.viaInvite ? 'Источник: по приглашению организации<br>' : ''}
         Дата: ${when}
       </p>
@@ -275,10 +276,10 @@ export function adminPurchaseEmail(data: {
     html: wrap(`
       <p><strong>Поступила оплата в ИСПУМ.</strong></p>
       <p>
-        Преподаватель: ${data.email}<br>
-        Тариф: ${data.planLabel}<br>
+        Преподаватель: ${escapeHtml(data.email)}<br>
+        Тариф: ${escapeHtml(data.planLabel)}<br>
         Сумма: ${data.amountRub.toLocaleString('ru-RU')} ₽<br>
-        Заказ: ${data.orderId}<br>
+        Заказ: ${escapeHtml(data.orderId)}<br>
         Дата: ${when}
       </p>
     `),
@@ -294,18 +295,18 @@ export function feedbackEmail(data: {
 }): Omit<EmailPayload, 'to'> {
   const labels: Record<string, string> = { bug: 'Проблема', idea: 'Идея', question: 'Вопрос', other: 'Другое' }
   const cat = labels[data.category] ?? data.category
-  const safe = data.message.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const safe = escapeHtml(data.message)
   return {
     subject: `[ИСПУМ] Отзыв (${cat}) — ${data.email}`,
     html: wrap(`
       <p><strong>Новый отзыв в ИСПУМ.</strong></p>
       <p style="color:#6B6560;font-size:13px">
-        От: ${data.name || '—'} (${data.email})<br>
-        Тариф: ${data.plan}${data.page ? `<br>Страница: ${data.page}` : ''}<br>
-        Категория: ${cat}
+        От: ${escapeHtml(data.name || '—')} (${escapeHtml(data.email)})<br>
+        Тариф: ${escapeHtml(data.plan)}${data.page ? `<br>Страница: ${escapeHtml(data.page)}` : ''}<br>
+        Категория: ${escapeHtml(cat)}
       </p>
       <div style="margin-top:12px;padding:14px 16px;background:#FAF8F4;border:1px solid rgba(0,0,0,0.08);border-radius:8px;white-space:pre-wrap">${safe}</div>
-      <p style="margin-top:16px"><a href="mailto:${data.email}" style="color:#C8860A">Ответить ${data.email}</a></p>
+      <p style="margin-top:16px"><a href="mailto:${escapeHtml(data.email)}" style="color:#C8860A">Ответить ${escapeHtml(data.email)}</a></p>
     `),
     text:
       `Новый отзыв в ИСПУМ\n\n` +
@@ -321,17 +322,17 @@ export function contactMessageEmail(data: {
     support: 'Вопрос в поддержку', demo: 'Демо / Для ВУЗов', research: 'Исследовательское партнёрство', billing: 'Оплата',
   }
   const topicLabel = labels[data.topic] ?? data.topic
-  const safe = data.message.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const safe = escapeHtml(data.message)
   return {
     subject: `[ИСПУМ] ${topicLabel} — ${data.name}`,
     html: wrap(`
       <p><strong>Новое обращение с сайта ИСПУМ (${data.sourcePage === 'research' ? '/research' : '/contact'}).</strong></p>
       <p style="color:#6B6560;font-size:13px">
-        От: ${data.name} (${data.email})${data.organization ? `<br>Организация: ${data.organization}` : ''}<br>
-        Тема: ${topicLabel}
+        От: ${escapeHtml(data.name)} (${escapeHtml(data.email)})${data.organization ? `<br>Организация: ${escapeHtml(data.organization)}` : ''}<br>
+        Тема: ${escapeHtml(topicLabel)}
       </p>
       <div style="margin-top:12px;padding:14px 16px;background:#FAF8F4;border:1px solid rgba(0,0,0,0.08);border-radius:8px;white-space:pre-wrap">${safe}</div>
-      <p style="margin-top:16px"><a href="mailto:${data.email}" style="color:#C8860A">Ответить ${data.email}</a></p>
+      <p style="margin-top:16px"><a href="mailto:${escapeHtml(data.email)}" style="color:#C8860A">Ответить ${escapeHtml(data.email)}</a></p>
     `),
     text:
       `Новое обращение с сайта ИСПУМ (${data.sourcePage === 'research' ? '/research' : '/contact'})\n\n` +
@@ -351,14 +352,14 @@ export function teacherInviteEmail(
     subject: `Приглашение в ИСПУМ — ${institutionName}`,
     html: wrap(`
       <p>Здравствуйте!</p>
-      <p><strong>${inviter}</strong> приглашает вас присоединиться к ИСПУМ
-         в рамках организации <strong>${institutionName}</strong>.</p>
+      <p><strong>${escapeHtml(inviter)}</strong> приглашает вас присоединиться к ИСПУМ
+         в рамках организации <strong>${escapeHtml(institutionName)}</strong>.</p>
       <p>ИСПУМ — платформа для преподавателей: проверка студенческих работ с ИИ
          и подготовка материалов к лекциям.</p>
       ${btn(inviteUrl, 'Принять приглашение')}
       <p style="color:#6B6560;font-size:13px">
         Приглашение действительно 7 дней. Если ссылка не открывается, скопируйте её в браузер:<br>
-        <span style="color:#C8860A;word-break:break-all">${inviteUrl}</span>
+        <span style="color:#C8860A;word-break:break-all">${escapeHtml(inviteUrl)}</span>
       </p>
     `),
     text:
@@ -387,7 +388,7 @@ export function activation24hEmail(name: string, unsubUrl: string): Omit<EmailPa
   return {
     subject: 'Проверьте первую работу за 2 минуты',
     html: wrap(`
-      <p>Здравствуйте, ${fn}!</p>
+      <p>Здравствуйте, ${escapeHtml(fn)}!</p>
       <p>Вы зарегистрировались в ИСПУМ, но ещё не проверили ни одной работы —
          а это самый быстрый способ понять, чем платформа полезна именно вам.</p>
       <p>Это занимает пару минут: вставьте текст любой студенческой работы
@@ -415,7 +416,7 @@ export function activation72hEmail(name: string, unsubUrl: string): Omit<EmailPa
   return {
     subject: '⏳ Сделайте первый шаг в ИСПУМ за 3 минуты',
     html: wrap(`
-      <p>Здравствуйте, ${fn}!</p>
+      <p>Здравствуйте, ${escapeHtml(fn)}!</p>
       <p>Вы уже зарегистрировались, но пока не начали проверять работы — и это совершенно нормально. 
 Часто первый шаг (создать предмет и загрузить первую работу) кажется самым сложным.</p>
 

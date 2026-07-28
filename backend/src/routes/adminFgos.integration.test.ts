@@ -7,6 +7,7 @@ import request from 'supertest'
 import { app } from '../app'
 import { pool } from '../db/connection'
 import { signToken } from '../lib/jwt'
+import { SESSION_COOKIE_NAME } from '../lib/session'
 import { createTestTeacher } from '../db/__tests__/fixtures'
 import { createInstitution } from '../db/queries/institutions'
 import { addUnitRole, getRootUnitForInstitution } from '../db/queries/orgUnits'
@@ -58,7 +59,7 @@ afterEach(async () => { await pool.query('ROLLBACK') })
 async function platformAdminToken() {
   const teacher = await createTestTeacher({})
   await pool.query('UPDATE teachers SET is_platform_admin = TRUE WHERE id = $1', [teacher.id])
-  return { teacher, token: signToken({ id: teacher.id, email: teacher.email }) }
+  return { teacher, token: signToken({ id: teacher.id, email: teacher.email }).token }
 }
 
 async function institutionAdminToken() {
@@ -67,7 +68,7 @@ async function institutionAdminToken() {
   const root = await getRootUnitForInstitution(institution.id)
   if (!root) throw new Error('root missing')
   await addUnitRole(teacher.id, root.id, 'admin', 'all')
-  return signToken({ id: teacher.id, email: teacher.email })
+  return signToken({ id: teacher.id, email: teacher.email }).token
 }
 
 const VALID_PAYLOAD = {
@@ -80,20 +81,20 @@ const VALID_PAYLOAD = {
 describe('ФГОС registry — requireAdmin gate (Feature AA v1)', () => {
   it('refuses an institution admin (this is platform-wide reference data, not institution data)', async () => {
     const token = await institutionAdminToken()
-    const res = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`)
+    const res = await request(app).get('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(res.status).toBe(403)
   })
 
   it('a teacher with no admin flag at all is refused', async () => {
     const teacher = await createTestTeacher({})
-    const token = signToken({ id: teacher.id, email: teacher.email })
-    const res = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`)
+    const { token } = signToken({ id: teacher.id, email: teacher.email })
+    const res = await request(app).get('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(res.status).toBe(403)
   })
 
   it('a platform admin reaches the registry', async () => {
     const { token } = await platformAdminToken()
-    const res = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`)
+    const res = await request(app).get('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(res.status).toBe(200)
   })
 })
@@ -106,35 +107,35 @@ describe('ФГОС registry — extract → create → publish round trip', () =
     // integration test DB is not a clean slate (a separate, pre-existing
     // issue — see the note left in TODO.md), so only the *change* caused
     // by this test's own /extract call is a meaningful assertion here.
-    const before = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`)
+    const before = await request(app).get('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     const countBefore = before.body.standards.length
 
-    const extract = await request(app).post('/api/admin/fgos/extract').set('Authorization', `Bearer ${token}`)
+    const extract = await request(app).post('/api/admin/fgos/extract').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
       .attach('file', Buffer.from('not a real pdf, just bytes'), { filename: 'fgos.pdf', contentType: 'application/pdf' })
     expect(extract.status).toBe(200)
     expect(extract.body.standard.direction_code).toBe('09.03.04')
 
-    const after = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`)
+    const after = await request(app).get('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(after.body.standards.length).toBe(countBefore)
   })
 
   it('create persists as draft; publish flips status and is what GET returns with children', async () => {
     const { token } = await platformAdminToken()
 
-    const create = await request(app).post('/api/admin/fgos').set('Authorization', `Bearer ${token}`).send(VALID_PAYLOAD)
+    const create = await request(app).post('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send(VALID_PAYLOAD)
     expect(create.status).toBe(201)
     expect(create.body.status).toBe('draft')
     const id = create.body.id
 
-    const beforePublish = await request(app).get(`/api/admin/fgos/${id}`).set('Authorization', `Bearer ${token}`)
+    const beforePublish = await request(app).get(`/api/admin/fgos/${id}`).set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(beforePublish.body.status).toBe('draft')
     expect(beforePublish.body.competencies).toHaveLength(1)
 
-    const publish = await request(app).post(`/api/admin/fgos/${id}/publish`).set('Authorization', `Bearer ${token}`).send(VALID_PAYLOAD)
+    const publish = await request(app).post(`/api/admin/fgos/${id}/publish`).set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send(VALID_PAYLOAD)
     expect(publish.status).toBe(200)
     expect(publish.body.status).toBe('published')
 
-    const afterPublish = await request(app).get(`/api/admin/fgos/${id}`).set('Authorization', `Bearer ${token}`)
+    const afterPublish = await request(app).get(`/api/admin/fgos/${id}`).set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(afterPublish.body.status).toBe('published')
     expect(afterPublish.body.competencies).toHaveLength(1)
     expect(afterPublish.body.structure_requirements).toHaveLength(1)
@@ -143,23 +144,23 @@ describe('ФГОС registry — extract → create → publish round trip', () =
 
   it('publish rejects a payload missing required standard fields', async () => {
     const { token } = await platformAdminToken()
-    const create = await request(app).post('/api/admin/fgos').set('Authorization', `Bearer ${token}`).send(VALID_PAYLOAD)
+    const create = await request(app).post('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send(VALID_PAYLOAD)
     const id = create.body.id
 
-    const res = await request(app).post(`/api/admin/fgos/${id}/publish`).set('Authorization', `Bearer ${token}`)
+    const res = await request(app).post(`/api/admin/fgos/${id}/publish`).set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
       .send({ standard: { direction_code: '', level: '', title: '' }, competencies: [], structureRequirements: [], profstandardRefs: [] })
     expect(res.status).toBe(400)
   })
 
   it('delete removes the standard (and cascades children)', async () => {
     const { token } = await platformAdminToken()
-    const create = await request(app).post('/api/admin/fgos').set('Authorization', `Bearer ${token}`).send(VALID_PAYLOAD)
+    const create = await request(app).post('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send(VALID_PAYLOAD)
     const id = create.body.id
 
-    const del = await request(app).delete(`/api/admin/fgos/${id}`).set('Authorization', `Bearer ${token}`)
+    const del = await request(app).delete(`/api/admin/fgos/${id}`).set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(del.status).toBe(204)
 
-    const get = await request(app).get(`/api/admin/fgos/${id}`).set('Authorization', `Bearer ${token}`)
+    const get = await request(app).get(`/api/admin/fgos/${id}`).set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(get.status).toBe(404)
   })
 })
@@ -167,14 +168,14 @@ describe('ФГОС registry — extract → create → publish round trip', () =
 describe('ФГОС registry — bulk import from fgosvo.ru', () => {
   it('requireAdmin gate: an institution admin is refused on /discover', async () => {
     const token = await institutionAdminToken()
-    const res = await request(app).post('/api/admin/fgos/discover').set('Authorization', `Bearer ${token}`)
+    const res = await request(app).post('/api/admin/fgos/discover').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
       .send({ url: 'https://fgosvo.ru/fgosvo/index/24' })
     expect(res.status).toBe(403)
   })
 
   it('discover crawls the top page and every category, returning a combined checklist', async () => {
     const { token } = await platformAdminToken()
-    const res = await request(app).post('/api/admin/fgos/discover').set('Authorization', `Bearer ${token}`)
+    const res = await request(app).post('/api/admin/fgos/discover').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
       .send({ url: 'https://fgosvo.ru/fgosvo/index/24' })
 
     expect(res.status).toBe(200)
@@ -190,19 +191,19 @@ describe('ФГОС registry — bulk import from fgosvo.ru', () => {
 
   it('discover marks an already-registered direction_code+level as already_imported', async () => {
     const { token } = await platformAdminToken()
-    await request(app).post('/api/admin/fgos').set('Authorization', `Bearer ${token}`).send({
+    await request(app).post('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send({
       ...VALID_PAYLOAD,
       standard: { ...VALID_PAYLOAD.standard, direction_code: '02.03.01', level: 'бакалавриат' },
     })
 
-    const res = await request(app).post('/api/admin/fgos/discover').set('Authorization', `Bearer ${token}`)
+    const res = await request(app).post('/api/admin/fgos/discover').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
       .send({ url: 'https://fgosvo.ru/fgosvo/index/24' })
     expect(res.body.items[0].already_imported).toBe(true)
   })
 
   it('import-one fetches, extracts, and lands the standard as a draft (never published)', async () => {
     const { token } = await platformAdminToken()
-    const res = await request(app).post('/api/admin/fgos/import-one').set('Authorization', `Bearer ${token}`).send({
+    const res = await request(app).post('/api/admin/fgos/import-one').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send({
       code: '02.03.01', name: 'Математика и компьютерные науки', level: 'бакалавриат',
       pdf_url: 'https://fgosvo.ru/fgosvo/downloads?f=x&id=1583',
     })
@@ -211,13 +212,13 @@ describe('ФГОС registry — bulk import from fgosvo.ru', () => {
     expect(res.body.direction_code).toBe('02.03.01')
     expect(res.body.source_url).toBe('https://fgosvo.ru/fgosvo/downloads?f=x&id=1583')
 
-    const get = await request(app).get(`/api/admin/fgos/${res.body.id}`).set('Authorization', `Bearer ${token}`)
+    const get = await request(app).get(`/api/admin/fgos/${res.body.id}`).set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(get.body.competencies).toHaveLength(1)
   })
 
   it('import-one rejects a request missing required fields', async () => {
     const { token } = await platformAdminToken()
-    const res = await request(app).post('/api/admin/fgos/import-one').set('Authorization', `Bearer ${token}`)
+    const res = await request(app).post('/api/admin/fgos/import-one').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
       .send({ code: '02.03.01' })
     expect(res.status).toBe(400)
   })
@@ -227,28 +228,28 @@ describe('ФГОС registry — list pagination, search, and level filter', () =
   it('search matches by direction_code or title, and level filters exactly', async () => {
     const { token } = await platformAdminToken()
     const uniqueCode = `99.${Date.now() % 100}.01`
-    await request(app).post('/api/admin/fgos').set('Authorization', `Bearer ${token}`).send({
+    await request(app).post('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').send({
       ...VALID_PAYLOAD,
       standard: { ...VALID_PAYLOAD.standard, direction_code: uniqueCode, title: 'Уникальное название для поиска', level: 'магистратура' },
     })
 
-    const byCode = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`).query({ search: uniqueCode })
+    const byCode = await request(app).get('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').query({ search: uniqueCode })
     expect(byCode.body.standards.map((s: { direction_code: string }) => s.direction_code)).toEqual([uniqueCode])
     expect(byCode.body.total).toBe(1)
 
-    const byTitle = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`).query({ search: 'Уникальное название' })
+    const byTitle = await request(app).get('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').query({ search: 'Уникальное название' })
     expect(byTitle.body.total).toBe(1)
 
-    const wrongLevel = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`).query({ search: uniqueCode, level: 'бакалавриат' })
+    const wrongLevel = await request(app).get('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').query({ search: uniqueCode, level: 'бакалавриат' })
     expect(wrongLevel.body.total).toBe(0)
 
-    const rightLevel = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`).query({ search: uniqueCode, level: 'магистратура' })
+    const rightLevel = await request(app).get('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').query({ search: uniqueCode, level: 'магистратура' })
     expect(rightLevel.body.total).toBe(1)
   })
 
   it('page/limit bound the returned rows and total reflects the full match count', async () => {
     const { token } = await platformAdminToken()
-    const res = await request(app).get('/api/admin/fgos').set('Authorization', `Bearer ${token}`).query({ page: 1, limit: 2 })
+    const res = await request(app).get('/api/admin/fgos').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM').query({ page: 1, limit: 2 })
     expect(res.status).toBe(200)
     expect(res.body.standards.length).toBeLessThanOrEqual(2)
     expect(typeof res.body.total).toBe('number')

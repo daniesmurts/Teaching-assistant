@@ -1,6 +1,7 @@
 import express from 'express'
 import helmet from 'helmet'
 import cors from 'cors'
+import cookieParser from 'cookie-parser'
 import { pool } from './db/connection'
 import { config, validateConfig } from './lib/config'
 import { getBuildVersion } from './lib/version'
@@ -82,8 +83,12 @@ app.use(helmet({
 
 const ALLOWED_ORIGINS = [
   process.env.FRONTEND_URL,      // production: https://ispum.ru
-  'http://localhost:5173',        // Vite dev server
-  'http://localhost:4173',        // Vite preview
+  // Localhost origins are dev-only — including them unconditionally would let
+  // any locally running site/extension on a teacher's machine make
+  // credentialed cross-origin requests against the production API.
+  ...(process.env.NODE_ENV !== 'production'
+    ? ['http://localhost:5173', 'http://localhost:4173'] // Vite dev server / preview
+    : []),
 ].filter(Boolean) as string[]
 
 app.use(cors({
@@ -96,7 +101,7 @@ app.use(cors({
     }
   },
   credentials:    true,
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   maxAge:         86400, // preflight cache 24 h
 }))
@@ -108,6 +113,8 @@ app.use(express.json({ limit: '1mb' }))
 // application/x-www-form-urlencoded. Bumped from default 100kb because the
 // base64-encoded assertion can be ~50kb on its own.
 app.use(express.urlencoded({ extended: false, limit: '1mb' }))
+// Reads the HttpOnly session cookie for `authenticate` (see middleware/authenticate.ts).
+app.use(cookieParser())
 app.use(generalLimiter)
 
 // Records every successful mutation from an authenticated user. Runs before the

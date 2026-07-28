@@ -115,9 +115,9 @@ export interface Teacher {
 }
 
 export interface AuthResponse {
-  token:   string
-  teacher: Teacher
-  plan:    PlanState
+  draftKeySeed: string
+  teacher:      Teacher
+  plan:         PlanState
 }
 
 // ─── Course ───────────────────────────────────────────────────────────────────
