@@ -1184,6 +1184,109 @@ for full design.
 
 - **Deferred:** automatic/scheduled refitting (v1 is admin-triggered only).
 
+### AG. Presentation generation depth + images · Effort: Phase 0 S, 🟢 SHIPPED (2026-07-29) · Phase 1 M–L, 🟢 SHIPPED (2026-07-29) · Phase 2 M, 🟢 SHIPPED (2026-07-29) · Phase 3 M, 🟢 SHIPPED (2026-07-29)
+
+Teacher feedback (2026-07-29): decks generated without a pasted conspectus
+are shallow — speaker notes too short to actually talk from (feedback
+estimated ≥1min30s of speaking material per slide) — and engineering
+lectures get little to no imagery. Root causes, not a prompt-wording
+problem: `presentationMaxTokens()` (`services/presentations.ts`) budgets the
+*entire deck* in one `chatJSON` call (~220 tokens/slide including JSON
+overhead — nowhere near 1min30s of Russian speech per slide); without
+`source_text`, the model gets only the topic string + 500 words of
+`syllabus_text` + up to 6 RAG chunks truncated to 280 chars (a display
+constant leaking into the prompt) as source material; and `image` is
+hardcoded `null` at generation — only `diagram`-type slides can carry one at
+all, filled in later only if the teacher manually opens the picker per
+slide.
+
+- **Phase 0 (shipped, this entry) — survive concurrent load before adding
+  depth.** Moved generation off the request thread onto pg-boss
+  (`presentation_jobs` + `presentationJobWorker.ts`, migration 102) and
+  added a platform-wide daily spend circuit breaker (`globalSpendCap.ts`) —
+  necessary *before* Phase 1, since outline+expansion multiplies LLM calls
+  per deck ~5x, and nothing today bounds concurrent generations or
+  aggregate spend across many teachers each under their own monthly cap.
+  See CHANGELOG for full detail.
+- **Phase 1 (shipped, 2026-07-29) — outline + parallel expansion, real
+  depth.** Split generation into a cheap outline call (`buildOutlinePrompt`
+  — type/title/one-line brief per slide, no RAG) + parallel expansion calls
+  (`buildExpansionPrompt`, `EXPANSION_BATCH_SIZE=5` slides/call,
+  `EXPANSION_CONCURRENCY=3`), each with its own full token budget
+  (`expansionBatchMaxTokens`: ~700 tokens/slide standard, ~1000 deep —
+  replaces the removed `presentationMaxTokens`). Notes rewritten as a
+  structured speaking script (why-it-matters → explanation → concrete
+  example → misconception → transition) with a word target behind a new
+  `depth: 'standard' | 'deep'` selector (`shared/types.ts`'s
+  `PresentationDepth`) gated via `canUseFeature('presentationDeepMode')` —
+  `deep` is Pro+, `standard` (180–220 words/slide) is the baseline for every
+  tier. RAG now retrieves per expansion batch (query = that batch's slide
+  titles/briefs) instead of once for the whole topic, feeds the prompt full
+  untruncated chunk text (280-char truncation now only applies to the
+  persisted popover excerpt), and a new `SourcePool` dedupes chunks reused
+  across batches so `[N]` citations stay consistent. `slide_count_target`'s
+  validated ceiling raised 30 → 50 now that batching removed the single-call
+  8192-token wall. See CHANGELOG for full detail; not done yet: images (Phase
+  2) and an eval harness to validate depth quality, not just length (Phase 3).
+- **Phase 2 (shipped, 2026-07-29) — images as a first-class part of
+  generation.** Added optional `image_query`/`image` to `SlideBase`
+  (`shared/types.ts`) so any slide type can carry a visual — `DiagramSlide`
+  deliberately kept its own `body.image_query`/`body.image` rather than
+  migrating (avoids orphaning every already-persisted diagram slide's
+  image). New `autoFillImages()` in `services/presentations.ts` auto-calls
+  `yandexImageSearch` in parallel (bounded concurrency) for every slide with
+  a query, including diagram (previously always left `null`), right after
+  expansion completes. `image_query` phrasing pushed toward object + viewer
+  word (`разрез`, `схема`, `чертёж`) in the expansion prompt. Cheap ranking
+  shipped in `yandexImages.ts`'s `rankImageCandidates()` (drops <500px when
+  known, sinks known stock-photo hosts rather than dropping them). Verified
+  live: a real generated deck's diagram slide got a real auto-picked
+  schematic. **Deferred, not done**: the "remaining candidates cached for a
+  one-click swap" idea — dropped as unnecessary since the picker already
+  re-searches live on demand; a code-enforced minimum image-share quota per
+  deck (currently instruction-only, no repair pass); a UI entry point to add
+  an image to a slide the model didn't suggest one for (backend route
+  already supports the override, frontend just doesn't surface it yet);
+  generated Mermaid/SVG schematics for process/flow slides where search
+  reliably returns junk; and PPTX export still only embeds diagram images
+  (the other 5 layouts have bespoke fixed-position math that needs a real
+  layout decision per type, not just wiring through).
+- **Phase 3a (shipped, 2026-07-29) — web-search grounding when RAG is thin.**
+  `shouldUseWebGrounding()` pure decision function: grounds when there's no
+  `source_text` AND (no `courseId` OR the course has zero RAG chunks —
+  checked via new `hasAnyChunksForCourse()`). `fetchWebGrounding()` calls
+  `webSearch` (already built in `services/yandexSearch.ts`, previously unused
+  here), picks the top `WEB_GROUNDING_RESULTS=5` results, feeds them into
+  both the outline and expansion prompts as `renderWebGroundingBlock()` so the
+  model can cite them. Falls back gracefully (search failure → no grounding,
+  not an error).
+- **Phase 3b (shipped, 2026-07-29) — eval harness.**
+  `services/presentationEvalHarness.ts` + `scripts/evalPresentations.ts` (new
+  CLI: `npm run eval:presentations`). Scores on `avgNotesWordCount`,
+  `minNotesWordCount`, `notesBelowTargetShare` (the key Phase 1 regression
+  guard), `bulletsShare`, `imageCoverageAmongEligible`, `citedSlideShare`.
+  Title excluded from notes-word stats; title + summary excluded from image
+  eligibility. 13 unit tests in `presentationEvalHarness.test.ts`. 8 default
+  engineering/humanities topics in the CLI.
+- **Gap 1 (shipped, 2026-07-29) — "Add image" entry point for slides the
+  model didn't suggest a query for.** `SlideContent.tsx` now shows a
+  `+ Добавить изображение` link below any non-title/summary slide that has
+  neither an auto-generated query nor a manually-picked image, so teachers
+  can add a visual to any slide at any time. The backend route already
+  accepted the override; the frontend just wasn't surfacing it.
+- **Gap 2 (shipped, 2026-07-29) — PPTX export embeds non-diagram images.**
+  `services/presentationExport.ts`'s five non-diagram slide renderers
+  (bullets, concept, formula, comparison, discussion) now support side-image
+  layout: `contentRegion(hasImage)` narrows the text region to `7"` when a
+  `3"` right-column image is present; `addSideImage()` fetches and embeds the
+  image via `fetchImageAsDataUri`, drawing a dashed placeholder on fetch
+  failure. Title and summary slides are unchanged (no image field).
+- **Why:** direct response to negative teacher feedback on a shipped,
+  GA feature (FEATURES.md) — not a speculative improvement.
+- **Touches:** `services/presentations.ts`, `services/presentationJobWorker.ts`,
+  `services/yandexImages.ts`, `validation/presentationValidation.ts`,
+  `shared/types.ts` (`Slide`/`SlideBase`), `PresentationForm.tsx`.
+
 ---
 
 ## Build order — locked design (§5–§7)

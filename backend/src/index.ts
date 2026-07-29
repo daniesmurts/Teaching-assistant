@@ -21,6 +21,7 @@ import { startJobQueue, stopJobQueue } from './services/jobQueue'
 import { registerLongReviewWorker } from './services/longReviewWorker'
 import { registerGradeJobWorker } from './services/gradeJobWorker'
 import { registerFosWorker } from './services/fosWorker'
+import { registerPresentationJobWorker } from './services/presentationJobWorker'
 
 const PORT = config.port
 
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
   await registerLongReviewWorker(boss)
   await registerGradeJobWorker(boss)
   await registerFosWorker(boss)
+  await registerPresentationJobWorker(boss)
 
   app.listen(PORT, () => {
     logger.info({ message: `Backend running on port ${PORT}`, env: process.env.NODE_ENV })

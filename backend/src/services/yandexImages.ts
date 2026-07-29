@@ -52,7 +52,7 @@ export async function yandexImageSearch(query: string, maxResults = 6): Promise<
     }
 
     const xml = Buffer.from(rawBase64, 'base64').toString('utf-8')
-    return parseYandexImagesXml(xml).slice(0, maxResults)
+    return rankImageCandidates(parseYandexImagesXml(xml)).slice(0, maxResults)
   } catch (err) {
     const e = err as { response?: { status?: number; data?: unknown }; message?: string }
     logger.warn({
@@ -138,6 +138,38 @@ export function parseYandexImagesXml(xml: string): ImageCandidate[] {
   }
 
   return results
+}
+
+// ── Ranking (TODO.md Feature AG Phase 2) ───────────────────────────────────
+//
+// Cheap, deterministic reordering — no extra API calls. Two passes:
+//   1. Drop candidates too small to look good on a slide (only when both
+//      dimensions are actually known — an unmeasured thumbnail is kept
+//      rather than penalised for missing metadata).
+//   2. Stable-sort so known stock-photo hosts sink to the bottom rather
+//      than being dropped outright — sometimes stock is genuinely the best
+//      (or only) result for a query, it just shouldn't be picked first.
+
+const MIN_DIMENSION = 500
+
+const STOCK_HOSTS = [
+  'shutterstock.com', 'istockphoto.com', 'gettyimages.com', 'depositphotos.com',
+  'alamy.com', 'dreamstime.com', '123rf.com', 'stock.adobe.com', 'freepik.com',
+  'vecteezy.com', 'stockphoto.com',
+]
+
+function isStockHost(host: string | null): boolean {
+  if (!host) return false
+  return STOCK_HOSTS.some((s) => host === s || host.endsWith(`.${s}`))
+}
+
+export function rankImageCandidates(candidates: ImageCandidate[]): ImageCandidate[] {
+  const bigEnough = candidates.filter((c) =>
+    !(c.width != null && c.height != null && (c.width < MIN_DIMENSION || c.height < MIN_DIMENSION))
+  )
+  // Array.prototype.sort is stable in Node (guaranteed since V8 7.0 / Node 11) —
+  // relative order within each group (stock vs. non-stock) is preserved.
+  return bigEnough.sort((a, b) => Number(isStockHost(a.source_host)) - Number(isStockHost(b.source_host)))
 }
 
 // ── XML helpers ────────────────────────────────────────────────────────────

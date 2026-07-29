@@ -1,6 +1,6 @@
 import { logger } from '../lib/logger'
 import type {
-  Presentation, Slide, TitleSlide, BulletsSlide, ConceptSlide, FormulaSlide,
+  Presentation, Slide, SlideImage, TitleSlide, BulletsSlide, ConceptSlide, FormulaSlide,
   ComparisonSlide, DiagramSlide, DiscussionSlide, SummarySlide,
 } from '../../../shared/types'
 
@@ -145,8 +145,49 @@ async function fetchImageAsDataUri(url: string): Promise<string | null> {
     const buf = Buffer.from(await res.arrayBuffer())
     return `data:${contentType};base64,${buf.toString('base64')}`
   } catch (err) {
-    logger.warn({ message: '[PPTX export] could not fetch diagram image, using placeholder', url, error: (err as Error).message })
+    logger.warn({ message: '[PPTX export] could not fetch slide image, using placeholder', url, error: (err as Error).message })
     return null
+  }
+}
+
+// ─── Side-image layout (TODO.md Feature AG Phase 2 gap) ───────────────────
+//
+// Non-diagram slides can carry a supplementary top-level image now (see
+// shared/types.ts's SlideBase) — the web viewer already renders it below
+// the slide body; PPTX export renders it as a right-hand column instead,
+// shrinking the text content region rather than overlapping it. Diagram
+// keeps its own dedicated full-width layout (addDiagramSlide) — this is
+// only for the OTHER content types (bullets/concept/formula/comparison/
+// discussion). Title/summary never carry a top-level image (the picker UI
+// doesn't offer one there), so they're not handled here.
+
+const SIDE_IMAGE_W = 3.0
+const SIDE_IMAGE_GAP = 0.3
+
+/** Text content region for a slide, narrower when a side image is present. */
+function contentRegion(hasImage: boolean): { x: number; w: number } {
+  const fullW = SLIDE_W - MARGIN * 2
+  return hasImage
+    ? { x: MARGIN, w: fullW - SIDE_IMAGE_W - SIDE_IMAGE_GAP }
+    : { x: MARGIN, w: fullW }
+}
+
+async function addSideImage(pptxSlide: Pptx, image: SlideImage | null | undefined): Promise<void> {
+  if (!image) return
+  const x = SLIDE_W - MARGIN - SIDE_IMAGE_W
+  const y = 1.3
+  const h = SLIDE_H - y - 0.3
+  const data = await fetchImageAsDataUri(image.url)
+  if (data) {
+    pptxSlide.addImage({ data, x, y, w: SIDE_IMAGE_W, h, sizing: { type: 'contain', w: SIDE_IMAGE_W, h } })
+  } else {
+    pptxSlide.addShape('rect', {
+      x, y, w: SIDE_IMAGE_W, h,
+      fill: { color: C.bg }, line: { color: C.border, width: 1, dashType: 'dash' },
+    })
+    pptxSlide.addText('Изображение недоступно для экспорта', {
+      x, y, w: SIDE_IMAGE_W, h, align: 'center', valign: 'middle', fontSize: 10, italic: true, color: C.ink3,
+    })
   }
 }
 
@@ -184,12 +225,12 @@ type Pptx = any
 async function addSlide(pptx: Pptx, slide: Slide): Promise<void> {
   switch (slide.type) {
     case 'title':      addTitleSlide(pptx, slide); return
-    case 'bullets':    addBulletsSlide(pptx, slide); return
-    case 'concept':    addConceptSlide(pptx, slide); return
-    case 'formula':    addFormulaSlide(pptx, slide); return
-    case 'comparison': addComparisonSlide(pptx, slide); return
+    case 'bullets':    await addBulletsSlide(pptx, slide); return
+    case 'concept':    await addConceptSlide(pptx, slide); return
+    case 'formula':    await addFormulaSlide(pptx, slide); return
+    case 'comparison': await addComparisonSlide(pptx, slide); return
     case 'diagram':    await addDiagramSlide(pptx, slide); return
-    case 'discussion': addDiscussionSlide(pptx, slide); return
+    case 'discussion': await addDiscussionSlide(pptx, slide); return
     case 'summary':    addSummarySlide(pptx, slide); return
   }
 }
@@ -235,51 +276,56 @@ function addTitleSlide(pptx: Pptx, slide: TitleSlide): void {
   addNotes(s, slide.notes)
 }
 
-function addBulletsSlide(pptx: Pptx, slide: BulletsSlide): void {
+async function addBulletsSlide(pptx: Pptx, slide: BulletsSlide): Promise<void> {
   const s = pptx.addSlide()
   addHeader(s, slide.title)
+  const region = contentRegion(Boolean(slide.image))
   if (slide.body.items.length > 0) {
     s.addText(bulletList(slide.body.items), {
-      x: MARGIN, y: 1.3, w: SLIDE_W - MARGIN * 2, h: SLIDE_H - 1.6,
+      x: region.x, y: 1.3, w: region.w, h: SLIDE_H - 1.6,
       fontSize: 16, color: C.ink, valign: 'top', lineSpacingMultiple: 1.3,
     })
   }
+  await addSideImage(s, slide.image)
   addNotes(s, slide.notes)
 }
 
-function addConceptSlide(pptx: Pptx, slide: ConceptSlide): void {
+async function addConceptSlide(pptx: Pptx, slide: ConceptSlide): Promise<void> {
   const s = pptx.addSlide()
   addHeader(s, slide.title)
+  const region = contentRegion(Boolean(slide.image))
   s.addText(cleanForSlide(slide.body.definition), {
-    x: MARGIN, y: 1.3, w: SLIDE_W - MARGIN * 2, h: 1.2,
+    x: region.x, y: 1.3, w: region.w, h: 1.2,
     fontSize: 18, italic: true, color: C.ink, valign: 'top',
     fill: { color: C.amberLight },
   })
   if (slide.body.supporting.length > 0) {
     s.addText(bulletList(slide.body.supporting), {
-      x: MARGIN, y: 2.7, w: SLIDE_W - MARGIN * 2, h: SLIDE_H - 3.0,
+      x: region.x, y: 2.7, w: region.w, h: SLIDE_H - 3.0,
       fontSize: 14, color: C.ink2, valign: 'top', lineSpacingMultiple: 1.3,
     })
   }
+  await addSideImage(s, slide.image)
   addNotes(s, slide.notes)
 }
 
-function addFormulaSlide(pptx: Pptx, slide: FormulaSlide): void {
+async function addFormulaSlide(pptx: Pptx, slide: FormulaSlide): Promise<void> {
   const s = pptx.addSlide()
   addHeader(s, slide.title)
+  const region = contentRegion(Boolean(slide.image))
   let y = 1.4
   for (const f of slide.body.formulas) {
     // f.latex is raw LaTeX with no surrounding $ delimiters (per the Slide
     // type) — run it through latexToPlainText() directly rather than
     // cleanForSlide(), which only converts math inside $...$.
     s.addText(latexToPlainText(f.latex), {
-      x: MARGIN, y, w: SLIDE_W - MARGIN * 2, h: 0.7,
+      x: region.x, y, w: region.w, h: 0.7,
       align: 'center', fontFace: 'Cambria Math', fontSize: 20, color: C.ink,
     })
     y += 0.7
     if (f.caption) {
       s.addText(cleanForSlide(f.caption), {
-        x: MARGIN, y, w: SLIDE_W - MARGIN * 2, h: 0.4,
+        x: region.x, y, w: region.w, h: 0.4,
         align: 'center', fontSize: 12, italic: true, color: C.ink3,
       })
       y += 0.5
@@ -287,21 +333,23 @@ function addFormulaSlide(pptx: Pptx, slide: FormulaSlide): void {
   }
   if (slide.body.explanation) {
     s.addText(cleanForSlide(slide.body.explanation), {
-      x: MARGIN, y: y + 0.2, w: SLIDE_W - MARGIN * 2, h: SLIDE_H - y - 0.4,
+      x: region.x, y: y + 0.2, w: region.w, h: SLIDE_H - y - 0.4,
       fontSize: 14, color: C.ink2, valign: 'top',
     })
   }
+  await addSideImage(s, slide.image)
   addNotes(s, slide.notes)
 }
 
-function addComparisonSlide(pptx: Pptx, slide: ComparisonSlide): void {
+async function addComparisonSlide(pptx: Pptx, slide: ComparisonSlide): Promise<void> {
   const s = pptx.addSlide()
   addHeader(s, slide.title)
+  const region = contentRegion(Boolean(slide.image))
   const cols = slide.body.columns
   const gap = 0.3
-  const colW = (SLIDE_W - MARGIN * 2 - gap * (cols.length - 1)) / cols.length
+  const colW = (region.w - gap * (cols.length - 1)) / cols.length
   cols.forEach((c, i) => {
-    const x = MARGIN + i * (colW + gap)
+    const x = region.x + i * (colW + gap)
     s.addShape('rect', { x, y: 1.3, w: colW, h: 0.5, fill: { color: C.bg }, line: { color: C.border, width: 0.5 } })
     s.addText(cleanForSlide(c.header).toUpperCase(), {
       x, y: 1.3, w: colW, h: 0.5, align: 'center', valign: 'middle',
@@ -313,6 +361,7 @@ function addComparisonSlide(pptx: Pptx, slide: ComparisonSlide): void {
       })
     }
   })
+  await addSideImage(s, slide.image)
   addNotes(s, slide.notes)
 }
 
@@ -357,19 +406,21 @@ async function addDiagramSlide(pptx: Pptx, slide: DiagramSlide): Promise<void> {
   addNotes(s, slide.notes)
 }
 
-function addDiscussionSlide(pptx: Pptx, slide: DiscussionSlide): void {
+async function addDiscussionSlide(pptx: Pptx, slide: DiscussionSlide): Promise<void> {
   const s = pptx.addSlide()
   addHeader(s, slide.title)
+  const region = contentRegion(Boolean(slide.image))
   s.addText(cleanForSlide(slide.body.question), {
-    x: MARGIN, y: 1.3, w: SLIDE_W - MARGIN * 2, h: 1.0,
+    x: region.x, y: 1.3, w: region.w, h: 1.0,
     fontFace: 'Georgia', fontSize: 20, bold: true, color: C.ink, valign: 'top',
   })
   if (slide.body.prompts.length > 0) {
     s.addText(bulletList(slide.body.prompts), {
-      x: MARGIN, y: 2.4, w: SLIDE_W - MARGIN * 2, h: SLIDE_H - 2.7,
+      x: region.x, y: 2.4, w: region.w, h: SLIDE_H - 2.7,
       fontSize: 14, color: C.ink2, valign: 'top',
     })
   }
+  await addSideImage(s, slide.image)
   addNotes(s, slide.notes)
 }
 

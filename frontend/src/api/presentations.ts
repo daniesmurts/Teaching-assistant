@@ -1,7 +1,7 @@
 import client from './client'
 import { downloadCsv } from './download'
 import type {
-  Presentation, PresentationSource, Slide, SlideImage, ImageCandidate,
+  Presentation, PresentationSource, PresentationDepth, Slide, SlideImage, ImageCandidate,
 } from '../types'
 
 export interface GenerateRequest {
@@ -14,6 +14,7 @@ export interface GenerateRequest {
   style?: string
   slide_count_target?: number
   source_text?: string
+  depth?: PresentationDepth
 }
 
 export interface GenerateResponse {
@@ -27,6 +28,31 @@ export interface GenerateResponse {
 
 export async function generatePresentation(data: GenerateRequest): Promise<GenerateResponse> {
   const res = await client.post<GenerateResponse>('/api/presentations/generate', data)
+  return res.data
+}
+
+// ─── Async presentation jobs ──────────────────────────────────────────────────
+// Generation can chain multiple LLM calls and outlive any HTTP timeout, so
+// the client enqueues a job and polls — same pattern as grading's grade-jobs.
+
+export type PresentationJobStatus = 'pending' | 'processing' | 'ready' | 'failed'
+
+export interface PresentationJob {
+  id:              string
+  status:          PresentationJobStatus
+  presentation_id: string | null
+  result:          GenerateResponse | null
+  error_message:   string | null
+  created_at:      string
+}
+
+export async function startPresentationJob(data: GenerateRequest): Promise<PresentationJob> {
+  const res = await client.post<PresentationJob>('/api/presentations/generate-jobs', data)
+  return res.data
+}
+
+export async function getPresentationJob(id: string): Promise<PresentationJob> {
+  const res = await client.get<PresentationJob>(`/api/presentations/generate-jobs/${id}`)
   return res.data
 }
 

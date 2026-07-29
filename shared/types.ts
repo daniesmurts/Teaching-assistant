@@ -63,6 +63,7 @@ export interface PlanState {
     challengeFeedback:     boolean
     rpdMonitor:             boolean
     pptxExport:             boolean
+    presentationDeepMode:   boolean
   }
 }
 
@@ -478,6 +479,10 @@ export type LongReviewStatus = 'pending' | 'analyzing' | 'synthesizing' | 'ready
 // chain can run for minutes, longer than any sane HTTP timeout.
 export type GradeJobStatus = 'pending' | 'processing' | 'ready' | 'failed'
 
+// Async presentation generation jobs (presentation_jobs table) — same
+// enqueue-and-poll shape as grade jobs; see presentation_jobs migration.
+export type PresentationJobStatus = 'pending' | 'processing' | 'ready' | 'failed'
+
 // Strengths/gaps shape evolved from plain string[] (Tier-0) to BulletItem[]
 // (Tier-1, with verbatim quotes from the section). Older rows still carry
 // strings inside the JSONB result column — the frontend renderer tolerates
@@ -681,6 +686,13 @@ export type SlideType =
   | 'discussion'
   | 'summary'
 
+// Controls how much material generation asks the model for per slide —
+// notes word-count target and RAG source count. 'deep' is Pro+ gated
+// (`presentationDeepMode` in planLimits.ts); 'standard' is the baseline for
+// every tier and already a large step up from the pre-outline+expansion
+// single-call generation (see TODO.md Feature AG).
+export type PresentationDepth = 'standard' | 'deep'
+
 // An image the teacher picked from Yandex Images for a diagram-class slide.
 // Stored on the slide itself; never auto-selected — search returns candidates,
 // teacher picks one. `source_url` is the page the image lives on (attribution).
@@ -699,6 +711,17 @@ interface SlideBase {
   title:     string
   notes:     string          // speaker notes — always present
   citations: number[]        // source idx values referenced anywhere on the slide
+  // Optional supplementary visual (TODO.md Feature AG Phase 2) — any slide
+  // type can carry one, not just DiagramSlide. `image_query` null/absent
+  // means "no image wanted"; auto-filled at generation when present (see
+  // presentations.ts's autoFillImages), swappable via the same picker
+  // DiagramSlide already uses. DiagramSlide deliberately keeps its OWN
+  // `body.image_query`/`body.image` instead of these — moving them here
+  // would silently orphan the image on every already-persisted diagram
+  // slide (stored as JSONB with the old shape), so it stays the anchor case
+  // and these top-level fields are simply unused for `type: 'diagram'`.
+  image_query?: string | null
+  image?:       SlideImage | null
 }
 
 export interface TitleSlide extends SlideBase {

@@ -79,6 +79,14 @@ function renderOne(s: Slide, n: number): string {
       break
   }
 
+  // Top-level image (any type except diagram, already handled above). Gate
+  // on image OR image_query — a manually-added image (via the "+ Добавить
+  // изображение" affordance) can have an image with no model-suggested
+  // query at all, and must not silently drop out of copy-all output.
+  if (s.type !== 'diagram' && (s.image_query || s.image)) {
+    out.push(s.image ? `[Изображение: ${s.image.source_url}]` : `[Подобрать изображение: «${s.image_query}»]`)
+  }
+
   if (s.notes) {
     out.push('')
     out.push('Заметки докладчика:')

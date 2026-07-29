@@ -58,6 +58,7 @@ export type {
   Presentation,
   PresentationSource,
   PresentationStyle,
+  PresentationDepth,
   Slide,
   SlideType,
   SlideImage,

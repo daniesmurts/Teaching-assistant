@@ -97,15 +97,17 @@ export async function setSlideImage(
   if (slideIdx < 0 || slideIdx >= existing.slides.length) return null
 
   const slide = existing.slides[slideIdx]
-  // Only diagram slides carry an image slot. Anything else is a programmer
-  // error — return null so the route returns 400/404.
-  if (slide.type !== 'diagram') return null
-
-  const next = existing.slides.map((s, i) =>
-    i === slideIdx && s.type === 'diagram'
+  // Every slide type can carry an image now (TODO.md Feature AG Phase 2) —
+  // diagram keeps its own body.image_query/image (see shared/types.ts's
+  // SlideBase comment), everything else uses the top-level field. Route
+  // already validated the slide actually has a query before calling here;
+  // this just decides which of the two locations to write into.
+  const next = existing.slides.map((s, i) => {
+    if (i !== slideIdx) return s
+    return s.type === 'diagram'
       ? { ...s, body: { ...s.body, image } }
-      : s
-  )
+      : { ...s, image }
+  })
 
   const { rows } = await pool.query<PresentationRow>(
     `UPDATE presentations

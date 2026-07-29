@@ -5,10 +5,16 @@ import { aiLimiter } from '../middleware/rateLimits'
 import { asyncHandler } from '../lib/asyncHandler'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
+import { canUseFeature } from '../config/planLimits'
 import { generatePresentationRules } from '../validation/presentationValidation'
-import { generatePresentation } from '../services/presentations'
+import { generatePresentation, getSlideImageQuery, type GenerateParams } from '../services/presentations'
 import { generatePresentationPptx } from '../services/presentationExport'
 import { yandexImageSearch } from '../services/yandexImages'
+import { PRESENTATION_JOB_QUEUE, type PresentationJobPayload } from '../services/presentationJobWorker'
+import { getJobQueue } from '../services/jobQueue'
+import {
+  createPresentationJob, getPresentationJobById,
+} from '../db/queries/presentationJobs'
 import {
   findPresentationsByTeacher, findPresentationById, deletePresentation, setSlideImage,
 } from '../db/queries/presentations'
@@ -17,34 +23,92 @@ import type { SlideImage } from '../../../shared/types'
 const router = Router()
 router.use(authenticate)
 
-// POST /api/presentations/generate
+function buildGenerateParams(req: { teacher: { id: string; plan_tier: string }; body: unknown }): GenerateParams {
+  const {
+    course_id, lecture_number, topic, duration_minutes,
+    learning_goals, audience_level, style, slide_count_target, source_text, depth,
+  } = req.body as {
+    topic: string; duration_minutes: number; learning_goals?: string[]
+    course_id?: string; lecture_number?: number; audience_level?: string
+    style?: string; slide_count_target?: number; source_text?: string
+    depth?: 'standard' | 'deep'
+  }
+
+  return {
+    teacherId:        req.teacher.id,
+    courseId:         course_id,
+    lectureNumber:    lecture_number,
+    topic,
+    durationMinutes:  Number(duration_minutes),
+    learningGoals:    learning_goals ?? [],
+    audienceLevel:    audience_level,
+    style,
+    slideCountTarget: slide_count_target ? Number(slide_count_target) : undefined,
+    sourceText:       source_text,
+    // Silent downgrade rather than a 403 — same convention as grading.ts's
+    // thorough/checkCitations gating — a free-tier teacher who somehow
+    // submits depth=deep just gets the standard depth instead of an error.
+    depth: depth === 'deep' && canUseFeature(req.teacher.plan_tier, 'presentationDeepMode') ? 'deep' : 'standard',
+  }
+}
+
+// POST /api/presentations/generate-jobs — async generation (the current
+// client path). Generation can run multiple LLM calls (Phase 1 outline +
+// per-slide expansion) and nothing should hold an HTTP socket open for that
+// long at volume — same reasoning as grading's /grade-jobs. Plan gates and
+// quota are checked here; the pg-boss worker (presentationJobWorker.ts) runs
+// generatePresentation(), and the client polls GET /generate-jobs/:id.
+router.post(
+  '/generate-jobs',
+  aiLimiter,
+  checkMonthlyLimit('presentationsPerMonth'),
+  validate(generatePresentationRules),
+  asyncHandler(async (req, res) => {
+    const params = buildGenerateParams(req)
+
+    const job = await createPresentationJob(req.teacher.id)
+    const payload: PresentationJobPayload = { jobId: job.id, params }
+    await getJobQueue().send(PRESENTATION_JOB_QUEUE, payload)
+
+    res.status(202).json({
+      id:              job.id,
+      status:          job.status,
+      presentation_id: null,
+      result:          null,
+      error_message:   null,
+      created_at:      job.created_at,
+    })
+  })
+)
+
+// GET /api/presentations/generate-jobs/:id — poll job status / fetch the
+// finished deck.
+router.get(
+  '/generate-jobs/:id',
+  asyncHandler(async (req, res) => {
+    const job = await getPresentationJobById(req.params.id, req.teacher.id)
+    if (!job) throw new NotFoundError('Генерация')
+    res.json({
+      id:              job.id,
+      status:          job.status,
+      presentation_id: job.presentation_id,
+      result:          job.result,
+      error_message:   job.error_message,
+      created_at:      job.created_at,
+    })
+  })
+)
+
+// POST /api/presentations/generate — legacy synchronous path. Kept only so
+// cached frontend bundles from before the async rollout keep working; the
+// current client posts to /generate-jobs. Remove after a deploy cycle or two.
 router.post(
   '/generate',
   aiLimiter,
   checkMonthlyLimit('presentationsPerMonth'),
   validate(generatePresentationRules),
   asyncHandler(async (req, res) => {
-    const {
-      course_id, lecture_number, topic, duration_minutes,
-      learning_goals, audience_level, style, slide_count_target, source_text,
-    } = req.body as {
-      topic: string; duration_minutes: number; learning_goals?: string[]
-      course_id?: string; lecture_number?: number; audience_level?: string
-      style?: string; slide_count_target?: number; source_text?: string
-    }
-
-    const result = await generatePresentation({
-      teacherId:        req.teacher.id,
-      courseId:         course_id,
-      lectureNumber:    lecture_number,
-      topic,
-      durationMinutes:  Number(duration_minutes),
-      learningGoals:    learning_goals ?? [],
-      audienceLevel:    audience_level,
-      style,
-      slideCountTarget: slide_count_target ? Number(slide_count_target) : undefined,
-      sourceText:       source_text,
-    })
+    const result = await generatePresentation(buildGenerateParams(req))
     res.status(201).json(result)
   })
 )
@@ -92,11 +156,13 @@ router.get('/:id/export.pptx',
 )
 
 // POST /api/presentations/:id/slides/:idx/images — fetch image candidates
-// from Yandex Images for the diagram slide at index :idx. Picker UI calls
-// this, then PATCH to commit the chosen one. We re-derive the query from
-// the persisted slide rather than trusting a client-supplied string — keeps
-// the surface honest and avoids letting the picker become an open search
-// proxy.
+// from Yandex Images for the slide at index :idx. Picker UI calls this, then
+// PATCH to commit the chosen one. Any slide type is searchable now (TODO.md
+// Feature AG Phase 2 — most already carry a model-suggested query, and a
+// teacher can attach an image to one that doesn't via the override below).
+// We re-derive the model's own query from the persisted slide rather than
+// trusting a client-supplied string as the default — keeps the surface
+// honest and avoids letting the picker become an open search proxy.
 router.post('/:id/slides/:idx/images',
   aiLimiter,
   asyncHandler(async (req, res) => {
@@ -108,21 +174,23 @@ router.post('/:id/slides/:idx/images',
       throw new NotFoundError('Слайд')
     }
     const slide = slides[idx]
-    if (slide.type !== 'diagram') {
-      throw new ValidationError('Поиск изображений доступен только для слайдов-схем')
-    }
-    // Allow a client-supplied query override (teacher tweaks the search box
-    // in the picker), but require it pass minimum sanity — otherwise fall
-    // back to the model-suggested query.
+    // Allow a client-supplied query override (teacher tweaks the search box,
+    // or adds an image to a slide the model didn't suggest one for), but
+    // require it pass minimum sanity — otherwise fall back to the model-
+    // suggested query, if any.
     const override = typeof req.body?.query === 'string' ? req.body.query.trim() : ''
-    const query = override.length >= 3 && override.length <= 120 ? override : slide.body.image_query
+    const query = override.length >= 3 && override.length <= 120 ? override : getSlideImageQuery(slide)
+    if (!query) {
+      throw new ValidationError('Для этого слайда нет запроса на изображение — введите свой')
+    }
     const candidates = await yandexImageSearch(query, 8)
     res.json({ query, candidates })
   })
 )
 
-// PATCH /api/presentations/:id/slides/:idx — currently only supports setting
-// or clearing the image on a diagram slide. Body: { image: SlideImage | null }.
+// PATCH /api/presentations/:id/slides/:idx — sets or clears the image on any
+// slide (TODO.md Feature AG Phase 2 — setSlideImage picks the right storage
+// location per slide type). Body: { image: SlideImage | null }.
 router.patch('/:id/slides/:idx',
   asyncHandler(async (req, res) => {
     const idx = Number(req.params.idx)

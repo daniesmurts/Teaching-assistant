@@ -299,6 +299,68 @@ function ComparisonBody({ slide, sources, onCite }: BodyProps<ComparisonSlide>) 
   )
 }
 
+// Shared image slot — a picked image + swap link, or an empty dashed slot
+// with the model's suggested query + a search trigger. Used by DiagramBody
+// (its native slot) and, since TODO.md Feature AG Phase 2, appended below
+// any other slide type that carries a top-level image_query/image (see
+// renderBody below).
+function SlideImageBlock({
+  image, query, altText, presentationId, slideIdx, onImageChange,
+}: {
+  image:          SlideImage | null
+  query:          string
+  altText:        string
+  presentationId: string
+  slideIdx:       number
+  onImageChange:  (image: SlideImage | null) => void
+}) {
+  return image ? (
+    <div className="mb-3">
+      <div className="bg-surface-warm rounded-md p-2 border border-border flex items-center justify-center">
+        <img
+          src={image.thumbnail || image.url}
+          alt={altText}
+          loading="lazy"
+          className="max-h-72 w-auto rounded-sm object-contain"
+        />
+      </div>
+      <div className="flex items-center justify-between mt-1.5 px-1">
+        <a
+          href={image.source_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[10px] font-sans text-ink-tertiary hover:text-amber transition-colors"
+        >
+          Источник: {image.source_host || image.source_url}
+        </a>
+        <SlideImagePicker
+          presentationId={presentationId}
+          slideIdx={slideIdx}
+          query={query}
+          onPick={onImageChange}
+          triggerLabel="Заменить"
+        />
+      </div>
+    </div>
+  ) : (
+    <div className="mb-3">
+      <div className="bg-surface-warm border border-dashed border-border rounded-md p-4 flex flex-col items-center justify-center gap-2 min-h-[120px]">
+        <div className="text-[11px] font-sans text-ink-tertiary uppercase tracking-wider">Изображение не выбрано</div>
+        {query && (
+          <div className="text-xs font-sans text-ink-secondary text-center italic">«{query}»</div>
+        )}
+        <SlideImagePicker
+          presentationId={presentationId}
+          slideIdx={slideIdx}
+          query={query}
+          onPick={onImageChange}
+          triggerLabel="Найти изображение"
+        />
+      </div>
+    </div>
+  )
+}
+
 function DiagramBody({
   slide, sources, onCite, presentationId, slideIdx, onImageChange,
 }: BodyProps<DiagramSlide> & {
@@ -306,54 +368,16 @@ function DiagramBody({
   slideIdx: number
   onImageChange: (image: SlideImage | null) => void
 }) {
-  const img = slide.body.image
   return (
     <div className="p-4">
-      {img ? (
-        <div className="mb-3">
-          <div className="bg-surface-warm rounded-md p-2 border border-border flex items-center justify-center">
-            <img
-              src={img.thumbnail || img.url}
-              alt={slide.body.caption || slide.title}
-              loading="lazy"
-              className="max-h-72 w-auto rounded-sm object-contain"
-            />
-          </div>
-          <div className="flex items-center justify-between mt-1.5 px-1">
-            <a
-              href={img.source_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[10px] font-sans text-ink-tertiary hover:text-amber transition-colors"
-            >
-              Источник: {img.source_host || img.source_url}
-            </a>
-            <SlideImagePicker
-              presentationId={presentationId}
-              slideIdx={slideIdx}
-              query={slide.body.image_query}
-              onPick={onImageChange}
-              triggerLabel="Заменить"
-            />
-          </div>
-        </div>
-      ) : (
-        <div className="mb-3">
-          <div className="bg-surface-warm border border-dashed border-border rounded-md p-4 flex flex-col items-center justify-center gap-2 min-h-[120px]">
-            <div className="text-[11px] font-sans text-ink-tertiary uppercase tracking-wider">Изображение не выбрано</div>
-            <div className="text-xs font-sans text-ink-secondary text-center italic">
-              «{slide.body.image_query}»
-            </div>
-            <SlideImagePicker
-              presentationId={presentationId}
-              slideIdx={slideIdx}
-              query={slide.body.image_query}
-              onPick={onImageChange}
-              triggerLabel="Найти изображение"
-            />
-          </div>
-        </div>
-      )}
+      <SlideImageBlock
+        image={slide.body.image}
+        query={slide.body.image_query}
+        altText={slide.body.caption || slide.title}
+        presentationId={presentationId}
+        slideIdx={slideIdx}
+        onImageChange={onImageChange}
+      />
 
       {slide.body.caption && (
         <div className="text-[13px] font-sans font-medium text-ink mb-2">
@@ -511,21 +535,71 @@ interface RenderBodyArgs {
 
 function renderBody(args: RenderBodyArgs): React.ReactNode {
   const { slide, sources, onCite, presentationId, slideIdx, onImageChange } = args
-  switch (slide.type) {
-    case 'title':      return <TitleBody slide={slide} sources={sources} onCite={onCite} />
-    case 'bullets':    return <BulletsBody slide={slide} sources={sources} onCite={onCite} />
-    case 'concept':    return <ConceptBody slide={slide} sources={sources} onCite={onCite} />
-    case 'formula':    return <FormulaBody slide={slide} sources={sources} onCite={onCite} />
-    case 'comparison': return <ComparisonBody slide={slide} sources={sources} onCite={onCite} />
-    case 'diagram':    return (
-      <DiagramBody
-        slide={slide} sources={sources} onCite={onCite}
-        presentationId={presentationId} slideIdx={slideIdx} onImageChange={onImageChange}
-      />
+  const body = (() => {
+    switch (slide.type) {
+      case 'title':      return <TitleBody slide={slide} sources={sources} onCite={onCite} />
+      case 'bullets':    return <BulletsBody slide={slide} sources={sources} onCite={onCite} />
+      case 'concept':    return <ConceptBody slide={slide} sources={sources} onCite={onCite} />
+      case 'formula':    return <FormulaBody slide={slide} sources={sources} onCite={onCite} />
+      case 'comparison': return <ComparisonBody slide={slide} sources={sources} onCite={onCite} />
+      case 'diagram':    return (
+        <DiagramBody
+          slide={slide} sources={sources} onCite={onCite}
+          presentationId={presentationId} slideIdx={slideIdx} onImageChange={onImageChange}
+        />
+      )
+      case 'discussion': return <DiscussionBody slide={slide} sources={sources} onCite={onCite} />
+      case 'summary':    return <SummaryBody slide={slide} sources={sources} onCite={onCite} />
+    }
+  })()
+
+  // Non-diagram slides can carry a supplementary top-level image (TODO.md
+  // Feature AG Phase 2) — diagram already renders its own inline above, via
+  // DiagramBody.
+  if (slide.type === 'diagram') return body
+
+  // Model suggested a query (or the teacher already picked one) — full slot.
+  if (slide.image_query || slide.image) {
+    return (
+      <>
+        {body}
+        <div className="px-4 pb-4">
+          <SlideImageBlock
+            image={slide.image ?? null}
+            query={slide.image_query ?? ''}
+            altText={slide.title}
+            presentationId={presentationId}
+            slideIdx={slideIdx}
+            onImageChange={onImageChange}
+          />
+        </div>
+      </>
     )
-    case 'discussion': return <DiscussionBody slide={slide} sources={sources} onCite={onCite} />
-    case 'summary':    return <SummaryBody slide={slide} sources={sources} onCite={onCite} />
   }
+
+  // No suggested image on a content slide (title/summary excluded — a
+  // picture rarely helps either) — a minimal link, not the full dashed box,
+  // so slides the model correctly judged didn't need one stay uncluttered.
+  // Lets a teacher add an image anywhere the model didn't (backend route
+  // already accepts a manual override query — see routes/presentations.ts).
+  if (slide.type !== 'title' && slide.type !== 'summary') {
+    return (
+      <>
+        {body}
+        <div className="px-4 pb-4">
+          <SlideImagePicker
+            presentationId={presentationId}
+            slideIdx={slideIdx}
+            query=""
+            onPick={onImageChange}
+            triggerLabel="+ Добавить изображение"
+          />
+        </div>
+      </>
+    )
+  }
+
+  return body
 }
 
 function slideTypeLabel(type: Slide['type']): string {
@@ -668,11 +742,14 @@ export default function SlideContent({
 
   function handleImageChange(slideIdx: number, image: SlideImage | null) {
     if (!useTyped || !onSlidesChange) return
-    const next = slides!.map((s, i) =>
-      i === slideIdx && s.type === 'diagram'
+    // Mirrors setSlideImage's storage split (db/queries/presentations.ts):
+    // diagram keeps body.image, every other type uses the top-level field.
+    const next = slides!.map((s, i) => {
+      if (i !== slideIdx) return s
+      return s.type === 'diagram'
         ? { ...s, body: { ...s.body, image } }
-        : s
-    )
+        : { ...s, image }
+    })
     onSlidesChange(next)
   }
 

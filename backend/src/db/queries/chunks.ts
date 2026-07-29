@@ -119,3 +119,16 @@ export async function findRelevantChunksScored(
   )
   return rows
 }
+
+/**
+ * Cheap existence probe (TODO.md Feature AG Phase 3) — no embedding call,
+ * just "does this course have anything to retrieve at all". Used to decide
+ * whether presentation generation needs web-search grounding instead of RAG.
+ */
+export async function hasAnyChunksForCourse(courseId: string): Promise<boolean> {
+  const { rows } = await pool.query<{ exists: boolean }>(
+    `SELECT EXISTS(SELECT 1 FROM document_chunks WHERE course_id = $1 AND embedding IS NOT NULL) AS exists`,
+    [courseId]
+  )
+  return rows[0]?.exists ?? false
+}

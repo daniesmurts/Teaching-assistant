@@ -14,6 +14,7 @@
     "eval": "node --env-file=../.env $(npm root)/.bin/tsx scripts/runEval.ts",
     "backfill:embeddings": "node --env-file=../.env $(npm root)/.bin/tsx scripts/backfillEmbeddings.ts",
     "eval:confidence": "node --env-file=../.env $(npm root)/.bin/tsx scripts/runConfidenceEval.ts",
+    "eval:presentations": "node --env-file=../.env $(npm root)/.bin/tsx scripts/evalPresentations.ts",
     "test:yandex-images": "node --env-file=../.env $(npm root)/.bin/tsx scripts/testYandexImages.ts",
     "repair:filenames": "node --env-file=../.env $(npm root)/.bin/tsx scripts/repairFilenames.ts",
     "repair:role-tree": "node --env-file=../.env $(npm root)/.bin/tsx scripts/repairRoleTreeSync.ts",

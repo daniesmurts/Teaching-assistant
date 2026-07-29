@@ -19,6 +19,7 @@ import { DeepSeekProvider } from './deepseek'
 import { YandexProvider }   from './yandex'
 import { QwenProvider }     from './qwen'
 import { checkSpendCap } from '../spendCap'
+import { checkGlobalSpendCap } from '../globalSpendCap'
 import type {
   CallContext, ChatMessage, ChatOptions, LLMProvider, ProviderName,
 } from './types'
@@ -91,6 +92,7 @@ async function resolveProvider(ctx?: CallContext): Promise<LLMProvider> {
 // ─── Public API — drop-in replacement for services/deepseek.ts exports ──────
 
 export async function chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<string> {
+  await checkGlobalSpendCap()
   if (opts.context?.teacherId) await checkSpendCap(opts.context.teacherId)
   // An explicit override that itself has a reasoner wins even under
   // opts.reasoner — this is what lets a blind cross-provider verification
@@ -120,6 +122,7 @@ export async function chatJSON<T>(
   retryLabel = 'response',
   opts:       ChatOptions = {},
 ): Promise<T> {
+  await checkGlobalSpendCap()
   if (opts.context?.teacherId) await checkSpendCap(opts.context.teacherId)
   // Calc grading uses the reasoner. An explicit providerOverride that itself
   // has a reasoner (e.g. Qwen-thinking, for a blind cross-provider

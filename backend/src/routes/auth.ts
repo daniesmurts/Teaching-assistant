@@ -598,6 +598,7 @@ async function buildPlanData(
       challengeFeedback:     canUseFeature(tier, 'challengeFeedback'),
       rpdMonitor:            canUseFeature(tier, 'rpdMonitor'),
       pptxExport:            canUseFeature(tier, 'pptxExport'),
+      presentationDeepMode:  canUseFeature(tier, 'presentationDeepMode'),
     },
   }
 }

@@ -70,3 +70,17 @@ export class SpendCapExceededError extends AppError {
     )
   }
 }
+
+// Platform-wide circuit breaker, distinct from the per-teacher cap above —
+// protects against a burst across many accounts each individually under
+// their own limit. 503 (temporary, not a per-account state) rather than 429.
+export class GlobalSpendCapExceededError extends AppError {
+  constructor() {
+    super(
+      'Временная перегрузка: платформа достигла дневного лимита расходов на генерацию. ' +
+      'Попробуйте через несколько минут.',
+      503,
+      'GLOBAL_SPEND_CAP_EXCEEDED',
+    )
+  }
+}

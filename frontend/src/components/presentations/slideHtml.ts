@@ -122,11 +122,22 @@ function renderTyped(s: Slide, n: number): string {
       break
   }
 
+  // Top-level image (any type except diagram, already handled above). Gate
+  // on image OR image_query — a manually-added image (via the "+ Добавить
+  // изображение" affordance) can have an image with no model-suggested
+  // query at all, and must not silently drop out of copy-all output.
+  const image = s.type !== 'diagram' && (s.image_query || s.image)
+    ? (s.image
+        ? `<p><img src="${escapeAttr(s.image.url)}" alt="${escapeAttr(s.title)}" /></p>` +
+          `<p><small>Источник: <a href="${escapeAttr(s.image.source_url)}">${escapeHtml(s.image.source_host || s.image.source_url)}</a></small></p>`
+        : `<p><em>[Подобрать изображение: «${richText(s.image_query ?? '')}»]</em></p>`)
+    : ''
+
   const notes = s.notes
     ? `<p><strong><em>Заметки докладчика:</em></strong> ${richText(s.notes)}</p>`
     : ''
 
-  return [header, body, notes].filter(Boolean).join('\n')
+  return [header, body, image, notes].filter(Boolean).join('\n')
 }
 
 // ── Legacy text-DSL slides (old presentations) ───────────────────────────────

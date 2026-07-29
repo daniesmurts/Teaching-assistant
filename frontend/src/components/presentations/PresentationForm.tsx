@@ -1,10 +1,15 @@
-import { useState, FormEvent, KeyboardEvent } from 'react'
+import { useState, useRef, useEffect, FormEvent, KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Button from '../ui/Button'
 import { Input } from '../ui/Input'
 import { getCourses } from '../../api/courses'
 import NoCourseHint from '../onboarding/NoCourseHint'
-import { generatePresentation, type GenerateResponse } from '../../api/presentations'
+import { startPresentationJob, getPresentationJob, type GenerateResponse } from '../../api/presentations'
+import { usePlan } from '../../hooks/usePlan'
+import { useUIStore } from '../../store/uiStore'
+import type { PresentationDepth } from '../../types'
+
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const AUDIENCE_LEVELS = [
   { value: '',                label: 'Не указан' },
@@ -34,8 +39,19 @@ export default function PresentationForm({ onResult }: Props) {
   const [goals, setGoals]     = useState<string[]>([])
   const [goalInput, setGoalInput] = useState('')
   const [sourceText, setSourceText] = useState('')
+  const [depth, setDepth]     = useState<PresentationDepth>('standard')
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
+
+  const { can } = usePlan()
+  const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
+
+  // Generation is asynchronous: enqueue + poll (services/presentationJobWorker.ts
+  // runs it off the request thread, since Phase 1's outline+expansion can chain
+  // several LLM calls well past any HTTP timeout). Guards against delivering a
+  // result after the form has unmounted (e.g. teacher navigates away mid-poll).
+  const cancelled = useRef(false)
+  useEffect(() => () => { cancelled.current = true }, [])
 
   const { data: courses = [] } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
 
@@ -53,13 +69,18 @@ export default function PresentationForm({ onResult }: Props) {
     if (e.key === 'Enter') { e.preventDefault(); addGoal() }
   }
 
+  function errMsg(err: unknown, fallback: string): string {
+    return (err as { response?: { data?: { error?: string } } }).response?.data?.error ?? fallback
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!form.topic.trim()) return
     setLoading(true)
     setError('')
     try {
-      const res = await generatePresentation({
+      cancelled.current = false
+      const job = await startPresentationJob({
         topic:            form.topic,
         duration_minutes: Number(form.duration_minutes) || 60,
         learning_goals:   goals,
@@ -69,14 +90,36 @@ export default function PresentationForm({ onResult }: Props) {
         style:            form.style || undefined,
         slide_count_target: form.slide_count_target ? Number(form.slide_count_target) : undefined,
         source_text:      sourceText.trim() || undefined,
+        depth,
       })
-      onResult(res)
+      await pollJob(job.id)
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } }).response?.data?.error
-        ?? 'Не удалось создать презентацию'
-      setError(msg)
-    } finally {
+      setError(errMsg(err, 'Не удалось создать презентацию'))
       setLoading(false)
+    }
+  }
+
+  // Up to 10 minutes at 2.5s/poll — generous headroom over a single-call
+  // deck today, room to grow into Phase 1's multi-call outline+expansion
+  // without needing to touch this loop.
+  async function pollJob(jobId: string) {
+    try {
+      for (let i = 0; i < 240 && !cancelled.current; i++) {
+        await delay(2500)
+        const job = await getPresentationJob(jobId)
+        if (job.status === 'ready' && job.result) {
+          onResult(job.result)
+          return
+        }
+        if (job.status === 'failed') {
+          setError(job.error_message || 'Не удалось создать презентацию')
+          return
+        }
+      }
+    } catch (err: unknown) {
+      setError(errMsg(err, 'Не удалось создать презентацию'))
+    } finally {
+      if (!cancelled.current) setLoading(false)
     }
   }
 
@@ -132,11 +175,51 @@ export default function PresentationForm({ onResult }: Props) {
           label="Кол-во слайдов (авто)"
           type="number"
           min={3}
-          max={30}
+          max={50}
           value={form.slide_count_target}
           onChange={set('slide_count_target')}
           placeholder="Авто"
         />
+      </div>
+
+      {/* Depth — 'deep' is Pro+ (planLimits.ts's presentationDeepMode); a
+          free-tier click opens the upgrade modal instead of silently doing
+          nothing, same pattern as GradingForm.tsx's thorough-mode gate. */}
+      <div>
+        <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">
+          Глубина проработки
+        </label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setDepth('standard')}
+            className={`flex-1 px-3 py-2 text-xs font-sans rounded-md border transition-colors ${
+              depth === 'standard'
+                ? 'border-amber bg-amber-light text-amber font-medium'
+                : 'border-border text-ink-secondary hover:border-border-strong'
+            }`}
+          >
+            Стандартная
+          </button>
+          <button
+            type="button"
+            onClick={() => can('presentationDeepMode') ? setDepth('deep') : showUpgradeModal('FEATURE_NOT_IN_PLAN')}
+            className={`flex-1 px-3 py-2 text-xs font-sans rounded-md border transition-colors ${
+              depth === 'deep'
+                ? 'border-amber bg-amber-light text-amber font-medium'
+                : can('presentationDeepMode')
+                  ? 'border-border text-ink-secondary hover:border-border-strong'
+                  : 'border-border text-ink-tertiary opacity-60'
+            }`}
+          >
+            Углублённая {!can('presentationDeepMode') && '🔒'}
+          </button>
+        </div>
+        <p className="text-[11px] font-sans text-ink-tertiary mt-1">
+          {depth === 'deep'
+            ? 'Более длинные заметки докладчика и более подробный разбор каждого слайда.'
+            : 'Заметок докладчика хватает примерно на 1.5 минуты речи на слайд.'}
+        </p>
       </div>
 
       {/* Row 4 — audience + style */}
