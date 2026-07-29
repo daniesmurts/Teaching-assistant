@@ -69,19 +69,17 @@ export const grantRoleRules = [
   body('teacherId').isUUID().withMessage('Некорректный идентификатор преподавателя'),
   body('unitId').isUUID().withMessage('Некорректный идентификатор подразделения'),
   body('role').isIn(UNIT_ROLES).withMessage('Недопустимая роль'),
-  body('domain').optional().isIn(GRANT_DOMAINS).withMessage('Недопустимая область доступа')
-    // Research.md §7.10 — 'admin' is always full-scope in this model (IT /
-    // institution admin). A domain-scoped admin grant would be indistinguishable
-    // from true institution admin to isInstitutionAdmin's belt-and-suspenders
-    // domain='all' filter anyway, so refuse it explicitly here with a clear
-    // message rather than silently accepting a grant that can never do what
-    // its author intended.
-    .custom((value, { req }) => {
-      if (req.body.role === 'admin' && value && value !== 'all') {
-        throw new Error('Роль «Администратор» выдаётся без ограничения по области — используйте «Редактор» или «Наблюдатель» для области-ограниченного доступа')
-      }
-      return true
-    }),
+  body('domain').optional().isIn(GRANT_DOMAINS).withMessage('Недопустимая область доступа'),
+  // «role='admin' всегда требует domain='all'» (Phase 1) removed 2026-07-29 —
+  // it made every «Администратор» grant institution-wide regardless of which
+  // подразделение it was granted on, since a domain-scoped admin's authority
+  // should be no different from an equivalently-scoped edit today (the only
+  // functional gap is Структура's platform:admin gate). 'admin' now scopes
+  // like 'edit'/'view' do: to the granted unit's own subtree. The inverse
+  // rule — domain='all' + role='admin' only means "administrator of the
+  // whole organisation" when granted ON the institution root — is now
+  // enforced in routes/orgUnits.ts's POST/DELETE /roles (needs the unit's
+  // type, which isn't available at this shape-validation layer).
 ]
 
 export const setPrimaryRules = [

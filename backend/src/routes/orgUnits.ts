@@ -25,9 +25,10 @@ import { findTeacherRowById } from '../db/queries/teachers'
 // Org-structure tree builder — the IT-admin surface (Research.md §7.4), plus
 // (Phase 3 slice B) sub-unit admins scoped to their own subtree. Mounted
 // under /api/institution/structure. Gated by requireDomain('platform','admin')
-// — role='admin' is always domain='all' (Phase 1 invariant), so this passes
-// both true institution-root admins AND sub-unit admin grants; the coarse
-// gate alone does not distinguish them. Real scoping is per-route below via
+// — reached by true institution-root admins (role='admin', domain='all', on
+// the institution root) AND by sub-unit platform:admin grants (Phase 3 slice
+// B, e.g. an institute director); the coarse gate alone does not distinguish
+// them. Real scoping is per-route below via
 // `unitInScope` (write endpoints) and `req.domainScope.pathPrefixes` (list
 // endpoints). `PUT /members/:teacherId/primary` stays root-admin-only
 // explicitly — reassigning which department a teacher belongs to is
@@ -329,6 +330,18 @@ router.post('/roles', validate(grantRoleRules), asyncHandler(async (req, res) =>
   const domain = (req.body.domain as GrantDomain | undefined) ?? 'all'
   if (!(await isTeacherInInstitution(teacherId, instId))) throw new NotFoundError('Преподаватель')
   const unit = await unitInScope(unitId, instId, req)
+  // domain='all' means "every functional axis" — on the institution root
+  // that IS institution-wide admin (isInstitutionAdmin's exact signal), but
+  // on any other unit it would silently make role='admin' institution-wide
+  // too, since getAccessScope expands domain='all' across every domain
+  // (platform/curriculum/teaching/umu) regardless of how narrow the unit is.
+  // 'admin' on a non-root unit must pick a real domain, same as 'edit'/
+  // 'view' — its authority then stays scoped to this unit's own subtree,
+  // exactly like an equivalently-scoped 'edit' (the only functional gap
+  // between the two today is Структура's platform:admin gate).
+  if (role === 'admin' && domain === 'all' && unit.type_code !== 'institution') {
+    throw new ValidationError('«Администратор» с областью «Все» доступен только на уровне всей организации — выберите конкретную область для этого подразделения')
+  }
   await addUnitRole(teacherId, unitId, role as UnitRole, domain)
   const member = await findTeacherRowById(teacherId)
   recordAudit({ institutionId: instId, actorTeacherId: req.teacher.id, actorEmail: req.teacher.email,

@@ -82,26 +82,29 @@ const INSTITUTION_WIDE_TYPES = new Set<OrgUnitType>(['governance', 'admin_office
 
 // Warn about the authorisation blast radius of a grant before it's applied.
 // Returns null when the grant is ordinary (scoped to the unit's subtree).
-function grantWarning(unit: OrgUnit | undefined, role: UnitRole): string | null {
+// 2026-07-29 — 'admin' no longer auto-forces domain='all' (that WAS the trap:
+// every admin grant became institution-wide regardless of which unit it sat
+// on — see routes/orgUnits.ts's POST /roles). 'admin' now scopes exactly
+// like 'edit'/'view' do: to the granted unit's own subtree, in whichever
+// domain is picked. domain='all' still means "every axis" — genuinely
+// institution-wide only when the unit IS the institution root; the server
+// rejects role='admin' + domain='all' anywhere else, and the form below
+// disables «Назначить» for that combination instead of letting it round-trip
+// to a server error.
+function grantWarning(unit: OrgUnit | undefined, role: UnitRole, domain: GrantDomain): string | null {
   if (!unit) return null
-  if (role === 'admin' && unit.type_code === 'institution') {
+  if (role === 'admin' && domain === 'all' && unit.type_code === 'institution') {
     return 'Даёт полный доступ администратора ко всей организации (равнозначно администратору организации).'
   }
-  if ((role === 'admin' || role === 'edit') && INSTITUTION_WIDE_TYPES.has(unit.type_code)) {
+  if ((role === 'admin' || role === 'edit') && (domain === 'all' || domain === 'curriculum') && INSTITUTION_WIDE_TYPES.has(unit.type_code)) {
+    // Unrelated to the domain='all' expansion above — services/programAccess.ts
+    // hardcodes governance/admin_office head/admin → all-rw programme access,
+    // but only reads domain IN ('all', 'curriculum') grants (its own query),
+    // so a 'teaching'/'platform'/'umu'-only grant here doesn't trigger it.
     return 'Подразделения этого типа дают доступ ко всем образовательным программам организации, а не только к этому подразделению.'
   }
-  // «Администратор» на любой другой единице (кафедра/институт/направление/
-  // программа/полигруппа) НЕ ограничивается этим подразделением — область
-  // всегда становится «all» (см. grantRoleRules), т.е. полный доступ ко ВСЕЙ
-  // организации по всем осям (структура, критерии, учебный процесс, УМУ),
-  // просто привязанный к поддереву этой единицы. Ровно эта ловушка once
-  // отдала «просто РОП» доступ к Организации/Структуре/УМУ/Критериям.
-  // «Редактор» с выбранной областью не имеет этого ограничения и на практике
-  // даёт тот же функционал в рамках выбранной области (сегодня admin и edit
-  // не различаются нигде, кроме гейта Структуры на platform:admin) — так что
-  // для роли «глава подразделения/программы» почти всегда нужен именно он.
-  if (role === 'admin' && unit.type_code !== 'institution' && !INSTITUTION_WIDE_TYPES.has(unit.type_code)) {
-    return '«Администратор» здесь не ограничивается этим подразделением — область автоматически становится «Все» (полный доступ ко всей организации по структуре, критериям, учебному процессу и УМУ), только по поддереву этой единицы. Если нужен доступ только к содержимому/процессу этого подразделения — выберите «Редактор» и укажите область ниже.'
+  if (role === 'admin' && domain === 'all' && unit.type_code !== 'institution') {
+    return '«Администратор» с областью «Все» доступен только на уровне всей организации — выберите конкретную область ниже, чтобы ограничить роль этим подразделением.'
   }
   return null
 }
@@ -623,7 +626,12 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
 
       {/* Grant a role — own full-width line so long unit names have room */}
       {adding && (() => {
-        const warning = grantWarning(unitsById.get(roleUnit), role)
+        const unit = unitsById.get(roleUnit)
+        const warning = grantWarning(unit, role, domain)
+        // «Администратор» + «Все» is only legal on the institution root
+        // (routes/orgUnits.ts's POST /roles rejects it server-side too) —
+        // block submission instead of letting it round-trip to an error.
+        const blocked = role === 'admin' && domain === 'all' && unit?.type_code !== 'institution'
         return (
         <div className="pt-2.5 border-t border-border space-y-2">
           <div className="flex flex-wrap items-end gap-2">
@@ -637,25 +645,21 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
             </label>
             <label className="block w-[150px]">
               <span className="text-[11px] font-sans text-ink-secondary block mb-1">Роль</span>
-              <select value={role} onChange={(e) => {
-                const next = e.target.value as UnitRole
-                setRole(next)
-                if (next === 'admin') setDomain('all') // admin is always full-scope
-              }} className={`${selectCls} w-full`}>
+              <select value={role} onChange={(e) => setRole(e.target.value as UnitRole)}
+                className={`${selectCls} w-full`}>
                 {(['admin', 'edit', 'view'] as UnitRole[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
               </select>
             </label>
-            {role !== 'admin' && (
-              <label className="block w-[220px]">
-                <span className="text-[11px] font-sans text-ink-secondary block mb-1">Область</span>
-                <select value={domain} onChange={(e) => setDomain(e.target.value as GrantDomain)}
-                  className={`${selectCls} w-full`}>
-                  {GRANT_DOMAIN_OPTIONS.map((d) => <option key={d} value={d}>{DOMAIN_LABEL[d]}</option>)}
-                </select>
-              </label>
-            )}
-            <button onClick={() => { if (roleUnit) { onGrant(roleUnit, role, role === 'admin' ? 'all' : domain); setAdding(false) } }}
-              className="px-3 py-1.5 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity">
+            <label className="block w-[220px]">
+              <span className="text-[11px] font-sans text-ink-secondary block mb-1">Область</span>
+              <select value={domain} onChange={(e) => setDomain(e.target.value as GrantDomain)}
+                className={`${selectCls} w-full`}>
+                {GRANT_DOMAIN_OPTIONS.map((d) => <option key={d} value={d}>{DOMAIN_LABEL[d]}</option>)}
+              </select>
+            </label>
+            <button onClick={() => { if (roleUnit && !blocked) { onGrant(roleUnit, role, domain); setAdding(false) } }}
+              disabled={blocked}
+              className="px-3 py-1.5 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40">
               Назначить
             </button>
             <button onClick={() => setAdding(false)}
