@@ -6,6 +6,7 @@ import Select from '../../components/ui/Select'
 import LoadingSpinner from '../../components/ui/LoadingSpinner'
 import UrlUploadField from '../../components/ui/UrlUploadField'
 import SvedenImportModal from '../../components/programs/SvedenImportModal'
+import EditProgramModal from '../../components/programs/EditProgramModal'
 import CurriculumGraph from '../../components/programs/CurriculumGraph'
 import Icon from '../../components/ui/Icon'
 import {
@@ -13,6 +14,8 @@ import {
   downloadAnalysisPdf, updateProgram, uploadProgramDocument, deleteProgramDocument,
   downloadProgramDocument, reviewDiscipline, getDisciplineReviews, openDisciplineInStudio,
   diffDiscipline, getAssignableTeachers, setDisciplineResponsible, type AssignableTeacher,
+  reviewDisciplinePlacement, getPlacementReviews,
+  reviewDisciplineMto, getMtoReviews,
 } from '../../api/programs'
 import { getCourses } from '../../api/courses'
 import { getPickableProgramUnits } from '../../api/programs'
@@ -21,6 +24,9 @@ import {
   type ProgramDocument, type ProgramPracticeType, type ProgramDocumentReview,
   type DisciplineCoverageItem, type IndicatorDimension, type SequencingStructure,
   type OutcomeDelivery, type ProgramDocumentDiff, type DiffChangeKind,
+  type ProgramPlacementReview, type PlacementSeverity, type DeclaredPrerequisiteLink,
+  type PlacementFindingKind,
+  type ProgramMtoReview, type MtoDeclaredItem, type MtoFindingKind,
 } from '../../types'
 import { useAuthStore } from '../../store/authStore'
 import { EXAMPLE_PROGRAM } from '../../lib/programExample'
@@ -50,6 +56,10 @@ export default function InstitutionProgramDetail() {
   const addToast = useUIStore((s) => s.addToast)
 
   const [tab, setTab] = useState<Tab>('builder')
+  // Fixes a dead end: a typo'd code or misspelt specialty name at intake had
+  // no way to be corrected afterwards, and silently broke sveden-page import
+  // matching. See EditProgramModal.
+  const [editingProgram, setEditingProgram] = useState(false)
   const [disciplines, setDisciplines] = useState<EditDiscipline[]>([])
   const [competencies, setCompetencies] = useState<EditCompetency[]>([])
   const [dirty, setDirty] = useState(false)
@@ -69,6 +79,20 @@ export default function InstitutionProgramDetail() {
     queryKey: ['program-discipline-reviews', id],
     queryFn:  () => getDisciplineReviews(id),
     enabled:  !!id,
+  })
+  // «Место дисциплины в структуре ОП» (migration 100) — only needed on the
+  // Documents tab where the check is triggered.
+  const { data: placementReviews = [] } = useQuery({
+    queryKey: ['program-placement-reviews', id],
+    queryFn:  () => getPlacementReviews(id),
+    enabled:  tab === 'documents',
+  })
+  // «Материально-техническое обеспечение» (migration 101) — same lazy-load
+  // rule as placementReviews above.
+  const { data: mtoReviews = [] } = useQuery({
+    queryKey: ['program-mto-reviews', id],
+    queryFn:  () => getMtoReviews(id),
+    enabled:  tab === 'documents',
   })
 
   // Read-only mode when the server says this caller can't edit this program.
@@ -265,6 +289,10 @@ export default function InstitutionProgramDetail() {
           </div>
           {canEdit && (
             <div className="flex items-center gap-2 flex-shrink-0">
+              <Button variant="secondary" size="sm" onClick={() => setEditingProgram(true)}
+                      title="Исправить код, название, профиль или уровень программы">
+                Редактировать
+              </Button>
               <Button variant="secondary" size="sm" onClick={() => saveMut.mutate()}
                       loading={saveMut.isPending} disabled={!dirty}>
                 {dirty ? 'Сохранить' : 'Сохранено'}
@@ -388,12 +416,20 @@ export default function InstitutionProgramDetail() {
             documents={program.documents ?? []}
             disciplines={program.disciplines}
             reviews={disciplineReviews}
+            placementReviews={placementReviews}
+            mtoReviews={mtoReviews}
             canEdit={canEdit}
             onChanged={() => qc.invalidateQueries({ queryKey: ['program', id] })}
             onReviewed={() => qc.invalidateQueries({ queryKey: ['program-discipline-reviews', id] })}
+            onPlacementReviewed={() => qc.invalidateQueries({ queryKey: ['program-placement-reviews', id] })}
+            onMtoReviewed={() => qc.invalidateQueries({ queryKey: ['program-mto-reviews', id] })}
           />
         )}
       </div>
+
+      {editingProgram && program && (
+        <EditProgramModal program={program} onClose={() => setEditingProgram(false)} />
+      )}
     </div>
   )
 }
@@ -1414,15 +1450,20 @@ function SectionLabel({ children }: { children: ReactNode }) {
 // none uploaded yet, otherwise the file + a "Проверить соответствие" trigger
 // that checks it against the discipline's declared competency_codes.
 function DocumentsPanel({
-  programId, documents, disciplines, reviews, canEdit, onChanged, onReviewed,
+  programId, documents, disciplines, reviews, placementReviews, mtoReviews,
+  canEdit, onChanged, onReviewed, onPlacementReviewed, onMtoReviewed,
 }: {
-  programId:   string
-  documents:   ProgramDocument[]
-  disciplines: ProgramDiscipline[]
-  reviews:     ProgramDocumentReview[]
-  canEdit:     boolean
-  onChanged:   () => void
-  onReviewed:  () => void
+  programId:        string
+  documents:        ProgramDocument[]
+  disciplines:      ProgramDiscipline[]
+  reviews:          ProgramDocumentReview[]
+  placementReviews: ProgramPlacementReview[]
+  mtoReviews:       ProgramMtoReview[]
+  canEdit:          boolean
+  onChanged:        () => void
+  onReviewed:       () => void
+  onPlacementReviewed: () => void
+  onMtoReviewed:       () => void
 }) {
   const addToast = useUIStore((s) => s.addToast)
   const [uploading, setUploading] = useState(false)
@@ -1453,9 +1494,19 @@ function DocumentsPanel({
   const [diffingId, setDiffingId] = useState<string | null>(null)
   const [diffByDiscipline, setDiffByDiscipline] = useState<Map<string, ProgramDocumentDiff>>(new Map())
   const [expandedDiffs, setExpandedDiffs] = useState<Set<string>>(new Set())
+  // «Место дисциплины в структуре ОП» (migration 100) — mirrors the coverage
+  // review state above.
+  const [placingId, setPlacingId] = useState<string | null>(null)
+  const [expandedPlacements, setExpandedPlacements] = useState<Set<string>>(new Set())
+  // «Материально-техническое обеспечение» (migration 101) — mirrors the
+  // placement-review state above.
+  const [mtoingId, setMtoingId] = useState<string | null>(null)
+  const [expandedMto, setExpandedMto] = useState<Set<string>>(new Set())
 
   const workingProgrammeByDiscipline = currentWorkingProgrammeMap(documents)
   const reviewByDiscipline = new Map(reviews.map((r) => [r.discipline_id, r]))
+  const placementByDiscipline = new Map(placementReviews.map((r) => [r.discipline_id, r]))
+  const mtoByDiscipline = new Map(mtoReviews.map((r) => [r.discipline_id, r]))
   const practices = documents.filter((d) => d.kind === 'practice')
   // All working_programme versions (current + superseded) per discipline,
   // newest first — powers the «Что изменилось с прошлого года» button's
@@ -1567,6 +1618,64 @@ function DocumentsPanel({
     })
   }
 
+  async function runPlacement(discipline: ProgramDiscipline) {
+    if (!discipline.id) return
+    const disciplineId = discipline.id
+    setPlacingId(disciplineId)
+    try {
+      const review = await reviewDisciplinePlacement(programId, disciplineId)
+      const errors = review.result.findings.filter((f) => f.severity === 'error').length
+      addToast(
+        errors > 0 ? `Найдено ошибок: ${errors}` : 'Противоречий не найдено',
+        errors > 0 ? 'error' : 'success',
+      )
+      setExpandedPlacements((prev) => new Set(prev).add(disciplineId))
+      onPlacementReviewed()
+    } catch {
+      // handled by interceptor
+    } finally {
+      setPlacingId(null)
+    }
+  }
+
+  function togglePlacementExpanded(disciplineId: string) {
+    setExpandedPlacements((prev) => {
+      const next = new Set(prev)
+      if (next.has(disciplineId)) next.delete(disciplineId)
+      else next.add(disciplineId)
+      return next
+    })
+  }
+
+  async function runMto(discipline: ProgramDiscipline) {
+    if (!discipline.id) return
+    const disciplineId = discipline.id
+    setMtoingId(disciplineId)
+    try {
+      const review = await reviewDisciplineMto(programId, disciplineId)
+      const errors = review.result.findings.filter((f) => f.severity === 'error').length
+      addToast(
+        errors > 0 ? `Найдено ошибок: ${errors}` : 'Противоречий не найдено',
+        errors > 0 ? 'error' : 'success',
+      )
+      setExpandedMto((prev) => new Set(prev).add(disciplineId))
+      onMtoReviewed()
+    } catch {
+      // handled by interceptor
+    } finally {
+      setMtoingId(null)
+    }
+  }
+
+  function toggleMtoExpanded(disciplineId: string) {
+    setExpandedMto((prev) => {
+      const next = new Set(prev)
+      if (next.has(disciplineId)) next.delete(disciplineId)
+      else next.add(disciplineId)
+      return next
+    })
+  }
+
   return (
     <div className="space-y-8">
       {/* Working programmes — one per discipline */}
@@ -1620,6 +1729,16 @@ function DocumentsPanel({
                 onUploadUrl={(fileUrl) => attachOne({ fileUrl, kind: 'working_programme', disciplineId: d.id })}
                 onRemove={(doc) => removeOne(doc)}
                 onReview={() => runReview(d)}
+                placementReview={d.id ? placementByDiscipline.get(d.id) ?? null : null}
+                placementExpanded={d.id ? expandedPlacements.has(d.id) : false}
+                onTogglePlacementExpanded={() => d.id && togglePlacementExpanded(d.id)}
+                placing={placingId === d.id}
+                onPlacementReview={() => runPlacement(d)}
+                mtoReview={d.id ? mtoByDiscipline.get(d.id) ?? null : null}
+                mtoExpanded={d.id ? expandedMto.has(d.id) : false}
+                onToggleMtoExpanded={() => d.id && toggleMtoExpanded(d.id)}
+                mtoing={mtoingId === d.id}
+                onMtoReview={() => runMto(d)}
                 assignableTeachers={assignableTeachers}
                 assigning={assignMut.isPending && assignMut.variables?.disciplineId === d.id}
                 onAssignResponsible={(teacherId) => d.id && assignMut.mutate({ disciplineId: d.id, teacherId })}
@@ -1803,6 +1922,8 @@ function DisciplineDocumentRow({
   discipline, doc, review, expanded, onToggleExpanded,
   versionCount, diff, diffExpanded, onToggleDiffExpanded, diffing, onDiff,
   programId, canEdit, uploading, reviewing, onUpload, onUploadUrl, onRemove, onReview,
+  placementReview, placementExpanded, onTogglePlacementExpanded, placing, onPlacementReview,
+  mtoReview, mtoExpanded, onToggleMtoExpanded, mtoing, onMtoReview,
   assignableTeachers, assigning, onAssignResponsible,
 }: {
   discipline:            ProgramDiscipline
@@ -1826,6 +1947,18 @@ function DisciplineDocumentRow({
   onUploadUrl:           (url: string) => void
   onRemove:              (doc: ProgramDocument) => void
   onReview:              () => void
+  // «Место дисциплины в структуре ОП» (migration 100)
+  placementReview:            ProgramPlacementReview | null
+  placementExpanded:          boolean
+  onTogglePlacementExpanded:  () => void
+  placing:                    boolean
+  onPlacementReview:          () => void
+  // «Материально-техническое обеспечение» (migration 101)
+  mtoReview:            ProgramMtoReview | null
+  mtoExpanded:          boolean
+  onToggleMtoExpanded:  () => void
+  mtoing:               boolean
+  onMtoReview:          () => void
   assignableTeachers:    AssignableTeacher[]
   assigning:             boolean
   onAssignResponsible:   (teacherId: string | null) => void
@@ -1954,6 +2087,36 @@ function DisciplineDocumentRow({
               {diffing ? 'Сравниваем…' : diff ? (diffExpanded ? 'Скрыть изменения' : 'Показать изменения') : 'Что изменилось с прошлого года'}
             </RowActionChip>
           )}
+          {canEdit && (
+            <RowActionChip
+              onClick={onPlacementReview}
+              disabled={placing}
+              variant={placementReview ? 'neutral' : 'primary'}
+              title="Проверяет раздел «Место дисциплины в структуре ОП» — предшествующие/последующие дисциплины — против учебного плана"
+            >
+              {placing ? 'Проверяем…' : placementReview ? 'Перепроверить место в структуре' : 'Проверить место в структуре'}
+            </RowActionChip>
+          )}
+          {canEdit && placementReview && (
+            <RowActionChip onClick={onTogglePlacementExpanded} expanded={placementExpanded}>
+              {placementExpanded ? 'Скрыть разбор' : 'Показать разбор'}
+            </RowActionChip>
+          )}
+          {canEdit && (
+            <RowActionChip
+              onClick={onMtoReview}
+              disabled={mtoing}
+              variant={mtoReview ? 'neutral' : 'primary'}
+              title="Проверяет раздел «Материально-техническое обеспечение» — конкретное ПО vs. общие аудиторные средства, согласованность с содержанием лабораторных/практических"
+            >
+              {mtoing ? 'Проверяем…' : mtoReview ? 'Перепроверить МТО' : 'Проверить МТО'}
+            </RowActionChip>
+          )}
+          {canEdit && mtoReview && (
+            <RowActionChip onClick={onToggleMtoExpanded} expanded={mtoExpanded}>
+              {mtoExpanded ? 'Скрыть разбор' : 'Показать разбор'}
+            </RowActionChip>
+          )}
         </div>
       )}
       {review && expanded && (
@@ -1969,6 +2132,228 @@ function DisciplineDocumentRow({
           <DocumentDiffPanel diff={diff} />
         </div>
       )}
+      {placementReview && placementExpanded && (
+        <div className="mt-3 pl-8 pr-1 border-t border-border pt-3">
+          <PlacementReviewPanel review={placementReview} />
+        </div>
+      )}
+      {mtoReview && mtoExpanded && (
+        <div className="mt-3 pl-8 pr-1 border-t border-border pt-3">
+          <MtoReviewPanel review={mtoReview} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Same badge convention as CurriculumConformance.tsx's STATUS_META — a
+// filled colour chip, not plain coloured text, so severity reads at a
+// glance instead of blending into the surrounding grey prose. Shared across
+// every РПД-section check (§2 placement, §12 МТО, …) — same three-tier
+// severity, different finding shapes.
+const SEVERITY_META: Record<PlacementSeverity, { label: string; badge: string; border: string }> = {
+  error:      { label: 'Ошибка',       badge: 'bg-danger-bg text-danger',   border: 'border-l-danger' },
+  warning:    { label: 'Предупреждение', badge: 'bg-warning-bg text-warning', border: 'border-l-warning' },
+  suggestion: { label: 'Рекомендация', badge: 'bg-amber-light text-amber',  border: 'border-l-amber' },
+}
+const PLACEMENT_FINDING_KIND_LABEL: Record<PlacementFindingKind, string> = {
+  phantom:        'Дисциплина не найдена в плане',
+  inversion:      'Нарушен порядок семестров',
+  asymmetry:      'Не подтверждено встречной РПД',
+  empty_section:  'Раздел не заполнен',
+  wrong_program:  'Другое направление/профиль',
+  weak_rationale: 'Слабое обоснование связи',
+  missing_link:   'Возможно, пропущена предпосылка',
+}
+const MTO_FINDING_KIND_LABEL: Record<MtoFindingKind, string> = {
+  generic_only:            'Нет названного ПО',
+  generic_software_only:   'Только общее ПО, нет профильного',
+  undeclared_tool:         'Инструмент не указан в разделе',
+  missing_specialized_tool: 'Возможно, пропущено профильное ПО',
+}
+
+// Verdict banner — colour = worst severity present, so a teacher skimming
+// the Documents tab sees red/amber/green before reading a single word.
+// Shared by every РПД-section check panel.
+function VerdictBanner({ severities, summary }: { severities: PlacementSeverity[]; summary: string }) {
+  const errors = severities.filter((s) => s === 'error').length
+  const clean  = severities.length === 0
+  const bannerClass = clean
+    ? 'bg-success-bg border-success/30 text-success'
+    : errors > 0
+      ? 'bg-danger-bg border-danger/30 text-danger'
+      : 'bg-warning-bg border-warning/30 text-warning'
+  return <div className={`rounded-lg border px-3 py-2.5 font-medium leading-relaxed ${bannerClass}`}>{summary}</div>
+}
+
+// One finding card — shared shape across every РПД-section check.
+function FindingCard({
+  severity, kindLabel, subjectName, detail, evidence, recommendation,
+}: {
+  severity:       PlacementSeverity
+  kindLabel:      string
+  subjectName:    string
+  detail:         string
+  evidence:       string | null
+  recommendation: string
+}) {
+  const meta = SEVERITY_META[severity]
+  return (
+    <div className={`bg-surface border border-border border-l-2 ${meta.border} rounded-lg p-3`}>
+      <div className="flex items-start justify-between gap-2 mb-1.5">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <span className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-sm flex-shrink-0 ${meta.badge}`}>
+            {meta.label}
+          </span>
+          <span className="text-ink-tertiary">{kindLabel}</span>
+        </div>
+        {subjectName && <span className="text-ink font-medium flex-shrink-0">{subjectName}</span>}
+      </div>
+      <div className="text-ink-secondary leading-relaxed">{detail}</div>
+      {evidence && <div className="text-ink-tertiary italic mt-1.5">«{evidence}»</div>}
+      <div className="text-ink mt-1.5 pt-1.5 border-t border-border">
+        <span className="font-medium text-amber">Рекомендация: </span>{recommendation}
+      </div>
+    </div>
+  )
+}
+
+// «Место дисциплины в структуре ОП» (migration 100) — declared predecessor/
+// successor list + findings (D1-D7, see services/placementReview.ts).
+function PlacementReviewPanel({ review }: { review: ProgramPlacementReview }) {
+  const { declared, declared_program, findings, summary } = review.result
+  const predecessors = declared.filter((d) => d.role === 'predecessor')
+  const successors   = declared.filter((d) => d.role === 'successor')
+
+  return (
+    <div className="space-y-3 text-xs font-sans">
+      <VerdictBanner severities={findings.map((f) => f.severity)} summary={summary} />
+
+      {declared_program && (
+        <div className="text-ink-tertiary">
+          Раздел указывает направление/профиль: <span className="text-ink font-medium">«{declared_program}»</span>
+        </div>
+      )}
+
+      {(predecessors.length > 0 || successors.length > 0) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <DeclaredList title="Предшествующие" links={predecessors} />
+          <DeclaredList title="Последующие" links={successors} />
+        </div>
+      )}
+
+      {findings.length > 0 && (
+        <div className="space-y-2 pt-1">
+          {findings.map((f, i) => (
+            <FindingCard
+              key={i}
+              severity={f.severity}
+              kindLabel={PLACEMENT_FINDING_KIND_LABEL[f.kind]}
+              subjectName={f.discipline_name}
+              detail={f.detail}
+              evidence={f.evidence}
+              recommendation={f.recommendation}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// «Материально-техническое обеспечение» (migration 101) — declared
+// software/generic items + findings (see services/mtoReview.ts).
+function MtoReviewPanel({ review }: { review: ProgramMtoReview }) {
+  const { software_items, generic_items, findings, summary } = review.result
+  // Split by category (migration 101's bucket split) — a list that's all
+  // 'general' reads very differently from one with a specialized tool in
+  // it, so they get their own columns rather than one flat "Названное ПО".
+  const specialized = software_items.filter((s) => s.category === 'specialized')
+  const general      = software_items.filter((s) => s.category !== 'specialized')
+
+  return (
+    <div className="space-y-3 text-xs font-sans">
+      <VerdictBanner severities={findings.map((f) => f.severity)} summary={summary} />
+
+      {(software_items.length > 0 || generic_items.length > 0) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <QuotedItemList title="Специализированное ПО" items={specialized} dotColor="var(--color-success)" />
+          <QuotedItemList title="Общее ПО" items={general} dotColor="var(--color-amber, #b5860b)" />
+        </div>
+      )}
+      {generic_items.length > 0 && (
+        <QuotedItemList title="Общие аудиторные средства" items={generic_items} dotColor="var(--color-ink-tertiary, #9ca3af)" />
+      )}
+
+      {findings.length > 0 && (
+        <div className="space-y-2 pt-1">
+          {findings.map((f, i) => (
+            <FindingCard
+              key={i}
+              severity={f.severity}
+              kindLabel={MTO_FINDING_KIND_LABEL[f.kind]}
+              subjectName={f.item_name}
+              detail={f.detail}
+              evidence={f.evidence}
+              recommendation={f.recommendation}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function QuotedItemList({ title, items, dotColor }: { title: string; items: MtoDeclaredItem[]; dotColor: string }) {
+  if (items.length === 0) return null
+  return (
+    <div>
+      <div className="text-[11px] font-sans font-semibold uppercase tracking-wide text-ink-tertiary mb-1">{title}</div>
+      <div className="space-y-1.5">
+        {items.map((it, i) => (
+          <div key={i}>
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0" style={{ background: dotColor }} />
+              <span className="text-ink">{it.raw_name}</span>
+            </div>
+            {it.quote && <div className="text-ink-tertiary italic ml-3 mt-0.5">«{it.quote}»</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function DeclaredList({ title, links }: { title: string; links: DeclaredPrerequisiteLink[] }) {
+  if (links.length === 0) return null
+  return (
+    <div>
+      <div className="text-[11px] font-sans font-semibold uppercase tracking-wide text-ink-tertiary mb-1">{title}</div>
+      <div className="space-y-1.5">
+        {links.map((l, i) => (
+          <div key={i}>
+            <div className="flex items-center gap-1.5">
+              <span
+                className="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0"
+                style={{
+                  background: l.resolution === 'internal' ? 'var(--color-success)'
+                    : l.resolution === 'external' ? 'var(--color-ink-tertiary, #9ca3af)' : 'var(--color-danger)',
+                }}
+              />
+              <span className="text-ink">{l.raw_name}</span>
+              {l.resolution === 'internal' && l.semester != null && (
+                <span className="text-ink-tertiary">· сем. {l.semester}</span>
+              )}
+              {l.resolution === 'external' && <span className="text-ink-tertiary">· внешняя</span>}
+              {l.resolution === 'unmatched' && <span className="text-danger">· не найдена в плане</span>}
+            </div>
+            {/* Verbatim quote from §2 — lets the teacher verify the finding
+                against the actual document instead of trusting the paraphrase
+                (same citation contract as grading/coverage checks). */}
+            {l.quote && <div className="text-ink-tertiary italic ml-3 mt-0.5">«{l.quote}»</div>}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

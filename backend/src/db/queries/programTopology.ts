@@ -10,13 +10,22 @@ import type {
 // queryable rows instead of a discard-after-render JSONB blob.
 //
 // Every `replace*` function here implements the same re-analysis rule:
-// 'extracted' rows are wholly replaced by the newest analysis run;
-// 'manual'/'confirmed' rows (no UI writes these yet — the columns exist for
-// Increment 4's sandbox) are never touched. The pattern is: delete this
+// 'extracted' rows are wholly replaced by the newest whole-plan analysis
+// run; 'manual'/'confirmed' rows (no UI writes these yet — the columns exist
+// for Increment 4's sandbox) are never touched. The pattern is: delete this
 // programme's 'extracted' rows, then re-insert the new set with an
 // ON CONFLICT guard scoped to `origin = 'extracted'` — so if a manual/
 // confirmed edge already occupies that unique slot, the newly-extracted
 // duplicate is silently absorbed rather than overwriting it.
+//
+// 'declared' (migration 100, services/placementReview.ts) is a third source
+// — a discipline's own РПД §2 — and sits between 'extracted' and
+// 'manual'/'confirmed' in trust: it beats a whole-plan LLM guess (an
+// 'extracted' row occupying the same slot is promoted to 'declared' on
+// conflict) but is still machine-derived, so it does not beat a human
+// 'manual'/'confirmed' edge. See replaceDeclaredPrerequisites below —
+// scoped per-discipline, not per-programme, since only that discipline's
+// own document attests to its edges.
 
 interface PrerequisiteRow {
   id: string
@@ -76,6 +85,49 @@ export async function replacePrerequisites(
                analysis_id = EXCLUDED.analysis_id, updated_at = NOW()
            WHERE program_prerequisites.origin = 'extracted'`,
         [programId, e.disciplineId, e.prerequisiteDisciplineId, e.reason, e.inverted, analysisId]
+      )
+    }
+    await client.query('COMMIT')
+  } catch (err) {
+    await client.query('ROLLBACK')
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
+/** Replaces THIS discipline's own `declared` predecessor edges (migration
+ *  100, services/placementReview.ts) — the discipline's РПД §2 states which
+ *  disciplines it depends on. Scoped to `discipline_id = disciplineId`
+ *  (not the whole programme) because only this discipline's own document
+ *  attests to these edges; re-reviewing it must not touch declared edges
+ *  another discipline's §2 created. Declared *successor* statements (this
+ *  discipline named as a predecessor by another) are surfaced as findings
+ *  only, not synced here — syncing them would mean writing into another
+ *  discipline's edge set from this one's review, which this discipline's
+ *  own re-review could then never clean up. Same manual/confirmed-preserving
+ *  ON CONFLICT pattern as replacePrerequisites. */
+export async function replaceDeclaredPrerequisites(
+  programId: string, disciplineId: string, edges: ReplacePrerequisiteInput[],
+): Promise<void> {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query(
+      `DELETE FROM program_prerequisites
+        WHERE program_id = $1 AND discipline_id = $2 AND origin = 'declared'`,
+      [programId, disciplineId]
+    )
+    for (const e of edges) {
+      await client.query(
+        `INSERT INTO program_prerequisites
+           (program_id, discipline_id, prerequisite_discipline_id, reason, inverted, origin, analysis_id)
+         VALUES ($1,$2,$3,$4,$5,'declared',NULL)
+         ON CONFLICT (discipline_id, prerequisite_discipline_id) DO UPDATE
+           SET reason = EXCLUDED.reason, inverted = EXCLUDED.inverted,
+               origin = 'declared', analysis_id = NULL, updated_at = NOW()
+           WHERE program_prerequisites.origin IN ('declared', 'extracted')`,
+        [programId, e.disciplineId, e.prerequisiteDisciplineId, e.reason, e.inverted]
       )
     }
     await client.query('COMMIT')

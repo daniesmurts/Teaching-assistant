@@ -3,6 +3,7 @@ import type {
   Program, ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramAnalysis,
   ProgramPracticeType, ProgramDocumentKind, ProgramDocument, ProgramDocumentReview,
   ProgramDocumentDiff, MarketEvidence, SupportedRegion, RpdSubmission, ProgramTopology, ProgramContentUnit,
+  ProgramPlacementReview, ProgramMtoReview,
 } from '../types'
 
 // Academic programs (учебные планы) — institution-admin feature.
@@ -229,6 +230,38 @@ export async function getDisciplineReviews(programId: string): Promise<ProgramDo
   return res.data
 }
 
+// ─── «Место дисциплины в структуре ОП» (migration 100) ────────────────────────
+
+export async function reviewDisciplinePlacement(
+  programId: string, disciplineId: string
+): Promise<ProgramPlacementReview> {
+  const res = await client.post<ProgramPlacementReview>(
+    `/api/institution/programs/${programId}/disciplines/${disciplineId}/placement-review`, {}, { timeout: 120_000 }
+  )
+  return res.data
+}
+
+export async function getPlacementReviews(programId: string): Promise<ProgramPlacementReview[]> {
+  const res = await client.get<ProgramPlacementReview[]>(`/api/institution/programs/${programId}/placement-reviews`)
+  return res.data
+}
+
+// ─── «Материально-техническое обеспечение» (migration 101) ────────────────────
+
+export async function reviewDisciplineMto(
+  programId: string, disciplineId: string
+): Promise<ProgramMtoReview> {
+  const res = await client.post<ProgramMtoReview>(
+    `/api/institution/programs/${programId}/disciplines/${disciplineId}/mto-review`, {}, { timeout: 120_000 }
+  )
+  return res.data
+}
+
+export async function getMtoReviews(programId: string): Promise<ProgramMtoReview[]> {
+  const res = await client.get<ProgramMtoReview[]>(`/api/institution/programs/${programId}/mto-reviews`)
+  return res.data
+}
+
 // ─── РПД approval — РОП side (docs/RPD-WORKFLOW.md phase 4b) ──────────────────
 
 export interface AssignableTeacher {
@@ -303,7 +336,18 @@ export async function getProgram(id: string): Promise<ProgramDetail> {
   return res.data
 }
 
-export async function updateProgram(id: string, input: Partial<CreateProgramInput>): Promise<Program> {
+export interface UpdateProgramInput extends Partial<CreateProgramInput> {
+  // Official ФГОС header fields — settable after creation (fixing a typo'd
+  // code or misspelt specialty name is otherwise a dead end: it silently
+  // breaks sveden-page discipline matching and ФГОС-code lookups keyed on
+  // `code`, and nothing surfaced why the import kept failing).
+  specialty_name?:  string | null
+  education_level?: string | null
+  profile?:         string | null
+  forms_of_study?:  string | null
+}
+
+export async function updateProgram(id: string, input: UpdateProgramInput): Promise<Program> {
   const res = await client.patch<Program>(`/api/institution/programs/${id}`, input)
   return res.data
 }

@@ -20,6 +20,15 @@ export const updateProgramRules = [
   body('duration_semesters').optional().isInt({ min: 1, max: 16 }),
   body('description').optional({ nullable: true }).isString().isLength({ max: 2000 }),
   body('org_unit_id').optional({ nullable: true }).isUUID().withMessage('Некорректный идентификатор подразделения'),
+  // Official ФГОС header fields (intake form) — a mistyped code or misspelt
+  // specialty name at intake had no way to be corrected afterwards, which
+  // then silently broke sveden-page discipline matching (matchDiscipline)
+  // and the ФГОС-code lookups keyed on `code`. Same length caps as the
+  // create-time form; no create-time validation existed to mirror exactly.
+  body('specialty_name').optional({ nullable: true }).isString().trim().isLength({ max: 300 }),
+  body('education_level').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('profile').optional({ nullable: true }).isString().trim().isLength({ max: 300 }),
+  body('forms_of_study').optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
 ]
 
 export const replaceDisciplinesRules = [

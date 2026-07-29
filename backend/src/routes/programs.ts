@@ -22,13 +22,15 @@ import { canEditProgram, canReadProgram } from '../services/programAccess'
 import { listAncestorsOfUnit } from '../db/queries/orgUnits'
 import { analyzeProgram, persistTopology, persistContentUnits } from '../services/programAnalysis'
 import { reviewDocumentCoverage, detectDeclaredCompetencyCodes } from '../services/documentReview'
+import { reviewPlacement } from '../services/placementReview'
+import { reviewMto } from '../services/mtoReview'
 import { diffWorkingProgrammes } from '../services/programDiff'
 import { generateProgramReportPdf } from '../services/programReportPdf'
 import { uploadFields, verifyFileContent } from '../middleware/fileValidation'
 import { extractText } from '../services/documentExtractor'
 import { parseStudyPlan, parseDescription, parseCompetencyMatrix } from '../services/programImport'
 import { setProgramDocs, setReportedSemesterTotals } from '../db/queries/programs'
-import { getProgramTopology, listContentUnitsByDiscipline } from '../db/queries/programTopology'
+import { getProgramTopology, listContentUnitsByDiscipline, replaceDeclaredPrerequisites } from '../db/queries/programTopology'
 import { downloadObject, deleteObject } from '../services/objectStorage'
 import {
   listProgramDocuments, findProgramDocument, deleteProgramDocument,
@@ -37,6 +39,8 @@ import {
 } from '../db/queries/programDocuments'
 import { attachProgramDocument } from '../services/programDocumentAttach'
 import { insertReview, getLatestReviewByDiscipline, getLatestReviewForDiscipline } from '../db/queries/programDocumentReviews'
+import { insertPlacementReview, getLatestPlacementReviewsByProgram } from '../db/queries/programPlacementReviews'
+import { insertMtoReview, getLatestMtoReviewsByProgram } from '../db/queries/programMtoReviews'
 import { insertDiff, findDiff } from '../db/queries/programDocumentDiffs'
 import {
   findCourseByTeacherAndName, findCoursesByTeacher, createCourse, setCourseSyllabusText,
@@ -953,6 +957,108 @@ router.post('/:id/disciplines/:disciplineId/review', aiLimiter, asyncHandler(asy
   res.status(201).json(review)
 }))
 
+// POST /:id/disciplines/:disciplineId/placement-review — «Место дисциплины
+// в структуре ОП» (РПД §2). Checks declared predecessor/successor
+// disciplines and направление/профиль against the real plan, the programme
+// header, other disciplines' own §2 (asymmetry), and — best-effort — content
+// affinity (weak rationale / missing prerequisite). See
+// services/placementReview.ts for the full rationale.
+router.post('/:id/disciplines/:disciplineId/placement-review', aiLimiter, asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  assertEdit(req, detail.org_unit_id)   // runs an AI call + writes a row — treat as edit
+
+  const discipline = detail.disciplines.find((d) => d.id === req.params.disciplineId)
+  if (!discipline) throw new NotFoundError('Дисциплина')
+
+  const found = await findWorkingProgrammeForDiscipline(detail.id, discipline.id!)
+  if (!found) throw new ValidationError('Сначала загрузите рабочую программу для этой дисциплины.')
+  if (!found.extractedText) {
+    throw new ValidationError('Не удалось извлечь текст из загруженного файла — перезагрузите документ.')
+  }
+
+  const siblingReviews = (await getLatestPlacementReviewsByProgram(detail.id))
+    .filter((r) => r.discipline_id !== discipline.id)
+
+  const result = await reviewPlacement({
+    teacherId:      req.teacher.id,
+    program:        detail,
+    discipline,
+    allDisciplines: detail.disciplines,
+    documentText:   found.extractedText,
+    siblingReviews,
+  })
+
+  const review = await insertPlacementReview({
+    programId:    detail.id,
+    disciplineId: discipline.id!,
+    documentId:   found.document.id,
+    result,
+  })
+
+  // Densify the topology graph for free (docs/topology-spec.md open question
+  // #2): matched, non-inverted declared predecessors become origin='declared'
+  // edges. Best-effort — a failure here must not lose the review itself.
+  const goodEdges = result.declared
+    .filter((d) => d.role === 'predecessor' && d.resolution === 'internal' && d.discipline_id)
+    .map((d) => ({
+      disciplineId:             discipline.id!,
+      prerequisiteDisciplineId: d.discipline_id!,
+      reason:                   'Указано в разделе «Место дисциплины в структуре ОП»',
+      inverted:                 d.semester != null && d.semester > discipline.semester,
+    }))
+  await replaceDeclaredPrerequisites(detail.id, discipline.id!, goodEdges).catch((err) => {
+    logger.warn({ message: 'Could not sync declared prerequisites into topology graph', disciplineId: discipline.id, error: (err as Error).message })
+  })
+
+  res.status(201).json(review)
+}))
+
+// POST /:id/disciplines/:disciplineId/mto-review — «Материально-техническое
+// обеспечение» (РПД §12), requested by the УМЦ head: catches a §12 that
+// only lists generic classroom items instead of named licensed software,
+// and flags tools the discipline's own лабораторные/практические content
+// mentions that §12 never lists. See services/mtoReview.ts — Phase 1, no
+// licensed-software registry.
+router.post('/:id/disciplines/:disciplineId/mto-review', aiLimiter, asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  assertEdit(req, detail.org_unit_id)   // runs an AI call + writes a row — treat as edit
+
+  const discipline = detail.disciplines.find((d) => d.id === req.params.disciplineId)
+  if (!discipline) throw new NotFoundError('Дисциплина')
+
+  const found = await findWorkingProgrammeForDiscipline(detail.id, discipline.id!)
+  if (!found) throw new ValidationError('Сначала загрузите рабочую программу для этой дисциплины.')
+  if (!found.extractedText) {
+    throw new ValidationError('Не удалось извлечь текст из загруженного файла — перезагрузите документ.')
+  }
+
+  const siblingMtoReviews = (await getLatestMtoReviewsByProgram(detail.id))
+    .filter((r) => r.discipline_id !== discipline.id)
+
+  const result = await reviewMto({
+    teacherId:      req.teacher.id,
+    discipline,
+    allDisciplines: detail.disciplines,
+    documentText:   found.extractedText,
+    siblingReviews: siblingMtoReviews,
+  })
+
+  const review = await insertMtoReview({
+    programId:    detail.id,
+    disciplineId: discipline.id!,
+    documentId:   found.document.id,
+    result,
+  })
+  res.status(201).json(review)
+}))
+
+// GET /:id/mto-reviews — latest «Материально-техническое обеспечение»
+// review per discipline.
+router.get('/:id/mto-reviews', asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  res.json(await getLatestMtoReviewsByProgram(detail.id))
+}))
+
 // POST /:id/disciplines/:disciplineId/diff — «Что изменилось с прошлого
 // года» (Research.md §9.6): compares the discipline's current РПД against
 // the version it superseded (migration 084). Cached per (old, new) document
@@ -1062,6 +1168,13 @@ router.post('/:id/disciplines/:disciplineId/studio-course', asyncHandler(async (
 router.get('/:id/discipline-reviews', asyncHandler(async (req, res) => {
   const detail = await loadReadable(req)
   res.json(await getLatestReviewByDiscipline(detail.id))
+}))
+
+// GET /:id/placement-reviews — latest «Место дисциплины в структуре ОП»
+// review per discipline.
+router.get('/:id/placement-reviews', asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  res.json(await getLatestPlacementReviewsByProgram(detail.id))
 }))
 
 // GET /:id/documents/:docId/download — stream the original file to the caller.

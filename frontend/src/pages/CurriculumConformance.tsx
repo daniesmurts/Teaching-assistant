@@ -25,6 +25,7 @@ const KIND_META: Record<RequirementKind, { label: string; group: string; order: 
   knowledge:   { label: 'знать',      group: 'Должен знать',                          order: 3 },
   skill:       { label: 'уметь',      group: 'Должен уметь',                          order: 4 },
   mastery:     { label: 'владеть',    group: 'Должен владеть',                        order: 5 },
+  technology:  { label: 'технология', group: 'Образовательные технологии (§13)',      order: 6 },
 }
 
 // Short section labels used in source chips (§5 / §7 / …).
@@ -123,7 +124,7 @@ function Results({ result }: { result: SyllabusReview }) {
   const { items, summary, covered, partial, missing, parsed } = result
 
   // Group by requirement kind in canonical order (Цели → Компетенции → ...).
-  const byKind = (['goal','competency','indicator','knowledge','skill','mastery'] as RequirementKind[])
+  const byKind = (['goal','competency','indicator','knowledge','skill','mastery','technology'] as RequirementKind[])
     .map((k) => ({ kind: k, items: items.filter((i) => i.kind === k) }))
     .filter((g) => g.items.length > 0)
 
@@ -176,6 +177,7 @@ function ParsedReport({ parsed }: { parsed: ParsedSyllabusReport }) {
     { label: 'Знать',      n: parsed.knowledge_count },
     { label: 'Уметь',      n: parsed.skills_count },
     { label: 'Владеть',    n: parsed.mastery_count },
+    { label: 'Технологии', n: parsed.technologies_count },
   ]
   const present = counts.filter((c) => c.n > 0)
   const missing = counts.filter((c) => c.n === 0).map((c) => c.label)

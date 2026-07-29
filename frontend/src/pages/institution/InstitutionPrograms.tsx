@@ -4,7 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import FeatureIntro from '../../components/ui/FeatureIntro'
 import Button from '../../components/ui/Button'
 import UrlUploadField from '../../components/ui/UrlUploadField'
-import { listPrograms, importProgram, getPickableProgramUnits } from '../../api/programs'
+import { listPrograms, importProgram, getPickableProgramUnits, deleteProgram } from '../../api/programs'
+import EditProgramModal from '../../components/programs/EditProgramModal'
 import { PROGRAM_PRACTICE_LABEL, PROGRAM_PRACTICE_TYPES, EDUCATION_LEVELS, STUDY_FORMS, type ProgramPracticeType } from '../../types'
 import { useUIStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
@@ -61,6 +62,22 @@ export default function InstitutionPrograms() {
   }
 
   const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: listPrograms })
+
+  // Quick edit/delete from the list — added because a typo'd code or
+  // misspelt name at intake had no way to be fixed afterwards, and silently
+  // broke sveden-page import matching. Gated on the same `canImport` flag
+  // used for the "Импортировать" CTA above (the list endpoint doesn't
+  // compute a per-programme can_edit the way GET /:id does); the backend's
+  // own assertEdit still 403s a scope mismatch, so this is a UI convenience,
+  // not the authority.
+  const [editingProgram, setEditingProgram] = useState<Program | null>(null)
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => deleteProgram(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['programs'] })
+      addToast('Программа удалена', 'success')
+    },
+  })
 
   // Program-unit options for the linker — single endpoint scoped by the
   // server. РОП: only their directly-held program units. Polygroup /
@@ -393,8 +410,18 @@ export default function InstitutionPrograms() {
               </h2>
               <span className="text-sm font-sans text-ink-tertiary">· {programs.length}</span>
             </div>
-            <ProgramList programs={programs} onOpen={(id) => navigate(`/programs/${id}`)} />
+            <ProgramList
+              programs={programs}
+              onOpen={(id) => navigate(`/programs/${id}`)}
+              canEdit={canImport}
+              onEdit={setEditingProgram}
+              onDelete={(p) => { if (confirm(`Удалить программу «${p.specialty_name || p.name}»?`)) deleteMut.mutate(p.id) }}
+            />
           </>
+        )}
+
+        {editingProgram && (
+          <EditProgramModal program={editingProgram} onClose={() => setEditingProgram(null)} />
         )}
       </div>
     </div>
@@ -422,10 +449,13 @@ const CloseGlyph = () => (
 // The profile field on each programme is what distinguishes rows within a group
 // — see the intake form's «профиль» field which is where this text comes from.
 function ProgramList({
-  programs, onOpen,
+  programs, onOpen, canEdit, onEdit, onDelete,
 }: {
   programs: Program[]
-  onOpen: (id: string) => void
+  onOpen:   (id: string) => void
+  canEdit:  boolean
+  onEdit:   (p: Program) => void
+  onDelete: (p: Program) => void
 }) {
   interface Group { key: string; heading: { code: string | null; name: string }; items: Program[] }
   const groups: Group[] = []
@@ -453,7 +483,7 @@ function ProgramList({
     <div className="space-y-4">
       {groups.map((g) => (
         g.items.length === 1
-          ? <ProgramCard key={g.key} p={g.items[0]} onOpen={onOpen} showDirection />
+          ? <ProgramCard key={g.key} p={g.items[0]} onOpen={onOpen} showDirection canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} />
           : (
             <div key={g.key}>
               <div className="flex items-baseline gap-2 mb-1.5 px-1">
@@ -465,7 +495,7 @@ function ProgramList({
               </div>
               <div className="space-y-1.5">
                 {g.items.map((p) => (
-                  <ProgramCard key={p.id} p={p} onOpen={onOpen} showDirection={false} />
+                  <ProgramCard key={p.id} p={p} onOpen={onOpen} showDirection={false} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} />
                 ))}
               </div>
             </div>
@@ -484,15 +514,28 @@ function profileWord(n: number): string {
   return 'ей'
 }
 
-function ProgramCard({ p, onOpen, showDirection }: { p: Program; onOpen: (id: string) => void; showDirection: boolean }) {
+function ProgramCard({ p, onOpen, showDirection, canEdit, onEdit, onDelete }: {
+  p: Program
+  onOpen: (id: string) => void
+  showDirection: boolean
+  canEdit:  boolean
+  onEdit:   (p: Program) => void
+  onDelete: (p: Program) => void
+}) {
   // Title: the profile when we're inside a grouped направление (siblings share
   // the heading), otherwise the направление name (single-profile case, keeps
   // the flat look the list has always had).
   const title = showDirection ? (p.specialty_name || p.name) : (p.profile || p.name || 'Профиль без названия')
   return (
-    <button
+    // A <button> can't nest the edit/delete buttons below without invalid
+    // HTML (and the click-through bugs that come with it) — div+role mirrors
+    // the same interaction, keyboard-accessible via tabIndex/onKeyDown.
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onOpen(p.id)}
-      className="w-full text-left bg-surface border border-border rounded-lg px-4 py-3 hover:border-border-mid hover:bg-surface-warm transition-colors flex items-center gap-3"
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(p.id) } }}
+      className="w-full text-left bg-surface border border-border rounded-lg px-4 py-3 hover:border-border-mid hover:bg-surface-warm transition-colors flex items-center gap-3 cursor-pointer"
     >
       <div className="flex-1 min-w-0">
         <div className="text-sm font-sans font-medium text-ink truncate">{title}</div>
@@ -505,10 +548,44 @@ function ProgramCard({ p, onOpen, showDirection }: { p: Program; onOpen: (id: st
           {p.duration_semesters} сем. · обновлён {fmt(p.updated_at)}
         </div>
       </div>
+      {canEdit && (
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); onEdit(p) }}
+            title="Редактировать код/название"
+            className="text-amber hover:text-amber-mid transition-colors p-1.5 rounded-md hover:bg-amber-light/60"
+            aria-label="Редактировать программу"
+          >
+            <EditGlyph />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(p) }}
+            title="Удалить программу"
+            className="text-danger hover:opacity-70 transition-opacity p-1.5 rounded-md hover:bg-danger-bg"
+            aria-label="Удалить программу"
+          >
+            <TrashGlyph />
+          </button>
+        </div>
+      )}
       <span className="text-ink-tertiary text-sm flex-shrink-0">→</span>
-    </button>
+    </div>
   )
 }
+
+const EditGlyph = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+  </svg>
+)
+const TrashGlyph = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+  </svg>
+)
 
 function Field({ label, value, onChange, placeholder, mono = false }: {
   label: string; value: string; onChange: (v: string) => void; placeholder?: string; mono?: boolean

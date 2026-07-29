@@ -991,6 +991,12 @@ export type RequirementKind =
   | 'knowledge'    // Знать
   | 'skill'        // Уметь
   | 'mastery'      // Владеть
+  // Раздел 13 «Образовательные технологии» — declared teaching methods
+  // (кейс-метод, проблемное обучение, …). Scored ONLY against СРС
+  // (independent) + control/ФОС content, never lectures/practicals/labs —
+  // per the УМЦ's ask: does what's declared here actually show up in how
+  // independent work and assessment are run.
+  | 'technology'
 
 // Content sections of the РПД — *where* evidence of coverage must live. Findings
 // cite these, not the requirement section itself.
@@ -1023,6 +1029,7 @@ export interface ParsedSyllabusReport {
   knowledge_count:    number
   skills_count:       number
   mastery_count:      number
+  technologies_count: number
   content_sections:   ContentSection[]   // which content sections were located
 }
 
@@ -1690,7 +1697,13 @@ export interface ProgramAnalysis {
 // params (Replace*Input) stay local to backend/src/db/queries/programTopology.ts
 // — not part of this cross-boundary contract.
 
-export type PrerequisiteOrigin = 'extracted' | 'manual' | 'confirmed'
+// 'declared' (migration 100) — a §2 «Место дисциплины в структуре ОП»
+// statement in the discipline's own РПД. Higher-precision than 'extracted'
+// (whole-plan LLM inference, capped 8-20 edges): follows the 'manual'/
+// 'confirmed' preservation rule, i.e. re-running the plan-wide sequencing
+// analysis never touches it — only re-running THIS discipline's placement
+// review replaces its own 'declared' edges.
+export type PrerequisiteOrigin = 'extracted' | 'manual' | 'confirmed' | 'declared'
 export type CompetencyLinkStage = 'introduce' | 'develop' | 'master'
 
 export interface ProgramPrerequisite {
@@ -1735,6 +1748,136 @@ export interface ProgramContentUnit {
   provenance:     'approved' | 'latest'
   sort_order:     number
   created_at:     string
+}
+
+// ─── «Место дисциплины в структуре ОП» — РПД §2 placement check ───────────────
+// (migration 100). Parses §2 (predecessor/successor disciplines + declared
+// направление/профиль) and checks it against three independent sources: the
+// real plan (program_disciplines.semester), the programme's own направление/
+// профиль, and — for asymmetry — other disciplines' own latest placement
+// review. Produced by services/placementReview.ts.
+
+// A name in §2 that doesn't resolve to a plan discipline is either a genuine
+// error (typo, phantom discipline) or a legitimate external prerequisite
+// (school course, another направление) — these need different treatment, so
+// resolution is a first-class field rather than folding external names into
+// "unmatched".
+export type PlacementResolution = 'internal' | 'external' | 'unmatched'
+
+export interface DeclaredPrerequisiteLink {
+  raw_name:      string                    // verbatim name as written in §2
+  role:          'predecessor' | 'successor'
+  resolution:    PlacementResolution
+  discipline_id: string | null             // set when resolution === 'internal'
+  semester:      number | null             // the matched discipline's semester, for internal links
+  // Verbatim quote from §2 naming this discipline, validated against the
+  // document the same way as grading/documentReview citations (rule #2) —
+  // null if the model's quote didn't survive validation. Lets the teacher
+  // check the finding against the actual document text instead of trusting
+  // the paraphrase.
+  quote:         string | null
+}
+
+export type PlacementFindingKind =
+  | 'phantom'        // D1 — declared name resolves to nothing in the plan and isn't plausibly external
+  | 'inversion'      // D2 — declared predecessor taught later (or successor taught earlier) than this discipline
+  | 'asymmetry'      // D3 — the counterpart discipline's own §2 doesn't declare the symmetric relationship
+  | 'empty_section'  // D4 — §2 names no disciplines at all
+  | 'wrong_program'  // D5 — §2's stated направление/профиль doesn't match this programme's
+  | 'weak_rationale' // D6 — a declared prerequisite's content shows little affinity with this discipline's content
+  | 'missing_link'   // D7 — an earlier-semester discipline with strong content affinity that §2 omits
+
+export type PlacementSeverity = 'error' | 'warning' | 'suggestion'
+
+export interface PlacementFinding {
+  kind:            PlacementFindingKind
+  severity:        PlacementSeverity
+  discipline_name: string            // the other discipline involved (declared or suggested), '' for D4/D5
+  detail:          string            // 1-2 sentences, human-readable
+  evidence:        string | null     // verbatim quote grounding the finding (D6/D7), else null
+  recommendation:  string
+}
+
+export interface PlacementReviewResult {
+  declared:          DeclaredPrerequisiteLink[]
+  declared_program:  string | null   // направление/профиль as stated in §2, if any
+  findings:          PlacementFinding[]
+  summary:           string
+}
+
+export interface ProgramPlacementReview {
+  id:            string
+  program_id:    string
+  discipline_id: string
+  document_id:   string
+  result:        PlacementReviewResult
+  created_at:    string
+}
+
+// Shared across every РПД-section check (§2 placement, §12 МТО, …) — same
+// three-tier severity, just attached to different finding shapes.
+export type ReviewSeverity = PlacementSeverity
+
+// ─── «МТО» — РПД §12 «Материально-техническое обеспечение» check ──────────────
+// (migration 101). Phase 1, no licensed-software registry (deferred — the
+// actual licence list lives in the university's own procurement/IT system,
+// not in ИСПУМ): catches the "мел, доска и парта" non-answer — §12 lists no
+// named software at all — and cross-checks named tools mentioned in the
+// discipline's own лабораторные/практические content against what §12
+// declares, so a lab that clearly uses AutoCAD/MATLAB/1С/etc. but never
+// lists it in §12 gets flagged with a citation from the content itself.
+// Produced by services/mtoReview.ts.
+
+export type MtoSoftwareCategory = 'general' | 'specialized'
+
+export interface MtoDeclaredItem {
+  raw_name: string
+  quote:    string | null   // verbatim quote from §12 naming this item
+  // Set on software_items only (undefined on generic_items — furniture has
+  // no category axis). 'general' = office suite / archiver / browser / PDF
+  // reader / antivirus / OS — recognisable regardless of discipline.
+  // 'specialized' = discipline-relevant tooling (CAD, statistics, industry
+  // software, …). A software list that's ALL 'general' is boilerplate, not
+  // an actual answer to "what does THIS discipline need" — see
+  // 'generic_software_only' below.
+  category?: MtoSoftwareCategory
+}
+
+export type MtoFindingKind =
+  | 'generic_only'            // §12 names zero software at all
+  | 'generic_software_only'   // §12 names software, but it's ALL general-purpose — no specialized tool
+  | 'undeclared_tool'         // a tool named in лаб/практ content isn't in §12
+  // Cross-discipline suggestion (no LLM domain-knowledge guessing — grounded
+  // in another discipline's OWN declared specialized software + document
+  // quote, surfaced only when content affinity is high). Deliberately NOT
+  // "the AI thinks this field usually needs X" — see the discussion this
+  // check was designed from: an ungrounded guess would be the one finding in
+  // this feature that isn't citation-backed, undermining trust in the rest.
+  | 'missing_specialized_tool'
+
+export interface MtoFinding {
+  kind:           MtoFindingKind
+  severity:       ReviewSeverity
+  item_name:      string          // the tool/software name involved, '' for generic_only
+  detail:         string
+  evidence:       string | null   // verbatim quote — from §12 or from the lab/practical content
+  recommendation: string
+}
+
+export interface MtoReviewResult {
+  software_items: MtoDeclaredItem[]   // named software/hardware products §12 declares
+  generic_items:  MtoDeclaredItem[]   // generic classroom items (мел, доска, парта, проектор, …)
+  findings:       MtoFinding[]
+  summary:        string
+}
+
+export interface ProgramMtoReview {
+  id:            string
+  program_id:    string
+  discipline_id: string
+  document_id:   string
+  result:        MtoReviewResult
+  created_at:    string
 }
 
 // ─── API error shape ──────────────────────────────────────────────────────────

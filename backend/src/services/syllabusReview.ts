@@ -106,10 +106,12 @@ interface ParsedCompetency {
   indicators: { code: string; title: string }[]
 }
 interface ParsedSyllabus {
-  goals:        string[]
-  competencies: ParsedCompetency[]
-  outcomes:     { knowledge: string[]; skills: string[]; mastery: string[] }
-  content:      Record<ContentSection, string | null>
+  goals:         string[]
+  competencies:  ParsedCompetency[]
+  outcomes:      { knowledge: string[]; skills: string[]; mastery: string[] }
+  // Раздел 13 «Образовательные технологии» — declared teaching methods.
+  technologies:  string[]
+  content:       Record<ContentSection, string | null>
 }
 
 export interface Requirement {
@@ -137,8 +139,9 @@ async function parseSyllabusStructure(teacherId: string, text: string): Promise<
   const system =
     'Вы — методист российского вуза. Вы извлекаете из текста рабочей программы дисциплины (РПД) ' +
     'её структурные элементы: цели, компетенции с индикаторами, планируемые результаты ' +
-    '(Знать/Уметь/Владеть) и разделы содержания (лекции, практические, лабораторные, СРС, контроль). ' +
-    'Берите формулировки из текста, не выдумывайте. Отвечайте только валидным JSON на русском языке.'
+    '(Знать/Уметь/Владеть), образовательные технологии и разделы содержания (лекции, практические, ' +
+    'лабораторные, СРС, контроль). Берите формулировки из текста, не выдумывайте. Отвечайте только ' +
+    'валидным JSON на русском языке.'
 
   const user =
     `## Текст РПД\n${sanitiseForPrompt(text)}\n\n` +
@@ -153,14 +156,18 @@ async function parseSyllabusStructure(teacherId: string, text: string): Promise<
     `   - "knowledge": массив пунктов из «Знать:» (каждый пункт — отдельная строка),\n` +
     `   - "skills": массив пунктов из «Уметь:»,\n` +
     `   - "mastery": массив пунктов из «Владеть:».\n\n` +
+    `5) "technologies" — массив строк: образовательные технологии из раздела «Образовательные ` +
+    `технологии» (обычно раздел 13) — например «проблемное обучение», «работа в малых группах», ` +
+    `«кейс-метод», «дистанционные образовательные технологии». Каждая — отдельная строка, дословно ` +
+    `или близко к тексту. Пустой массив, если раздела нет.\n\n` +
     `4) "content" — РАЗДЕЛЫ СОДЕРЖАНИЯ (что реально преподаётся/делается). Объект с пятью полями:\n` +
     `   - "lectures": текст раздела о лекционных занятиях (полностью), либо null,\n` +
     `   - "practicals": текст раздела о практических/семинарских, либо null,\n` +
     `   - "labs": текст раздела о лабораторных занятиях, либо null,\n` +
     `   - "independent": текст раздела о самостоятельной работе студентов (СРС), либо null,\n` +
-    `   - "control": текст раздела о контроле/промежуточной аттестации, либо null.\n` +
+    `   - "control": текст раздела о контроле/промежуточной аттестации/ФОС/КСР, либо null.\n` +
     `Если соответствующего раздела в РПД нет — null или пустой массив. Не выдумывайте контент.\n\n` +
-    `## Формат\nВерните JSON: {"goals":[...],"competencies":[...],"outcomes":{...},"content":{...}}. Только JSON.`
+    `## Формат\nВерните JSON: {"goals":[...],"competencies":[...],"outcomes":{...},"technologies":[...],"content":{...}}. Только JSON.`
 
   const result = await chatJSON<RawParse>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
@@ -176,10 +183,11 @@ async function parseSyllabusStructure(teacherId: string, text: string): Promise<
 }
 
 interface RawParse {
-  goals?:        unknown
-  competencies?: { code?: string; title?: string; indicators?: { code?: string; title?: string }[] }[]
-  outcomes?:     { knowledge?: unknown; skills?: unknown; mastery?: unknown }
-  content?:      Partial<Record<ContentSection, string | null>>
+  goals?:         unknown
+  competencies?:  { code?: string; title?: string; indicators?: { code?: string; title?: string }[] }[]
+  outcomes?:      { knowledge?: unknown; skills?: unknown; mastery?: unknown }
+  technologies?:  unknown
+  content?:       Partial<Record<ContentSection, string | null>>
 }
 
 function normaliseParse(r: RawParse): ParsedSyllabus {
@@ -206,6 +214,7 @@ function normaliseParse(r: RawParse): ParsedSyllabus {
       skills:    strArr(r.outcomes?.skills),
       mastery:   strArr(r.outcomes?.mastery),
     },
+    technologies: strArr(r.technologies),
     content,
   }
 }
@@ -229,7 +238,18 @@ function buildRequirements(p: ParsedSyllabus): Requirement[] {
   p.outcomes.knowledge.forEach((t, i) => out.push({ ref: `K${i}`, kind: 'knowledge', code: null, title: t, parent_code: null }))
   p.outcomes.skills.forEach((t, i)    => out.push({ ref: `S${i}`, kind: 'skill',     code: null, title: t, parent_code: null }))
   p.outcomes.mastery.forEach((t, i)   => out.push({ ref: `M${i}`, kind: 'mastery',   code: null, title: t, parent_code: null }))
+  p.technologies.forEach((t, i)       => out.push({ ref: `TC${i}`, kind: 'technology', code: null, title: t, parent_code: null }))
   return out.slice(0, MAX_REQUIREMENTS)
+}
+
+// Раздел 13 «Образовательные технологии» must be checked against how
+// independent work and assessment are actually RUN — a declared «кейс-метод»
+// that never shows up in СРС/ФОС is exactly what the УМЦ head asked to
+// catch. Every other kind may cite any content section, as before.
+const ALLOWED_SECTIONS: Record<RequirementKind, readonly ContentSection[]> = {
+  goal: VALID_SECTION, competency: VALID_SECTION, indicator: VALID_SECTION,
+  knowledge: VALID_SECTION, skill: VALID_SECTION, mastery: VALID_SECTION,
+  technology: ['independent', 'control'],
 }
 
 // ── Scorer pass — score each requirement against the CONTENT sections only ────
@@ -261,7 +281,10 @@ async function scoreCoverage(
     `## Требования к обеспечению\n${reqBlock}\n\n` +
     `## Задача\nДля КАЖДОГО требования (с ref) определите, обеспечивает ли его СОДЕРЖАНИЕ выше.\n` +
     `ВАЖНО: ищите подтверждение в РАЗДЕЛАХ СОДЕРЖАНИЯ (LECTURES/PRACTICALS/LABS/INDEPENDENT/CONTROL), ` +
-    `а не в формулировке самого требования.\n\n` +
+    `а не в формулировке самого требования. Для требований типа «Образовательные технологии» ` +
+    `(раздел 13) ищите подтверждение ТОЛЬКО в INDEPENDENT (СРС) и CONTROL (контроль/ФОС/КСР) — ` +
+    `действительно ли заявленная технология обучения отражена в том, как организована самостоятельная ` +
+    `работа и аттестация, а не просто упомянута в лекциях.\n\n` +
     `## Критерии статуса (применяйте строго, в этом порядке)\n` +
     `- "covered": в содержании есть тема/занятие/форма контроля, ПРЯМО обеспечивающая требование ` +
     `(тот же предмет деятельности, а не смежный) — и вы можете привести дословную цитату.\n` +
@@ -321,15 +344,16 @@ function buildContentBlock(content: Record<ContentSection, string | null>): stri
 
 function buildRequirementsBlock(reqs: Requirement[]): string {
   const groups: Record<RequirementKind, Requirement[]> = {
-    goal: [], competency: [], indicator: [], knowledge: [], skill: [], mastery: [],
+    goal: [], competency: [], indicator: [], knowledge: [], skill: [], mastery: [], technology: [],
   }
   for (const r of reqs) groups[r.kind].push(r)
 
   const header: Record<RequirementKind, string> = {
     goal: '### Цели', competency: '### Компетенции', indicator: '### Индикаторы достижения',
     knowledge: '### Знать', skill: '### Уметь', mastery: '### Владеть',
+    technology: '### Образовательные технологии',
   }
-  return (['goal','competency','indicator','knowledge','skill','mastery'] as RequirementKind[])
+  return (['goal','competency','indicator','knowledge','skill','mastery','technology'] as RequirementKind[])
     .filter((k) => groups[k].length > 0)
     .map((k) => `${header[k]}\n` + groups[k].map((r) =>
       `${r.ref}.${r.code ? ` [${sanitiseForPrompt(r.code)}]` : ''} ${sanitiseForPrompt(r.title)}`
@@ -351,6 +375,11 @@ export function toItem(
   // Keep a source only if its excerpt genuinely appears (verbatim,
   // case/whitespace-insensitive) in the claimed section — hallucinated
   // quotes get dropped rather than shown to the admin as "evidence".
+  // Sections this requirement's kind is even allowed to cite (technology →
+  // independent/control only, everything else → all five, see
+  // ALLOWED_SECTIONS) — enforced here, not just asked for in the prompt, so
+  // a model citing a lecture for a declared технология can't slip through.
+  const allowed = ALLOWED_SECTIONS[req.kind]
   const sources: CoverageSource[] = (raw?.sources ?? [])
     .map((s) => ({
       section: (VALID_SECTION as readonly string[]).includes(String(s.section)) ? (s.section as ContentSection) : null,
@@ -358,6 +387,7 @@ export function toItem(
     }))
     .filter((s): s is CoverageSource =>
       s.section !== null &&
+      allowed.includes(s.section) &&
       s.excerpt.length >= 8 &&
       haystacks[s.section].includes(normaliseForMatch(s.excerpt))
     )
@@ -402,6 +432,7 @@ function parsedReport(p: ParsedSyllabus): ParsedSyllabusReport {
     knowledge_count:    p.outcomes.knowledge.length,
     skills_count:       p.outcomes.skills.length,
     mastery_count:      p.outcomes.mastery.length,
+    technologies_count: p.technologies.length,
     content_sections:   VALID_SECTION.filter((s) => p.content[s]),
   }
 }
