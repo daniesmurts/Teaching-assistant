@@ -1390,7 +1390,7 @@ export async function approve(
   const assignment = await approveAssignment(id, teacherId, data)
   if (!assignment) throw new NotFoundError('Работа')
 
-  generateAndStoreEmbedding(id, assignment.submission_text).catch(() => null)
+  generateAndStoreEmbedding(id, assignment.submission_text, { teacherId, feature: 'embedding' }).catch(() => null)
   if (assignment.course_id && data.approvedCriteriaScores?.length) {
     generateCriterionEmbeddings(id, teacherId, assignment.course_id, data.approvedCriteriaScores).catch(() => null)
   }

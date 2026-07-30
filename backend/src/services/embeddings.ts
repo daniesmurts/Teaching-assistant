@@ -3,17 +3,21 @@ import { updateEmbedding } from '../db/queries/assignments'
 import { insertCriterionExample } from '../db/queries/criterionExamples'
 import { logger } from '../lib/logger'
 import type { CriterionScore } from '../../../shared/types'
+import type { CallContext } from './llm/types'
 
 /**
  * Generate an embedding for the given text and store it on the assignment.
  * Called fire-and-forget after approval — never awaited by the caller.
+ * `context` is optional (TODO.md Improvement #13) — without it the
+ * embedding still happens, it just doesn't get cost-attributed.
  */
 export async function generateAndStoreEmbedding(
   assignmentId: string,
-  text: string
+  text: string,
+  context?: CallContext,
 ): Promise<void> {
   try {
-    const vector = await embed(text)
+    const vector = await embed(text, context)
     await updateEmbedding(assignmentId, vector)
   } catch (err) {
     // Non-fatal — RAG will just miss this example until a retry

@@ -5,6 +5,10 @@ import { existsSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { logger } from '../lib/logger'
+import { createUsageLog } from '../db/queries/usageLog'
+import { calculateYandexVisionCostRub } from '../config/planLimits'
+import { getUsdRubRate, rubToUsd } from './fxRate'
+import type { CallContext } from './llm/types'
 
 const execFileAsync = promisify(execFile)
 
@@ -23,9 +27,16 @@ const execFileAsync = promisify(execFile)
  *      20+ page scanned document loses everything after page 8. Rasterizing
  *      per-page removes this cap too (one image per call, not one PDF).
  */
+// `context` is optional (TODO.md Improvement #13) — best-effort usage
+// logging, one row per document covering the total page count, not one row
+// per Vision call. Callers that don't pass it (a handful of institution
+// bulk-import paths, deliberately left as a known residual gap — see
+// TODO.md) simply stay uninstrumented, same as every other `if (context)`
+// fire-and-forget site in this codebase.
 export async function yandexVisionOCR(
   fileBuffer: Buffer,
-  mimeType = 'image/jpeg'
+  mimeType = 'image/jpeg',
+  context?: CallContext,
 ): Promise<string> {
   const apiKey   = process.env.YANDEX_VISION_API_KEY
   const folderId = process.env.YANDEX_FOLDER_ID
@@ -35,9 +46,28 @@ export async function yandexVisionOCR(
     return ''
   }
 
+  const start = Date.now()
+  try {
+    const result = await runOcr(fileBuffer, mimeType, apiKey, folderId)
+    // Fire-and-forget, including the FX lookup inside logVisionUsage — must
+    // never add latency to the OCR result itself (same rule as
+    // createUsageLog's own doc comment).
+    if (result.pageCount > 0) logVisionUsage(context, result.pageCount, Date.now() - start, true)
+    return result.text
+  } catch (err) {
+    // pageCount 0 on failure — no pages were successfully billed, but the
+    // row still records that a call was attempted and failed.
+    logVisionUsage(context, 0, Date.now() - start, false)
+    throw err
+  }
+}
+
+async function runOcr(
+  fileBuffer: Buffer, mimeType: string, apiKey: string, folderId: string,
+): Promise<{ text: string; pageCount: number }> {
   // Non-PDFs (images) always go in a single call.
   if (mimeType !== 'application/pdf') {
-    return ocrOneChunk(fileBuffer, apiKey, folderId)
+    return { text: await ocrOneChunk(fileBuffer, apiKey, folderId), pageCount: 1 }
   }
 
   const pages = await rasterizePdfPages(fileBuffer)
@@ -45,10 +75,10 @@ export async function yandexVisionOCR(
     // Rasterizer unavailable/failed — degrade to the legacy whole-PDF call.
     // Works for a PDF Vision can decode natively; still fails for a
     // CCITT-encoded scan, but that's the same behavior as before this fix.
-    return ocrOneChunk(fileBuffer, apiKey, folderId)
+    return { text: await ocrOneChunk(fileBuffer, apiKey, folderId), pageCount: 1 }
   }
-  if (pages.length === 0) return ''
-  if (pages.length === 1) return ocrOneChunk(pages[0], apiKey, folderId)
+  if (pages.length === 0) return { text: '', pageCount: 0 }
+  if (pages.length === 1) return { text: await ocrOneChunk(pages[0], apiKey, folderId), pageCount: 1 }
 
   logger.info({ message: 'PDF OCR: rasterized to page images', pages: pages.length })
 
@@ -61,7 +91,31 @@ export async function yandexVisionOCR(
   }
   // Each page is OCR'd independently; join with \f to preserve the same
   // downstream «[стр. N]» convention as a native multi-page result.
-  return out.join('\f')
+  return { text: out.join('\f'), pageCount: pages.length }
+}
+
+async function logVisionUsage(
+  context: CallContext | undefined, pageCount: number, durationMs: number, success: boolean,
+): Promise<void> {
+  if (!context) return
+  try {
+    const costRub = calculateYandexVisionCostRub(pageCount)
+    const { rate } = await getUsdRubRate()
+    await createUsageLog({
+      ...context,
+      model:        'yandex:vision-ocr',
+      inputTokens:  pageCount,   // pages, not tokens — Vision bills per page, not per token
+      outputTokens: 0,
+      costUsd:      rubToUsd(costRub, rate),
+      costNative:   costRub,
+      currency:     'RUB',
+      fxRateUsed:   rate,
+      durationMs,
+      success,
+    })
+  } catch (e) {
+    logger.warn({ message: 'Failed to write Vision usage log', error: (e as Error).message })
+  }
 }
 
 async function ocrOneChunk(

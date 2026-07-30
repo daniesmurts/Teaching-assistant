@@ -1,5 +1,9 @@
 import axios from 'axios'
 import { logger } from '../lib/logger'
+import { createUsageLog } from '../db/queries/usageLog'
+import { calculateYandexWebSearchCostRub } from '../config/planLimits'
+import { getUsdRubRate, rubToUsd } from './fxRate'
+import type { CallContext } from './llm/types'
 
 export interface SearchResult {
   title:   string
@@ -19,7 +23,9 @@ function apiKey(): string | null {
   return process.env.YANDEX_SEARCH_API_KEY?.trim() || process.env.YANDEX_VISION_API_KEY?.trim() || null
 }
 
-export async function webSearch(query: string, maxResults = 6): Promise<SearchResult[]> {
+// `context` is optional (TODO.md Improvement #13) — best-effort usage
+// logging, mirrors yandexImages.ts's yandexImageSearch.
+export async function webSearch(query: string, maxResults = 6, context?: CallContext): Promise<SearchResult[]> {
   const key = apiKey()
   const folderId = process.env.YANDEX_FOLDER_ID?.trim()
   if (!key || !folderId) return [] // not configured → silent model-only
@@ -39,7 +45,10 @@ export async function webSearch(query: string, maxResults = 6): Promise<SearchRe
       { headers, timeout: 4_000 }
     )
     const operationId = submit.data?.id as string | undefined
-    if (!operationId) return []
+    if (!operationId) {
+      logWebSearchUsage(context, Date.now() - started, false)
+      return []
+    }
 
     // 2. Poll the operation until done (within the time budget)
     let rawBase64: string | undefined
@@ -51,14 +60,43 @@ export async function webSearch(query: string, maxResults = 6): Promise<SearchRe
         break
       }
     }
-    if (!rawBase64) return []
+    if (!rawBase64) {
+      logWebSearchUsage(context, Date.now() - started, false)
+      return []
+    }
 
     // 3. Decode + parse the XML result
     const xml = Buffer.from(rawBase64, 'base64').toString('utf-8')
+    // Fire-and-forget, including the FX lookup inside logWebSearchUsage —
+    // must never add latency to the grounding/citation-check response itself.
+    logWebSearchUsage(context, Date.now() - started, true)
     return parseYandexXml(xml).slice(0, maxResults)
   } catch (err) {
     logger.warn({ message: 'Yandex search failed (continuing model-only)', error: (err as Error).message })
+    logWebSearchUsage(context, Date.now() - started, false)
     return []
+  }
+}
+
+async function logWebSearchUsage(context: CallContext | undefined, durationMs: number, success: boolean): Promise<void> {
+  if (!context) return
+  try {
+    const costRub = calculateYandexWebSearchCostRub(1)
+    const { rate } = await getUsdRubRate()
+    await createUsageLog({
+      ...context,
+      model:        'yandex:web-search',
+      inputTokens:  0,
+      outputTokens: 0,
+      costUsd:      rubToUsd(costRub, rate),
+      costNative:   costRub,
+      currency:     'RUB',
+      fxRateUsed:   rate,
+      durationMs,
+      success,
+    })
+  } catch (e) {
+    logger.warn({ message: 'Failed to write web-search usage log', error: (e as Error).message })
   }
 }
 

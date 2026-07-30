@@ -53,8 +53,6 @@ entirely, not just the "rebuild in Excel" step v1 already removed.
   `backend/src/index.ts`, `rpd_snapshots.source_filename` becomes nullable
   (no upload) or gets a `source: 'upload' | 'auto'` discriminator.
 
----
-
 ## Features
 
 ### A. Bulk grading · Effort: L
@@ -1286,6 +1284,199 @@ slide.
 - **Touches:** `services/presentations.ts`, `services/presentationJobWorker.ts`,
   `services/yandexImages.ts`, `validation/presentationValidation.ts`,
   `shared/types.ts` (`Slide`/`SlideBase`), `PresentationForm.tsx`.
+
+### AL. Capacity + unit-economics dashboard — headroom, margin, and provider ceilings · Effort: Phase 0 M, Phase 1 M, Phase 2 M, Phase 3 S–M, Phase 4 S
+
+Designed 2026-07-29, out of the Feature AG scaling conversation ("will the
+system hold at 1000 concurrent presentations?"). Two questions the platform
+currently cannot answer from its own data: **when do we need to spend money on
+infrastructure**, and **does a teacher/institution cost more than they pay**.
+
+**Framing.** [docs/scaling.md](docs/scaling.md) is already the model — a
+hand-maintained table of bottlenecks each with a "Trigger" line (`assignments`
+embeddings > 50k, Postgres RAM > 70%, daily DeepSeek cost > $5). Every one is a
+threshold a human has to remember to go check. This feature turns that doc into
+a live instrument. Evidence the static form doesn't hold: scaling.md still
+lists "Grading is synchronous (60s)" as an open Tier 2 item, but `grade_jobs` +
+`services/gradeJobWorker.ts` shipped and grading is async — **the doc has
+already silently drifted from reality.**
+
+**Not prediction — headroom.** With a young product, extrapolating *when* is
+noise. What's arithmetic is: (1) derive per-active-teacher coefficients from
+`api_usage_log` + row counts; (2) encode the ceilings scaling.md documents
+(4 GB RAM, 20 GB disk, pool `max=25` × 2 PM2 workers, pgvector `lists=100`
+≈10k rows, 2 vCPU); (3) divide. Output is an **ordered list of what breaks
+first, in users-until-breach** ("Postgres connections bind at ~340 active
+teachers; disk at ~1,200; RAM fine to 5,000") — not a resource-over-time
+chart. The human supplies the growth assumption via a scenario input; the page
+supplies headroom. Deterministic, every number traceable to
+`coefficient × N vs. ceiling` — a forecast the operator can't check by hand
+won't be trusted enough to justify spending.
+
+**Audience is the founder AND outside parties (incl. potential investors)** —
+confirmed 2026-07-29. Same data layer, two framings: an **operator view**
+(prescriptive, dense, mostly empty when nothing needs doing) and an
+**investor view** (the derivative — is cost/teacher falling?). Two
+consequences: the trend framing forces a retained-history rollup (below), and
+named teacher data must not be the default rendering (152-ФЗ; teachers are
+natural persons and `getUsageByTeacher` currently returns names + emails
+beside cost). Pseudonymise by default ("Преподаватель #7"), names behind an
+explicit toggle; a presentation mode that aggregates institutions is cheap
+insurance while КНИТУ is a live pilot partner.
+
+**The framing that is both honest and favourable:** split **fixed** infra
+(VM — flat regardless of user count) from **variable** AI cost per active
+teacher. Today the fixed cost dominates and blended margin looks bad; at 1,000
+teachers it's noise. A single blended margin number actively understates the
+business right now, and the split is the same fact as headroom restated as
+capital efficiency ("we can absorb 5× users on the current VM").
+
+- **Phase 0 — make the ledger true.** Nothing downstream is correct without
+  this, so it isn't really phase-able.
+  - **Yandex cost blind spot — 🟢 SHIPPED (2026-07-30, see CHANGELOG).**
+    Every Yandex-billed call (chat/embed/vision/images/search) now writes a
+    real, correctly-priced usage row instead of `costUsd:0` or nothing —
+    was the prerequisite this whole phase depended on. `cost_native` /
+    `currency` / `fx_rate_used` landed on `api_usage_log`, `cost_usd` stays
+    the canonical converted figure, and the FX piece below shipped with it.
+  - **FX** (shipped as part of the above): rate from **ЦБ РФ** (canonical
+    Russian accounting source, free public endpoint), cached daily,
+    `AbortController` + 8s, fail-open to last known rate — an FX lookup must
+    never break a grading call. Display ₽ **with the rate and its date
+    shown**, never silently picked.
+  - **`variant` column** (`'standard' | 'deep'`) on `api_usage_log` for
+    presentation depth. Deliberately NOT a new `feature` enum value —
+    `getDailyUsage` filters `feature = 'presentation'` and a
+    `'presentation_deep'` value would silently halve every existing aggregate.
+  - **`account` column** — `deepseek.ts` has `account.label` in scope at the
+    `createUsageLog` call site and discards it (it's passed to the adjacent
+    `logger.warn` only). Without it we can count 429s but not *which* account
+    rate-limited, how often we failed over, or whether the primary is silently
+    carrying 100% of traffic while 4 configured accounts sit idle and untested.
+  - **Fix `activeThisWeek`** — `routes/admin.ts`'s `/overview` computes it as
+    `COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')` **on the
+    `teachers` table**, i.e. *signups*, not active users (`new_this_month` is
+    the same metric on a wider window — that's the tell). `last_seen_at` has
+    existed since migration 073. Active-teacher count is the denominator of
+    every coefficient here, and showing an investor "340 active users" when
+    the query counts registrations is a diligence risk, not just untidy data.
+  - **`institution_contracts`** (`institution_id`, `annual_value_rub`,
+    `seats_purchased`, `term_start`, `term_end`, `notes`) + platform-admin
+    form. Institution revenue **does not exist anywhere in the DB today**:
+    `payments` is `teacher_id NOT NULL` with plans `'pro_monthly'|'pro_annual'`
+    only, and `institutions` has just `name`/`plan_tier`/`max_teachers`
+    (a licensing cap, not a price). Deals are negotiated offline via 44-ФЗ
+    procurement, so a manual record is the correct model, not an integration.
+    **The only new data-entry surface in this whole feature** — and
+    unavoidable, since margin can't be derived from revenue never recorded.
+- **Phase 1 — unit economics (pulled ahead of the infra forecast, confirmed
+  2026-07-29).**
+  - **`usage_rollup_monthly`** (month, effective tier, institution, active
+    teachers, calls, tokens, cost, amortized revenue, **frozen FX rate +
+    rate date**), computed monthly and treated as immutable. Three jobs at
+    once: it's the trend source, it survives eventual `api_usage_log`
+    pruning (which would otherwise destroy the ability to recompute history),
+    and it keeps the page fast without scanning a year of raw rows. Freezing
+    the rate is load-bearing — re-deriving ₽ at render time makes historical
+    margin silently rewrite itself daily, and an investor who screenshots the
+    same month twice and gets different numbers stops trusting all of it.
+  - **Report the distribution, not the mean** — what kills freemium is the p95
+    free user, not the average one. Cost per tier at p50/p95/max, plus "how
+    many free users cost more than $N".
+  - **Use `lib/planTier.ts`'s `computeEffectiveTier`**, not raw
+    `teachers.plan_tier` — grouping on the column misclassifies every
+    institution member and every lapsed Pro.
+  - **Amortize `pro_annual`** across 12 months off `confirmed_at`. Summing
+    `amount_kopecks` by month gives a fake January profit spike and a February
+    collapse — exactly the jagged chart that discredits the page.
+  - **Per-institution view** (confirmed in scope): contract value, seats
+    purchased, **seats actually active**, cost, margin, cost per active seat.
+    Shared/overhead work (cohort synthesis, institution-pool RAG,
+    `rpd_reminder`) is charged to **institution overhead, not the triggering
+    teacher** (decided 2026-07-29) — those rows carry a `teacher_id` but the
+    benefit isn't that teacher's. Seat utilization is the sleeper metric: a
+    leading churn indicator *and* the input to a net-revenue-retention story.
+  - **Backfill 2 months** (decided 2026-07-29). Consequence to design around:
+    that's ≤2 rollup points, so the investor view launches showing a **level,
+    not a trend**, and only becomes a real curve around month 4–5. Gate trend
+    charts on ≥3 points and label "tracking since <month>" until then — a
+    2-point line presented as a trend is worse than no line. Also: those two
+    months contain the founder's own heavy AG testing, so **exclude
+    platform-admin/test accounts** (mandatory, or the first run is garbage)
+    and treat presentation coefficients as unreliable until a month of real
+    teacher traffic exists. Define "active" explicitly (≥1 AI call in the
+    month) so the dormant-signup tail doesn't halve every coefficient and make
+    headroom look twice as good as it is.
+  - Report **`n` and spread beside every coefficient**. "$1.40/teacher/month,
+    n=23 teacher-months, p95 $6.10" is reasonable-about-able; "$1.40" alone
+    gets over-trusted.
+- **Phase 2 — the `AdminCapacity` page.** Operator framing by default,
+  investor framing as a mode/second tab, pseudonymised by default, scenario
+  input ("if we go to N active teachers") over the coefficient engine.
+  Reuses `AdminLayout` — no new design language.
+- **Phase 3 — capacity report + provider ceilings.** Coefficients,
+  **peak-to-mean ratio** derived from hourly `created_at` buckets (capacity is
+  set by peak concurrency, not monthly averages, and this product's load is
+  violently seasonal — сессия in январь/июнь, РПД work at semester start,
+  flat summer; the same user growth is a non-event in July and an incident in
+  December), binding-constraint table, and the three provider ceilings, which
+  fail differently and need separating:
+  - **Balance (402)** — sudden and total per account. Forecastable from burn
+    rate → top-up cadence.
+  - **Rate limit (429)** — the concurrency wall, bites at сессия peak.
+    **Derive the ceiling empirically**: bucket calls hourly, plot concurrent
+    volume against 429 rate, the knee is the effective limit. Confirmed in
+    scope 2026-07-29; needs enough peak volume to have actually hit 429s, so
+    if production has never rate-limited there's no knee to find yet.
+  - **Pool depth** — accounts configured vs. currently cooling down.
+    `deepseek.ts`'s `downUntil` map is in-memory and **per-PM2-worker**, so
+    worker 0 can know an account is bad while worker 1 keeps hitting it.
+  - Also worth recording as a risk with no mitigation: invariant #9 forces
+    **all** embeddings through Yandex and `llm/yandex.ts` has no multi-account
+    pool. DeepSeek got a 5-account pool after a real 402 incident; the Yandex
+    embed path has the same exposure and none of the mitigation, and by
+    architectural design cannot fail over to another provider.
+- **Phase 4 — guardrail + in-process sampler.**
+  - **Per-feature spend cap** — the third variant of a pattern that already
+    exists twice (`spendCap.ts` per-teacher monthly, `globalSpendCap.ts`
+    platform daily). The gap: today the only platform-level lever is
+    all-or-nothing, so the global cap tripping kills *grading* too. A
+    per-feature ceiling lets deep presentations throttle while grading stays
+    up — the correct blast radius. Motivated directly by "imagine deep mode
+    becomes very popular; I wouldn't want the numbers to sink the whole
+    business". The levers to pull once the number is visible already exist:
+    raise the tier `presentationDeepMode` requires, add a monthly deep quota,
+    or lower `PER_SLIDE_TOKENS`.
+  - **`resource_samples`** sampler on PM2 worker 0 (same gating precedent as
+    `renewals.ts`), ~60s interval: `process.memoryUsage()`, `os.loadavg()`,
+    `os.freemem()`, `pg_database_size()`, `pg_stat_activity` count, and the
+    row counts gating the pgvector reindex.
+  - **Deliberately NOT integrating the Yandex Cloud Monitoring API.** It's
+    blind to every constraint that actually binds us (DB pool exhaustion,
+    pgvector row counts, per-worker rate-limit state, provider account
+    health), and Yandex already shows CPU/RAM in its own console for free.
+    The high-value metrics are the ones only visible from inside the app.
+    Since Postgres shares the VM (scaling.md Tier 3), in-process RSS + DB size
+    is a fair proxy for the whole box.
+- **Also deliberately not building:** ML/regression forecasting (linear
+  coefficients + explicit seasonal multipliers only — an unexplainable
+  forecast won't be trusted with money); a new alerting system (capacity
+  thresholds should reuse the existing Telegram incident channel);
+  real-time streaming (60s samples and monthly rollups are ample for a
+  "should I buy a bigger VM" decision).
+- **Why:** two unanswerable questions with real money attached. `GLOBAL_DAILY_SPEND_CAP_USD`
+  is still unset because nobody knows what number is right — this is the
+  instrument that says. AG Phase 1 multiplied presentation LLM calls ~5x and
+  nothing is watching that land in the cost data. And the freemium tier's
+  `monthlySpendCapUsd` in `config/planLimits.ts` is currently set by
+  judgement, with no evidence of what a free user actually costs.
+- **Touches:** migration (`api_usage_log` columns, `institution_contracts`,
+  `usage_rollup_monthly`, `resource_samples`), `db/queries/usageLog.ts`,
+  new `db/queries/usageRollup.ts` / `institutionContracts.ts`,
+  new `services/fxRate.ts` / `capacityModel.ts` / `unitEconomics.ts`,
+  new `scripts/capacityReport.ts`, `routes/admin.ts`,
+  new `pages/admin/AdminCapacity.tsx`, `config/planLimits.ts`,
+  `docs/scaling.md` (becomes the doc the page renders, not a parallel copy).
 
 ---
 

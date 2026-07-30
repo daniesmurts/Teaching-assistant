@@ -23,7 +23,7 @@ import type { SlideImage } from '../../../shared/types'
 const router = Router()
 router.use(authenticate)
 
-function buildGenerateParams(req: { teacher: { id: string; plan_tier: string }; body: unknown }): GenerateParams {
+function buildGenerateParams(req: { teacher: { id: string; plan_tier: string; institution_id: string | null }; body: unknown }): GenerateParams {
   const {
     course_id, lecture_number, topic, duration_minutes,
     learning_goals, audience_level, style, slide_count_target, source_text, depth,
@@ -36,6 +36,7 @@ function buildGenerateParams(req: { teacher: { id: string; plan_tier: string }; 
 
   return {
     teacherId:        req.teacher.id,
+    institutionId:    req.teacher.institution_id ?? undefined,
     courseId:         course_id,
     lectureNumber:    lecture_number,
     topic,
@@ -183,7 +184,9 @@ router.post('/:id/slides/:idx/images',
     if (!query) {
       throw new ValidationError('Для этого слайда нет запроса на изображение — введите свой')
     }
-    const candidates = await yandexImageSearch(query, 8)
+    const candidates = await yandexImageSearch(query, 8, {
+      teacherId: req.teacher.id, institutionId: req.teacher.institution_id ?? undefined, feature: 'presentation',
+    })
     res.json({ query, candidates })
   })
 )

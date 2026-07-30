@@ -79,14 +79,14 @@ export function classifyMatch(
     : { status, best_match_title: best.result.title || null, best_match_url: best.result.url || null }
 }
 
-async function searchForReference(rawText: string): Promise<{ queryUsed: string; results: SearchResult[] }> {
+async function searchForReference(rawText: string, context: CallContext): Promise<{ queryUsed: string; results: SearchResult[] }> {
   const primaryQuery = stripLeadingNumbering(rawText).slice(0, 200)
-  let results = await webSearch(primaryQuery)
+  let results = await webSearch(primaryQuery, 6, context)
   if (results.length > 0) return { queryUsed: primaryQuery, results }
 
   const fallbackQuery = reformulateQuery(rawText)
   if (fallbackQuery !== primaryQuery) {
-    results = await webSearch(fallbackQuery)
+    results = await webSearch(fallbackQuery, 6, context)
     if (results.length > 0) return { queryUsed: fallbackQuery, results }
   }
   return { queryUsed: primaryQuery, results: [] }
@@ -138,7 +138,7 @@ export async function checkCitations(params: {
       while (next < refs.length) {
         const i = next++
         const ref = refs[i]
-        const { queryUsed, results } = await searchForReference(ref.raw_text)
+        const { queryUsed, results } = await searchForReference(ref.raw_text, params.context)
         const { status, best_match_title, best_match_url } = classifyMatch(ref.raw_text, results)
         verdicts[i] = {
           index:            ref.index,

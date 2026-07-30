@@ -1,6 +1,10 @@
 import axios from 'axios'
 import { logger } from '../lib/logger'
+import { createUsageLog } from '../db/queries/usageLog'
+import { calculateYandexImageSearchCostRub } from '../config/planLimits'
+import { getUsdRubRate, rubToUsd } from './fxRate'
 import type { ImageCandidate } from '../../../shared/types'
+import type { CallContext } from './llm/types'
 
 // Yandex Cloud Search API v2 — image endpoint.
 //
@@ -24,11 +28,15 @@ function apiKey(): string | null {
     || null
 }
 
-export async function yandexImageSearch(query: string, maxResults = 6): Promise<ImageCandidate[]> {
+// `context` is optional (TODO.md Improvement #13) — best-effort usage
+// logging, same fire-and-forget posture as the rest of this file's error
+// handling (a logging failure never surfaces to the caller).
+export async function yandexImageSearch(query: string, maxResults = 6, context?: CallContext): Promise<ImageCandidate[]> {
   const key = apiKey()
   const folderId = process.env.YANDEX_FOLDER_ID?.trim()
   if (!key || !folderId) return []
 
+  const start = Date.now()
   try {
     const res = await axios.post<{ rawData?: string }>(
       SEARCH_ENDPOINT,
@@ -48,10 +56,14 @@ export async function yandexImageSearch(query: string, maxResults = 6): Promise<
     const rawBase64 = res.data?.rawData
     if (!rawBase64) {
       logger.warn({ message: 'Yandex image search returned no rawData', query })
+      logSearchUsage(context, Date.now() - start, false)
       return []
     }
 
     const xml = Buffer.from(rawBase64, 'base64').toString('utf-8')
+    // Fire-and-forget, including the FX lookup inside logSearchUsage — must
+    // never add latency to the picker/auto-fill response itself.
+    logSearchUsage(context, Date.now() - start, true)
     return rankImageCandidates(parseYandexImagesXml(xml)).slice(0, maxResults)
   } catch (err) {
     const e = err as { response?: { status?: number; data?: unknown }; message?: string }
@@ -61,7 +73,30 @@ export async function yandexImageSearch(query: string, maxResults = 6): Promise<
       status:  e.response?.status,
       error:   e.message,
     })
+    logSearchUsage(context, Date.now() - start, false)
     return []
+  }
+}
+
+async function logSearchUsage(context: CallContext | undefined, durationMs: number, success: boolean): Promise<void> {
+  if (!context) return
+  try {
+    const costRub = calculateYandexImageSearchCostRub(1)
+    const { rate } = await getUsdRubRate()
+    await createUsageLog({
+      ...context,
+      model:        'yandex:image-search',
+      inputTokens:  0,
+      outputTokens: 0,
+      costUsd:      rubToUsd(costRub, rate),
+      costNative:   costRub,
+      currency:     'RUB',
+      fxRateUsed:   rate,
+      durationMs,
+      success,
+    })
+  } catch (e) {
+    logger.warn({ message: 'Failed to write image-search usage log', error: (e as Error).message })
   }
 }
 

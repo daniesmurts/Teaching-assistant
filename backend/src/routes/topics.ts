@@ -40,7 +40,8 @@ router.post(
     }
 
     const result = await generateTopics({
-      teacherId:    req.teacher.id,
+      teacherId:     req.teacher.id,
+      institutionId: req.teacher.institution_id ?? undefined,
       courseId:     course_id,
       level,
       workType:     work_type,

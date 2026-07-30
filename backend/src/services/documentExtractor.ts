@@ -1,5 +1,6 @@
 import mammoth from 'mammoth'
 import { yandexVisionOCR } from './yandexVision'
+import type { CallContext } from './llm/types'
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 const CHARS_PER_TOKEN = 3.5  // Russian text ≈ 3.5 chars/token
@@ -13,10 +14,19 @@ export interface ExtractResult {
 }
 
 // ─── Main entry — routes by MIME type ─────────────────────────────────────────
+//
+// `context` is optional (TODO.md Improvement #13) — passed through to
+// yandexVisionOCR so an OCR fallback gets cost-logged under the caller's
+// teacher/institution. Only threaded from the teacher-facing upload paths
+// (services/documents.ts, services/rpdSubmissions.ts) at time of writing;
+// the institution-admin bulk-import call sites (routes/programs.ts,
+// routes/adminFgos.ts, services/institutionStrategyDoc.ts) don't pass one
+// yet — a known residual gap, not an oversight, left for a follow-up pass.
 
 export async function extractText(
   fileBuffer: Buffer,
-  mimeType: string
+  mimeType: string,
+  context?: CallContext,
 ): Promise<ExtractResult> {
 
   if (mimeType === DOCX_MIME) {
@@ -48,19 +58,19 @@ export async function extractText(
       // digit/punctuation noise from page markers, page numbers, or tables.
       const wordCount = (text.match(/\p{L}{2,}/gu) ?? []).length
       if (wordCount < 50) {
-        const ocrText = await yandexVisionOCR(fileBuffer, 'application/pdf')
+        const ocrText = await yandexVisionOCR(fileBuffer, 'application/pdf', context)
         return { text: cleanText(ocrText), method: 'ocr', pageCount }
       }
 
       return { text: cleanText(text), method: 'text_layer', pageCount }
     } catch {
-      const ocrText = await yandexVisionOCR(fileBuffer, 'application/pdf')
+      const ocrText = await yandexVisionOCR(fileBuffer, 'application/pdf', context)
       return { text: cleanText(ocrText), method: 'ocr' }
     }
   }
 
   if (mimeType.startsWith('image/')) {
-    const ocrText = await yandexVisionOCR(fileBuffer, mimeType)
+    const ocrText = await yandexVisionOCR(fileBuffer, mimeType, context)
     return { text: cleanText(ocrText), method: 'ocr' }
   }
 

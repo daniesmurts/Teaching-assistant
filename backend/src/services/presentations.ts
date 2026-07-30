@@ -7,6 +7,7 @@ import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { yandexImageSearch } from './yandexImages'
 import { webSearch, type SearchResult } from './yandexSearch'
 import { logger } from '../lib/logger'
+import type { CallContext } from './llm/types'
 import type {
   Presentation,
   PresentationSource,
@@ -29,6 +30,7 @@ import type {
 
 export interface GenerateParams {
   teacherId: string
+  institutionId?: string
   courseId?: string
   lectureNumber?: number
   topic: string
@@ -74,6 +76,8 @@ const MAX_AUTO_IMAGES          = 20   // ceiling on a very large deck — remain
 // ─── Generate ─────────────────────────────────────────────────────────────────
 
 export async function generatePresentation(params: GenerateParams): Promise<GenerateResult> {
+  const context: CallContext = { teacherId: params.teacherId, institutionId: params.institutionId, feature: 'presentation' }
+
   const course = params.courseId
     ? await findCourseById(params.courseId, params.teacherId)
     : null
@@ -98,7 +102,7 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
   // validateCitation does for uploaded documents.
   const courseHasChunks = params.courseId ? await hasAnyChunksForCourse(params.courseId) : false
   const webGrounding = shouldUseWebGrounding(Boolean(params.sourceText), Boolean(params.courseId), courseHasChunks)
-    ? await fetchWebGrounding(params.topic)
+    ? await fetchWebGrounding(params.topic, context)
     : []
 
   // ── Outline pass — cheap, structure-only. Decides slide count/order/type
@@ -162,7 +166,7 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
   })
 
   const slidesWithoutImages = expandedBatches.flat()
-  const slides  = await autoFillImages(slidesWithoutImages)
+  const slides  = await autoFillImages(slidesWithoutImages, context)
   const sources = pool.all()
 
   // Union of structured citations and inline [N] markers found in slide
@@ -310,7 +314,7 @@ function toSlideImage(c: ImageCandidate, query: string): SlideImage {
   }
 }
 
-export async function autoFillImages(slides: Slide[]): Promise<Slide[]> {
+export async function autoFillImages(slides: Slide[], context?: CallContext): Promise<Slide[]> {
   const candidates = slides
     .map((slide, index) => ({ index, query: getSlideImageQuery(slide).trim() }))
     .filter((c) => c.query.length > 0)
@@ -320,7 +324,7 @@ export async function autoFillImages(slides: Slide[]): Promise<Slide[]> {
 
   const picks = await mapWithConcurrency(candidates, IMAGE_SEARCH_CONCURRENCY, async ({ index, query }) => {
     try {
-      const results = await yandexImageSearch(query, 3)
+      const results = await yandexImageSearch(query, 3, context)
       return results[0] ? { index, image: toSlideImage(results[0], query) } : null
     } catch (err) {
       logger.warn({ message: '[auto-image] search failed', query, error: (err as Error).message })
@@ -352,8 +356,8 @@ export function shouldUseWebGrounding(hasSourceText: boolean, hasCourseId: boole
   return !hasSourceText && (!hasCourseId || !courseHasChunks)
 }
 
-async function fetchWebGrounding(topic: string): Promise<SearchResult[]> {
-  return webSearch(topic, WEB_GROUNDING_RESULTS)
+async function fetchWebGrounding(topic: string, context?: CallContext): Promise<SearchResult[]> {
+  return webSearch(topic, WEB_GROUNDING_RESULTS, context)
 }
 
 // ─── Outline ────────────────────────────────────────────────────────────────

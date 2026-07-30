@@ -1,5 +1,7 @@
 import axios from 'axios'
 import { createUsageLog } from '../../db/queries/usageLog'
+import { calculateYandexChatCostRub, calculateYandexEmbedCostRub } from '../../config/planLimits'
+import { getUsdRubRate, rubToUsd } from '../fxRate'
 import { logger } from '../../lib/logger'
 import type {
   CallContext, ChatMessage, ChatOptions, LLMProvider, ProviderCapabilities,
@@ -84,15 +86,13 @@ export class YandexProvider implements LLMProvider {
       const outputTokens = Number(usage?.completionTokens ?? 0)
 
       if (opts.context) {
-        createUsageLog({
-          ...opts.context,
-          model:        `yandex:${CHAT_MODEL}`,
-          inputTokens,
-          outputTokens,
-          costUsd:      0,   // priced in RUB by Yandex; cost tracking TBD in Phase 4 follow-up
-          durationMs:   Date.now() - start,
-          success:      true,
-        }).catch((e) => logger.warn({ message: 'Failed to write usage log', error: e.message }))
+        // Fire-and-forget, including the FX lookup — getUsdRubRate() is
+        // usually cache-hit-instant but can be a real network call on a
+        // cache miss, and this must never add latency to the actual chat
+        // response (same "never await this where it would block a
+        // user-facing response" rule as createUsageLog itself).
+        logYandexChatUsage(opts.context, inputTokens, outputTokens, Date.now() - start, true)
+          .catch((e) => logger.warn({ message: 'Failed to write usage log', error: e.message }))
       }
 
       return text
@@ -104,6 +104,7 @@ export class YandexProvider implements LLMProvider {
           ...opts.context,
           model:        `yandex:${CHAT_MODEL}`,
           inputTokens:  0, outputTokens: 0, costUsd: 0,
+          currency:     'RUB',
           durationMs:   Date.now() - start,
           success:      false,
           errorCode,
@@ -174,15 +175,12 @@ export class YandexProvider implements LLMProvider {
         if (vector.length === 0) throw new Error('Yandex embedding response missing vector')
 
         if (context) {
-          createUsageLog({
-            ...context,
-            model:        'yandex:text-search-doc',
-            inputTokens:  Number(response.data.numTokens ?? 0),
-            outputTokens: 0,
-            costUsd:      0,
-            durationMs:   Date.now() - start,
-            success:      true,
-          }).catch(() => null)
+          const tokens = Number(response.data.numTokens ?? 0)
+          // Fire-and-forget, including the FX lookup — see the comment on
+          // logYandexChatUsage's call site; embedding latency compounds
+          // across a chunked document (services/documents.ts calls this
+          // once per chunk), so this matters even more here.
+          logYandexEmbedUsage(context, tokens, Date.now() - start, true).catch(() => null)
         }
         return vector
       } catch (err) {
@@ -201,6 +199,7 @@ export class YandexProvider implements LLMProvider {
         ...context,
         model:        'yandex:text-search-doc',
         inputTokens:  0, outputTokens: 0, costUsd: 0,
+        currency:     'RUB',
         durationMs:   Date.now() - start,
         success:      false,
         errorCode:    axios.isAxiosError(lastErr) ? `HTTP_${lastErr.response?.status ?? 0}` : 'UNKNOWN',
@@ -216,6 +215,40 @@ export class YandexProvider implements LLMProvider {
   static chatModelName(): string {
     return CHAT_MODEL
   }
+}
+
+async function logYandexChatUsage(
+  context: CallContext, inputTokens: number, outputTokens: number, durationMs: number, success: boolean,
+): Promise<void> {
+  const costRub = calculateYandexChatCostRub(inputTokens, outputTokens)
+  const { rate } = await getUsdRubRate()
+  await createUsageLog({
+    ...context,
+    model: `yandex:${CHAT_MODEL}`,
+    inputTokens, outputTokens,
+    costUsd:    rubToUsd(costRub, rate),
+    costNative: costRub,
+    currency:   'RUB',
+    fxRateUsed: rate,
+    durationMs, success,
+  })
+}
+
+async function logYandexEmbedUsage(
+  context: CallContext, tokens: number, durationMs: number, success: boolean,
+): Promise<void> {
+  const costRub = calculateYandexEmbedCostRub(tokens)
+  const { rate } = await getUsdRubRate()
+  await createUsageLog({
+    ...context,
+    model: 'yandex:text-search-doc',
+    inputTokens: tokens, outputTokens: 0,
+    costUsd:    rubToUsd(costRub, rate),
+    costNative: costRub,
+    currency:   'RUB',
+    fxRateUsed: rate,
+    durationMs, success,
+  })
 }
 
 // Without native JSON mode we lean on the system prompt. The instruction is

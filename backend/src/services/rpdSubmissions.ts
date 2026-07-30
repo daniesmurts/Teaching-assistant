@@ -85,7 +85,9 @@ export async function submitByUpload(params: SubmitCommon & { file: FetchedFile 
 
   let extractedText: string | null = null
   try {
-    extractedText = (await extractText(params.file.buffer, params.file.mimetype)).text
+    extractedText = (await extractText(params.file.buffer, params.file.mimetype, {
+      teacherId: params.teacherId, institutionId: params.institutionId, feature: 'document_extraction',
+    })).text
   } catch (err) {
     logger.warn({ message: 'РПД submit (upload): text extraction failed', error: (err as Error).message })
   }

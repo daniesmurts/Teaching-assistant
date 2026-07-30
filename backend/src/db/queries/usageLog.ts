@@ -3,7 +3,7 @@ import { pool } from '../connection'
 export interface CreateUsageLogParams {
   teacherId:      string
   institutionId?: string
-  feature:        'grading' | 'presentation' | 'feedback_email' | 'embedding' | 'criteria_assist' | 'rpd_reminder'
+  feature:        'grading' | 'presentation' | 'feedback_email' | 'embedding' | 'criteria_assist' | 'rpd_reminder' | 'document_extraction'
   model:          string
   inputTokens:    number
   outputTokens:   number
@@ -11,6 +11,15 @@ export interface CreateUsageLogParams {
   durationMs:     number
   success:        boolean
   errorCode?:     string
+  // Native-currency cost (TODO.md Improvement #13) — cost_usd above stays
+  // the canonical figure every existing query reads; these three are purely
+  // additive. Omit for a provider that bills in USD (DeepSeek/Qwen): the
+  // caller passes costNative equal to costUsd with currency:'USD' so every
+  // row ends up with a currency, or omits all three and the row's currency
+  // is NULL (legacy rows predating this migration behave the same way).
+  costNative?:    number
+  currency?:      'USD' | 'RUB'
+  fxRateUsed?:    number   // ₽ per $1 at the moment of conversion; only meaningful for RUB rows
 }
 
 /**
@@ -21,8 +30,9 @@ export async function createUsageLog(params: CreateUsageLogParams): Promise<void
   await pool.query(
     `INSERT INTO api_usage_log
        (teacher_id, institution_id, feature, model,
-        input_tokens, output_tokens, cost_usd, duration_ms, success, error_code)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        input_tokens, output_tokens, cost_usd, duration_ms, success, error_code,
+        cost_native, currency, fx_rate_used)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
     [
       params.teacherId,
       params.institutionId ?? null,
@@ -34,6 +44,9 @@ export async function createUsageLog(params: CreateUsageLogParams): Promise<void
       params.durationMs,
       params.success,
       params.errorCode ?? null,
+      params.costNative ?? null,
+      params.currency ?? null,
+      params.fxRateUsed ?? null,
     ]
   )
 }

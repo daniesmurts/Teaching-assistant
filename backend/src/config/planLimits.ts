@@ -159,3 +159,100 @@ export function calculateQwenCost(inputTokens: number, outputTokens: number, mod
   const r = QWEN_RATES[model] ?? QWEN_RATES['qwen3.7-plus']
   return (inputTokens / 1_000_000) * r.in + (outputTokens / 1_000_000) * r.out
 }
+
+// ─── Yandex Cloud pricing ──────────────────────────────────────────────────
+//
+// Confirmed 2026-07-30 against real Yandex AI Studio pricing sources
+// (console pricing tables + the AI Studio pricing assistant, both supplied
+// directly by the user — TODO.md Improvement #13). Same "update if rates
+// change" posture as DeepSeek/Qwen above; override via the env vars below
+// if a rate changes.
+//
+// - **Chat** (₽, converted via services/fxRate.ts like everything else in
+//   this section): the console lists two text-generation tiers — "Alice AI
+//   LLM Flash" (cheap) and plain "Alice AI LLM" (the bigger model), each
+//   split sync/async/cached/tool-token. `CHAT_MODEL = 'yandexgpt'` in
+//   `llm/yandex.ts` — no `-lite` suffix — is the pre-rebrand model-URI
+//   naming for the STANDARD/PRO tier, not the lite one; mapped to the
+//   non-Flash "Alice AI LLM" row. Our call is a single POST with no
+//   operation polling (`completionOptions.stream: false`), so synchronous
+//   pricing applies: 0.5₽/1000 in, 1.2₽/1000 out → 500/1200 ₽ per 1M tokens.
+// - **Vision OCR** (₽): "Распознавание печатного текста" (0.1321₽/image) is
+//   the plain-text-detection product — matches `TEXT_DETECTION` in
+//   `yandexVision.ts`'s `batchAnalyze` call. The passport/CTC/vehicle-plate/
+//   handwriting rows in the same table are unrelated document-specific OCR
+//   products, not used here.
+// - **Search — two DIFFERENT products, not one** (₽). `yandexImages.ts`
+//   calls the SYNCHRONOUS `/v2/image/search` endpoint → "Поиск изображений"
+//   (915₽/1000 ops = 0.915₽/call). `yandexSearch.ts`'s `webSearch` submits
+//   to `/v2/web/searchAsync` and polls — the ASYNC ("отложенные") row, not
+//   sync — priced separately, day vs night; using the daytime (higher, more
+//   conservative) rate since our calls aren't time-gated: 30.5₽/1000 ops =
+//   0.0305₽/call. These two were previously conflated into one
+//   `searchPerCall` constant despite being ~30× apart — a real
+//   understatement for every image search logged before this fix.
+// - **Embeddings** (₽, VAT-inclusive): "Получение эмбеддингов текста" —
+//   0.0101₽ per 1000 tokens (1 token = 1 vectorization unit) → 10.1₽ per 1M
+//   tokens, from the same static console pricing table as chat/vision/search
+//   (superseding an earlier USD-denominated figure from the AI Studio
+//   pricing *assistant* — the static table is the more authoritative
+//   source, and having every Yandex product on the same ₽/FX basis avoids a
+//   mixed-currency inconsistency for no reason). Note this table explicitly
+//   says "вкл. НДС" (VAT-inclusive); the other three tables didn't disclose
+//   their VAT basis, so full cross-product consistency isn't guaranteed —
+//   good enough for cost tracking, not a reconciled invoice.
+export interface YandexRatesRub {
+  chatInPerM:         number   // ₽ per 1M input tokens — Alice AI LLM (non-Flash), synchronous
+  chatOutPerM:        number   // ₽ per 1M output tokens — Alice AI LLM (non-Flash), synchronous
+  embedPerM:          number   // ₽ per 1M tokens — "Получение эмбеддингов текста", VAT-inclusive
+  visionPerPage:      number   // ₽ per OCR page — "Распознавание печатного текста"
+  webSearchPerCall:   number   // ₽ per web search call — async/"отложенные", daytime rate
+  imageSearchPerCall: number   // ₽ per image search call — sync, "Поиск изображений"
+}
+
+const YANDEX_DEFAULT_RATES_RUB: YandexRatesRub = {
+  chatInPerM:         500,
+  chatOutPerM:        1200,
+  embedPerM:          10.1,
+  visionPerPage:      0.1321,
+  webSearchPerCall:   0.0305,
+  imageSearchPerCall: 0.915,
+}
+
+function envRateNumber(name: string, fallback: number): number {
+  const raw = process.env[name]
+  const n = raw ? Number(raw) : NaN
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+export function getYandexRatesRub(): YandexRatesRub {
+  return {
+    chatInPerM:         envRateNumber('YANDEX_RATE_CHAT_IN_RUB_PER_M',         YANDEX_DEFAULT_RATES_RUB.chatInPerM),
+    chatOutPerM:        envRateNumber('YANDEX_RATE_CHAT_OUT_RUB_PER_M',        YANDEX_DEFAULT_RATES_RUB.chatOutPerM),
+    embedPerM:          envRateNumber('YANDEX_RATE_EMBED_RUB_PER_M',           YANDEX_DEFAULT_RATES_RUB.embedPerM),
+    visionPerPage:      envRateNumber('YANDEX_RATE_VISION_RUB_PER_PAGE',       YANDEX_DEFAULT_RATES_RUB.visionPerPage),
+    webSearchPerCall:   envRateNumber('YANDEX_RATE_WEB_SEARCH_RUB_PER_CALL',   YANDEX_DEFAULT_RATES_RUB.webSearchPerCall),
+    imageSearchPerCall: envRateNumber('YANDEX_RATE_IMAGE_SEARCH_RUB_PER_CALL', YANDEX_DEFAULT_RATES_RUB.imageSearchPerCall),
+  }
+}
+
+export function calculateYandexChatCostRub(inputTokens: number, outputTokens: number): number {
+  const r = getYandexRatesRub()
+  return (inputTokens / 1_000_000) * r.chatInPerM + (outputTokens / 1_000_000) * r.chatOutPerM
+}
+
+export function calculateYandexEmbedCostRub(tokens: number): number {
+  return (tokens / 1_000_000) * getYandexRatesRub().embedPerM
+}
+
+export function calculateYandexVisionCostRub(pages: number): number {
+  return pages * getYandexRatesRub().visionPerPage
+}
+
+export function calculateYandexWebSearchCostRub(calls = 1): number {
+  return calls * getYandexRatesRub().webSearchPerCall
+}
+
+export function calculateYandexImageSearchCostRub(calls = 1): number {
+  return calls * getYandexRatesRub().imageSearchPerCall
+}

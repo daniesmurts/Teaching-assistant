@@ -94,12 +94,15 @@ export class QwenProvider implements LLMProvider {
       const outputTokens = usage?.completion_tokens ?? 0
 
       if (opts.context) {
+        const costUsd = calculateQwenCost(inputTokens, outputTokens, model)
         createUsageLog({
           ...opts.context,
           model:        `qwen:${model}`,
           inputTokens,
           outputTokens,
-          costUsd:      calculateQwenCost(inputTokens, outputTokens, model),
+          costUsd,
+          costNative:   costUsd,
+          currency:     'USD',
           durationMs:   Date.now() - start,
           success:      true,
         }).catch((e) => logger.warn({ message: 'Failed to write usage log', error: e.message }))
@@ -117,6 +120,7 @@ export class QwenProvider implements LLMProvider {
           ...opts.context,
           model:        `qwen:${model}`,
           inputTokens:  0, outputTokens: 0, costUsd: 0,
+          currency:     'USD',
           durationMs:   Date.now() - start,
           success:      false,
           errorCode,

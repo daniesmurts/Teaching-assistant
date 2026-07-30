@@ -39,13 +39,14 @@ router.post(
     }
 
     const document = await uploadAndProcess({
-      fileBuffer:   file.buffer,
-      fileName:     file.originalname,
-      mimeType:     file.mimetype,
-      fileSize:     file.size,
-      teacherId:    req.teacher.id,
-      courseId:     course_id,
-      documentType: document_type as 'assignment' | 'syllabus' | 'material',
+      fileBuffer:     file.buffer,
+      fileName:       file.originalname,
+      mimeType:       file.mimetype,
+      fileSize:       file.size,
+      teacherId:      req.teacher.id,
+      institutionId:  req.teacher.institution_id ?? undefined,
+      courseId:       course_id,
+      documentType:   document_type as 'assignment' | 'syllabus' | 'material',
     })
 
     res.status(201).json({

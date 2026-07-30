@@ -229,12 +229,15 @@ export class DeepSeekProvider implements LLMProvider {
       // used to produce, then fail fast.
       if (choice.finish_reason === 'length') {
         if (opts.context) {
+          const costUsd = calculateDeepSeekCost(inputTokens, outputTokens, model)
           createUsageLog({
             ...opts.context,
             model:        `deepseek:${model}`,
             inputTokens,
             outputTokens,
-            costUsd:      calculateDeepSeekCost(inputTokens, outputTokens, model),
+            costUsd,
+            costNative:   costUsd,
+            currency:     'USD',
             durationMs:   Date.now() - start,
             success:      false,
             errorCode:    'TRUNCATED',
@@ -248,12 +251,15 @@ export class DeepSeekProvider implements LLMProvider {
       }
 
       if (opts.context) {
+        const costUsd = calculateDeepSeekCost(inputTokens, outputTokens, model)
         createUsageLog({
           ...opts.context,
           model:        `deepseek:${model}`,
           inputTokens,
           outputTokens,
-          costUsd:      calculateDeepSeekCost(inputTokens, outputTokens, model),
+          costUsd,
+          costNative:   costUsd,
+          currency:     'USD',
           durationMs:   Date.now() - start,
           success:      true,
         }).catch((e) => logger.warn({ message: 'Failed to write usage log', error: e.message }))
@@ -276,6 +282,7 @@ export class DeepSeekProvider implements LLMProvider {
           ...opts.context,
           model:        `deepseek:${model}`,
           inputTokens:  0, outputTokens: 0, costUsd: 0,
+          currency:     'USD',
           durationMs:   Date.now() - start,
           success:      false,
           errorCode,

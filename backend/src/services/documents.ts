@@ -10,6 +10,7 @@ import {
 import { createChunk, deleteChunksForOtherSyllabusDocuments } from '../db/queries/chunks'
 import { setCourseSyllabusText } from '../db/queries/courses'
 import { logger } from '../lib/logger'
+import type { CallContext } from './llm/types'
 
 function fileTypeFromMime(mime: string): string {
   if (mime === 'application/pdf') return 'pdf'
@@ -20,13 +21,14 @@ function fileTypeFromMime(mime: string): string {
 // ─── Upload + kick off async processing ───────────────────────────────────────
 
 export async function uploadAndProcess(params: {
-  fileBuffer:   Buffer
-  fileName:     string
-  mimeType:     string
-  fileSize:     number
-  teacherId:    string
-  courseId?:    string
-  documentType: DocumentType
+  fileBuffer:     Buffer
+  fileName:       string
+  mimeType:       string
+  fileSize:       number
+  teacherId:      string
+  institutionId?: string
+  courseId?:      string
+  documentType:   DocumentType
 }): Promise<DocumentRow> {
 
   // 1. Persist the original file immediately
@@ -46,7 +48,9 @@ export async function uploadAndProcess(params: {
   })
 
   // 3. Process in the background — do NOT await
-  processDocument(document.id, params.fileBuffer, params.mimeType, params.documentType)
+  processDocument(document.id, params.fileBuffer, params.mimeType, params.documentType, {
+    teacherId: params.teacherId, institutionId: params.institutionId, feature: 'document_extraction',
+  })
     .catch((err) => {
       logger.error({ message: 'Document processing failed', documentId: document.id, error: err.message })
       setDocumentFailed(document.id, err.message).catch(() => null)
@@ -61,11 +65,12 @@ async function processDocument(
   documentId: string,
   fileBuffer: Buffer,
   mimeType: string,
-  documentType: DocumentType
+  documentType: DocumentType,
+  context: CallContext,
 ): Promise<void> {
   await setDocumentStatus(documentId, 'extracting')
 
-  const { text, method, pageCount } = await extractText(fileBuffer, mimeType)
+  const { text, method, pageCount } = await extractText(fileBuffer, mimeType, context)
   const tokenEstimate = estimateTokens(text)
 
   await updateDocumentExtraction(documentId, {

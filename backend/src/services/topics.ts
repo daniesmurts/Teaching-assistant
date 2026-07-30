@@ -22,6 +22,7 @@ const LEVEL_GUIDANCE: Record<string, string> = {
 
 interface GenerateParams {
   teacherId:    string
+  institutionId?: string
   courseId?:    string
   level:        string
   workType:     string
@@ -49,7 +50,9 @@ export async function generateTopics(p: GenerateParams): Promise<TopicSet> {
 
   // Build a search query and ground on live results (best-effort)
   const queryParts = [p.field, p.interests, p.practiceSite, WORK_RU[p.workType]].filter(Boolean)
-  const searchResults = queryParts.length ? await webSearch(queryParts.join(' ')) : []
+  const searchResults = queryParts.length
+    ? await webSearch(queryParts.join(' '), 6, { teacherId: p.teacherId, institutionId: p.institutionId, feature: 'presentation' })   // reuse a logged feature bucket, same as the chatJSON call below
+    : []
   const usedSearch = searchResults.length > 0
 
   const system =
