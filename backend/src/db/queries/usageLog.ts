@@ -20,6 +20,10 @@ export interface CreateUsageLogParams {
   costNative?:    number
   currency?:      'USD' | 'RUB'
   fxRateUsed?:    number   // ₽ per $1 at the moment of conversion; only meaningful for RUB rows
+  // TODO.md Feature AL Phase 0 — two more dimensions for per-teacher/
+  // per-institution coefficients and provider-account health.
+  variant?:       string   // e.g. presentation depth 'standard' | 'deep' — NOT a new `feature` value, see migration 104
+  account?:       string   // which DeepSeek account served the call ('primary', 'key-2', ...); undefined for single-account providers
 }
 
 /**
@@ -31,8 +35,8 @@ export async function createUsageLog(params: CreateUsageLogParams): Promise<void
     `INSERT INTO api_usage_log
        (teacher_id, institution_id, feature, model,
         input_tokens, output_tokens, cost_usd, duration_ms, success, error_code,
-        cost_native, currency, fx_rate_used)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        cost_native, currency, fx_rate_used, variant, account)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
     [
       params.teacherId,
       params.institutionId ?? null,
@@ -47,6 +51,8 @@ export async function createUsageLog(params: CreateUsageLogParams): Promise<void
       params.costNative ?? null,
       params.currency ?? null,
       params.fxRateUsed ?? null,
+      params.variant ?? null,
+      params.account ?? null,
     ]
   )
 }
@@ -64,20 +70,52 @@ export interface DailyUsageRow {
   error_count:       number
 }
 
+// grade_count comes from `assignments`, not a `feature = 'grading'` count over
+// api_usage_log. 'grading' is a shared LLM-cost bucket reused by ~15 unrelated
+// services (documentReview, mtoReview, placementReview, programDiff,
+// programAnalysis, docChat, cohortSynthesis, evalHarness, longReview, ...),
+// and even a single real grading action can log several rows under it (the
+// feedback critic pass, calc verification, citation check, and — in
+// "тщательная проверка" mode — every confidence-ensemble sample plus a
+// reconciliation call all inherit the same context). Counting those rows as
+// "Проверок" overstated real grading activity by anywhere from 2x to 10x+.
+// `assignments` has exactly one row per submission actually graded
+// (services/grading.ts's grade() persists it once, regardless of how many
+// LLM calls that took), including completed long reviews — longReview.ts
+// calls createAssignment() on completion, so no separate long_reviews count
+// is needed here.
 export async function getDailyUsage(days = 30): Promise<DailyUsageRow[]> {
   const { rows } = await pool.query<DailyUsageRow>(
-    `SELECT
-       DATE(created_at)                             AS date,
-       SUM(input_tokens + output_tokens)::int       AS total_tokens,
-       SUM(input_tokens)::int                       AS input_tokens,
-       SUM(output_tokens)::int                      AS output_tokens,
-       ROUND(SUM(cost_usd)::numeric, 6)             AS cost_usd,
-       COUNT(*) FILTER (WHERE feature = 'grading')::int          AS grade_count,
-       COUNT(*) FILTER (WHERE feature = 'presentation')::int     AS presentation_count,
-       COUNT(*) FILTER (WHERE NOT success)::int                  AS error_count
-     FROM api_usage_log
-     WHERE created_at >= NOW() - ($1 || ' days')::INTERVAL
-     GROUP BY DATE(created_at)
+    `WITH usage AS (
+       SELECT
+         DATE(created_at)                                          AS date,
+         SUM(input_tokens + output_tokens)::int                    AS total_tokens,
+         SUM(input_tokens)::int                                    AS input_tokens,
+         SUM(output_tokens)::int                                   AS output_tokens,
+         ROUND(SUM(cost_usd)::numeric, 6)                          AS cost_usd,
+         COUNT(*) FILTER (WHERE feature = 'presentation')::int     AS presentation_count,
+         COUNT(*) FILTER (WHERE NOT success)::int                  AS error_count
+       FROM api_usage_log
+       WHERE created_at >= NOW() - ($1 || ' days')::INTERVAL
+       GROUP BY DATE(created_at)
+     ),
+     grades AS (
+       SELECT DATE(created_at) AS date, COUNT(*)::int AS grade_count
+       FROM assignments
+       WHERE created_at >= NOW() - ($1 || ' days')::INTERVAL
+       GROUP BY DATE(created_at)
+     )
+     SELECT
+       COALESCE(usage.date, grades.date)     AS date,
+       COALESCE(usage.total_tokens, 0)       AS total_tokens,
+       COALESCE(usage.input_tokens, 0)       AS input_tokens,
+       COALESCE(usage.output_tokens, 0)      AS output_tokens,
+       COALESCE(usage.cost_usd, 0)           AS cost_usd,
+       COALESCE(grades.grade_count, 0)       AS grade_count,
+       COALESCE(usage.presentation_count, 0) AS presentation_count,
+       COALESCE(usage.error_count, 0)        AS error_count
+     FROM usage
+     FULL OUTER JOIN grades ON grades.date = usage.date
      ORDER BY date DESC`,
     [days]
   )
@@ -94,6 +132,8 @@ export interface UsageByTeacherRow {
   last_active:  string | null
 }
 
+// grade_count: see the comment on getDailyUsage above — real grading actions
+// from `assignments`, not a count of LLM calls tagged 'grading'.
 export async function getUsageByTeacher(limit = 20): Promise<UsageByTeacherRow[]> {
   const { rows } = await pool.query<UsageByTeacherRow>(
     `SELECT
@@ -102,11 +142,16 @@ export async function getUsageByTeacher(limit = 20): Promise<UsageByTeacherRow[]
        t.email,
        SUM(u.input_tokens + u.output_tokens)::int AS total_tokens,
        ROUND(SUM(u.cost_usd)::numeric, 6)      AS cost_usd,
-       COUNT(*) FILTER (WHERE u.feature = 'grading')::int AS grade_count,
+       COALESCE(g.grade_count, 0)              AS grade_count,
        MAX(u.created_at)::text                 AS last_active
      FROM api_usage_log u
      JOIN teachers t ON t.id = u.teacher_id
-     GROUP BY t.id, t.name, t.email
+     LEFT JOIN (
+       SELECT teacher_id, COUNT(*)::int AS grade_count
+       FROM assignments
+       GROUP BY teacher_id
+     ) g ON g.teacher_id = t.id
+     GROUP BY t.id, t.name, t.email, g.grade_count
      ORDER BY cost_usd DESC
      LIMIT $1`,
     [limit]

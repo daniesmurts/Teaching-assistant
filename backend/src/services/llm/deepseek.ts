@@ -238,6 +238,7 @@ export class DeepSeekProvider implements LLMProvider {
             costUsd,
             costNative:   costUsd,
             currency:     'USD',
+            account:      account.label,
             durationMs:   Date.now() - start,
             success:      false,
             errorCode:    'TRUNCATED',
@@ -260,6 +261,7 @@ export class DeepSeekProvider implements LLMProvider {
           costUsd,
           costNative:   costUsd,
           currency:     'USD',
+          account:      account.label,
           durationMs:   Date.now() - start,
           success:      true,
         }).catch((e) => logger.warn({ message: 'Failed to write usage log', error: e.message }))
@@ -283,6 +285,7 @@ export class DeepSeekProvider implements LLMProvider {
           model:        `deepseek:${model}`,
           inputTokens:  0, outputTokens: 0, costUsd: 0,
           currency:     'USD',
+          account:      account.label,
           durationMs:   Date.now() - start,
           success:      false,
           errorCode,

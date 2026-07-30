@@ -182,6 +182,36 @@ describe('DeepSeekProvider — multi-account fallback', () => {
     expect(createUsageLogMock.mock.calls[1][0]).toMatchObject({ success: true })
   })
 
+  // TODO.md Feature AL Phase 0 — without the account label on the usage row,
+  // a 402/429 burst is visible in aggregate but not attributable to a
+  // specific account: which one is unhealthy, how often fallback actually
+  // fires, whether the primary silently carries all traffic.
+  it('tags each usage log row with the account label that actually served it, not just the primary', async () => {
+    setAccounts(2)
+    postMock.mockRejectedValueOnce(axiosError(402))
+    postMock.mockResolvedValueOnce(okResponse())
+
+    await new DeepSeekProvider().chat(
+      [{ role: 'user', content: 'hi' }],
+      { context: { teacherId: 't1', feature: 'grading' } }
+    )
+
+    expect(createUsageLogMock.mock.calls[0][0]).toMatchObject({ account: `primary-${uniqueSuffix}` })
+    expect(createUsageLogMock.mock.calls[1][0]).toMatchObject({ account: `secondary-${uniqueSuffix}` })
+  })
+
+  it('tags the variant through from CallContext (e.g. presentation depth) without any DeepSeek-specific code', async () => {
+    setAccounts(1)
+    postMock.mockResolvedValueOnce(okResponse())
+
+    await new DeepSeekProvider().chat(
+      [{ role: 'user', content: 'hi' }],
+      { context: { teacherId: 't1', feature: 'presentation', variant: 'deep' } }
+    )
+
+    expect(createUsageLogMock.mock.calls[0][0]).toMatchObject({ variant: 'deep' })
+  })
+
   // TODO.md Improvement #10 — a truncated response used to come back as a
   // normal (successful) `chat()` result, so chatJSON's JSON.parse would fail
   // on the cut-off content and burn a second, identically-doomed call before

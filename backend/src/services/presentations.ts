@@ -76,7 +76,12 @@ const MAX_AUTO_IMAGES          = 20   // ceiling on a very large deck — remain
 // ─── Generate ─────────────────────────────────────────────────────────────────
 
 export async function generatePresentation(params: GenerateParams): Promise<GenerateResult> {
-  const context: CallContext = { teacherId: params.teacherId, institutionId: params.institutionId, feature: 'presentation' }
+  const depth: PresentationDepth = params.depth === 'deep' ? 'deep' : 'standard'
+  // variant (TODO.md Feature AL Phase 0) tags every LLM/search/image call
+  // this generation makes as standard vs. deep — lets the cost ledger
+  // answer "is deep mode priced right" instead of folding it into one
+  // undifferentiated 'presentation' bucket.
+  const context: CallContext = { teacherId: params.teacherId, institutionId: params.institutionId, feature: 'presentation', variant: depth }
 
   const course = params.courseId
     ? await findCourseById(params.courseId, params.teacherId)
@@ -87,7 +92,6 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
     : []
 
   const slideTarget = params.slideCountTarget ?? estimateSlideCount(params.durationMinutes)
-  const depth: PresentationDepth = params.depth === 'deep' ? 'deep' : 'standard'
 
   // ── Web-search grounding (TODO.md Feature AG Phase 3) — a deck with no
   // pasted conspectus AND no course RAG material to draw on has nothing
@@ -123,7 +127,7 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
     ],
     'outline',
     {
-      context: { teacherId: params.teacherId, feature: 'presentation' },
+      context,
       maxTokens: outlineMaxTokens(slideTarget),
     }
   )
@@ -156,7 +160,7 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
       ],
       'slides',
       {
-        context: { teacherId: params.teacherId, feature: 'presentation' },
+        context,
         maxTokens: expansionBatchMaxTokens(batch.length, depth),
       }
     )

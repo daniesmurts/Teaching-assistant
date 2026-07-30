@@ -195,6 +195,47 @@ export async function updateSamlConfig(
   return (await client.put<SamlConfig>(`/api/admin/institutions/${institutionId}/saml`, patch)).data
 }
 
+// ─── Institution contracts (TODO.md Feature AL Phase 0) ───────────────────────
+// Manual record of negotiated deals — institution revenue doesn't exist
+// anywhere else (payments.ts is teacher-scoped only), and these are
+// negotiated offline via 44-ФЗ procurement.
+
+export interface InstitutionContract {
+  id:                string
+  institution_id:    string
+  annual_value_rub:  number
+  seats_purchased:   number
+  term_start:        string   // 'YYYY-MM-DD'
+  term_end:          string   // 'YYYY-MM-DD'
+  notes:             string | null
+  created_by:        string | null
+  created_at:        string
+  updated_at:        string
+}
+
+export async function getInstitutionContracts(institutionId: string): Promise<InstitutionContract[]> {
+  return (await client.get<InstitutionContract[]>(`/api/admin/institutions/${institutionId}/contracts`)).data
+}
+
+export async function createInstitutionContract(
+  institutionId: string,
+  data: { annual_value_rub: number; seats_purchased: number; term_start: string; term_end: string; notes?: string | null }
+): Promise<InstitutionContract> {
+  return (await client.post<InstitutionContract>(`/api/admin/institutions/${institutionId}/contracts`, data)).data
+}
+
+export async function updateInstitutionContract(
+  institutionId: string,
+  contractId: string,
+  data: Partial<{ annual_value_rub: number; seats_purchased: number; term_start: string; term_end: string; notes: string | null }>
+): Promise<InstitutionContract> {
+  return (await client.patch<InstitutionContract>(`/api/admin/institutions/${institutionId}/contracts/${contractId}`, data)).data
+}
+
+export async function deleteInstitutionContract(institutionId: string, contractId: string): Promise<void> {
+  await client.delete(`/api/admin/institutions/${institutionId}/contracts/${contractId}`)
+}
+
 export interface AdminError {
   feature:    string
   error_code: string | null
@@ -483,5 +524,104 @@ export async function importFgosvoItem(item: { code: string; name: string; level
   const res = await client.post<FgosStandard>('/api/admin/fgos/import-one', {
     code: item.code, name: item.name, level: item.level, pdf_url: item.pdfUrl,
   })
+  return res.data
+}
+
+// ─── Capacity + unit economics (TODO.md Feature AL Phase 2) ───────────────────
+
+export interface TierDistributionRow {
+  tier: string
+  n:    number
+  mean: number
+  p50:  number
+  p95:  number
+  max:  number
+}
+
+export interface FreeOutlierRow {
+  thresholdUsd: number
+  count:        number
+  total:        number
+}
+
+export interface InstitutionSummaryRow {
+  institutionId:  string
+  name:           string
+  activeSeats:    number
+  seatsPurchased: number | null
+  utilizationPct: number | null
+  costUsd:        number
+  revenueUsd:     number | null
+  marginUsd:      number | null
+  costPerSeatUsd: number
+}
+
+export interface ResourceHeadroom {
+  key:             string
+  label:           string
+  unit:            string
+  current:         number
+  ceiling:         number | null
+  ceilingLabel:    string
+  projectedAtScenario: number | null
+  breaksAtTeachers:    number | null
+  breaksAtTeachersPeakAdjusted?: number | null
+  note?:           string
+}
+
+export interface HeadroomResult {
+  activeTeachers:   number
+  scenarioTeachers: number
+  resources:        ResourceHeadroom[]
+}
+
+export interface RateLimitKnee {
+  observed:                       boolean
+  minHourlyVolumeWithRateLimit:    number | null
+  maxHourlyVolumeWithoutRateLimit: number | null
+}
+
+export interface AccountCeiling {
+  account:           string
+  burnRatePerDayUsd: number
+  balanceFailures:   number
+  failureCount:      number
+  lastSuccessAt:     string | null
+  lastFailureAt:     string | null
+  possiblyUnhealthy: boolean
+}
+
+export interface ProviderCeilingsReport {
+  windowDays:    number
+  peakToMean:    { ratio: number | null; totalCalls: number; peakHourlyCalls: number }
+  rateLimitKnee: RateLimitKnee
+  accounts:      AccountCeiling[]
+  yandexEmbedSpofNote: string
+}
+
+export interface CapacityOverview {
+  month:              string
+  availableMonths:    string[]
+  trackingSinceMonth: string | null
+  isTrendReady:       boolean
+  activeTeachers:     number
+  tierDistribution:   TierDistributionRow[]
+  freeOutliers:       FreeOutlierRow[]
+  institutions:       InstitutionSummaryRow[]
+  fixedCostUsd:       number | null
+  variableCostPerTeacherUsd: number | null
+  headroom:           HeadroomResult
+  providerCeilings:   ProviderCeilingsReport
+}
+
+export interface CapacityNoData {
+  noData:  true
+  message: string
+}
+
+export async function getCapacityOverview(
+  params: { month?: string; scenarioTeachers?: number } = {}
+): Promise<CapacityOverview | CapacityNoData> {
+  const res = await client.get<CapacityOverview | CapacityNoData>('/api/admin/capacity/overview', { params })
   return res.data
 }

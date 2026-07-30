@@ -22,6 +22,7 @@ import documentsRouter from './routes/documents'
 import adminRouter from './routes/admin'
 import adminEvalsRouter from './routes/adminEvals'
 import adminFgosRouter from './routes/adminFgos'
+import adminCapacityRouter from './routes/adminCapacity'
 import institutionRouter from './routes/institution'
 import feedbackRouter from './routes/feedback'
 import topicsRouter from './routes/topics'
@@ -167,6 +168,7 @@ app.use('/api/published-assignments', publishedAssignmentsRouter)
 app.use('/api/documents',     documentsRouter)
 app.use('/api/admin/evals',   adminEvalsRouter)   // before /api/admin so /evals isn't shadowed
 app.use('/api/admin/fgos',    adminFgosRouter)    // before /api/admin so /fgos isn't shadowed
+app.use('/api/admin/capacity', adminCapacityRouter) // before /api/admin so /capacity isn't shadowed
 app.use('/api/admin',         adminRouter)
 app.use('/api/institution/programs',  programsRouter)      // before /api/institution so it isn't shadowed
 app.use('/api/institution/structure', orgStructureRouter)  // before /api/institution so it isn't shadowed

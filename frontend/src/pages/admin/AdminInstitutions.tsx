@@ -6,6 +6,8 @@ import { useUIStore } from '../../store/uiStore'
 import {
   getInstitutions, createInstitution, updateInstitution, type AdminInstitution,
   getSamlConfig, updateSamlConfig, type SamlConfig,
+  getInstitutionContracts, createInstitutionContract, updateInstitutionContract, deleteInstitutionContract,
+  type InstitutionContract,
 } from '../../api/admin'
 
 const PLANS = ['institution', 'pro', 'free']
@@ -80,7 +82,7 @@ export default function AdminInstitutions() {
           </form>
         )}
 
-        <div className="bg-surface border border-border rounded-lg overflow-hidden">
+        <div className="bg-surface border border-border rounded-lg overflow-x-auto">
           <table className="w-full text-sm font-sans">
             <thead>
               <tr className="border-b border-border bg-surface-warm text-xs text-ink-secondary">
@@ -90,12 +92,13 @@ export default function AdminInstitutions() {
                 <th className="text-right px-4 py-2 font-medium">Мест</th>
                 <th className="text-right px-4 py-2 font-medium">Преподавателей</th>
                 <th className="text-right px-4 py-2 font-medium">Создана</th>
+                <th className="text-right px-4 py-2 font-medium">Контракт</th>
                 <th className="text-right px-4 py-2 font-medium">SSO</th>
               </tr>
             </thead>
             <tbody>
               {institutions.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-ink-tertiary text-xs">Организаций пока нет.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-ink-tertiary text-xs">Организаций пока нет.</td></tr>
               ) : (
                 institutions.map((inst) => <Row key={inst.id} inst={inst} onPatch={(data) => updateMut.mutate({ id: inst.id, data })} />)
               )}
@@ -109,6 +112,9 @@ export default function AdminInstitutions() {
 
 function Row({ inst, onPatch }: { inst: AdminInstitution; onPatch: (data: { planTier?: string; maxTeachers?: number | null; emailDomain?: string | null }) => void }) {
   const [showSaml, setShowSaml] = useState(false)
+  const [showContracts, setShowContracts] = useState(false)
+  const openPanel = showSaml ? 'saml' : showContracts ? 'contracts' : null
+
   return (
     <>
       <tr className="border-b border-border last:border-0">
@@ -150,7 +156,19 @@ function Row({ inst, onPatch }: { inst: AdminInstitution; onPatch: (data: { plan
         <td className="px-4 py-2.5 text-right text-ink-tertiary text-xs">{fmt(inst.created_at)}</td>
         <td className="px-4 py-2.5 text-right">
           <button
-            onClick={() => setShowSaml((s) => !s)}
+            onClick={() => { setShowContracts((s) => !s); setShowSaml(false) }}
+            className={`text-xs font-sans px-2 py-1 rounded-md border transition-colors ${
+              showContracts
+                ? 'border-amber text-amber bg-amber-light'
+                : 'border-border-mid text-ink-secondary hover:bg-surface-warm'
+            }`}
+          >
+            {showContracts ? 'Скрыть' : 'Открыть'}
+          </button>
+        </td>
+        <td className="px-4 py-2.5 text-right">
+          <button
+            onClick={() => { setShowSaml((s) => !s); setShowContracts(false) }}
             className={`text-xs font-sans px-2 py-1 rounded-md border transition-colors ${
               showSaml
                 ? 'border-amber text-amber bg-amber-light'
@@ -161,14 +179,173 @@ function Row({ inst, onPatch }: { inst: AdminInstitution; onPatch: (data: { plan
           </button>
         </td>
       </tr>
-      {showSaml && (
+      {openPanel === 'saml' && (
         <tr className="border-b border-border last:border-0 bg-surface-warm">
-          <td colSpan={7} className="px-4 py-4">
+          <td colSpan={8} className="px-4 py-4">
             <SamlPanel institutionId={inst.id} institutionName={inst.name} />
           </td>
         </tr>
       )}
+      {openPanel === 'contracts' && (
+        <tr className="border-b border-border last:border-0 bg-surface-warm">
+          <td colSpan={8} className="px-4 py-4">
+            <ContractsPanel institutionId={inst.id} institutionName={inst.name} />
+          </td>
+        </tr>
+      )}
     </>
+  )
+}
+
+// ─── Contracts panel (TODO.md Feature AL Phase 0) ──────────────────────────
+//
+// Manual record of negotiated deals — institution revenue doesn't exist
+// anywhere else in the database. This is deliberately the only place in the
+// whole feature that requires hand entry; everything downstream (Phase 1's
+// margin view) derives from what's recorded here.
+
+const rub = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n) + ' ₽'
+const fmtDate = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+
+function ContractsPanel({ institutionId, institutionName }: { institutionId: string; institutionName: string }) {
+  const qc = useQueryClient()
+  const addToast = useUIStore((s) => s.addToast)
+  const [showForm, setShowForm] = useState(false)
+  const [annualValue, setAnnualValue] = useState('')
+  const [seats, setSeats] = useState('')
+  const [termStart, setTermStart] = useState('')
+  const [termEnd, setTermEnd] = useState('')
+  const [notes, setNotes] = useState('')
+
+  const { data: contracts = [], isLoading } = useQuery({
+    queryKey: ['admin-contracts', institutionId],
+    queryFn:  () => getInstitutionContracts(institutionId),
+  })
+
+  const createMut = useMutation({
+    mutationFn: () => createInstitutionContract(institutionId, {
+      annual_value_rub: Number(annualValue),
+      seats_purchased:  Number(seats),
+      term_start: termStart,
+      term_end:   termEnd,
+      notes: notes.trim() || null,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-contracts', institutionId] })
+      setShowForm(false); setAnnualValue(''); setSeats(''); setTermStart(''); setTermEnd(''); setNotes('')
+      addToast('Контракт добавлен', 'success')
+    },
+    onError: () => addToast('Не удалось добавить контракт — проверьте даты и суммы', 'error'),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (contractId: string) => deleteInstitutionContract(institutionId, contractId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-contracts', institutionId] })
+      addToast('Контракт удалён', 'success')
+    },
+    onError: () => addToast('Не удалось удалить контракт', 'error'),
+  })
+
+  const field = 'px-3 py-2 text-sm font-sans bg-surface border border-border rounded-md focus:outline-none focus:border-border-strong'
+  const today = new Date().toISOString().slice(0, 10)
+
+  const valid = Number(annualValue) >= 0 && Number(seats) > 0 && termStart && termEnd && termEnd > termStart
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-sans text-sm font-medium text-ink">Контракты — {institutionName}</h3>
+        {!showForm && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="text-xs font-sans px-3 py-1.5 rounded-md border border-border-mid text-ink-secondary hover:bg-surface transition-colors"
+          >
+            + Новый контракт
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <div className="bg-surface border border-border rounded-lg p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              className={field} type="number" min={0} placeholder="Сумма контракта, ₽/год"
+              value={annualValue} onChange={(e) => setAnnualValue(e.target.value)}
+            />
+            <input
+              className={field} type="number" min={1} placeholder="Мест"
+              value={seats} onChange={(e) => setSeats(e.target.value)}
+            />
+            <input
+              className={field} type="date" placeholder="Начало срока"
+              value={termStart} onChange={(e) => setTermStart(e.target.value)}
+            />
+            <input
+              className={field} type="date" placeholder="Конец срока" min={termStart || undefined}
+              value={termEnd} onChange={(e) => setTermEnd(e.target.value)}
+            />
+          </div>
+          <input
+            className={`${field} w-full`} placeholder="Заметки (номер договора, контакт и т.п.)"
+            value={notes} onChange={(e) => setNotes(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <Button onClick={() => createMut.mutate()} loading={createMut.isPending} disabled={!valid}>Сохранить</Button>
+            <button
+              type="button" onClick={() => setShowForm(false)}
+              className="px-4 py-2 rounded-md border border-border-mid text-ink-secondary font-sans text-sm hover:bg-surface-warm transition-colors"
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="text-xs font-sans text-ink-tertiary py-2">Загрузка контрактов…</div>
+      ) : contracts.length === 0 ? (
+        <div className="text-xs font-sans text-ink-tertiary py-2">
+          Контрактов пока нет — институциональные тарифы без записи контракта не учитываются в отчётах по марже.
+        </div>
+      ) : (
+        <table className="w-full text-xs font-sans">
+          <thead>
+            <tr className="text-ink-tertiary border-b border-border">
+              <th className="text-left py-1.5 font-medium">Срок</th>
+              <th className="text-right py-1.5 font-medium">Сумма/год</th>
+              <th className="text-right py-1.5 font-medium">Мест</th>
+              <th className="text-left py-1.5 font-medium pl-3">Заметки</th>
+              <th className="py-1.5"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {contracts.map((c: InstitutionContract) => {
+              const active = c.term_start <= today && today <= c.term_end
+              return (
+                <tr key={c.id} className="border-b border-border last:border-0">
+                  <td className="py-2 text-ink">
+                    {fmtDate(c.term_start)} – {fmtDate(c.term_end)}
+                    {active && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-light text-amber">действует</span>}
+                  </td>
+                  <td className="py-2 text-right text-ink">{rub(c.annual_value_rub)}</td>
+                  <td className="py-2 text-right text-ink">{c.seats_purchased}</td>
+                  <td className="py-2 pl-3 text-ink-secondary">{c.notes ?? '—'}</td>
+                  <td className="py-2 text-right">
+                    <button
+                      onClick={() => { if (confirm('Удалить контракт?')) deleteMut.mutate(c.id) }}
+                      className="text-ink-tertiary hover:text-red-600 text-[11px]"
+                    >
+                      Удалить
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
   )
 }
 

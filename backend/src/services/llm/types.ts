@@ -23,6 +23,12 @@ export interface CallContext {
   teacherId:      string
   institutionId?: string
   feature:        Feature
+  // TODO.md Feature AL Phase 0 — a sub-dimension within a feature, e.g.
+  // presentation depth ('standard' | 'deep'). Flows straight through to
+  // usageLog.ts's CreateUsageLogParams.variant via the existing
+  // `...context`/`...opts.context` spreads in deepseek.ts/qwen.ts/yandex.ts
+  // — no per-provider changes needed to plumb a new variant through.
+  variant?:       string
 }
 
 export interface ChatOptions {

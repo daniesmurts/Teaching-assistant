@@ -47,6 +47,7 @@ import Feedback from './pages/Feedback'
 import AdminLayout from './pages/admin/AdminLayout'
 import AdminOverview from './pages/admin/AdminOverview'
 import AdminUsage from './pages/admin/AdminUsage'
+import AdminCapacity from './pages/admin/AdminCapacity'
 import AdminActivation from './pages/admin/AdminActivation'
 import AdminPayments from './pages/admin/AdminPayments'
 import AdminTeachers from './pages/admin/AdminTeachers'
@@ -321,6 +322,7 @@ export default function App() {
           <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>
             <Route index            element={<AdminOverview />} />
             <Route path="usage"     element={<AdminUsage />} />
+            <Route path="capacity"  element={<AdminCapacity />} />
             <Route path="activation" element={<AdminActivation />} />
             <Route path="payments"  element={<AdminPayments />} />
             <Route path="teachers"  element={<AdminTeachers />} />

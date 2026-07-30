@@ -22,6 +22,8 @@ import { registerLongReviewWorker } from './services/longReviewWorker'
 import { registerGradeJobWorker } from './services/gradeJobWorker'
 import { registerFosWorker } from './services/fosWorker'
 import { registerPresentationJobWorker } from './services/presentationJobWorker'
+import { startResourceSampler } from './services/resourceSampler'
+import { startUsageRollupScheduler } from './services/usageRollup'
 
 const PORT = config.port
 
@@ -39,6 +41,8 @@ async function main(): Promise<void> {
     startRenewalScheduler()   // daily auto-renewal sweep
     startActivationScheduler()        // hourly onboarding-nudge sweep
     startActivationDigestScheduler()  // weekly Telegram activation summary
+    startResourceSampler()            // ~60s in-process capacity sampler
+    startUsageRollupScheduler()       // recompute usage/institution rollups every 6h
   })
 }
 

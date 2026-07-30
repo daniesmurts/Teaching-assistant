@@ -16,6 +16,10 @@ import {
   listInstitutionsWithCounts, createInstitution, updateInstitution,
   getSamlConfig, setSamlConfig,
 } from '../db/queries/institutions'
+import {
+  listInstitutionContracts, createInstitutionContract,
+  updateInstitutionContract, deleteInstitutionContract,
+} from '../db/queries/institutionContracts'
 import { syncRoleToTree, clearOrgTiesOutsideInstitution, assignDefaultDepartmentIfUnset } from '../db/queries/orgUnits'
 import { metadataUrlForInstitution, acsUrlForInstitution } from '../services/saml'
 import { listFeedback } from '../db/queries/feedback'
@@ -51,7 +55,12 @@ router.get('/overview', asyncHandler(async (_req, res) => {
     }>(`
       SELECT
         COUNT(*)                                                                       AS total_teachers,
-        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')               AS active_this_week,
+        -- TODO.md Feature AL Phase 0 — this used to filter on created_at, which
+        -- counts SIGNUPS this week, not active users (new_this_month below is
+        -- the same metric on a wider window — that was the tell). last_seen_at
+        -- (migration 073, touched on every authenticated request) is the real
+        -- activity signal; COALESCE covers accounts that predate that column.
+        COUNT(*) FILTER (WHERE COALESCE(last_seen_at, created_at) >= NOW() - INTERVAL '7 days') AS active_this_week,
         COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW()))               AS new_this_month,
         (SELECT COUNT(*) FROM assignments)                                             AS total_grades,
         (SELECT COUNT(*) FROM presentations)                                           AS total_presentations,
@@ -606,6 +615,84 @@ router.put('/institutions/:id/saml', asyncHandler(async (req, res) => {
   const updated = await setSamlConfig(req.params.id, b)
   if (!updated) throw new NotFoundError('Организация')
   res.json(updated)
+}))
+
+// ─── Institution contracts (TODO.md Feature AL Phase 0) ───────────────────────
+// Manual record of negotiated institution deals — institution revenue
+// doesn't exist anywhere else in the database (payments.ts is
+// teacher-scoped only), and these deals are negotiated offline via 44-ФЗ
+// procurement, so there's no payment webhook to derive this from.
+
+router.get('/institutions/:id/contracts', asyncHandler(async (req, res) => {
+  res.json(await listInstitutionContracts(req.params.id))
+}))
+
+function parseIsoDate(v: unknown, field: string): string {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    throw new ValidationError(`${field}: укажите дату в формате ГГГГ-ММ-ДД`)
+  }
+  return v
+}
+
+router.post('/institutions/:id/contracts', asyncHandler(async (req, res) => {
+  const { annual_value_rub, seats_purchased, term_start, term_end, notes } = req.body as {
+    annual_value_rub?: unknown; seats_purchased?: unknown
+    term_start?: unknown; term_end?: unknown; notes?: unknown
+  }
+
+  const annualValueRub = Number(annual_value_rub)
+  if (!Number.isFinite(annualValueRub) || annualValueRub < 0) {
+    throw new ValidationError('Сумма контракта должна быть неотрицательным числом')
+  }
+  const seatsPurchased = Number(seats_purchased)
+  if (!Number.isInteger(seatsPurchased) || seatsPurchased < 1) {
+    throw new ValidationError('Количество мест должно быть положительным целым числом')
+  }
+  const termStart = parseIsoDate(term_start, 'Начало срока')
+  const termEnd   = parseIsoDate(term_end, 'Конец срока')
+  if (termEnd <= termStart) throw new ValidationError('Конец срока должен быть позже начала')
+
+  res.status(201).json(await createInstitutionContract({
+    institutionId:  req.params.id,
+    annualValueRub, seatsPurchased, termStart, termEnd,
+    notes: typeof notes === 'string' ? notes.trim() || null : null,
+    createdBy: req.teacher.id,
+  }))
+}))
+
+router.patch('/institutions/:id/contracts/:contractId', asyncHandler(async (req, res) => {
+  const { annual_value_rub, seats_purchased, term_start, term_end, notes } = req.body as {
+    annual_value_rub?: unknown; seats_purchased?: unknown
+    term_start?: unknown; term_end?: unknown; notes?: unknown
+  }
+
+  const patch: Parameters<typeof updateInstitutionContract>[1] = {}
+  if (annual_value_rub !== undefined) {
+    const v = Number(annual_value_rub)
+    if (!Number.isFinite(v) || v < 0) throw new ValidationError('Сумма контракта должна быть неотрицательным числом')
+    patch.annualValueRub = v
+  }
+  if (seats_purchased !== undefined) {
+    const v = Number(seats_purchased)
+    if (!Number.isInteger(v) || v < 1) throw new ValidationError('Количество мест должно быть положительным целым числом')
+    patch.seatsPurchased = v
+  }
+  if (term_start !== undefined) patch.termStart = parseIsoDate(term_start, 'Начало срока')
+  if (term_end   !== undefined) patch.termEnd   = parseIsoDate(term_end, 'Конец срока')
+  if (patch.termStart && patch.termEnd && patch.termEnd <= patch.termStart) {
+    throw new ValidationError('Конец срока должен быть позже начала')
+  }
+  if (notes !== undefined) patch.notes = typeof notes === 'string' ? notes.trim() || null : null
+
+  const updated = await updateInstitutionContract(req.params.contractId, patch)
+  if (!updated) throw new NotFoundError('Контракт')
+  res.json(updated)
+}))
+
+router.delete('/institutions/:id/contracts/:contractId', asyncHandler(async (req, res) => {
+  const deleted = await deleteInstitutionContract(req.params.contractId)
+  if (!deleted) throw new NotFoundError('Контракт')
+  res.status(204).end()
 }))
 
 export default router

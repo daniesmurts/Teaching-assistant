@@ -442,26 +442,55 @@ export interface InstitutionDailyUsageRow {
 // Tokens + counts only — cost_usd is deliberately omitted (platform-admin only).
 // Scoped via teacher membership so it works regardless of api_usage_log.institution_id.
 // See `listInstitutionTeachers`'s doc comment for `unitPathPrefixes` semantics.
+// grade_count is real grading actions from `assignments`, not a count of LLM
+// calls tagged feature = 'grading' — that tag is a shared cost bucket reused
+// by many unrelated services and one grading click can log several rows
+// under it (critic/calc/citation sub-calls, confidence-ensemble samples).
+// See the longer comment on usageLog.ts's getDailyUsage for the full story.
+// The `grades` CTE duplicates the same institution/subtree scoping as
+// `usage` so both sides of the FULL OUTER JOIN respect unitPathPrefixes.
 export async function getInstitutionDailyUsage(
   institutionId: string,
   days = 30,
   unitPathPrefixes?: string[]
 ): Promise<InstitutionDailyUsageRow[]> {
   const { rows } = await pool.query<InstitutionDailyUsageRow>(
-    `SELECT
-       DATE(l.created_at)                                            AS date,
-       SUM(l.input_tokens + l.output_tokens)::int                    AS total_tokens,
-       COUNT(*) FILTER (WHERE l.feature = 'grading')::int            AS grade_count,
-       COUNT(*) FILTER (WHERE l.feature = 'presentation')::int       AS presentation_count
-     FROM api_usage_log l
-     JOIN teachers t ON t.id = l.teacher_id
-     LEFT JOIN org_units pu ON pu.id = t.primary_org_unit_id
-     WHERE t.institution_id = $1
-       AND l.created_at >= NOW() - ($2 || ' days')::INTERVAL
-       AND ($3::text[] IS NULL OR EXISTS (
-             SELECT 1 FROM unnest($3::text[]) AS prefix WHERE pu.path LIKE prefix || '%'
-           ))
-     GROUP BY DATE(l.created_at)
+    `WITH usage AS (
+       SELECT
+         DATE(l.created_at)                                        AS date,
+         SUM(l.input_tokens + l.output_tokens)::int                AS total_tokens,
+         COUNT(*) FILTER (WHERE l.feature = 'presentation')::int   AS presentation_count
+       FROM api_usage_log l
+       JOIN teachers t ON t.id = l.teacher_id
+       LEFT JOIN org_units pu ON pu.id = t.primary_org_unit_id
+       WHERE t.institution_id = $1
+         AND l.created_at >= NOW() - ($2 || ' days')::INTERVAL
+         AND ($3::text[] IS NULL OR EXISTS (
+               SELECT 1 FROM unnest($3::text[]) AS prefix WHERE pu.path LIKE prefix || '%'
+             ))
+       GROUP BY DATE(l.created_at)
+     ),
+     grades AS (
+       SELECT
+         DATE(a.created_at) AS date,
+         COUNT(*)::int      AS grade_count
+       FROM assignments a
+       JOIN teachers t ON t.id = a.teacher_id
+       LEFT JOIN org_units pu ON pu.id = t.primary_org_unit_id
+       WHERE t.institution_id = $1
+         AND a.created_at >= NOW() - ($2 || ' days')::INTERVAL
+         AND ($3::text[] IS NULL OR EXISTS (
+               SELECT 1 FROM unnest($3::text[]) AS prefix WHERE pu.path LIKE prefix || '%'
+             ))
+       GROUP BY DATE(a.created_at)
+     )
+     SELECT
+       COALESCE(usage.date, grades.date)     AS date,
+       COALESCE(usage.total_tokens, 0)       AS total_tokens,
+       COALESCE(grades.grade_count, 0)       AS grade_count,
+       COALESCE(usage.presentation_count, 0) AS presentation_count
+     FROM usage
+     FULL OUTER JOIN grades ON grades.date = usage.date
      ORDER BY date DESC`,
     [institutionId, days, unitPathPrefixes ?? null]
   )

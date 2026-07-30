@@ -84,3 +84,18 @@ export class GlobalSpendCapExceededError extends AppError {
     )
   }
 }
+
+// TODO.md Feature AL Phase 4 — the correct blast radius for a runaway
+// feature (e.g. deep-mode presentations) is that ONE feature, not the whole
+// platform — GlobalSpendCapExceededError above would otherwise take down
+// grading too. 503 for the same reason: temporary, not a per-account state.
+export class FeatureSpendCapExceededError extends AppError {
+  constructor(feature: string) {
+    super(
+      `Временная перегрузка: функция «${feature}» достигла дневного лимита расходов. ` +
+      'Попробуйте через несколько минут — другие функции платформы работают в обычном режиме.',
+      503,
+      'FEATURE_SPEND_CAP_EXCEEDED',
+    )
+  }
+}
