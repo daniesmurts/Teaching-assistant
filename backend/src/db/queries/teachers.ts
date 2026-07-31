@@ -28,8 +28,13 @@ export interface TeacherRow {
   primary_org_unit_id: string | null   // §7 org tree — teacher's primary department
   is_platform_admin:   boolean         // §7 orthogonal platform-owner flag
   email_verified_at:   Date | null     // NULL = ownership of the address not yet proven
+  saml_subject:        string | null   // set by findOrCreateSamlTeacher (migration 041)
+  saml_provisioned_at: Date | null
+  lti_subject:         string | null   // set by findOrCreateLtiTeacher (migration 066)
+  lti_provisioned_at:  Date | null
   institution_plan_tier:         string | null   // tier of the teacher's institution (if any)
   institution_shared_rag_enabled: boolean | null // mirror of institutions.shared_rag_enabled
+  institution_saml_force_sso:    boolean | null  // mirror of institutions.saml_force_sso
   created_at:          Date
 }
 
@@ -53,7 +58,8 @@ export async function findTeacherByEmail(email: string): Promise<TeacherRow | nu
   const { rows } = await pool.query<TeacherRow>(
     `SELECT t.*,
             i.plan_tier         AS institution_plan_tier,
-            i.shared_rag_enabled AS institution_shared_rag_enabled
+            i.shared_rag_enabled AS institution_shared_rag_enabled,
+            i.saml_force_sso    AS institution_saml_force_sso
        FROM teachers t
        LEFT JOIN institutions i ON i.id = t.institution_id
       WHERE t.email = $1 LIMIT 1`,

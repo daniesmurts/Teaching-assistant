@@ -7,6 +7,8 @@ import Button from '../components/ui/Button'
 import CopyAllButton from '../components/ui/CopyAllButton'
 import BackLink from '../components/ui/BackLink'
 import { Input } from '../components/ui/Input'
+import Badge from '../components/ui/Badge'
+import { tagColorClasses } from '../lib/tagColor'
 import { getCourses } from '../api/courses'
 import NoCourseHint from '../components/onboarding/NoCourseHint'
 import { generateTasks, getTaskSets, getTaskSet, deleteTaskSet } from '../api/tasks'
@@ -190,7 +192,14 @@ export default function MaterialGenerator() {
                 {history.map((set) => (
                   <div key={set.id} className="flex items-center gap-3 px-4 py-2.5">
                     <button onClick={() => setResult(set)} className="flex-1 text-left min-w-0">
-                      <div className="text-sm font-sans text-ink truncate">{set.topic}</div>
+                      <div className="flex items-center gap-2 min-w-0">
+                        {set.course_name && (
+                          <Badge className={`flex-shrink-0 max-w-[40%] ${tagColorClasses(set.course_id ?? set.course_name)}`}>
+                            {set.course_name}
+                          </Badge>
+                        )}
+                        <div className="text-sm font-sans text-ink truncate min-w-0 flex-1">{set.topic}</div>
+                      </div>
                       <div className="text-xs font-sans text-ink-tertiary">
                         {DIFFICULTY_LABEL[set.difficulty] ?? set.difficulty} · {set.tasks.length} шт.
                       </div>

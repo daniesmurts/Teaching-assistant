@@ -51,6 +51,14 @@ export default function Login() {
   }
 
   const loginError = login.isError ? authErrorMessage(login.error) : ''
+  // saml_force_sso safety-net rejection (backend/src/routes/auth.ts) — rare:
+  // /discover already routes SSO-configured domains away from this form
+  // before it's ever shown. Carries a real login URL, so offer it as a link
+  // rather than a dead-end error.
+  const loginErrorData = login.isError
+    ? (login.error as { response?: { data?: { code?: string; ssoLoginUrl?: string } } }).response?.data
+    : undefined
+  const ssoRequiredUrl = loginErrorData?.code === 'SSO_REQUIRED' ? loginErrorData.ssoLoginUrl : undefined
 
   return (
     <div className="min-h-screen bg-bg flex items-center justify-center p-4">
@@ -128,6 +136,14 @@ export default function Login() {
               {loginError && (
                 <div className="px-3 py-2 bg-danger-bg text-danger text-xs font-sans rounded-md">
                   {loginError}
+                  {ssoRequiredUrl && (
+                    <a
+                      href={`${API_BASE}${ssoRequiredUrl}`}
+                      className="block mt-1.5 font-medium text-amber hover:underline"
+                    >
+                      Войти через SSO →
+                    </a>
+                  )}
                 </div>
               )}
 

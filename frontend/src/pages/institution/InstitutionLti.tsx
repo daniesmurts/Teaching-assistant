@@ -4,7 +4,8 @@ import Button from '../../components/ui/Button'
 import { useUIStore } from '../../store/uiStore'
 import {
   getLtiConfig, updateLtiConfig, testLtiConnection, getLtiRegistrationLink,
-  listLtiCourseLinks, setLtiCourseLinkOrgUnit, type LtiConfigPatch, type LtiCourseLink,
+  listLtiCourseLinks, setLtiCourseLinkOrgUnit, listLtiLaunches,
+  type LtiConfigPatch, type LtiCourseLink,
 } from '../../api/lti'
 import { getOrgStructure } from '../../api/orgStructure'
 import { buildTree, TYPE_LABEL, type TreeNode } from '../../lib/orgTree'
@@ -18,7 +19,7 @@ import { buildTree, TYPE_LABEL, type TreeNode } from '../../lib/orgTree'
  * Setup form + Test connection, plus course mapping (linking Moodle contexts
  * to org_units for institutional reporting rollups — purely additive, an
  * unmapped course still works fine since courses auto-create on first
- * teacher launch). Activity log is a still-later milestone.
+ * teacher launch), plus a launch activity log for troubleshooting.
  */
 export default function InstitutionLti() {
   const qc = useQueryClient()
@@ -26,6 +27,7 @@ export default function InstitutionLti() {
 
   const { data, isLoading } = useQuery({ queryKey: ['institution-lti'], queryFn: getLtiConfig })
   const { data: courseLinks } = useQuery({ queryKey: ['institution-lti-course-links'], queryFn: listLtiCourseLinks })
+  const { data: launches } = useQuery({ queryKey: ['institution-lti-launches'], queryFn: listLtiLaunches })
   const [mappingLink, setMappingLink] = useState<LtiCourseLink | null>(null)
 
   const mapMut = useMutation({
@@ -226,7 +228,12 @@ export default function InstitutionLti() {
             <div key={l.id} className="flex items-center gap-3 bg-surface border border-border rounded-lg px-3 py-2.5">
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-sans text-ink truncate">{l.context_title ?? l.context_label ?? 'Без названия'}</div>
-                <div className="text-xs font-sans text-ink-tertiary truncate">{l.course_name ?? '—'}</div>
+                <div className="text-xs font-sans text-ink-tertiary truncate">
+                  {l.course_name ?? '—'}
+                  {(l.teacher_name || l.teacher_email) && (
+                    <span> · {l.teacher_name ?? l.teacher_email}</span>
+                  )}
+                </div>
               </div>
               <div className="text-xs font-sans flex-shrink-0">
                 {l.org_unit_name
@@ -251,6 +258,53 @@ export default function InstitutionLti() {
           onPick={(unitId) => mapMut.mutate({ id: mappingLink.id, orgUnitId: unitId })}
           busy={mapMut.isPending}
         />
+      )}
+
+      <h2 className="font-display text-xl font-bold text-ink mt-10 mb-2">Журнал запусков</h2>
+      <p className="text-xs font-sans text-ink-tertiary mb-4 max-w-prose leading-relaxed">
+        Последние 100 запусков LTI из Moodle — для диагностики, если у преподавателя или студента
+        не получается войти.
+      </p>
+
+      {!launches?.length ? (
+        <div className="bg-surface border border-border rounded-lg px-3 py-3">
+          <p className="text-sm font-sans text-ink-tertiary">Запусков пока не было.</p>
+        </div>
+      ) : (
+        <div className="bg-surface border border-border rounded-lg overflow-hidden">
+          <table className="w-full text-xs font-sans">
+            <thead>
+              <tr className="text-left text-ink-tertiary border-b border-border">
+                <th className="font-medium px-3 py-2">Когда</th>
+                <th className="font-medium px-3 py-2">Преподаватель</th>
+                <th className="font-medium px-3 py-2">Роль</th>
+                <th className="font-medium px-3 py-2">Курс</th>
+                <th className="font-medium px-3 py-2 text-right">Статус</th>
+              </tr>
+            </thead>
+            <tbody>
+              {launches.map((l) => (
+                <tr key={l.id} className="border-b border-border last:border-0">
+                  <td className="px-3 py-2 text-ink-secondary whitespace-nowrap">
+                    {new Date(l.created_at).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </td>
+                  <td className="px-3 py-2 text-ink truncate max-w-[220px]">
+                    {l.teacher_name ?? l.teacher_email ?? '—'}
+                  </td>
+                  <td className="px-3 py-2 text-ink-secondary">
+                    {l.role === 'instructor' ? 'преподаватель' : l.role === 'learner' ? 'студент' : '—'}
+                  </td>
+                  <td className="px-3 py-2 text-ink-secondary truncate max-w-[220px]">{l.context_title ?? '—'}</td>
+                  <td className="px-3 py-2 text-right">
+                    {l.success
+                      ? <span className="text-success">✓</span>
+                      : <span className="text-danger" title={l.error_code ?? undefined}>✗ {l.error_code ?? ''}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
     </div>

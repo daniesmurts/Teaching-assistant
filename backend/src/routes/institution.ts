@@ -39,6 +39,7 @@ import axios from 'axios'
 import { getLtiConfig, setLtiConfig, isLtiConfigComplete } from '../db/queries/institutions'
 import { loginInitUrl, launchCallbackUrl, jwksUrl as toolJwksUrl, createRegistrationSession, registrationInitUrl } from '../services/lti'
 import { listLtiCourseLinksForInstitution, setLtiCourseLinkOrgUnit } from '../db/queries/ltiCourseLinks'
+import { listRecentLtiLaunches } from '../db/queries/ltiLaunchLog'
 import { getOrgUnitById, getRootUnitForInstitution } from '../db/queries/orgUnits'
 import type { CriterionSubject, RubricItem } from '../../../shared/types'
 
@@ -608,6 +609,14 @@ router.get('/lti/registration-link', asyncHandler(async (req, res) => {
 router.get('/lti/course-links', asyncHandler(async (req, res) => {
   const id = institutionId(req)
   res.json({ links: await listLtiCourseLinksForInstitution(id) })
+}))
+
+// ─── Launch activity log (TODO.md Feature R backlog #1) ────────────────────────
+// Troubleshooting view — most recent 100 launches, success and failure alike.
+
+router.get('/lti/launches', asyncHandler(async (req, res) => {
+  const id = institutionId(req)
+  res.json({ launches: await listRecentLtiLaunches(id, 100) })
 }))
 
 router.put('/lti/course-links/:id', asyncHandler(async (req, res) => {

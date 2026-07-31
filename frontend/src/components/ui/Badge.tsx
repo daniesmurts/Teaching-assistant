@@ -17,13 +17,18 @@ const labels: Record<BadgeVariant, string> = {
 export default function Badge({
   children,
   variant = 'default',
+  className = '',
 }: {
   children?: React.ReactNode
   variant?: BadgeVariant
+  // Only meaningful with variant='default' — overrides its bg/text color
+  // (e.g. per-category tag colors via lib/tagColor.ts) while keeping the
+  // shared padding/rounding/font.
+  className?: string
 }) {
   const text = variant !== 'default' ? labels[variant] : children
   return (
-    <span className={`text-xs font-sans font-medium px-2 py-0.5 rounded-sm ${styles[variant]}`}>
+    <span className={`inline-block max-w-full truncate align-bottom text-xs font-sans font-medium px-2 py-0.5 rounded-sm ${className || styles[variant]}`}>
       {text}
     </span>
   )

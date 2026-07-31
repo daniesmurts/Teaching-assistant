@@ -70,6 +70,20 @@ export async function getPublishedAssignment(id: string, teacherId: string): Pro
   return rows[0] ?? null
 }
 
+/** Unscoped by teacher — used by the LTI student-launch path (routes/lti.ts)
+ *  to resolve which lti_course_links row an AGS lineitem belongs to. A
+ *  student's launch carries no teacher identity of its own, but the
+ *  published_assignment_id it does carry already uniquely determines the
+ *  course (unambiguous even when a Moodle context has multiple co-teacher
+ *  links, unlike looking the link up by context_id alone). */
+export async function getPublishedAssignmentCourseId(id: string): Promise<string | null> {
+  const { rows } = await pool.query<{ course_id: string | null }>(
+    'SELECT course_id FROM published_assignments WHERE id = $1',
+    [id]
+  )
+  return rows[0]?.course_id ?? null
+}
+
 export async function listPublishedAssignments(teacherId: string): Promise<PublishedAssignmentWithCounts[]> {
   const { rows } = await pool.query<PublishedAssignmentWithCounts>(
     `SELECT pa.*,

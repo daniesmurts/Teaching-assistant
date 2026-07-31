@@ -5,6 +5,9 @@ interface QuizRow {
   id:             string
   teacher_id:     string
   course_id:      string | null
+  // Only present when the query joins courses (findQuizzesByTeacher /
+  // findQuizById) — absent on plain `RETURNING *` rows from createQuiz.
+  course_name?:   string | null
   topic:          string
   level:          string | null
   question_count: number
@@ -18,6 +21,7 @@ function toQuiz(row: QuizRow): Quiz {
     id:             row.id,
     teacher_id:     row.teacher_id,
     course_id:      row.course_id,
+    course_name:    row.course_name ?? null,
     topic:          row.topic,
     level:          row.level as QuizLevel | null,
     question_count: row.question_count,
@@ -60,13 +64,21 @@ export async function findQuizzesByTeacher(
 ): Promise<Quiz[]> {
   if (courseId) {
     const { rows } = await pool.query<QuizRow>(
-      `SELECT * FROM quizzes WHERE teacher_id = $1 AND course_id = $2 ORDER BY created_at DESC`,
+      `SELECT q.*, c.name AS course_name
+         FROM quizzes q
+         LEFT JOIN courses c ON c.id = q.course_id
+        WHERE q.teacher_id = $1 AND q.course_id = $2
+        ORDER BY q.created_at DESC`,
       [teacherId, courseId]
     )
     return rows.map(toQuiz)
   }
   const { rows } = await pool.query<QuizRow>(
-    'SELECT * FROM quizzes WHERE teacher_id = $1 ORDER BY created_at DESC',
+    `SELECT q.*, c.name AS course_name
+       FROM quizzes q
+       LEFT JOIN courses c ON c.id = q.course_id
+      WHERE q.teacher_id = $1
+      ORDER BY q.created_at DESC`,
     [teacherId]
   )
   return rows.map(toQuiz)
@@ -74,7 +86,11 @@ export async function findQuizzesByTeacher(
 
 export async function findQuizById(id: string, teacherId: string): Promise<Quiz | null> {
   const { rows } = await pool.query<QuizRow>(
-    'SELECT * FROM quizzes WHERE id = $1 AND teacher_id = $2 LIMIT 1',
+    `SELECT q.*, c.name AS course_name
+       FROM quizzes q
+       LEFT JOIN courses c ON c.id = q.course_id
+      WHERE q.id = $1 AND q.teacher_id = $2
+      LIMIT 1`,
     [id, teacherId]
   )
   return rows[0] ? toQuiz(rows[0]) : null

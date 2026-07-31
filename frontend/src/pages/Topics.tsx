@@ -4,6 +4,8 @@ import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Button from '../components/ui/Button'
 import CopyAllButton from '../components/ui/CopyAllButton'
+import Badge from '../components/ui/Badge'
+import { tagColorClasses } from '../lib/tagColor'
 import { getCourses } from '../api/courses'
 import NoCourseHint from '../components/onboarding/NoCourseHint'
 import { getStudents } from '../api/grading'
@@ -193,11 +195,18 @@ export default function Topics() {
                   <button key={h.id} onClick={() => setResult(h)}
                     className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-warm transition-colors ${i < arr.length - 1 ? 'border-b border-border' : ''}`}>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-sans text-ink truncate">
-                        {h.field || 'Без направления'} · {labelFor(WORK_TYPES, h.work_type)}
-                        {h.student_name && (
-                          <span className="text-ink-secondary font-normal"> · для {h.student_name}</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        {h.course_name && (
+                          <Badge className={`flex-shrink-0 max-w-[40%] ${tagColorClasses(h.course_id ?? h.course_name)}`}>
+                            {h.course_name}
+                          </Badge>
                         )}
+                        <div className="text-sm font-sans text-ink truncate min-w-0 flex-1">
+                          {h.field || 'Без направления'} · {labelFor(WORK_TYPES, h.work_type)}
+                          {h.student_name && (
+                            <span className="text-ink-secondary font-normal"> · для {h.student_name}</span>
+                          )}
+                        </div>
                       </div>
                       <div className="text-xs font-sans text-ink-tertiary">
                         {labelFor(LEVELS, h.level)} · {h.topics.length} тем

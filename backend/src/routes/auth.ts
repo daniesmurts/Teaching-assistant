@@ -34,7 +34,10 @@ import {
 } from '../services/emailVerification'
 import { setEmailVerified } from '../db/queries/teachers'
 import { findValidInviteByToken, markInviteAccepted } from '../db/queries/teacherInvites'
-import { getInstitutionById, findInstitutionByEmailDomain, countInstitutionTeachers } from '../db/queries/institutions'
+import {
+  getInstitutionById, findInstitutionByEmailDomain, countInstitutionTeachers,
+  getSamlConfig, isSamlConfigComplete,
+} from '../db/queries/institutions'
 import { isInstitutionAdmin, assignDefaultDepartmentIfUnset } from '../db/queries/orgUnits'
 import { verifyNudgeUnsubToken } from '../services/activation'
 import { setNudgeEmailsEnabled } from '../db/queries/activation'
@@ -395,6 +398,36 @@ router.post(
       recordAudit({ actorEmail: email, action: 'auth.login_failed',
         metadata: { reason: 'unknown_email' }, ...reqMeta(req) })
       throw new ValidationError('Неверный адрес эл. почты или пароль')
+    }
+
+    // Institution requires SSO-only login (saml_force_sso) — reject before
+    // even checking the password so a correct password can't be used to
+    // route around it. /api/sso/discover already sends most teachers to
+    // their IdP before they ever reach this route; this is the safety net
+    // for a teacher whose institution_id doesn't match their email's
+    // auto-discovered domain (e.g. manually invited under a different
+    // domain). Responds directly (not via AppError) because AppError's
+    // `details` isn't serialised by errorHandler.ts and the frontend needs
+    // the SSO login URL to offer a real way in, not a dead-end error.
+    //
+    // Only enforced when SAML is actually complete+enabled — force_sso is
+    // stored independently of the other SAML fields, and blindly enforcing
+    // it without a working SAML config behind it would lock every teacher
+    // in the institution out with no login path at all. This check is the
+    // lockout guard.
+    if (row.institution_id && row.institution_saml_force_sso) {
+      const samlCfg = await getSamlConfig(row.institution_id)
+      if (samlCfg && isSamlConfigComplete(samlCfg)) {
+        recordAudit({ institutionId: row.institution_id, actorTeacherId: row.id,
+          actorEmail: row.email, action: 'auth.login_failed',
+          metadata: { reason: 'sso_required' }, ...reqMeta(req) })
+        res.status(403).json({
+          error:       'Эта организация требует вход только через SSO. Используйте единый вход.',
+          code:        'SSO_REQUIRED',
+          ssoLoginUrl: `/api/sso/${row.institution_id}/login`,
+        })
+        return
+      }
     }
 
     const valid = await bcrypt.compare(password, row.password_hash)

@@ -78,6 +78,10 @@ export interface LtiCourseLink {
   course_name:           string | null
   org_unit_id:           string | null
   org_unit_name:         string | null
+  // A co-taught Moodle context can have more than one row (one per teacher
+  // who's launched it) — these distinguish them.
+  teacher_name:          string | null
+  teacher_email:         string | null
   last_launch_at:        string
 }
 
@@ -87,4 +91,22 @@ export async function listLtiCourseLinks(): Promise<LtiCourseLink[]> {
 
 export async function setLtiCourseLinkOrgUnit(id: string, orgUnitId: string | null): Promise<LtiCourseLink> {
   return (await client.put<LtiCourseLink>(`/api/institution/lti/course-links/${id}`, { org_unit_id: orgUnitId })).data
+}
+
+// ─── Launch activity log ────────────────────────────────────────────────────────
+
+export interface LtiLaunch {
+  id:            string
+  teacher_name:  string | null
+  teacher_email: string | null
+  message_type:  string | null
+  role:          string | null
+  context_title: string | null
+  success:       boolean
+  error_code:    string | null
+  created_at:    string
+}
+
+export async function listLtiLaunches(): Promise<LtiLaunch[]> {
+  return (await client.get<{ launches: LtiLaunch[] }>('/api/institution/lti/launches')).data.launches
 }

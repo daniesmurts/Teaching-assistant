@@ -54,7 +54,7 @@ export default function AdminInstitutions() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-4xl mx-auto px-6 py-6">
+      <div className="max-w-6xl mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="font-display text-2xl font-bold text-ink">Организации</h1>
@@ -375,6 +375,7 @@ function SamlForm({
   addToast: (msg: string, type?: 'success' | 'error') => void
 }) {
   const [enabled, setEnabled]   = useState(cfg.saml_enabled)
+  const [forceSso, setForceSso] = useState(cfg.saml_force_sso)
   const [entityId, setEntityId] = useState(cfg.saml_idp_entity_id ?? '')
   const [ssoUrl, setSsoUrl]     = useState(cfg.saml_idp_sso_url ?? '')
   const [cert, setCert]         = useState(cfg.saml_idp_x509_cert ?? '')
@@ -384,6 +385,7 @@ function SamlForm({
   const saveMut = useMutation({
     mutationFn: () => updateSamlConfig(institutionId, {
       saml_enabled:         enabled,
+      saml_force_sso:       forceSso,
       saml_idp_entity_id:   entityId.trim() || null,
       saml_idp_sso_url:     ssoUrl.trim() || null,
       saml_idp_x509_cert:   cert.trim() || null,
@@ -413,10 +415,16 @@ function SamlForm({
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-sans text-sm font-medium text-ink">Настройки IdP — {institutionName}</h3>
-          <label className="flex items-center gap-2 text-xs font-sans text-ink-secondary cursor-pointer">
-            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-            Включить SSO
-          </label>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-xs font-sans text-ink-secondary cursor-pointer">
+              <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+              Включить SSO
+            </label>
+            <label className="flex items-center gap-2 text-xs font-sans text-ink-secondary cursor-pointer" title="Преподаватели этой организации не смогут войти по паролю — только через SSO">
+              <input type="checkbox" checked={forceSso} onChange={(e) => setForceSso(e.target.checked)} disabled={!enabled} />
+              Только SSO (запретить пароль)
+            </label>
+          </div>
         </div>
 
         <div>
@@ -479,7 +487,7 @@ function CopyField({ label, value, onCopy }: { label: string; value: string; onC
       <label className="block text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-1.5">{label}</label>
       <div className="flex gap-2">
         <input readOnly value={value}
-          className="flex-1 px-3 py-2 text-xs font-mono bg-surface border border-border rounded-md text-ink-secondary" />
+          className="flex-1 min-w-0 px-3 py-2 text-xs font-mono bg-surface border border-border rounded-md text-ink-secondary truncate" />
         <button
           onClick={() => onCopy(value, label)}
           className="px-3 py-2 rounded-md border border-border-mid text-ink-secondary font-sans text-xs hover:bg-surface transition-colors flex-shrink-0"

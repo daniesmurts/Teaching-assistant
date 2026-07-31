@@ -7,6 +7,8 @@ import Button from '../components/ui/Button'
 import CopyAllButton from '../components/ui/CopyAllButton'
 import BackLink from '../components/ui/BackLink'
 import Icon from '../components/ui/Icon'
+import Badge from '../components/ui/Badge'
+import { tagColorClasses } from '../lib/tagColor'
 import { Input } from '../components/ui/Input'
 import { getCourses } from '../api/courses'
 import NoCourseHint from '../components/onboarding/NoCourseHint'
@@ -194,8 +196,15 @@ export default function Quizzes() {
                     {list.map((q, i) => (
                       <div key={q.id}
                         className={`flex items-center gap-3 px-4 py-3 ${i < list.length - 1 ? 'border-b border-border' : ''}`}>
-                        <button onClick={() => setActiveQuiz(q)} className="flex-1 text-left">
-                          <div className="text-sm font-sans font-medium text-ink">{q.topic}</div>
+                        <button onClick={() => setActiveQuiz(q)} className="flex-1 text-left min-w-0">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {q.course_name && (
+                              <Badge className={`flex-shrink-0 max-w-[40%] ${tagColorClasses(q.course_id ?? q.course_name)}`}>
+                                {q.course_name}
+                              </Badge>
+                            )}
+                            <div className="text-sm font-sans font-medium text-ink truncate min-w-0 flex-1">{q.topic}</div>
+                          </div>
                           <div className="text-xs font-sans text-ink-tertiary mt-0.5">
                             {q.question_count} вопросов
                             {q.level && <span> · {LEVEL_LABEL[q.level]}</span>}
@@ -203,7 +212,7 @@ export default function Quizzes() {
                           </div>
                         </button>
                         <button onClick={() => { if (confirm('Удалить этот тест?')) deleteMut.mutate(q.id) }}
-                          className="text-xs text-ink-tertiary hover:text-danger">Удалить</button>
+                          className="text-xs text-ink-tertiary hover:text-danger flex-shrink-0">Удалить</button>
                       </div>
                     ))}
                   </div>

@@ -11,6 +11,10 @@ interface PresentationRow {
   id: string
   teacher_id: string
   course_id: string | null
+  // Only present when the query joins courses (findPresentationsByTeacher /
+  // findPresentationById) — absent (undefined) on plain `RETURNING *` rows
+  // from create/update, which toPresentation() maps to null.
+  course_name?: string | null
   lecture_number: number | null
   topic: string
   duration_minutes: number | null
@@ -29,6 +33,7 @@ function toPresentation(row: PresentationRow): Presentation {
     id: row.id,
     teacher_id: row.teacher_id,
     course_id: row.course_id,
+    course_name: row.course_name ?? null,
     lecture_number: row.lecture_number,
     topic: row.topic,
     duration_minutes: row.duration_minutes,
@@ -125,15 +130,21 @@ export async function findPresentationsByTeacher(
 ): Promise<Presentation[]> {
   if (courseId) {
     const { rows } = await pool.query<PresentationRow>(
-      `SELECT * FROM presentations
-       WHERE teacher_id = $1 AND course_id = $2
-       ORDER BY created_at DESC`,
+      `SELECT p.*, c.name AS course_name
+         FROM presentations p
+         LEFT JOIN courses c ON c.id = p.course_id
+        WHERE p.teacher_id = $1 AND p.course_id = $2
+        ORDER BY p.created_at DESC`,
       [teacherId, courseId]
     )
     return rows.map(toPresentation)
   }
   const { rows } = await pool.query<PresentationRow>(
-    'SELECT * FROM presentations WHERE teacher_id = $1 ORDER BY created_at DESC',
+    `SELECT p.*, c.name AS course_name
+       FROM presentations p
+       LEFT JOIN courses c ON c.id = p.course_id
+      WHERE p.teacher_id = $1
+      ORDER BY p.created_at DESC`,
     [teacherId]
   )
   return rows.map(toPresentation)
@@ -144,7 +155,11 @@ export async function findPresentationById(
   teacherId: string
 ): Promise<Presentation | null> {
   const { rows } = await pool.query<PresentationRow>(
-    'SELECT * FROM presentations WHERE id = $1 AND teacher_id = $2 LIMIT 1',
+    `SELECT p.*, c.name AS course_name
+       FROM presentations p
+       LEFT JOIN courses c ON c.id = p.course_id
+      WHERE p.id = $1 AND p.teacher_id = $2
+      LIMIT 1`,
     [id, teacherId]
   )
   return rows[0] ? toPresentation(rows[0]) : null

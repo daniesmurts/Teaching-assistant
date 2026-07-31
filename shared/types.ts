@@ -636,6 +636,7 @@ export interface TopicSet {
   id:            string
   teacher_id:    string
   course_id:     string | null
+  course_name:   string | null
   level:         string
   work_type:     string
   field:         string | null
@@ -816,6 +817,11 @@ export interface Presentation {
   id: string
   teacher_id: string
   course_id: string | null
+  // Denormalised alongside course_id for display (history list subject tag) —
+  // null whenever course_id is null, or on rows returned by a write path
+  // that doesn't join courses (create/update — the list is what re-fetches
+  // with the join, so freshly-created rows don't need it populated).
+  course_name: string | null
   lecture_number: number | null
   topic: string
   duration_minutes: number | null
@@ -861,6 +867,7 @@ export interface Quiz {
   id:             string
   teacher_id:     string
   course_id:      string | null
+  course_name:    string | null
   topic:          string
   level:          QuizLevel | null
   question_count: number
@@ -1120,14 +1127,15 @@ export interface TaskItem {
 }
 
 export interface TaskSet {
-  id:         string
-  teacher_id: string
-  course_id:  string | null
-  kind:       MaterialKind
-  topic:      string
-  difficulty: TaskDifficulty
-  tasks:      TaskItem[]
-  created_at: string
+  id:          string
+  teacher_id:  string
+  course_id:   string | null
+  course_name: string | null
+  kind:        MaterialKind
+  topic:       string
+  difficulty:  TaskDifficulty
+  tasks:       TaskItem[]
+  created_at:  string
 }
 
 // ─── ФОС generator (TODO.md Feature X) ─────────────────────────────────────────

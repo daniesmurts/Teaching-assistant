@@ -5,6 +5,8 @@ import FeatureIntro from '../components/ui/FeatureIntro'
 import PresentationForm from '../components/presentations/PresentationForm'
 import SlideContent from '../components/presentations/SlideContent'
 import Button from '../components/ui/Button'
+import Badge from '../components/ui/Badge'
+import { tagColorClasses } from '../lib/tagColor'
 import { getPresentations, deletePresentation, type GenerateResponse } from '../api/presentations'
 import { useUIStore } from '../store/uiStore'
 import type { Presentation, Slide } from '../types'
@@ -25,13 +27,18 @@ function HistoryItem({
   return (
     <div className="flex items-center gap-4 px-4 py-3 border-b border-border last:border-0">
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {p.course_name && (
+            <Badge className={`flex-shrink-0 max-w-[40%] ${tagColorClasses(p.course_id ?? p.course_name)}`}>
+              {p.course_name}
+            </Badge>
+          )}
           {p.lecture_number && (
             <span className="text-[10px] font-sans font-semibold bg-amber-light text-amber px-1.5 py-0.5 rounded-sm uppercase tracking-wide flex-shrink-0">
               Лекция {p.lecture_number}
             </span>
           )}
-          <span className="text-sm font-sans font-medium text-ink truncate">{p.topic}</span>
+          <span className="text-sm font-sans font-medium text-ink truncate min-w-0 flex-1">{p.topic}</span>
         </div>
         <div className="text-xs font-sans text-ink-tertiary mt-0.5">
           {p.duration_minutes && `${p.duration_minutes} мин · `}

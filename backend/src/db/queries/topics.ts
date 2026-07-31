@@ -14,7 +14,7 @@ export async function createTopicSet(data: {
   topics: TopicItem[]
   usedSearch: boolean
 }): Promise<TopicSet> {
-  const { rows } = await pool.query<TopicSet>(
+  const { rows } = await pool.query<Omit<TopicSet, 'course_name'>>(
     `INSERT INTO topic_sets
        (teacher_id, course_id, level, work_type, field, interests, practice_site,
         student_name, student_group, topics, used_search)
@@ -27,12 +27,16 @@ export async function createTopicSet(data: {
       JSON.stringify(data.topics), data.usedSearch,
     ]
   )
-  return rows[0]
+  return { ...rows[0], course_name: null }
 }
 
 export async function listTopicSets(teacherId: string, limit = 50): Promise<TopicSet[]> {
   const { rows } = await pool.query<TopicSet>(
-    `SELECT * FROM topic_sets WHERE teacher_id = $1 ORDER BY created_at DESC LIMIT $2`,
+    `SELECT t.*, c.name AS course_name
+       FROM topic_sets t
+       LEFT JOIN courses c ON c.id = t.course_id
+      WHERE t.teacher_id = $1
+      ORDER BY t.created_at DESC LIMIT $2`,
     [teacherId, Math.min(limit, 200)]
   )
   return rows
@@ -40,7 +44,10 @@ export async function listTopicSets(teacherId: string, limit = 50): Promise<Topi
 
 export async function getTopicSet(id: string, teacherId: string): Promise<TopicSet | null> {
   const { rows } = await pool.query<TopicSet>(
-    `SELECT * FROM topic_sets WHERE id = $1 AND teacher_id = $2`,
+    `SELECT t.*, c.name AS course_name
+       FROM topic_sets t
+       LEFT JOIN courses c ON c.id = t.course_id
+      WHERE t.id = $1 AND t.teacher_id = $2`,
     [id, teacherId]
   )
   return rows[0] ?? null

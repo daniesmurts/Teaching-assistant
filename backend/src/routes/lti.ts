@@ -16,14 +16,15 @@ import {
 import { getLtiConfig, setLtiConfig, findLtiConfigForIssuer, isLtiConfigComplete } from '../db/queries/institutions'
 import { escapeHtml } from '../lib/escapeHtml'
 import { findOrCreateLtiTeacher } from '../db/queries/teachers'
-import { resolveCourseForLtiLaunch, findLtiCourseLinkId, recordNrpsMembershipsUrl } from '../db/queries/ltiCourseLinks'
+import { resolveCourseForLtiLaunch, findLtiCourseLinkByCourseId, recordNrpsMembershipsUrl } from '../db/queries/ltiCourseLinks'
+import { logLtiLaunch } from '../db/queries/ltiLaunchLog'
 import { recordLineItemIfAbsent } from '../db/queries/ltiLineItems'
 import {
   createDeepLinkSession, getDeepLinkSession, consumeDeepLinkSession,
 } from '../db/queries/ltiDeepLinkSessions'
 import {
   listPublishedAssignments, createPublishedAssignment, getPublishedAssignment,
-  findOrCreateLtiInvite,
+  getPublishedAssignmentCourseId, findOrCreateLtiInvite,
 } from '../db/queries/publishedAssignments'
 
 const router = Router()
@@ -102,168 +103,204 @@ router.post('/launch', ltiLimiter, asyncHandler(async (req, res) => {
     throw new AppError('Запуск LTI просрочен или уже был использован', 400, 'LTI_STATE_INVALID')
   }
 
-  const cfg = await getLtiConfig(consumed.institutionId)
-  if (!cfg || !isLtiConfigComplete(cfg)) {
-    throw new AppError('LTI не настроен для этой организации', 404, 'LTI_NOT_CONFIGURED')
-  }
-
-  const claims = await validateLaunchToken({
-    idToken,
-    institutionId: consumed.institutionId,
-    cfg,
-    expectedNonce: consumed.nonce,
-  })
-
-  const frontend = process.env.FRONTEND_URL ?? 'http://localhost:5173'
-
-  // ─── Deep Linking: teacher picks/creates a published assignment ────────────
-  if (claims.messageType === 'LtiDeepLinkingRequest') {
-    if (!isInstructorRole(claims.roles)) {
-      throw new AppError('Настройка заданий доступна только преподавателям', 403, 'LTI_DEEP_LINK_FORBIDDEN')
-    }
-    if (!claims.deepLinkingSettings) {
-      throw new AppError('В запросе отсутствуют настройки Deep Linking', 400, 'LTI_NO_DEEP_LINK_SETTINGS')
-    }
-    if (!claims.email) {
-      throw new AppError(
-        'В запуске LTI не найден адрес эл. почты. Проверьте настройки конфиденциальности инструмента в Moodle.',
-        400, 'LTI_NO_EMAIL'
-      )
+  // Everything from here on has a resolved institution, so activity-log
+  // failures below can be attributed to it. Wrapping the rest of the handler
+  // rather than logging at every individual throw site — each already has
+  // its own AppError code, which the catch block reuses directly. The log
+  // write itself is fire-and-forget (`.catch(() => {})` inside
+  // logLtiLaunch's own call sites below) — logging must never break a real
+  // launch, success or failure.
+  try {
+    const cfg = await getLtiConfig(consumed.institutionId)
+    if (!cfg || !isLtiConfigComplete(cfg)) {
+      throw new AppError('LTI не настроен для этой организации', 404, 'LTI_NOT_CONFIGURED')
     }
 
-    const teacher = await findOrCreateLtiTeacher({
-      email:         claims.email,
-      name:          claims.name,
+    const claims = await validateLaunchToken({
+      idToken,
       institutionId: consumed.institutionId,
-      ltiSubject:    claims.sub,
-    })
-    if (!teacher.is_active) throw new AppError('Аккаунт деактивирован', 403, 'ACCOUNT_DISABLED')
-
-    // Resolve/create the course now (not just at student-launch time) so a
-    // published assignment created from this picker is course-scoped from
-    // the start — otherwise its grades would never feed course-scoped RAG.
-    const courseId = claims.contextId
-      ? await resolveCourseForLtiLaunch({
-          institutionId: consumed.institutionId,
-          deploymentId:  claims.deploymentId,
-          contextId:     claims.contextId,
-          contextTitle:  claims.contextTitle,
-          contextLabel:  claims.contextLabel,
-          teacherId:     teacher.id,
-        })
-      : null
-
-    const sessionId = await createDeepLinkSession({
-      institutionId:     consumed.institutionId,
-      teacherId:         teacher.id,
-      deploymentId:      claims.deploymentId,
-      contextId:         claims.contextId,
-      contextTitle:      claims.contextTitle,
-      courseId,
-      deepLinkReturnUrl: claims.deepLinkingSettings.deepLinkReturnUrl,
-      passthroughData:   claims.deepLinkingSettings.data,
+      cfg,
+      expectedNonce: consumed.nonce,
     })
 
-    const { token } = signToken({ id: teacher.id, email: teacher.email })
-    setSessionCookie(res, token)
-    const pickerUrl = new URL('/lti/deep-link', frontend)
-    pickerUrl.searchParams.set('session', sessionId)
-    res.redirect(pickerUrl.toString())
-    return
-  }
+    const frontend = process.env.FRONTEND_URL ?? 'http://localhost:5173'
 
-  // ─── Resource Link launch ────────────────────────────────────────────────────
-  if (!claims.contextId) {
-    throw new AppError('В запуске LTI отсутствует идентификатор курса (context)', 400, 'LTI_NO_CONTEXT')
-  }
-
-  if (isInstructorRole(claims.roles)) {
-    if (!claims.email) {
-      logger.warn({
-        message: 'LTI launch missing email claim',
-        institutionId: consumed.institutionId,
-        deploymentId: claims.deploymentId,
-      })
-      throw new AppError(
-        'В запуске LTI не найден адрес эл. почты. Проверьте настройки конфиденциальности инструмента в Moodle (разрешите передачу email).',
-        400, 'LTI_NO_EMAIL'
-      )
-    }
-
-    const teacher = await findOrCreateLtiTeacher({
-      email:         claims.email,
-      name:          claims.name,
-      institutionId: consumed.institutionId,
-      ltiSubject:    claims.sub,
-    })
-    if (!teacher.is_active) throw new AppError('Аккаунт деактивирован', 403, 'ACCOUNT_DISABLED')
-
-    const courseId = await resolveCourseForLtiLaunch({
-      institutionId: consumed.institutionId,
-      deploymentId:  claims.deploymentId,
-      contextId:     claims.contextId,
-      contextTitle:  claims.contextTitle,
-      contextLabel:  claims.contextLabel,
-      teacherId:     teacher.id,
-    })
-
-    // Best-effort — never blocks the launch if it fails.
-    if (claims.nrpsContextMembershipsUrl) {
-      recordNrpsMembershipsUrl(
-        consumed.institutionId, claims.deploymentId, claims.contextId, claims.nrpsContextMembershipsUrl
-      ).catch(err => logger.warn({
-        message: 'Failed to record LTI NRPS memberships URL',
-        error: err instanceof Error ? err.message : String(err),
-      }))
-    }
-
-    const { token } = signToken({ id: teacher.id, email: teacher.email })
-    setSessionCookie(res, token)
-    const callbackUrl = new URL('/lti/callback', frontend)
-    callbackUrl.searchParams.set('courseId', courseId)
-    res.redirect(callbackUrl.toString())
-    return
-  }
-
-  if (isLearnerRole(claims.roles)) {
-    const publishedAssignmentId = claims.customParams.published_assignment_id
-    if (!publishedAssignmentId) {
-      throw new AppError(
-        'Этот элемент курса не настроен для сдачи работ через ИСПУМ', 400, 'LTI_NO_PUBLISHED_ASSIGNMENT'
-      )
-    }
-
-    // Best-effort AGS lineitem capture for the (later) grade write-back
-    // milestone — never blocks the student from reaching the writing surface.
-    if (claims.agsEndpoint?.lineitem) {
-      try {
-        const linkId = await findLtiCourseLinkId(consumed.institutionId, claims.deploymentId, claims.contextId)
-        if (linkId) {
-          await recordLineItemIfAbsent({
-            ltiCourseLinkId:       linkId,
-            lineitemUrl:           claims.agsEndpoint.lineitem,
-            publishedAssignmentId,
-          })
-        }
-      } catch (err) {
-        logger.warn({ message: 'Failed to record LTI AGS lineitem', error: err instanceof Error ? err.message : String(err) })
+    // ─── Deep Linking: teacher picks/creates a published assignment ────────────
+    if (claims.messageType === 'LtiDeepLinkingRequest') {
+      if (!isInstructorRole(claims.roles)) {
+        throw new AppError('Настройка заданий доступна только преподавателям', 403, 'LTI_DEEP_LINK_FORBIDDEN')
       }
+      if (!claims.deepLinkingSettings) {
+        throw new AppError('В запросе отсутствуют настройки Deep Linking', 400, 'LTI_NO_DEEP_LINK_SETTINGS')
+      }
+      if (!claims.email) {
+        throw new AppError(
+          'В запуске LTI не найден адрес эл. почты. Проверьте настройки конфиденциальности инструмента в Moodle.',
+          400, 'LTI_NO_EMAIL'
+        )
+      }
+
+      const teacher = await findOrCreateLtiTeacher({
+        email:         claims.email,
+        name:          claims.name,
+        institutionId: consumed.institutionId,
+        ltiSubject:    claims.sub,
+      })
+      if (!teacher.is_active) throw new AppError('Аккаунт деактивирован', 403, 'ACCOUNT_DISABLED')
+
+      // Resolve/create the course now (not just at student-launch time) so a
+      // published assignment created from this picker is course-scoped from
+      // the start — otherwise its grades would never feed course-scoped RAG.
+      const courseId = claims.contextId
+        ? await resolveCourseForLtiLaunch({
+            institutionId: consumed.institutionId,
+            deploymentId:  claims.deploymentId,
+            contextId:     claims.contextId,
+            contextTitle:  claims.contextTitle,
+            contextLabel:  claims.contextLabel,
+            teacherId:     teacher.id,
+          })
+        : null
+
+      const sessionId = await createDeepLinkSession({
+        institutionId:     consumed.institutionId,
+        teacherId:         teacher.id,
+        deploymentId:      claims.deploymentId,
+        contextId:         claims.contextId,
+        contextTitle:      claims.contextTitle,
+        courseId,
+        deepLinkReturnUrl: claims.deepLinkingSettings.deepLinkReturnUrl,
+        passthroughData:   claims.deepLinkingSettings.data,
+      })
+
+      const { token } = signToken({ id: teacher.id, email: teacher.email })
+      setSessionCookie(res, token)
+      const pickerUrl = new URL('/lti/deep-link', frontend)
+      pickerUrl.searchParams.set('session', sessionId)
+      logLtiLaunch({
+        institutionId: consumed.institutionId, teacherId: teacher.id,
+        messageType: claims.messageType, role: 'instructor', contextTitle: claims.contextTitle,
+        success: true,
+      }).catch(() => {})
+      res.redirect(pickerUrl.toString())
+      return
     }
 
-    const invite = await findOrCreateLtiInvite({
-      publishedAssignmentId,
-      ltiSubject:      claims.sub,
-      ltiDeploymentId: claims.deploymentId,
-      ltiContextId:    claims.contextId,
-      studentName:     claims.name,
-      studentEmail:    claims.email,
-    })
+    // ─── Resource Link launch ────────────────────────────────────────────────────
+    if (!claims.contextId) {
+      throw new AppError('В запуске LTI отсутствует идентификатор курса (context)', 400, 'LTI_NO_CONTEXT')
+    }
 
-    res.redirect(new URL(`/student/${invite.token}`, frontend).toString())
-    return
+    if (isInstructorRole(claims.roles)) {
+      if (!claims.email) {
+        logger.warn({
+          message: 'LTI launch missing email claim',
+          institutionId: consumed.institutionId,
+          deploymentId: claims.deploymentId,
+        })
+        throw new AppError(
+          'В запуске LTI не найден адрес эл. почты. Проверьте настройки конфиденциальности инструмента в Moodle (разрешите передачу email).',
+          400, 'LTI_NO_EMAIL'
+        )
+      }
+
+      const teacher = await findOrCreateLtiTeacher({
+        email:         claims.email,
+        name:          claims.name,
+        institutionId: consumed.institutionId,
+        ltiSubject:    claims.sub,
+      })
+      if (!teacher.is_active) throw new AppError('Аккаунт деактивирован', 403, 'ACCOUNT_DISABLED')
+
+      const courseId = await resolveCourseForLtiLaunch({
+        institutionId: consumed.institutionId,
+        deploymentId:  claims.deploymentId,
+        contextId:     claims.contextId,
+        contextTitle:  claims.contextTitle,
+        contextLabel:  claims.contextLabel,
+        teacherId:     teacher.id,
+      })
+
+      // Best-effort — never blocks the launch if it fails.
+      if (claims.nrpsContextMembershipsUrl) {
+        recordNrpsMembershipsUrl(
+          consumed.institutionId, claims.deploymentId, claims.contextId, claims.nrpsContextMembershipsUrl
+        ).catch(err => logger.warn({
+          message: 'Failed to record LTI NRPS memberships URL',
+          error: err instanceof Error ? err.message : String(err),
+        }))
+      }
+
+      const { token } = signToken({ id: teacher.id, email: teacher.email })
+      setSessionCookie(res, token)
+      const callbackUrl = new URL('/lti/callback', frontend)
+      callbackUrl.searchParams.set('courseId', courseId)
+      logLtiLaunch({
+        institutionId: consumed.institutionId, teacherId: teacher.id,
+        messageType: claims.messageType, role: 'instructor', contextTitle: claims.contextTitle,
+        success: true,
+      }).catch(() => {})
+      res.redirect(callbackUrl.toString())
+      return
+    }
+
+    if (isLearnerRole(claims.roles)) {
+      const publishedAssignmentId = claims.customParams.published_assignment_id
+      if (!publishedAssignmentId) {
+        throw new AppError(
+          'Этот элемент курса не настроен для сдачи работ через ИСПУМ', 400, 'LTI_NO_PUBLISHED_ASSIGNMENT'
+        )
+      }
+
+      // Best-effort AGS lineitem capture for the (later) grade write-back
+      // milestone — never blocks the student from reaching the writing surface.
+      // Resolved via the published assignment's own course_id, not the
+      // launch's context_id — a Moodle context can have multiple co-teacher
+      // lti_course_links rows now, so context_id alone is ambiguous; the
+      // published assignment already pins down exactly one course/teacher.
+      if (claims.agsEndpoint?.lineitem) {
+        try {
+          const courseId = await getPublishedAssignmentCourseId(publishedAssignmentId)
+          const link = courseId ? await findLtiCourseLinkByCourseId(courseId) : null
+          if (link) {
+            await recordLineItemIfAbsent({
+              ltiCourseLinkId:       link.id,
+              lineitemUrl:           claims.agsEndpoint.lineitem,
+              publishedAssignmentId,
+            })
+          }
+        } catch (err) {
+          logger.warn({ message: 'Failed to record LTI AGS lineitem', error: err instanceof Error ? err.message : String(err) })
+        }
+      }
+
+      const invite = await findOrCreateLtiInvite({
+        publishedAssignmentId,
+        ltiSubject:      claims.sub,
+        ltiDeploymentId: claims.deploymentId,
+        ltiContextId:    claims.contextId,
+        studentName:     claims.name,
+        studentEmail:    claims.email,
+      })
+
+      logLtiLaunch({
+        institutionId: consumed.institutionId, teacherId: null,
+        messageType: claims.messageType, role: 'learner', contextTitle: claims.contextTitle,
+        success: true,
+      }).catch(() => {})
+      res.redirect(new URL(`/student/${invite.token}`, frontend).toString())
+      return
+    }
+
+    throw new AppError('Роль пользователя LTI не поддерживается', 403, 'LTI_ROLE_UNSUPPORTED')
+  } catch (err) {
+    logLtiLaunch({
+      institutionId: consumed.institutionId,
+      success:       false,
+      errorCode:     err instanceof AppError ? err.code : 'LTI_UNKNOWN_ERROR',
+    }).catch(() => {})
+    throw err
   }
-
-  throw new AppError('Роль пользователя LTI не поддерживается', 403, 'LTI_ROLE_UNSUPPORTED')
 }))
 
 // ─── Deep Linking picker (frontend-facing, authenticated) ─────────────────────
