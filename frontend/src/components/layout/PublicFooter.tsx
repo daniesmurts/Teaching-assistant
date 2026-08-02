@@ -24,6 +24,7 @@ export default function PublicFooter() {
         <Link to="/use-cases" className="hover:text-ink cursor-pointer transition-colors">Применение</Link>
         <Link to="/changelog" className="hover:text-ink cursor-pointer transition-colors">Обновления</Link>
         <Link to="/institutions" className="hover:text-ink cursor-pointer transition-colors">ВУЗам</Link>
+        <Link to="/priority-2030" className="hover:text-ink cursor-pointer transition-colors">Приоритет 2030</Link>
         <Link to="/research" className="hover:text-ink cursor-pointer transition-colors">Исследования</Link>
         <Link to="/faq" className="hover:text-ink cursor-pointer transition-colors">FAQ</Link>
         <Link to="/ethics" className="hover:text-ink cursor-pointer transition-colors">Этика ИИ</Link>

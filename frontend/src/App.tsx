@@ -88,6 +88,7 @@ import LoadingSpinner from './components/ui/LoadingSpinner'
 const Landing    = lazy(() => import('./pages/Landing'))
 const About      = lazy(() => import('./pages/About'))
 const Institutions = lazy(() => import('./pages/Institutions'))
+const Priority2030 = lazy(() => import('./pages/Priority2030'))
 const Research   = lazy(() => import('./pages/Research'))
 const FAQ        = lazy(() => import('./pages/FAQ'))
 const Ethics     = lazy(() => import('./pages/Ethics'))
@@ -262,6 +263,7 @@ export default function App() {
           <Route path="/"         element={<Landing />} />
           <Route path="/about"    element={<About />} />
           <Route path="/institutions" element={<Institutions />} />
+          <Route path="/priority-2030" element={<Priority2030 />} />
           <Route path="/research"     element={<Research />} />
           <Route path="/faq"      element={<FAQ />} />
           <Route path="/ethics"   element={<Ethics />} />

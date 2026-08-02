@@ -8,5 +8,5 @@ export const contactMessageRules = [
   body('message').trim()
     .isLength({ min: 3 }).withMessage('Сообщение слишком короткое')
     .isLength({ max: 5000 }).withMessage('Сообщение слишком длинное (максимум 5000 символов)'),
-  body('sourcePage').isIn(['contact', 'research']).withMessage('Неверный источник обращения'),
+  body('sourcePage').isIn(['contact', 'research', 'priority2030']).withMessage('Неверный источник обращения'),
 ]

@@ -1,7 +1,7 @@
 import client from './client'
 
 export type ContactTopic = 'support' | 'demo' | 'research' | 'billing'
-export type ContactSourcePage = 'contact' | 'research'
+export type ContactSourcePage = 'contact' | 'research' | 'priority2030'
 
 export async function submitContactMessage(data: {
   name: string
