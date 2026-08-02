@@ -625,3 +625,69 @@ export async function getCapacityOverview(
   const res = await client.get<CapacityOverview | CapacityNoData>('/api/admin/capacity/overview', { params })
   return res.data
 }
+
+// ─── Pricing calculator (platform-admin negotiation tool) ───────────────────
+
+export interface PricingCostInputs {
+  days:                   number
+  activeTeachers:         number
+  tokenCostUsd:           number
+  ocrCostUsd:             number
+  tokenCostPerTeacherUsd: number
+  ocrCostPerTeacherUsd:   number
+  tokenCostPerTeacherRub: number
+  ocrCostPerTeacherRub:   number
+  fxRate:                 number
+  fxRateDate:             string
+}
+
+export async function getPricingCostInputs(
+  params: { days?: number; institutionId?: string } = {}
+): Promise<PricingCostInputs> {
+  const res = await client.get<PricingCostInputs>('/api/admin/pricing/cost-inputs', { params })
+  return res.data
+}
+
+export interface PricingInstitution {
+  institution_id:  string
+  name:            string
+  plan_tier:       string
+  max_teachers:    number | null
+  teacher_count:   number
+  active_teachers: number
+  seat_cap:        number
+  activation_rate: number
+}
+
+export async function getPricingInstitutions(days = 30): Promise<PricingInstitution[]> {
+  const res = await client.get<PricingInstitution[]>('/api/admin/pricing/institutions', { params: { days } })
+  return res.data
+}
+
+export interface PricingAssumptions {
+  institutionId:      string | null
+  activationOverride: number | null
+  marginMultiplier:   number
+  maxDiscountPct:     number
+  costPerActiveTeacherManualOverrideRub: number | null
+  updatedBy:          string | null
+  updatedAt:          string | null
+}
+
+export async function getPricingAssumptions(institutionId?: string): Promise<PricingAssumptions> {
+  const res = await client.get<PricingAssumptions>('/api/admin/pricing/assumptions', { params: { institutionId } })
+  return res.data
+}
+
+export async function updatePricingAssumptions(
+  institutionId: string | undefined,
+  patch: {
+    activation_override?: number | null
+    margin_multiplier?: number
+    max_discount_pct?: number
+    cost_per_active_teacher_manual_override_rub?: number | null
+  }
+): Promise<PricingAssumptions> {
+  const res = await client.put<PricingAssumptions>('/api/admin/pricing/assumptions', patch, { params: { institutionId } })
+  return res.data
+}
