@@ -31,6 +31,27 @@ export async function generatePresentation(data: GenerateRequest): Promise<Gener
   return res.data
 }
 
+// Reads text out of an uploaded PDF/Word/image conspectus (backend/src/
+// routes/presentations.ts's /extract-text) so the "Свой конспект" field can
+// be filled from a file instead of copy-paste — paste alone can't carry a
+// Word equation object (its clipboard has no plain-text form), so a .docx
+// upload is what actually preserves formulas (see services/ommlToLatex.ts).
+export interface ExtractSourceTextResponse {
+  text:       string
+  truncated:  boolean
+}
+
+export async function extractPresentationSourceText(file: File): Promise<ExtractSourceTextResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await client.post<ExtractSourceTextResponse>(
+    '/api/presentations/extract-text',
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  )
+  return res.data
+}
+
 // ─── Async presentation jobs ──────────────────────────────────────────────────
 // Generation can chain multiple LLM calls and outlive any HTTP timeout, so
 // the client enqueues a job and polls — same pattern as grading's grade-jobs.

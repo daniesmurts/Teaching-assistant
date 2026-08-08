@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { aiLimiter } from '../middleware/rateLimits'
+import { uploadFields, verifyFileContent } from '../middleware/fileValidation'
 import { asyncHandler } from '../lib/asyncHandler'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
@@ -9,6 +10,7 @@ import { canUseFeature } from '../config/planLimits'
 import { generatePresentationRules } from '../validation/presentationValidation'
 import { generatePresentation, getSlideImageQuery, type GenerateParams } from '../services/presentations'
 import { generatePresentationPptx } from '../services/presentationExport'
+import { extractText } from '../services/documentExtractor'
 import { yandexImageSearch } from '../services/yandexImages'
 import { PRESENTATION_JOB_QUEUE, type PresentationJobPayload } from '../services/presentationJobWorker'
 import { getJobQueue } from '../services/jobQueue'
@@ -114,6 +116,41 @@ router.post(
   })
 )
 
+// Matches the frontend textarea's maxLength (PresentationForm.tsx's "Свой
+// конспект" field) — capped here too so a huge upload can't silently blow
+// past what the field (and the generation prompt) actually uses.
+const SOURCE_TEXT_MAX_CHARS = 20_000
+
+// POST /api/presentations/extract-text — reads text out of an uploaded
+// PDF/Word/image so a teacher can attach a conspectus as a file instead of
+// pasting it into the "Свой конспект" field. Paste alone can't carry a Word
+// equation object — the clipboard has no plain-text form for it, so it just
+// vanishes — while a .docx upload goes through documentExtractor.ts's DOCX
+// path, which (via services/ommlToLatex.ts) recovers those formulas as
+// LaTeX instead. No DB write — same "extract, don't persist" shape as
+// adminFgos.ts's /extract.
+router.post('/extract-text',
+  checkFeatureAccess('documentUpload'),
+  aiLimiter,
+  uploadFields([{ name: 'file', maxCount: 1 }]),
+  verifyFileContent,
+  asyncHandler(async (req, res) => {
+    const files = req.files as { file?: Express.Multer.File[] } | undefined
+    const file = files?.file?.[0]
+    if (!file) throw new ValidationError('Загрузите файл конспекта (PDF, Word или изображение)')
+
+    const { text } = await extractText(file.buffer, file.mimetype, {
+      teacherId: req.teacher.id, institutionId: req.teacher.institution_id ?? undefined,
+      feature: 'document_extraction',
+    })
+    if (!text.trim()) {
+      throw new ValidationError('Не удалось извлечь текст из файла — попробуйте другой формат или вставьте текст вручную.')
+    }
+
+    const truncated = text.length > SOURCE_TEXT_MAX_CHARS
+    res.json({ text: text.slice(0, SOURCE_TEXT_MAX_CHARS), truncated })
+  }))
+
 // GET /api/presentations
 router.get('/', asyncHandler(async (req, res) => {
   const courseId = req.query.course_id as string | undefined
@@ -148,9 +185,16 @@ router.get('/:id/export.pptx',
     }
 
     const pptx = await generatePresentationPptx(presentation)
-    const fname = `${(presentation.topic || 'presentation').replace(/[^\w.-]/g, '_')}.pptx`
+    // presentation.topic is normally Cyrillic — `\w` only matches ASCII, so
+    // a plain regex sanitiser turns the whole topic into underscores (grows
+    // with the topic's length, which is exactly the "filename is just a
+    // series of underscores" bug a teacher hit). Use an ASCII-safe fallback
+    // name plus the RFC 5987 `filename*` param for the real UTF-8 name,
+    // matching the pattern already used for program document downloads
+    // (routes/programs.ts's `/documents/:docId/download`).
+    const fname = `${(presentation.topic || 'presentation').trim()}.pptx`
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
-    res.setHeader('Content-Disposition', `attachment; filename="${fname}"`)
+    res.setHeader('Content-Disposition', `attachment; filename="presentation.pptx"; filename*=UTF-8''${encodeURIComponent(fname)}`)
     res.setHeader('Content-Length', pptx.length)
     res.end(pptx)
   })

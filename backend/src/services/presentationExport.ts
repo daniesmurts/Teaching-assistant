@@ -1,4 +1,5 @@
 import { logger } from '../lib/logger'
+import { renderFormulaToPng } from './formulaRenderer'
 import type {
   Presentation, Slide, SlideImage, TitleSlide, BulletsSlide, ConceptSlide, FormulaSlide,
   ComparisonSlide, DiagramSlide, DiscussionSlide, SummarySlide,
@@ -8,15 +9,15 @@ import type {
 // the rest of the backend boots even if the package isn't installed yet —
 // same posture as docx in fosExport.ts / pdfkit in programReportPdf.ts.
 //
-// pptxgenjs can't render KaTeX/LaTeX or the [N] citation chips the web
-// viewer shows — those are web-only affordances. cleanForSlide() strips
-// citations and converts $...$/$$...$$ math to readable Unicode via
-// latexToPlainText() below, rather than just dropping the delimiters and
-// leaving raw commands like "\rho" or "^2" sitting in the slide text —
-// that read as broken markup, not math (known limitation either way: no
-// PowerPoint-native equation rendering in v1, same "documented, not
-// silently wrong" posture as ФОС's DOCX export — but the fallback should
-// still look like prose, not LaTeX source).
+// pptxgenjs has no math typesetting of its own, and the [N] citation chips
+// the web viewer shows are a web-only affordance. cleanForSlide() strips
+// citations from prose text. For formula slides, addFormulaSlide() renders
+// each formula to a PNG via formulaRenderer.ts (MathJax → SVG → resvg),
+// matching the KaTeX-rendered web viewer. If that rendering isn't available
+// (packages not installed) or fails for a given formula, it falls back to
+// the Unicode flattening in latexToPlainText() below rather than leaving
+// raw commands like "\rho" or "^2" sitting in the slide text — that reads as
+// broken markup, not math.
 
 const C = {
   ink:        '1A1A1A',
@@ -164,6 +165,17 @@ async function fetchImageAsDataUri(url: string): Promise<string | null> {
 const SIDE_IMAGE_W = 3.0
 const SIDE_IMAGE_GAP = 0.3
 
+// Never hand pptxgenjs a non-positive or non-finite extent — DrawingML
+// requires cx/cy > 0, and a negative one makes PowerPoint refuse to open the
+// deck ("PowerPoint found a problem with content..."), which is exactly what
+// a formula slide used to produce once its stacked images overran the slide
+// height. Overflowing the slide edge is merely ugly; a negative extent is
+// fatal, so every dynamically-computed height goes through here.
+const MIN_SHAPE_H = 0.2
+function clampH(h: number): number {
+  return Number.isFinite(h) && h > MIN_SHAPE_H ? h : MIN_SHAPE_H
+}
+
 /** Text content region for a slide, narrower when a side image is present. */
 function contentRegion(hasImage: boolean): { x: number; w: number } {
   const fullW = SLIDE_W - MARGIN * 2
@@ -211,7 +223,42 @@ export async function generatePresentationPptx(presentation: Presentation): Prom
   }
 
   const data = await pptx.write({ outputType: 'nodebuffer' })
-  return data as Buffer
+  return fixDanglingSlideMasterEntries(data as Buffer)
+}
+
+// ─── Work around a pptxgenjs 4.0.1 packaging bug ───────────────────────────
+//
+// createContentTypesXml() in the library writes one `<Override .../ppt/
+// slideMasters/slideMasterN.xml>` entry PER SLIDE (using the slide's index,
+// not the actual master count) — see `slides.forEach((slide, idx) => ...
+// slideMaster${idx + 1}.xml ...)` in pptxgenjs/dist/pptxgen.cjs.js. This
+// deck never calls defineSlideMaster(), so there is exactly one real
+// ppt/slideMasters/slideMaster1.xml — every deck with 2+ slides therefore
+// ships a [Content_Types].xml that references slideMaster2.xml,
+// slideMaster3.xml, etc. that don't exist in the zip. PowerPoint's strict
+// OOXML validator flags that as corruption ("PowerPoint found a problem
+// with content...") and auto-repairs by stripping parts, which is exactly
+// the dialog a teacher hit on a real multi-slide deck. Rather than patching
+// the installed library (fragile across npm installs) or forking it, strip
+// the dangling Overrides from the already-written zip before returning it —
+// jszip is already a transitive dependency of pptxgenjs, so this reuses it
+// rather than adding another zip library.
+async function fixDanglingSlideMasterEntries(pptxBuffer: Buffer): Promise<Buffer> {
+  const JSZip = (await import('jszip')).default
+  const zip = await JSZip.loadAsync(pptxBuffer)
+
+  const realMasterCount = Object.keys(zip.files)
+    .filter((name) => /^ppt\/slideMasters\/slideMaster\d+\.xml$/.test(name)).length
+
+  const contentTypesFile = zip.file('[Content_Types].xml')
+  if (!contentTypesFile) return pptxBuffer // unexpected shape — leave the buffer untouched rather than guess
+  let xml = await contentTypesFile.async('string')
+
+  const danglingRe = /<Override PartName="\/ppt\/slideMasters\/slideMaster(\d+)\.xml"[^>]*\/>/g
+  xml = xml.replace(danglingRe, (match, n) => (Number(n) > realMasterCount ? '' : match))
+
+  zip.file('[Content_Types].xml', xml)
+  return zip.generateAsync({ type: 'nodebuffer' })
 }
 
 // ─── Per-slide-type rendering ──────────────────────────────────────────────
@@ -309,31 +356,77 @@ async function addConceptSlide(pptx: Pptx, slide: ConceptSlide): Promise<void> {
   addNotes(s, slide.notes)
 }
 
+// Formula-slide vertical layout. A rendered formula IMAGE is far taller than
+// the single line of text it replaced, so the per-formula height has to be
+// budgeted against the slide rather than taken as a flat cap: four formulas
+// at the old flat 1.8" cap (plus captions) ran `y` to 9.57" on a 5.63"
+// slide, and the explanation box below then got a NEGATIVE height —
+// invalid DrawingML that makes PowerPoint refuse to open the deck
+// ("PowerPoint found a problem with content..."). Budget first, then clamp.
+const FORMULA_IMG_MAX_H  = 1.8   // tallest a single formula may render
+const FORMULA_IMG_MIN_H  = 0.3   // floor, so a formula-dense slide still shows something
+const FORMULA_TOP        = 1.4   // below the header bar
+const FORMULA_BOTTOM_PAD = 0.3
+const FORMULA_CAPTION_H  = 0.35
+const FORMULA_GAP        = 0.08
+const EXPLANATION_RESERVE = 0.9  // vertical space held back for body.explanation
+
 async function addFormulaSlide(pptx: Pptx, slide: FormulaSlide): Promise<void> {
   const s = pptx.addSlide()
   addHeader(s, slide.title)
   const region = contentRegion(Boolean(slide.image))
-  let y = 1.4
-  for (const f of slide.body.formulas) {
+
+  const formulas = slide.body.formulas
+  const hasExplanation = Boolean(slide.body.explanation)
+
+  // Share the free vertical space between the formulas, so N formulas
+  // always fit regardless of how tall each one would render on its own.
+  const available = SLIDE_H - FORMULA_TOP - FORMULA_BOTTOM_PAD
+    - (hasExplanation ? EXPLANATION_RESERVE : 0)
+  const perFormula = formulas.length > 0 ? available / formulas.length : available
+
+  let y = FORMULA_TOP
+  for (const f of formulas) {
+    const captionH = f.caption ? FORMULA_CAPTION_H : 0
+    const bodyBudget = Math.max(FORMULA_IMG_MIN_H, perFormula - captionH - FORMULA_GAP)
+
     // f.latex is raw LaTeX with no surrounding $ delimiters (per the Slide
-    // type) — run it through latexToPlainText() directly rather than
-    // cleanForSlide(), which only converts math inside $...$.
-    s.addText(latexToPlainText(f.latex), {
-      x: region.x, y, w: region.w, h: 0.7,
-      align: 'center', fontFace: 'Cambria Math', fontSize: 20, color: C.ink,
-    })
-    y += 0.7
+    // type). Prefer a rendered PNG (matches the KaTeX web viewer); fall back
+    // to the Unicode flattening in latexToPlainText() if MathJax/resvg
+    // aren't installed or fail to render this particular formula.
+    const rendered = await renderFormulaToPng(f.latex, `#${C.ink}`)
+    if (rendered && Number.isFinite(rendered.aspect) && rendered.aspect > 0) {
+      const maxH = Math.min(FORMULA_IMG_MAX_H, bodyBudget)
+      let w = region.w * 0.85
+      let h = w / rendered.aspect
+      if (h > maxH) {
+        h = maxH
+        w = h * rendered.aspect
+      }
+      const x = region.x + (region.w - w) / 2
+      s.addImage({ data: rendered.dataUri, x, y, w, h })
+      y += h + FORMULA_GAP
+    } else {
+      const h = Math.min(0.7, bodyBudget)
+      s.addText(latexToPlainText(f.latex), {
+        x: region.x, y, w: region.w, h: clampH(h),
+        align: 'center', fontFace: 'Cambria Math', fontSize: 20, color: C.ink,
+      })
+      y += h + FORMULA_GAP
+    }
+
     if (f.caption) {
       s.addText(cleanForSlide(f.caption), {
-        x: region.x, y, w: region.w, h: 0.4,
+        x: region.x, y, w: region.w, h: FORMULA_CAPTION_H,
         align: 'center', fontSize: 12, italic: true, color: C.ink3,
       })
-      y += 0.5
+      y += captionH
     }
   }
-  if (slide.body.explanation) {
-    s.addText(cleanForSlide(slide.body.explanation), {
-      x: region.x, y: y + 0.2, w: region.w, h: SLIDE_H - y - 0.4,
+
+  if (hasExplanation) {
+    s.addText(cleanForSlide(slide.body.explanation!), {
+      x: region.x, y: y + 0.1, w: region.w, h: clampH(SLIDE_H - y - 0.1 - FORMULA_BOTTOM_PAD),
       fontSize: 14, color: C.ink2, valign: 'top',
     })
   }
@@ -400,7 +493,7 @@ async function addDiagramSlide(pptx: Pptx, slide: DiagramSlide): Promise<void> {
   }
   if (slide.body.points.length > 0) {
     s.addText(bulletList(slide.body.points), {
-      x: MARGIN, y, w: SLIDE_W - MARGIN * 2, h: SLIDE_H - y - 0.2, fontSize: 11, color: C.ink2, valign: 'top',
+      x: MARGIN, y, w: SLIDE_W - MARGIN * 2, h: clampH(SLIDE_H - y - 0.2), fontSize: 11, color: C.ink2, valign: 'top',
     })
   }
   addNotes(s, slide.notes)

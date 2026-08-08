@@ -4,7 +4,9 @@ import Button from '../ui/Button'
 import { Input } from '../ui/Input'
 import { getCourses } from '../../api/courses'
 import NoCourseHint from '../onboarding/NoCourseHint'
-import { startPresentationJob, getPresentationJob, type GenerateResponse } from '../../api/presentations'
+import {
+  startPresentationJob, getPresentationJob, extractPresentationSourceText, type GenerateResponse,
+} from '../../api/presentations'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
 import type { PresentationDepth } from '../../types'
@@ -42,6 +44,9 @@ export default function PresentationForm({ onResult }: Props) {
   const [depth, setDepth]     = useState<PresentationDepth>('standard')
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { can } = usePlan()
   const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
@@ -71,6 +76,28 @@ export default function PresentationForm({ onResult }: Props) {
 
   function errMsg(err: unknown, fallback: string): string {
     return (err as { response?: { data?: { error?: string } } }).response?.data?.error ?? fallback
+  }
+
+  // Uploading a .docx recovers formulas as LaTeX (services/ommlToLatex.ts on
+  // the backend) — pasting can't, since a Word equation object has no
+  // plain-text clipboard form and just vanishes on paste. Replaces
+  // sourceText outright rather than appending, since the extracted text is
+  // meant to stand in for manual paste, not add to it.
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-selecting the same file after an error
+    if (!file) return
+    setUploading(true)
+    setUploadError('')
+    try {
+      const { text, truncated } = await extractPresentationSourceText(file)
+      setSourceText(text)
+      if (truncated) setUploadError('Текст был обрезан до 20 000 символов — при желании отредактируйте вручную.')
+    } catch (err: unknown) {
+      setUploadError(errMsg(err, 'Не удалось извлечь текст из файла'))
+    } finally {
+      setUploading(false)
+    }
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -244,16 +271,36 @@ export default function PresentationForm({ onResult }: Props) {
           it replaces course RAG retrieval as the source (see
           services/presentations.ts's generatePresentation). */}
       <div>
-        <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">
-          Свой конспект (опционально)
-        </label>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-xs font-sans font-medium text-ink-secondary">
+            Свой конспект (опционально)
+          </label>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="text-xs font-sans text-amber hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {uploading ? 'Извлекаем текст…' : 'Загрузить файл (PDF, Word)'}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.doc,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            className="hidden"
+            onChange={handleFileUpload}
+          />
+        </div>
         <textarea
           className={`${selectClass} min-h-[100px] resize-y`}
           value={sourceText}
           onChange={(e) => setSourceText(e.target.value)}
-          placeholder="Вставьте текст своего конспекта — презентация будет построена строго по нему, без привязки к загруженным материалам предмета"
+          placeholder="Вставьте текст своего конспекта — презентация будет построена строго по нему, без привязки к загруженным материалам предмета. Формулы из Word при вставке теряются — для их сохранения загрузите файл .docx кнопкой выше"
           maxLength={20000}
         />
+        {uploadError && (
+          <p className="text-[11px] font-sans text-danger mt-1">{uploadError}</p>
+        )}
       </div>
 
       {/* Learning goals */}

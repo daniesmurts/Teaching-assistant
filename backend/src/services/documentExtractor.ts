@@ -1,5 +1,6 @@
 import mammoth from 'mammoth'
 import { yandexVisionOCR } from './yandexVision'
+import { extractDocxTextWithFormulas } from './ommlToLatex'
 import type { CallContext } from './llm/types'
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -30,6 +31,18 @@ export async function extractText(
 ): Promise<ExtractResult> {
 
   if (mimeType === DOCX_MIME) {
+    // mammoth.extractRawText() has no concept of OOXML math (`<m:oMath>`,
+    // what Word's Equation Editor writes) and silently drops it — fine for
+    // the common case (no formulas), but exactly what a teacher hit
+    // uploading a conspectus full of equations. Only reach for the custom
+    // XML walker when it actually found formulas; otherwise defer to
+    // mammoth, which is more battle-tested for everything else a real
+    // Word document can contain (styles, footnotes, weird nesting) and is
+    // what every other call site here still relies on unchanged.
+    const withFormulas = await extractDocxTextWithFormulas(fileBuffer)
+    if (withFormulas && withFormulas.formulaCount > 0 && withFormulas.text.trim()) {
+      return { text: cleanText(withFormulas.text), method: 'docx' }
+    }
     const result = await mammoth.extractRawText({ buffer: fileBuffer })
     return { text: cleanText(result.value), method: 'docx' }
   }
