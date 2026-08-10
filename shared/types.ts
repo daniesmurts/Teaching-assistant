@@ -840,6 +840,31 @@ export interface Presentation {
   created_at: string
 }
 
+// ─── Slide-count sizing ──────────────────────────────────────────────────────
+//
+// Shared rather than duplicated per side: the form's max, the server's
+// validation cap and the generator's own clamp all have to agree, or a
+// teacher gets silently fewer slides than they asked for (which is exactly
+// what happened while the ceiling lived in three places).
+
+// Minutes of lecture per slide. Was effectively 2.0 (an inline `/ 2` in
+// services/presentations.ts), which teachers reported as far too sparse —
+// their own figure is 1–1.5 min/slide, i.e. a 45-minute lecture wants 30–45
+// slides, not 23. Set to the conservative end of that range; this is THE
+// knob to tune as feedback arrives.
+export const MINUTES_PER_SLIDE = 1.5
+
+// Ceiling on both the automatic estimate and the manual target. Raised from
+// 50 in step with MINUTES_PER_SLIDE so a 90-minute lecture (→ 60) is
+// actually reachable. Not a token wall — outlineMaxTokens() covers ~82
+// slides — but past that the single outline call is the real constraint.
+export const MAX_SLIDE_COUNT = 60
+export const MIN_SLIDE_COUNT = 5
+
+export function estimateSlideCount(minutes: number): number {
+  return Math.max(MIN_SLIDE_COUNT, Math.min(MAX_SLIDE_COUNT, Math.round(minutes / MINUTES_PER_SLIDE)))
+}
+
 // Candidate from a Yandex Images search — pre-pick, before it lives on a slide.
 export interface ImageCandidate {
   url:         string

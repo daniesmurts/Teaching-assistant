@@ -14,6 +14,9 @@ export interface GenerateRequest {
   style?: string
   slide_count_target?: number
   source_text?: string
+  // "Строго по конспекту" — build the deck only from source_text, without the
+  // model supplementing it from its own knowledge. Ignored without source_text.
+  strict_source?: boolean
   depth?: PresentationDepth
 }
 

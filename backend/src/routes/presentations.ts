@@ -28,11 +28,12 @@ router.use(authenticate)
 function buildGenerateParams(req: { teacher: { id: string; plan_tier: string; institution_id: string | null }; body: unknown }): GenerateParams {
   const {
     course_id, lecture_number, topic, duration_minutes,
-    learning_goals, audience_level, style, slide_count_target, source_text, depth,
+    learning_goals, audience_level, style, slide_count_target, source_text, strict_source, depth,
   } = req.body as {
     topic: string; duration_minutes: number; learning_goals?: string[]
     course_id?: string; lecture_number?: number; audience_level?: string
     style?: string; slide_count_target?: number; source_text?: string
+    strict_source?: boolean
     depth?: 'standard' | 'deep'
   }
 
@@ -48,6 +49,7 @@ function buildGenerateParams(req: { teacher: { id: string; plan_tier: string; in
     style,
     slideCountTarget: slide_count_target ? Number(slide_count_target) : undefined,
     sourceText:       source_text,
+    strictSource:     Boolean(strict_source),
     // Silent downgrade rather than a 403 — same convention as grading.ts's
     // thorough/checkCitations gating — a free-tier teacher who somehow
     // submits depth=deep just gets the standard depth instead of an error.
@@ -143,8 +145,16 @@ router.post('/extract-text',
       teacherId: req.teacher.id, institutionId: req.teacher.institution_id ?? undefined,
       feature: 'document_extraction',
     })
+    // Scanned pages and screenshot-built documents already go through OCR in
+    // documentExtractor.ts, so reaching here means even that recovered
+    // nothing — say so, rather than letting the teacher generate a deck with
+    // no material behind it (which is how a presentation ends up written from
+    // the topic string alone).
     if (!text.trim()) {
-      throw new ValidationError('Не удалось извлечь текст из файла — попробуйте другой формат или вставьте текст вручную.')
+      throw new ValidationError(
+        'Не удалось извлечь текст из файла. Если это скан или скриншоты, попробуйте файл лучшего качества, ' +
+        'другой формат или вставьте текст вручную.'
+      )
     }
 
     const truncated = text.length > SOURCE_TEXT_MAX_CHARS

@@ -1,4 +1,5 @@
 import { body } from 'express-validator'
+import { MAX_SLIDE_COUNT } from '../../../shared/types'
 
 export const generatePresentationRules = [
   body('topic')
@@ -22,11 +23,15 @@ export const generatePresentationRules = [
   // ceiling (2026-07-15 incident). Generation now runs as outline +
   // parallel expansion batches (services/presentations.ts) — each batch has
   // its own full token budget regardless of total deck size, so the cap is
-  // now a product/cost decision, not a technical wall. Raised to 50,
-  // matching estimateSlideCount()'s own ceiling for the automatic path.
+  // now a product/cost decision, not a technical wall.
+  //
+  // Kept in lockstep with MAX_SLIDE_COUNT rather than hardcoded: a manual
+  // target validation accepts but the generator then clamps would silently
+  // hand back fewer slides than requested.
   body('slide_count_target')
     .optional({ nullable: true, checkFalsy: true })
-    .isInt({ min: 3, max: 50 }).withMessage('Количество слайдов: от 3 до 50'),
+    .isInt({ min: 3, max: MAX_SLIDE_COUNT })
+    .withMessage(`Количество слайдов: от 3 до ${MAX_SLIDE_COUNT}`),
 
   body('depth')
     .optional()
@@ -54,4 +59,10 @@ export const generatePresentationRules = [
   body('source_text')
     .optional({ nullable: true, checkFalsy: true })
     .isLength({ max: 20000 }).withMessage('Конспект слишком длинный (макс. 20000 символов)'),
+
+  // "Строго по конспекту" — only meaningful alongside source_text; the
+  // service ignores it otherwise (see isStrictSource in services/presentations.ts).
+  body('strict_source')
+    .optional({ nullable: true })
+    .isBoolean().withMessage('Неверное значение режима «строго по конспекту»'),
 ]

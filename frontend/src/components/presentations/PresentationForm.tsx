@@ -9,6 +9,7 @@ import {
 } from '../../api/presentations'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
+import { MAX_SLIDE_COUNT, estimateSlideCount } from '../../types'
 import type { PresentationDepth } from '../../types'
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -41,6 +42,7 @@ export default function PresentationForm({ onResult }: Props) {
   const [goals, setGoals]     = useState<string[]>([])
   const [goalInput, setGoalInput] = useState('')
   const [sourceText, setSourceText] = useState('')
+  const [strictSource, setStrictSource] = useState(false)
   const [depth, setDepth]     = useState<PresentationDepth>('standard')
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
@@ -117,6 +119,7 @@ export default function PresentationForm({ onResult }: Props) {
         style:            form.style || undefined,
         slide_count_target: form.slide_count_target ? Number(form.slide_count_target) : undefined,
         source_text:      sourceText.trim() || undefined,
+        strict_source:    strictSource && Boolean(sourceText.trim()),
         depth,
       })
       await pollJob(job.id)
@@ -149,6 +152,15 @@ export default function PresentationForm({ onResult }: Props) {
       if (!cancelled.current) setLoading(false)
     }
   }
+
+  // Shown in the slide-count placeholder so "Авто" isn't a black box — the
+  // teacher can see what the duration implies before deciding to override it.
+  // Uses the same shared estimateSlideCount() the generator does, so the
+  // number displayed is the number they'll actually get.
+  const durationForEstimate = Number(form.duration_minutes)
+  const autoSlideCount = Number.isFinite(durationForEstimate) && durationForEstimate >= 10
+    ? estimateSlideCount(durationForEstimate)
+    : null
 
   const selectClass =
     'w-full px-3 py-2 text-sm font-sans text-ink bg-surface border border-border rounded-md ' +
@@ -202,10 +214,10 @@ export default function PresentationForm({ onResult }: Props) {
           label="Кол-во слайдов (авто)"
           type="number"
           min={3}
-          max={50}
+          max={MAX_SLIDE_COUNT}
           value={form.slide_count_target}
           onChange={set('slide_count_target')}
-          placeholder="Авто"
+          placeholder={autoSlideCount ? `Авто — ${autoSlideCount}` : 'Авто'}
         />
       </div>
 
@@ -301,6 +313,30 @@ export default function PresentationForm({ onResult }: Props) {
         {uploadError && (
           <p className="text-[11px] font-sans text-danger mt-1">{uploadError}</p>
         )}
+
+        {/* Strict mode only means something when there IS a conspectus, so the
+            checkbox stays disabled (and unchecked) until the field has text —
+            otherwise it would read as a promise the generator can't keep. */}
+        <label
+          className={`flex items-start gap-2 mt-2 ${
+            sourceText.trim() ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed'
+          }`}
+        >
+          <input
+            type="checkbox"
+            className="mt-0.5 accent-amber"
+            checked={strictSource && Boolean(sourceText.trim())}
+            disabled={!sourceText.trim()}
+            onChange={(e) => setStrictSource(e.target.checked)}
+          />
+          <span className="text-[11px] font-sans text-ink-secondary leading-snug">
+            Строго по конспекту — ничего не добавлять от себя
+            <span className="block text-ink-tertiary">
+              Слайды собираются только из вашего текста: без примеров, определений и цифр,
+              которых в нём нет. Если материала мало, слайдов будет меньше.
+            </span>
+          </span>
+        </label>
       </div>
 
       {/* Learning goals */}

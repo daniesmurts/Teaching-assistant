@@ -1605,3 +1605,342 @@ exact text** instead of a detached bullet list.
   → §10.7 (agreement meter) — all reuse already-persisted data.
 - **First two to build:** §10.1 and §10.10 — one proves the accuracy number
   offline with zero prompt risk, the other is the strongest demo artefact.
+
+---
+
+## 11. Научная школа — Expert Personas & Institutional Memory (2026-08-09 brainstorm)
+
+### 11.0 Why this section exists
+
+Origin: brilliant senior professors at KNRTU will die and their knowledge dies
+with them. The naive framing is "build a chatbot that answers like Professor X"
+(reference implementation seen in the wild: an investment-club Telegram channel
+where six trader personas — Minervini, Zanger, Livermore, Kovner — each analyse
+the *same* chart independently, in-character, each with their own method).
+
+**This section rejects the naive framing.** Two conclusions drive everything
+below:
+
+1. **The chat is 10% of the work.** No corpus exists for a living professor, and
+   it cannot be scraped from their papers — papers contain the *combed result*,
+   not the judgment. The product to build is the **elicitation pipeline**; the
+   persona is its display surface.
+2. **This is §1.1 generalised.** §1.1 infers a teacher's implicit *rubric* from
+   longitudinal approval signal. §11 infers their implicit *method* — what they
+   reject on sight, what they ask first, where they know students break — from
+   the same signal plus new capture surfaces. Same flywheel, one altitude up.
+
+**Two different products share one wrapper.** Separate them or the design
+collapses:
+
+| | Historical figures (Mendeleev, Landau) | Living / recently departed faculty |
+|---|---|---|
+| Corpus | Public domain, exists | **Does not exist** — must be elicited |
+| Legal | Clean | Consent, 152-ФЗ, heirs |
+| Value | Engagement, marketing, freshman motivation | **Tacit knowledge transfer** |
+| Honest description | Costume on a base model | Institutional memory |
+| Marginal cost | Build once, sell to every institution | Per-professor, per-institution |
+
+Historical personas ship as a separate, honestly-labelled reconstruction track
+(§11.15 phase 5). Everything else in §11 is about the living.
+
+### 11.1 The core mechanism: draft → correction → signal
+
+The single organising insight of this section. **One mechanism appears on three
+surfaces, and the platform already runs it on the first:**
+
+| Surface | Status | The draft | The correction is |
+|---|---|---|---|
+| Grading | **Shipped** (`approved_revisions`) | AI grade + comments | What they weight, what they reject |
+| Q&A to aspirants | New — §11.4 | Persona drafts the reply to a student's question, **privately** | How they *reason*, not just how they score |
+| Defence questions | Partially built (`longReview`) | Questions the commission will ask | Their line of attack |
+
+The Q&A surface is the highest-leverage unbuilt thing in this section, because
+it closes four gaps at once:
+
+- **Demand** — aspirants already write to their supervisor; no new habit needed.
+- **Capture** — every edit is judgment-typed signal, same shape as grading.
+- **Motivation** — the professor gets *less* work, not more. The persona is
+  their assistant while alive. This is the only sustainable incentive.
+- **Quality/ethics** — nothing leaves without their eyes on it.
+
+**Consequence for phasing:** phase 2 is not "a private chat with your persona".
+Phase 2 is **persona-drafts-your-replies**. The chat is a by-product.
+
+### 11.2 Capture layers, and the arithmetic that reshapes them
+
+Governing principle: **capture rides on work the professor already does.** A
+separate "interview module" they must remember to open dies in week two.
+
+- **Layer 0 — silent (0 sec).** Structured diff of AI-proposed vs
+  teacher-approved: which criteria move and which way, which comments are
+  deleted outright (implicit "this is nonsense"), which survive verbatim, where
+  they dwell. Extends `approved_revisions`. Gives *what*, never *why*.
+- **Layer 1 — micro-question at the moment of action (5–15 s).** Chips + voice +
+  always-skippable, fired inline at the edit. Skips are data.
+- **Layer 2 — rule confirmation (weekly, batched, async, ~2 min).** "You lowered
+  the score 7 times when the literature review has no empirical work from the
+  last 5 years. Is that a rule of yours?" [Да · Почти, уточню · Нет, совпадение]
+  The conversion of observation into an explicit, human-readable rule.
+- **Layer 3 — deep think-aloud session on a system-selected hard case (20–30
+  min).** Triggered by a detected gap, not by calendar.
+
+**The arithmetic that forces a redesign.** Field data (2026-08-09): a typical
+participant grades **5–10 works/week**, almost exclusively on desktop, with
+heavy seasonality. Question budget is therefore **3–5 per week, counted weekly
+not per-session** → ~50–70 answered questions per professor per semester. That
+is far too thin to build a method from scratch.
+
+**So invert the flow.** Not `observe → formulate rule → ask to confirm`, but:
+
+> **Mine 30–50 candidate rules from documents that already exist** — методички,
+> **отзывы научного руководителя**, рецензии на ВКР, criteria in РПД, lecture
+> transcripts — **then have the professor mark them да / почти / нет.**
+
+The supervisor's отзыв is a concentrate of judgment: it says in plain text what
+they value and what they consider defective. Throughput rises an order of
+magnitude at identical cost to the professor. Micro-questions then change role:
+**resolve contradictions** between what the document declares and what the
+practice does. That is the single most informative question type available.
+
+**Seasonality is a schedule, not an obstacle.** ВКР defence season concentrates
+15–20 works into two weeks, they are the year's most substantive works, and the
+commission structure naturally yields *several experts on one work*. Plan the
+pilot around defences; do not judge it on a quiet October.
+
+**Desktop-only is a gift.** Use a persistent side panel, not popups. The key
+interaction is **select a fragment → say why**: it yields exactly the right data
+type and simultaneously produces the verbatim source anchor that
+`validateCitation()` requires. Voice stays a prominent option but is not
+primary — the barrier is social (colleagues in the office), not technical.
+
+### 11.3 Question selection is the whole game
+
+With a 3–5/week budget, a wasted question is expensive. Ask only where the
+answer changes the model — active-learning posture:
+
+- large divergence from the platform's proposal (not half a point);
+- **divergence from themselves** — a similar work graded differently a month
+  ago (most informative, and independently interesting to the professor);
+- divergence from the department norm;
+- a pattern recurring a third time, ready to harden into a rule;
+- **two experts disagreeing on the same work** — the gold case, because it is
+  what makes personas *distinguishable* later (§11.8). ВКР commissions produce
+  this naturally.
+
+Never ask: when they agreed with the proposal, on cosmetic edits, on anything
+already answered. Asking "why" on every edit kills the feature in two weeks.
+
+### 11.4 Grading rules ≠ reasoning: the other capture surfaces
+
+The original scenario — "ask a chemistry question, get it answered the way the
+professor would" — is **not** served by grading data. Knowing what someone marks
+down does not teach you how they approach a problem. Additional surfaces, in
+descending order of ratio (value : effort to obtain):
+
+- **Q&A drafting** (§11.1) — the flagship.
+- **Lecture transcripts** — the most natural "how they explain" corpus, and
+  universities already record lectures. Underweighted in the first pass of this
+  design; plausibly half the corpus.
+- **Questions asked at defences** — a question put to a student is the purest
+  distillate of method, and defences are minuted.
+- **Consultations and seminar walkthroughs.**
+
+### 11.5 Personas are *views*; the corpus is the asset
+
+Reframing that raises the ceiling: do not build "digital doubles of people".
+Build a **judgment corpus** for the institution, over which a persona is one
+view among several:
+
+- **Persona** — one named expert's method (attributed, §11.12).
+- **Department norm** — de-identified aggregate: what this кафедра considers
+  defective, independent of who is grading.
+- **Dissertation-council standard** — what actually passes here, as opposed to
+  what the regulations say.
+- **Divergence map between schools** — "кафедра A treats this as a
+  methodological error, кафедра B as an acceptable simplification." Nobody has
+  ever made this explicit, and it is genuinely interesting.
+
+What a university buys is not a chat with a dead professor. It is that its
+expertise **stops evaporating** with every retirement and death.
+
+### 11.6 «Мой подход» — the artefact, and rules as the representation
+
+A screen holding the accumulated rules: statement, confidence, **evidence**
+("based on 7 of your reviews → show them"), each editable and deletable, with
+gaps highlighted. It delivers four things at once: the professor is the editor
+of their own double while alive; quality is human-controlled rather than
+model-selected; provenance is legally presentable; and a self-portrait taking
+shape is intrinsically motivating in a way reminders never are.
+
+**Do not fine-tune in this phase.** Retrieval over the per-persona corpus plus
+explicit rule cards only. Rules are readable, editable, auditable and defensible
+in front of a legal department and a widow. Weights are none of those things.
+
+### 11.7 Fidelity measurement: the silent shadow prediction
+
+From day one, before any persona is visible, the system **predicts silently**:
+before the professor opens a work, it logs its forecast of their score and
+edits. They see nothing.
+
+This yields (a) an objective per-person fidelity number, separable from base
+model quality, (b) a gap map — "practical works: 40% agreement, send layer 3
+there", and (c) protection against self-deception. It ties directly into
+existing machinery: `evalHarness.ts` already replays approved assignments
+through the pure `gradeOnce` path and computes QWK / MAE / Spearman against
+teacher ground truth — persona fidelity is the same harness scoped to one
+teacher.
+
+**And it pays for itself before the persona ships:** as the forecast sharpens,
+the drafts that professor receives get closer to their own style. That — *«ИСПУМ
+подстраивается под ваш подход, вам меньше исправлять»* — is what the UI should
+promise. "We are preserving your legacy" belongs in the consent form, not the
+daily interface.
+
+**Readiness gates** (all three, before a persona is shown to anyone else):
+silent-forecast accuracy; share of rules confirmed by the professor themselves;
+**blind test** — strip the names, can the head of department tell two colleagues
+apart from their answers?
+
+### 11.8 The consortium, and why it collapses by default
+
+One base model + six different prompts = six identical answers in different
+vocabularies. The trader reference works because the methods are *formally
+distinguishable* — position size, stop placement, the 200-day average — so the
+divergence shows up in numbers. Physicists have no such anchor, and the default
+result is a chorus of synonyms.
+
+Differentiation must come from:
+
+1. **separate retrieval** — each persona reads only its own corpus;
+2. **explicit method cards** — 5–10 principles surfaced by §11.2/11.6;
+3. **genuine independence** — parallel generation, personas never see each
+   other's answers, or they collapse into consensus;
+4. **synthesis as a separate layer on top** — "where they agree / where they
+   diverge and why" — never instead of the individual answers.
+
+Acceptance test: the blind test in §11.7.
+
+### 11.9 Asymmetric disclosure (decide now, cannot be retrofitted)
+
+A student with access to their grader's persona asks exactly one question: *"what
+do you mark down for?"* — and optimises the submission against the assessor.
+Personas therefore need **role-asymmetric disclosure by construction**:
+
+- **aspirant / young lecturer** → method, reasoning, defence-question style;
+- **student** → an explaining mentor, **with no access to that professor's
+  grading rules**;
+- **department head / institution** → aggregate views only (§11.5).
+
+This is an architectural decision about how the corpus is partitioned, not a
+permission checkbox to add later. It maps onto the existing domain axis (§7.10).
+
+### 11.10 The caricature risk
+
+A persona is always more consistent than the person. A living professor is
+contradictory, mood- and context-dependent, and changes their mind over a
+decade. A rules-derived model flattens them into a cartoon — "Ivanov always
+demands empirical work."
+
+Two counters, both structural:
+- **personas must carry their uncertainty**: "in 7 of 9 cases he marked this
+  down, twice he let it pass — here they are";
+- **the corpus is versioned in time**: Ivanov-2015 and Ivanov-2026 are not the
+  same expert, and the difference is itself interesting (§11.13).
+
+### 11.11 Death as a designed event, not an edge case
+
+Needs a specified lifecycle, decided before the first participant dies:
+- who becomes **curator** after death — the scientific successor, which is
+  fitting: the student inherits editorship of the teacher;
+- is the corpus frozen, or extended by the students' commentary;
+- what the memorial mode looks like in the UI;
+- who may switch it off, and on what grounds.
+
+Designed in advance this is the strongest part of the pitch. Left undesigned,
+the first death becomes the project's crisis.
+
+### 11.12 Consent, law, and the hard boundary
+
+- **Living:** written consent enumerating name, voice, image, term, right of
+  withdrawal, and what happens after death. Withdrawal must actually work, or
+  the next professor will not sign.
+- **Deceased:** consent of heirs (spouse, children, parents) — not a formality;
+  this is the thing the feature breaks on if done in the wrong order.
+- **152-ФЗ:** the corpus is personal data, resident in Yandex like everything
+  else. Export/delete on request.
+- **Hidden ≠ covert.** Per-teacher flag for rollout, but for the participant:
+  one-time consent screen, a persistent unobtrusive mode indicator, one-click
+  pause. Silently recording a person's judgment style ends the project at the
+  first corridor conversation.
+- **Attribution over plausibility.** Every statement either rests on a corpus
+  fragment and shows it, or is marked as general knowledge.
+  `validateCitation()` fits verbatim. Presentation is **"a walkthrough in the
+  approach of X"**, never an imitation of a live interlocutor.
+- **Hard boundary — no voice or face cloning. Ever, even on request, even with
+  consent.** A text persona with attribution is institutional memory. A talking
+  head in a dead professor's voice is a deepfake of the deceased, and one
+  Telegram post about it buries the feature and the platform's reputation.
+  Record this in the project principles *before* someone crosses it out of
+  enthusiasm.
+
+### 11.13 The school as a graph, not a set of personas
+
+Russian science carries an unusual cultural asset: explicit genealogies of
+schools — teacher → students → their students. Link personas into a succession
+tree and something appears that nobody else has: *how an approach evolved across
+three generations*, *where the student diverged from the teacher*. Combined with
+the time-versioning in §11.10, this turns a utility into an identity.
+
+It is also, verbatim, the language of Приоритет-2030 programmes ("сохранение и
+развитие научных школ") — the frame that makes this grant-fundable rather than
+budget-funded, and the frame in which the проректор по научной работе owns it.
+
+### 11.14 Economics, defensibility, patent framing
+
+Grading sells as time saved — replaceable value. A научная-школа corpus is
+**non-substitutable and compounding**: the longer an institution is in the
+system, the more expensive leaving becomes. It is the deepest moat in the
+product. Historical personas are the zero-marginal-cost marketing contour on
+top.
+
+Patent line: §1.1 is already framed as "method for deriving implicit grading
+criteria from longitudinal approval signal." The natural sibling claim here is
+**"method for constructing an expert persona from a stream of assessment
+actions"** — the draft→correction→signal loop of §11.1 plus the
+document-first rule mining of §11.2. Verify the fit with the patent attorney;
+it also lands inside the проректор's remit (IP commercialisation).
+
+### 11.15 Phasing, pilot, open questions
+
+1. **Consent + capture.** Nothing published. Layers 0–2 only.
+2. **Persona drafts the professor's replies** (§11.1) — private, editor-in-the-
+   loop. *Not* "a private chat".
+3. **Department persona** with attribution and asymmetric disclosure (§11.9).
+4. **Consortium** — only once 3+ personas pass the blind test.
+5. **Historical figures** as a separate, honestly-labelled reconstruction track.
+
+**Pilot:** 3–5 people from one or two кафедры (one participant cannot test
+distinguishability), timed around ВКР defences. The first weeks' machine-
+generated questions will be bad — read them weekly by hand and rewrite them.
+This does not automate at the start.
+
+**Naming:** «Научная школа» / «Совет кафедры» reads far better than «цифровой
+двойник» — the latter sounds like replacing the person, the former like
+continuing the tradition.
+
+**Open:**
+- **Primary audience — students or aspirants/young lecturers?** Different
+  products: the student needs an explaining mentor, the successor needs the
+  method. The latter is more valuable and more defensible, and it determines
+  both the UI and the rule priority. Unresolved.
+- **Demand-side design.** The whole section above designs supply. An empty chat
+  with no scenario dies as fast as a feedback form. Need 3–5 concrete demand
+  moments specified — "supervisor is away and the chapter is unapproved",
+  "choosing a method for an experiment", "preparing for the defence: what will
+  he ask". The last one is nearly built already (`longReview` generates defence
+  questions; *in the style of a specific commission member* is the first
+  shippable demand scenario).
+- Whether the department-norm view (§11.5) can ship *before* any named persona —
+  it needs no consent for attribution, only for data use, and may be the safest
+  first public artefact.

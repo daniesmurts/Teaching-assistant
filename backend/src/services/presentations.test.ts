@@ -6,8 +6,11 @@ import {
   filterCitations, outlineMaxTokens, expansionBatchMaxTokens,
   normaliseOutline, createSourcePool, chunkArray,
   getSlideImageQuery, withSlideImage, autoFillImages,
-  shouldUseWebGrounding,
+  shouldUseWebGrounding, isStrictSource, OUTLINE_MAX_OUTPUT_TOKENS,
 } from './presentations'
+import {
+  estimateSlideCount, MAX_SLIDE_COUNT, MIN_SLIDE_COUNT,
+} from '../../../shared/types'
 import { yandexImageSearch } from './yandexImages'
 import type { PresentationSource, Slide, DiagramSlide, ConceptSlide, ImageCandidate } from '../../../shared/types'
 import type { RelevantChunk } from '../db/queries/chunks'
@@ -75,12 +78,46 @@ describe('filterCitations', () => {
 })
 
 describe('outlineMaxTokens', () => {
-  it('stays cheap even for the max validated slide count', () => {
-    expect(outlineMaxTokens(50)).toBeLessThanOrEqual(4000)
-  })
-
   it('scales up for larger decks', () => {
     expect(outlineMaxTokens(20)).toBeGreaterThan(outlineMaxTokens(5))
+  })
+
+  // The ceiling used to be 4000, which covers only ~44 slides at the ~90
+  // tokens/slide the outline actually needs — so any deck past that had its
+  // outline JSON truncated mid-array, normaliseOutline() accepted the short
+  // result, and the teacher silently got fewer slides than requested. That
+  // was reachable in production because validation already allowed 50.
+  it('budgets the whole supported slide range without truncating', () => {
+    for (const n of [45, 50, MAX_SLIDE_COUNT]) {
+      expect(outlineMaxTokens(n)).toBeGreaterThanOrEqual(n * 90)
+    }
+  })
+
+  it('never exceeds the provider output ceiling', () => {
+    expect(outlineMaxTokens(MAX_SLIDE_COUNT)).toBeLessThanOrEqual(OUTLINE_MAX_OUTPUT_TOKENS)
+    expect(outlineMaxTokens(500)).toBeLessThanOrEqual(OUTLINE_MAX_OUTPUT_TOKENS)
+  })
+})
+
+describe('estimateSlideCount', () => {
+  // The old ratio was 2 min/slide, which teachers reported as far too sparse
+  // — a 45-minute lecture produced 23 slides where they expected 30–45.
+  it('matches the 1–1.5 min/slide density teachers actually lecture at', () => {
+    expect(estimateSlideCount(45)).toBe(30)
+    expect(estimateSlideCount(90)).toBe(60)
+  })
+
+  it('clamps to the supported range', () => {
+    expect(estimateSlideCount(1)).toBe(MIN_SLIDE_COUNT)
+    expect(estimateSlideCount(240)).toBe(MAX_SLIDE_COUNT)
+  })
+
+  // A duration whose estimate exceeds the cap must not produce a target the
+  // validator would reject — the two ceilings are the same constant.
+  it('never returns more than validation accepts', () => {
+    for (const m of [10, 45, 60, 90, 120, 180, 240]) {
+      expect(estimateSlideCount(m)).toBeLessThanOrEqual(MAX_SLIDE_COUNT)
+    }
   })
 })
 
@@ -320,5 +357,35 @@ describe('shouldUseWebGrounding', () => {
     expect(shouldUseWebGrounding(true, false, false)).toBe(false)
     expect(shouldUseWebGrounding(true, true, false)).toBe(false)
     expect(shouldUseWebGrounding(true, true, true)).toBe(false)
+  })
+})
+
+// ─── «Строго по конспекту» ─────────────────────────────────────────────────
+
+describe('isStrictSource', () => {
+  it('is on when the box is checked and a conspectus was supplied', () => {
+    expect(isStrictSource({ strictSource: true, sourceText: 'Мой конспект.' })).toBe(true)
+  })
+
+  it('is off when the box is unchecked', () => {
+    expect(isStrictSource({ strictSource: false, sourceText: 'Мой конспект.' })).toBe(false)
+    expect(isStrictSource({ sourceText: 'Мой конспект.' })).toBe(false)
+  })
+
+  // A checked box with no conspectus would otherwise forbid the model from
+  // writing anything at all — there'd be no material to be strict about.
+  it('is off when there is no conspectus to be strict about', () => {
+    expect(isStrictSource({ strictSource: true })).toBe(false)
+    expect(isStrictSource({ strictSource: true, sourceText: '' })).toBe(false)
+    expect(isStrictSource({ strictSource: true, sourceText: '   \n  ' })).toBe(false)
+  })
+
+  // Strict mode implies sourceText, and sourceText already disables both web
+  // grounding and RAG retrieval — so a strict deck is grounded solely in the
+  // teacher's own text. Pinning that here so the two rules can't drift apart.
+  it('implies a conspectus, which already suppresses web grounding', () => {
+    const params = { strictSource: true, sourceText: 'Мой конспект.' }
+    expect(isStrictSource(params)).toBe(true)
+    expect(shouldUseWebGrounding(Boolean(params.sourceText), true, true)).toBe(false)
   })
 })

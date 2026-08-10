@@ -8,6 +8,7 @@ import { yandexImageSearch } from './yandexImages'
 import { webSearch, type SearchResult } from './yandexSearch'
 import { logger } from '../lib/logger'
 import type { CallContext } from './llm/types'
+import { estimateSlideCount, MAX_SLIDE_COUNT } from '../../../shared/types'
 import type {
   Presentation,
   PresentationSource,
@@ -40,6 +41,12 @@ export interface GenerateParams {
   style?: string
   slideCountTarget?: number
   sourceText?: string   // pasted lecture notes — takes priority over RAG retrieval, same as quizzes.ts
+  // "Строго по конспекту" — the deck may contain ONLY what sourceText
+  // already says: structure and reformat it, never supplement it. Without
+  // this the model treats the conspectus as grounding it may extend from,
+  // which is right for a sparse outline and wrong for a teacher who handed
+  // over a finished lecture. Meaningless (and ignored) without sourceText.
+  strictSource?: boolean
   depth?: PresentationDepth   // 'standard' (default) or 'deep' (Pro+ — see planLimits.ts's presentationDeepMode)
 }
 
@@ -111,10 +118,19 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
 
   // ── Outline pass — cheap, structure-only. Decides slide count/order/type
   // and a one-line brief per slide; no RAG, no full-length writing yet. ────
+  // Reinforced in the system role as well as the user prompt: strict mode is
+  // a hard constraint on the whole task, not one instruction among many.
+  const strictClause = isStrictSource(params)
+    ? `Преподаватель передал собственный конспект и просил построить презентацию ` +
+      `ТОЛЬКО по нему. Вы структурируете чужой материал, а не пишете свой: ничего ` +
+      `не добавляйте от себя и не дополняйте материал из своих знаний. `
+    : ''
+
   const outlineSystemPrompt =
     `Вы опытный разработчик учебных программ и методист. ` +
     `Вы строите план лекции: порядок слайдов, их тип и краткое техническое ` +
     `задание по содержанию для каждого — сам текст слайдов напишет другой автор. ` +
+    strictClause +
     `Вы выбираете подходящий тип слайда под содержание: определение → concept, формула → formula, ` +
     `сравнение → comparison, схема/оборудование → diagram, вопрос для обсуждения → discussion. ` +
     `Длинные перечни маркеров — последний выбор, не первый. ` +
@@ -151,6 +167,7 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
       `Вы опытный преподаватель, пишущий полный текст слайдов и сценарий ` +
       `выступления по уже готовому плану лекции — тип и заголовок каждого ` +
       `слайда уже определены, менять их нельзя. ` +
+      strictClause +
       `Пишите на русском языке. Отвечайте строго в формате JSON.`
 
     const raw = await chatJSON<{ slides: unknown[] }>(
@@ -364,6 +381,40 @@ async function fetchWebGrounding(topic: string, context?: CallContext): Promise<
   return webSearch(topic, WEB_GROUNDING_RESULTS, context)
 }
 
+/**
+ * "Строго по конспекту" only means anything when there's a conspectus to be
+ * strict about — a checked box with an empty source field must not silently
+ * forbid the model from writing anything at all.
+ */
+export function isStrictSource(params: Pick<GenerateParams, 'strictSource' | 'sourceText'>): boolean {
+  return Boolean(params.strictSource && params.sourceText?.trim())
+}
+
+// The strict-mode contract, shared verbatim by the outline and expansion
+// passes so the plan can't promise slides the writer is then forbidden to
+// fill. Deliberately explicit about the failure mode it's replacing:
+// teachers reported decks where the model quietly invented definitions and
+// numbers that were nowhere in the material they supplied.
+const STRICT_SOURCE_RULES = `
+## РЕЖИМ «СТРОГО ПО КОНСПЕКТУ» (ОБЯЗАТЕЛЬНО)
+
+Презентация должна содержать ТОЛЬКО то, что уже есть в конспекте выше.
+Ваша задача — структурировать и оформить чужой материал, а не дополнять его.
+
+- ЗАПРЕЩЕНО добавлять факты, определения, примеры, цифры, даты, формулы,
+  термины и источники, которых нет в конспекте.
+- ЗАПРЕЩЕНО дополнять материал из собственных знаний по теме, даже если
+  вам кажется, что в конспекте чего-то не хватает или что-то неточно.
+- Формулировки берите из конспекта, сокращая и разбивая их на слайды.
+  Переформулировать для краткости можно, менять смысл — нельзя.
+- Заметки докладчика — тоже только по конспекту: это развёрнутый пересказ
+  соответствующего фрагмента, а не дополнительный материал от вас.
+- Если материала в конспекте хватает лишь на меньшее число слайдов, сделайте
+  МЕНЬШЕ слайдов. Недобор слайдов — это правильный результат, выдуманное
+  содержание — нет.
+- Если тема лекции шире конспекта, раскрывайте только ту часть, которая
+  покрыта конспектом.`
+
 // ─── Outline ────────────────────────────────────────────────────────────────
 //
 // One slide's worth of plan: a decided type + title, and a brief that's a
@@ -422,6 +473,7 @@ function buildOutlinePrompt(
     lines.push(`## Конспект лекции (план должен строго следовать этому материалу, не добавляя фактов от себя)`)
     lines.push(sanitiseForPrompt(params.sourceText))
     lines.push('')
+    if (isStrictSource(params)) lines.push(STRICT_SOURCE_RULES, '')
   }
 
   lines.push(...renderWebGroundingBlock(webGrounding))
@@ -448,7 +500,11 @@ function buildOutlinePrompt(
 а "виды насосов: объёмные vs динамические, критерий выбора для конкретной
 задачи".
 
-Верните JSON объект с одним ключом "outline" — массивом из ${slideTarget} элементов.
+Верните JSON объект с одним ключом "outline" — массивом из ${slideTarget} элементов${
+  isStrictSource(params)
+    ? ` (или МЕНЬШЕ, если материала конспекта не хватает на ${slideTarget} слайдов — см. режим «строго по конспекту» выше)`
+    : ''
+}.
 Каждый элемент: { "type", "title", "brief" }.
 
 - "type" — один из: title, bullets, concept, formula, comparison, diagram, discussion, summary.
@@ -546,6 +602,7 @@ function buildExpansionPrompt(
     lines.push(`## Конспект лекции (пишите строго по этому материалу, не добавляя фактов от себя)`)
     lines.push(sanitiseForPrompt(params.sourceText))
     lines.push('')
+    if (isStrictSource(params)) lines.push(STRICT_SOURCE_RULES, '')
   }
 
   lines.push(...renderWebGroundingBlock(webGrounding))
@@ -579,6 +636,29 @@ function buildExpansionPrompt(
   if (params.style)         lines.push(`Стиль подачи: ${styleLabel(params.style)}`)
 
   const [wMin, wMax] = NOTES_WORD_TARGET[depth]
+
+  // The default notes spec asks for a worked example "с реальными числами"
+  // and a typical misconception — excellent for a deck the model is
+  // authoring, but a direct instruction to invent when the teacher asked
+  // for their own conspectus and nothing else. Strict mode swaps in a spec
+  // that keeps notes a speakable expansion of the supplied material, and
+  // drops the word floor (a thin source paragraph must be allowed to
+  // produce short notes rather than padding to hit a quota).
+  const notesSpec = isStrictSource(params)
+    ? `ЗАМЕТКИ ДОКЛАДЧИКА (поле "notes") — сценарий выступления по этому слайду,
+основанный ИСКЛЮЧИТЕЛЬНО на соответствующем фрагменте конспекта: развёрнутый
+пересказ того, что автор написал сам, живой речью. Ориентир — до ${wMax} слов,
+но если во фрагменте меньше материала, напишите короче. НЕ добавляйте примеры,
+числа, заблуждения или пояснения, которых нет в конспекте.
+Не дублируйте текст слайда дословно — notes должны звучать как речь.`
+    : `ЗАМЕТКИ ДОКЛАДЧИКА (поле "notes") — сценарий выступления на ${wMin}–${wMax} слов
+(этого хватает примерно на 1.5 минуты речи), а не короткая аннотация. Стройте по структуре:
+1. Почему это важно для студента.
+2. Развёрнутое объяснение содержания слайда.
+3. Конкретный пример с реальными числами или деталями — не абстрактный.
+4. Типичное заблуждение или ошибка, которую здесь допускают.
+5. Переход к следующему слайду.
+Не дублируйте текст слайда — notes должны звучать как речь, а не как повтор body.`
   const citationsClause = sources.length > 0
     ? `\n- Помечайте источники маркером [N] прямо в тексте полей слайда (definition, items, caption, и т.д.) и одновременно дублируйте номера в поле "citations" слайда. Не выдумывайте номера, которых нет в списке материалов.`
     : ''
@@ -642,14 +722,7 @@ function buildExpansionPrompt(
 - Формат запроса тот же, что у diagram: конкретный объект + техническое слово («схема», «разрез», «график», «чертёж»), не общая тема лекции.
 - Если поле не нужно — просто не добавляйте его (не пишите null явно и не пишите пустую строку).
 
-ЗАМЕТКИ ДОКЛАДЧИКА (поле "notes") — сценарий выступления на ${wMin}–${wMax} слов
-(этого хватает примерно на 1.5 минуты речи), а не короткая аннотация. Стройте по структуре:
-1. Почему это важно для студента.
-2. Развёрнутое объяснение содержания слайда.
-3. Конкретный пример с реальными числами или деталями — не абстрактный.
-4. Типичное заблуждение или ошибка, которую здесь допускают.
-5. Переход к следующему слайду.
-Не дублируйте текст слайда — notes должны звучать как речь, а не как повтор body.
+${notesSpec}
 
 ФОРМУЛЫ В ТЕКСТЕ:
 - В любом текстовом поле можно использовать LaTeX inline: $Q$, $\\\\eta$, $\\\\rho g Q H$. Не используйте $$ внутри полей text.${citationsClause}
@@ -1014,20 +1087,29 @@ async function getPreviousTopics(
     .slice(0, 10)
 }
 
-function estimateSlideCount(minutes: number): number {
-  // Was capped at 30 to fit the old single-call generation's 8192-token
-  // ceiling (see the 2026-07-15 incident this codebase used to document
-  // here). Outline+expansion batches independently now — each batch has its
-  // own full 8192-token budget regardless of total slide count — so the cap
-  // is a product/cost decision (a 90-slide "lecture" is a scope problem, not
-  // a token-budget one), not a technical wall. Raised to 50.
-  return Math.max(5, Math.min(50, Math.round(minutes / 2)))
-}
+// estimateSlideCount / MAX_SLIDE_COUNT live in shared/types.ts so the form's
+// max, this clamp and the validation cap can't drift apart — see the note
+// there on MINUTES_PER_SLIDE, which is the knob to tune on feedback.
 
 // Outline is cheap: ~80-90 tokens/slide (type + title + one-line brief),
 // plus a fixed buffer for the JSON envelope.
+//
+// The ceiling used to be 4000, which silently truncated any deck past ~44
+// slides — the budget simply ran out mid-array, normaliseOutline() accepted
+// the short result, and the teacher got fewer slides than they asked for
+// with no error anywhere. Since validation already allowed 50, that was
+// reachable in production. Raised to the provider output cap (8192, same
+// constant expansionBatchMaxTokens() clamps to) so the whole supported
+// range fits with headroom: MAX_SLIDE_COUNT=60 needs ~6200.
+//
+// This is still a per-CALL ceiling on a SINGLE outline call, so it's the
+// real wall on deck size — ~82 slides at 90 tokens each. Going beyond that
+// needs the outline chunked across calls the way expansion already is, not
+// a bigger number here.
+export const OUTLINE_MAX_OUTPUT_TOKENS = 8192
+
 export function outlineMaxTokens(slideTarget: number): number {
-  return Math.min(4000, 800 + slideTarget * 90)
+  return Math.min(OUTLINE_MAX_OUTPUT_TOKENS, 800 + slideTarget * 90)
 }
 
 // Expansion writes the actual body + speaking-script notes, so this is
