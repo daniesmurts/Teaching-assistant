@@ -1,0 +1,30 @@
+# Keep the build context small and the image reproducible. Anything generated,
+# secret, or host-specific must not enter the build.
+.git
+.github
+node_modules
+**/node_modules
+**/dist
+frontend/dist
+backend/dist
+uploads
+graphify-out
+
+# Secrets and host state — never bake these into an image.
+.env
+.env.*
+VERSION
+
+# Docs and local tooling contribute nothing to the runtime.
+docs
+*.md
+!backend/**/*.md
+.vscode
+.claude
+.DS_Store
+**/.DS_Store
+deploy
+deploy.sh
+vm-setup.sh
+docker-compose.keycloak.yml
+marketing-merge-list*.csv

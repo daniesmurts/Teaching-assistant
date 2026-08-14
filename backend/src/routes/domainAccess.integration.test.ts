@@ -28,18 +28,36 @@ async function setupInstitutionTeacher(planTier = 'institution') {
 }
 
 describe('curriculum-domain access (Research.md §7.10 Phase 1)', () => {
-  it('a curriculum/edit grant at root reaches RPD monitor and institution criteria/rubrics', async () => {
+  // UPDATED 2026-08-15: this test asserted that a curriculum grant also reached
+  // the РПД monitor, which was true in Phase 1 but was deliberately reversed —
+  // the monitor moved to its own `umu` domain (docs/ACCESS-MATRIX.md §"Почему
+  // `umu`", routes/rpdMonitor.ts) precisely so a Заведующий кафедрой can author
+  // criteria without seeing institution-wide filing compliance. ACCESS-MATRIX
+  // lists "ЗК не видит Мониторинг РПД" as a required property, so the 403 below
+  // is the behaviour under test, not a regression.
+  it('a curriculum/edit grant at root reaches institution criteria/rubrics but NOT the РПД monitor', async () => {
     const { teacher, root, token } = await setupInstitutionTeacher()
     await addUnitRole(teacher.id, root.id, 'edit', 'curriculum')
-
-    const rpd = await request(app).get('/api/institution/rpd/overview').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
-    expect(rpd.status).toBe(200)
 
     const criteria = await request(app).get('/api/institution/criteria').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(criteria.status).toBe(200)
 
     const rubrics = await request(app).get('/api/institution/rubrics').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
     expect(rubrics.status).toBe(200)
+
+    const rpd = await request(app).get('/api/institution/rpd/overview').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
+    expect(rpd.status).toBe(403)
+  })
+
+  it('a umu/view grant at root reaches the РПД monitor', async () => {
+    // The positive half of the split above — without this, nothing proves the
+    // monitor is reachable at all and the 403 assertion could pass for the
+    // wrong reason (e.g. the route silently 403-ing for everyone).
+    const { teacher, root, token } = await setupInstitutionTeacher()
+    await addUnitRole(teacher.id, root.id, 'view', 'umu')
+
+    const rpd = await request(app).get('/api/institution/rpd/overview').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
+    expect(rpd.status).toBe(200)
   })
 
   it('a curriculum/edit grant does NOT reach platform-only institution routes', async () => {
@@ -105,14 +123,32 @@ describe('curriculum-domain access (Research.md §7.10 Phase 1)', () => {
     expect(rpd.status).toBe(200)
   })
 
-  it('the grant-role validation refuses an admin-level grant scoped to a non-all domain', async () => {
-    const { teacher: admin, root, token } = await setupInstitutionTeacher()
+  // UPDATED 2026-08-15: this asserted the Phase 1 rule that role='admin' always
+  // had to carry domain='all'. That restriction was REMOVED on 2026-07-29 after
+  // it caused a real incident (see docs/ACCESS-MATRIX.md): forcing domain='all'
+  // meant an 'admin' grant on a `program` unit conferred institution-wide
+  // access. Admin now scales by subtree like edit/view, and curriculum:admin /
+  // umu:admin are actively issued (РОП, РУМЦ). The guard was INVERTED, not
+  // dropped — so this now tests the rule that actually exists.
+  it('the grant-role validation accepts a domain-scoped admin grant but refuses admin+all off the root', async () => {
+    const { teacher: admin, institution, root, token } = await setupInstitutionTeacher()
     await addUnitRole(admin.id, root.id, 'admin', 'all')
     const other = await createTestTeacher({ institutionId: root.institution_id })
 
-    const res = await request(app).post('/api/institution/structure/roles').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
+    // Domain-scoped admin on the root: legitimate — this is what РОП/РУМЦ get.
+    const scoped = await request(app).post('/api/institution/structure/roles').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
       .send({ teacherId: other.id, unitId: root.id, role: 'admin', domain: 'curriculum' })
-    expect(res.status).toBe(400)
+    expect(scoped.status).toBe(201)
+
+    // admin + domain='all' anywhere below the root is the escalation path from
+    // the incident: getAccessScope expands 'all' across every domain, so it
+    // would hand institution-wide authority to a unit-level grant.
+    const department = await createOrgUnit({
+      institutionId: institution.id, parentId: root.id, typeCode: 'department', name: 'Кафедра ТЕСТ',
+    })
+    const escalating = await request(app).post('/api/institution/structure/roles').set('Cookie', `${SESSION_COOKIE_NAME}=${token}`).set('X-Requested-With', 'ISPUM')
+      .send({ teacherId: other.id, unitId: department.id, role: 'admin', domain: 'all' })
+    expect(escalating.status).toBe(400)
   })
 })
 

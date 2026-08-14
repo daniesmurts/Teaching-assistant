@@ -6,8 +6,6 @@ name: CI
 # build server exists; this is it.
 #
 # Deliberately NOT here yet, each a follow-up slice:
-#   • integration tests   — need a Postgres + pgvector service container and
-#                           `npm run test:integration:setup` (Track 1.1b)
 #   • bundle smoke test   — needs the Compose bundle (Track 3.7)
 #   • upgrade test        — needs a seeded DB snapshot at the oldest supported
 #                           version (Track 3.7)
@@ -65,3 +63,135 @@ jobs:
       # broken one must fail here rather than at deploy time.
       - name: Typecheck + build (frontend)
         run: npm run build --workspace=frontend
+
+  integration:
+    name: Integration tests (Postgres + pgvector)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      # PG 15 to match the production VM (vm-setup.sh pins PostgreSQL 15 from
+      # the PGDG repo, since Ubuntu 24.04's default repos have no
+      # postgresql-15-pgvector). Same reasoning as the Node 20 pin above: a
+      # version skew between CI and prod is a bug source, not a convenience.
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # .env.test is gitignored (it holds real local keys), so CI synthesises a
+      # disposable one — random JWT secret, freshly generated SAML/LTI
+      # keypairs, fake T-Bank credentials. See backend/scripts/generateTestEnv.ts.
+      - name: Generate .env.test
+        run: npm run test:env --workspace=backend
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ispum_test
+
+      # Creates the database, enables pgvector, then applies every migration
+      # with the same runner production uses — so a migration that only works
+      # against an already-populated schema fails here, not on a customer's box.
+      - name: Create + migrate test database
+        run: npm run test:integration:setup --workspace=backend
+
+      - name: Integration tests
+        run: npm run test:integration --workspace=backend
+
+  image:
+    name: Build backend image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Never publish an artifact that hasn't passed both suites — the whole
+    # point of an immutable image is that its tag is a promise about what's in it.
+    needs: [test, integration]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same string deploy.sh writes ("1.5.0 (2026-08-15+abc1234)"), so a
+      # container reports the same version as a VM deploy of the same commit.
+      # The IMAGE TAG uses a hyphenated form because Docker tags allow neither
+      # spaces nor parentheses.
+      - name: Compute version
+        id: version
+        run: |
+          SEMVER="$(node -p "require('./package.json').version")"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          DATE="$(date -u +%Y-%m-%d)"
+          echo "build_version=${SEMVER} (${DATE}+${SHORT_SHA})" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${SEMVER}-${SHORT_SHA}"               >> "$GITHUB_OUTPUT"
+
+      # Publishing is opt-in: without a registry secret the image is still
+      # BUILT on every run (which is what catches a broken Dockerfile), just
+      # not pushed. Set YC_REGISTRY_ID + YC_SA_JSON_KEY to turn publishing on
+      # — no workflow edit needed. Yandex Container Registry rather than
+      # ghcr.io/Docker Hub: production is in Yandex Cloud, and customers behind
+      # a RU perimeter can't be assumed to reach foreign registries
+      # (docs/on-prem-deployment.md §9).
+      - name: Registry configured?
+        id: registry
+        run: |
+          ENABLED="${{ secrets.YC_SA_JSON_KEY != '' && secrets.YC_REGISTRY_ID != '' }}"
+          echo "enabled=${ENABLED}" >> "$GITHUB_OUTPUT"
+          # The repo name must stay VALID even with no secrets set — an empty
+          # registry id would render as "cr.yandex//ispum-backend", which Docker
+          # rejects and which would fail the build, not just the push.
+          if [ "$ENABLED" = "true" ]; then
+            echo "repo=cr.yandex/${{ secrets.YC_REGISTRY_ID }}/ispum-backend" >> "$GITHUB_OUTPUT"
+          else
+            echo "repo=ispum-backend" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Yandex Container Registry
+        if: steps.registry.outputs.enabled == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: cr.yandex
+          username: json_key
+          password: ${{ secrets.YC_SA_JSON_KEY }}
+
+      - name: Build (and push when configured)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          # Push only from main — a PR build proves the image builds without
+          # publishing an artifact for a commit that may never land.
+          push: ${{ steps.registry.outputs.enabled == 'true' && github.event_name == 'push' }}
+          build-args: |
+            BUILD_VERSION=${{ steps.version.outputs.build_version }}
+          tags: |
+            ${{ steps.registry.outputs.repo }}:${{ steps.version.outputs.image_tag }}
+            ${{ steps.registry.outputs.repo }}:main
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "### Backend image" >> "$GITHUB_STEP_SUMMARY"
+          echo "- version: \`${{ steps.version.outputs.build_version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tag: \`${{ steps.version.outputs.image_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.registry.outputs.enabled }}" != "true" ]; then
+            echo "- **not pushed** — set \`YC_REGISTRY_ID\` and \`YC_SA_JSON_KEY\` repository secrets to publish." >> "$GITHUB_STEP_SUMMARY"
+          fi

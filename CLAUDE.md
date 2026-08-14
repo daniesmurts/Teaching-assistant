@@ -142,9 +142,12 @@ Resolves through `org_units` + `org_unit_roles`, not `teachers.role`:
   `'all'`, which `services/accessScope.ts` expands across every concrete
   domain — every institution-root admin from the original backfill is
   unaffected. `middleware/requireDomain.ts` gates routes on a specific domain
-  (e.g. РПД monitor + institution criteria/rubrics on `curriculum`; institution
-  overview/usage/roster-read on `teaching`) instead of full institution-root
-  admin. Phase 1 (`curriculum`), Phase 2 (`teaching`), Phase 3 slice A
+  (e.g. institution criteria/rubrics on `curriculum`; institution
+  overview/usage/roster-read on `teaching`; РПД monitor + УМК readiness on
+  `umu`) instead of full institution-root admin. **РПД monitor is `umu`, not
+  `curriculum`** — split out deliberately (docs/ACCESS-MATRIX.md) so a
+  Заведующий кафедрой can author criteria without seeing institution-wide
+  filing compliance; two features on the same domain+level can't be told apart. Phase 1 (`curriculum`), Phase 2 (`teaching`), Phase 3 slice A
   (subtree query scoping for `teaching`), and Phase 3 slice B (subtree-scoped
   org tree CRUD + role grants on `platform`) are shipped. `getProgramAccessScope`
   and `canTeacherShareToUnit` also require `domain IN ('all','curriculum')` —

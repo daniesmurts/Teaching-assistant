@@ -10,6 +10,7 @@
     "migrate": "node --env-file=../.env scripts/migrate.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:env": "$(npm root)/.bin/tsx scripts/generateTestEnv.ts",
     "test:integration:setup": "$(npm root)/.bin/tsx scripts/setup-test-db.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "eval": "node --env-file=../.env $(npm root)/.bin/tsx scripts/runEval.ts",

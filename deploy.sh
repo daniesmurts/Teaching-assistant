@@ -50,7 +50,23 @@ if [ "$UNPUSHED" != "0" ]; then
   echo "⚠ ${UNPUSHED} commit(s) not pushed to origin — prod will run code that isn't on the remote."
 fi
 
-# Build/deploy identifier — `{date}+{git short SHA}`, e.g. 2026-07-14+a1b2c3d.
+# ── Release identity (docs/on-prem-deployment.md §7.4, §16 Track 1.2) ────────
+# The SEMANTIC version is the single source of truth in the ROOT package.json
+# ("1.5.0"), not in the workspaces — it's the number a customer says out loud
+# and the one a support matrix and a licence file refer to. The date+SHA build
+# stamp stays as metadata: it identifies the exact build, the semver identifies
+# the release.
+SEMVER="$(node -p "require('./package.json').version")"
+
+# A release should be tagged. Warn rather than block — bumping package.json and
+# tagging are separate acts, and a hotfix deploy shouldn't be held hostage to
+# tag hygiene. Track 4.1 turns this into a hard gate for the `stable` channel.
+if ! git rev-parse --verify --quiet "refs/tags/v${SEMVER}" >/dev/null; then
+  echo "⚠ No git tag v${SEMVER} — this release isn't tagged. Create it with: git tag v${SEMVER}"
+fi
+
+# Build/deploy identifier — `{semver} ({date}+{git short SHA})`,
+# e.g. 1.5.0 (2026-07-14+a1b2c3d).
 # Distinct from the hand-curated "Версия 1.4" marketing changelog
 # (frontend/src/pages/Changelog.tsx): that one is bumped by hand when we want
 # to announce a release; this one stamps every deploy automatically so
@@ -58,7 +74,7 @@ fi
 # zero chance of forgetting to bump it. Read by vite.config.ts (frontend) and
 # backend/src/lib/version.ts (backend) — both fall back to 'dev' if the
 # VERSION file is absent, which is the normal state outside of a deploy.
-BUILD_VERSION="$(date -u +%Y-%m-%d)+$(git rev-parse --short HEAD)${DIRTY_SUFFIX}"
+BUILD_VERSION="${SEMVER} ($(date -u +%Y-%m-%d)+$(git rev-parse --short HEAD)${DIRTY_SUFFIX})"
 echo "$BUILD_VERSION" > VERSION
 echo "▶ [0/7] Build version: ${BUILD_VERSION}"
 
