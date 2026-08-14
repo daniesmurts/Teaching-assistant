@@ -276,12 +276,16 @@ function QuizDisplay({ quiz }: { quiz: Quiz }) {
   return (
     <div className="space-y-4">
       {/* Toolbar — flex-wrap so a long topic label drops the action row to
-          its own line instead of squeezing it into a sliver of width. */}
+          its own line instead of squeezing it into a sliver of width. The
+          action row itself also needs flex-wrap: on a narrow phone screen
+          the pacing toggle + 3 buttons don't fit one line, and without wrap
+          here they used to force the whole PAGE into horizontal scroll
+          instead of just flowing onto a second line. */}
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">
+        <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider break-words min-w-0">
           {quiz.questions.length} вопросов · {quiz.topic}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Pacing choice — made once, at launch, since it changes the
               whole interaction model (shared vs. per-participant question
               pointer) rather than something togglable mid-session. */}

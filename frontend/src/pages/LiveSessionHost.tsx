@@ -446,7 +446,14 @@ function SaveToJournalPanel({
 
       <div className="flex flex-col gap-2 max-h-[45vh] overflow-y-auto mb-4">
         {rows.map((r) => (
-          <div key={r.participant_id} className="flex items-center gap-3 bg-white/5 rounded-md px-3 py-2">
+          // flex-wrap so the row reflows onto multiple lines on a narrow
+          // phone instead of overflowing — this row has five fixed-width
+          // elements (checkbox, nickname, group, score, saved-badge) plus the
+          // name input; without wrap they never fit a 375px screen and the
+          // row forced the whole page into horizontal scroll, clipping the
+          // "Группа" field mid-input. min-w on the name input keeps it from
+          // being squeezed to nothing before it wraps to its own line.
+          <div key={r.participant_id} className="flex flex-wrap items-center gap-2 sm:gap-3 bg-white/5 rounded-md px-3 py-2">
             <input
               type="checkbox"
               checked={r.include}
@@ -454,14 +461,14 @@ function SaveToJournalPanel({
               onChange={(e) => updateRow(r.participant_id, { include: e.target.checked })}
               className="shrink-0"
             />
-            <div className="w-24 truncate text-xs text-white/50 shrink-0">{r.nickname ?? '—'}</div>
+            <div className="w-20 sm:w-24 truncate text-xs text-white/50 shrink-0">{r.nickname ?? '—'}</div>
             <input
               value={r.student_name}
               onChange={(e) => updateRow(r.participant_id, { student_name: e.target.value })}
               disabled={r.already_saved}
               list="journal-name-suggestions"
               placeholder="ФИО студента"
-              className="flex-1 min-w-0 px-2 py-1.5 rounded bg-white/10 border border-white/20 text-white text-sm placeholder:text-white/30 disabled:opacity-40"
+              className="flex-1 min-w-[140px] px-2 py-1.5 rounded bg-white/10 border border-white/20 text-white text-sm placeholder:text-white/30 disabled:opacity-40"
             />
             <input
               value={r.student_group}
@@ -469,7 +476,7 @@ function SaveToJournalPanel({
               disabled={r.already_saved}
               list="journal-group-suggestions"
               placeholder="Группа"
-              className="w-28 shrink-0 px-2 py-1.5 rounded bg-white/10 border border-white/20 text-white text-sm placeholder:text-white/30 disabled:opacity-40"
+              className="w-24 sm:w-28 shrink-0 px-2 py-1.5 rounded bg-white/10 border border-white/20 text-white text-sm placeholder:text-white/30 disabled:opacity-40"
             />
             <div className="w-16 text-right text-sm text-white/60 shrink-0">{r.score.correct} / {r.score.total}</div>
             {r.already_saved && <span className="text-xs text-success shrink-0 w-20 text-right">сохранено</span>}
