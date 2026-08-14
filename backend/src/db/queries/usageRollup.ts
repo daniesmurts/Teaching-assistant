@@ -207,7 +207,12 @@ export interface UsageRollupRow {
 
 export async function getUsageRollupForMonth(month: string): Promise<UsageRollupRow[]> {
   const { rows } = await pool.query<UsageRollupRow>(
-    `SELECT month, teacher_id, institution_id, effective_tier, call_count, total_tokens::int AS total_tokens,
+    // total_tokens is BIGINT; `::int` (int4) would throw "integer out of
+    // range" once a teacher-month passes 2,147,483,647 tokens. Not reachable
+    // today, but it's the same latent overflow that broke
+    // getLatestResourceSample in CI — float8 is exact below 2^53 and node-pg
+    // parses it to a JS number, so the `number` typing stays honest.
+    `SELECT month, teacher_id, institution_id, effective_tier, call_count, total_tokens::float8 AS total_tokens,
             cost_usd, amortized_revenue_rub, amortized_revenue_usd
        FROM usage_rollup_monthly
       WHERE month = $1`,
@@ -231,7 +236,7 @@ export interface InstitutionRollupRow {
 export async function getInstitutionRollupForMonth(month: string): Promise<InstitutionRollupRow[]> {
   const { rows } = await pool.query<InstitutionRollupRow>(
     `SELECT month, institution_id, active_seats, seats_purchased,
-            overhead_call_count, overhead_tokens::int AS overhead_tokens, overhead_cost_usd,
+            overhead_call_count, overhead_tokens::float8 AS overhead_tokens, overhead_cost_usd,
             amortized_revenue_rub, amortized_revenue_usd
        FROM institution_rollup_monthly
       WHERE month = $1`,

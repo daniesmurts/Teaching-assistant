@@ -17,6 +17,32 @@ describe('sampleOnce', () => {
     expect(latest!.embedded_assignments).toBeGreaterThanOrEqual(0)
   })
 
+  it('REGRESSION: reads byte columns above the int4 ceiling without overflowing', async () => {
+    // The read queries used to cast these BIGINT columns to ::int (int4, max
+    // 2,147,483,647 ≈ 2.0 GiB), so any value past ~2.1 GB threw "integer out
+    // of range". free_mem_bytes crosses that on any machine with >2 GB free —
+    // i.e. every production VM in normal operation. It escaped notice because
+    // macOS reports a small os.freemem() (memory is held as cache), so the
+    // suite passed locally and only failed on a 16 GB CI runner. Pin explicit
+    // over-ceiling values so this fails everywhere, not just on Linux.
+    const OVER_INT4 = 8_589_934_592          // 8 GiB
+    await pool.query(
+      `INSERT INTO resource_samples
+         (rss_bytes, heap_used_bytes, load_avg_1m, free_mem_bytes, db_size_bytes, db_connections, embedded_assignments)
+       VALUES ($1, $1, 0.5, $1, $1, 3, 0)`,
+      [OVER_INT4]
+    )
+
+    const latest = await getLatestResourceSample()
+    expect(latest!.rss_bytes).toBe(OVER_INT4)
+    expect(latest!.free_mem_bytes).toBe(OVER_INT4)
+    expect(latest!.db_size_bytes).toBe(OVER_INT4)
+
+    const peaks = await getResourceSamplePeaks(1)
+    expect(peaks.peakRssBytes).toBe(OVER_INT4)
+    expect(peaks.peakDbSizeBytes).toBe(OVER_INT4)
+  })
+
   it('does not throw when called back-to-back (idempotent-safe, not a singleton)', async () => {
     await sampleOnce()
     await sampleOnce()

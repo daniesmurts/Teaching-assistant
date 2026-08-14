@@ -43,10 +43,20 @@ export interface ResourceSampleRow {
 
 export async function getLatestResourceSample(): Promise<ResourceSampleRow | null> {
   const { rows } = await pool.query<ResourceSampleRow>(
+    // float8, NOT int — these columns are BIGINT because they hold byte
+    // counts, and `::int` is int4 (max 2,147,483,647 ≈ 2.0 GiB), so the cast
+    // throws "integer out of range" the moment any of them exceeds ~2.1 GB.
+    // free_mem_bytes (os.freemem()) crosses that on any machine with more
+    // than 2 GB free, which is every production VM in normal operation —
+    // this threw in CI on a 16 GB runner while passing on macOS, where
+    // freemem() reports a much smaller number because the OS holds memory as
+    // cache. float8 is exact for integers below 2^53 (~9 PB), and node-pg
+    // parses it straight to a JS number, unlike bigint which arrives as a
+    // string. The `number` typings above stay honest.
     `SELECT sampled_at::text AS sampled_at,
-            rss_bytes::int AS rss_bytes, heap_used_bytes::int AS heap_used_bytes,
-            load_avg_1m, free_mem_bytes::int AS free_mem_bytes,
-            db_size_bytes::int AS db_size_bytes, db_connections, embedded_assignments
+            rss_bytes::float8 AS rss_bytes, heap_used_bytes::float8 AS heap_used_bytes,
+            load_avg_1m, free_mem_bytes::float8 AS free_mem_bytes,
+            db_size_bytes::float8 AS db_size_bytes, db_connections, embedded_assignments
        FROM resource_samples
       ORDER BY sampled_at DESC
       LIMIT 1`
@@ -67,11 +77,14 @@ export async function getResourceSamplePeaks(hours: number): Promise<ResourceSam
   const { rows } = await pool.query<{
     sample_count: number; peak_rss: number; peak_load: number; peak_conn: number; peak_db_size: number
   }>(
+    // Byte peaks are float8 for the same int4-overflow reason as
+    // getLatestResourceSample above. sample_count and peak_conn stay ::int —
+    // a row count and a connection count can't approach 2.1 billion.
     `SELECT COUNT(*)::int AS sample_count,
-            COALESCE(MAX(rss_bytes), 0)::int AS peak_rss,
+            COALESCE(MAX(rss_bytes), 0)::float8 AS peak_rss,
             COALESCE(MAX(load_avg_1m), 0) AS peak_load,
             COALESCE(MAX(db_connections), 0)::int AS peak_conn,
-            COALESCE(MAX(db_size_bytes), 0)::int AS peak_db_size
+            COALESCE(MAX(db_size_bytes), 0)::float8 AS peak_db_size
        FROM resource_samples
       WHERE sampled_at >= NOW() - ($1 || ' hours')::interval`,
     [hours]
