@@ -6,6 +6,7 @@
 
 import os from 'os'
 import { logger } from '../lib/logger'
+import { scheduleWithLease } from './schedulerLease'
 import { getDatabaseSizeBytes, getActiveConnectionCount, getEmbeddedAssignmentCount } from '../db/queries/capacity'
 import { insertResourceSample, pruneResourceSamples } from '../db/queries/resourceSamples'
 
@@ -41,13 +42,13 @@ async function tick(): Promise<void> {
 
 /** Start the ~60s sampler. Gated to PM2 worker 0 only — same precedent as services/renewals.ts's startRenewalScheduler — so cluster mode doesn't insert duplicate samples every tick. */
 export function startResourceSampler(): void {
-  const instanceId = process.env.NODE_APP_INSTANCE ?? '0'
-  if (instanceId !== '0') {
-    logger.info({ message: 'Resource sampler skipped on this worker', instanceId })
-    return
-  }
-
-  setInterval(() => { void tick() }, SAMPLE_INTERVAL_MS)
-  void tick()   // first sample immediately, don't wait a full interval after boot
+  // Lease-gated so exactly one instance samples per tick — see
+  // services/schedulerLease.ts. Semantic nuance worth knowing when reading the
+  // numbers: the RSS/heap figures now come from whichever instance won this
+  // tick, not always from PM2's worker 0. Both are "one worker's memory", so
+  // the capacity signal is unchanged, but consecutive samples may come from
+  // different processes.
+  scheduleWithLease('resource_sampler', { intervalMs: SAMPLE_INTERVAL_MS, leaseMs: SAMPLE_INTERVAL_MS - 10_000, firstRunDelayMs: 0 },
+    async () => { await tick() })
   logger.info({ message: 'Resource sampler started', intervalMs: SAMPLE_INTERVAL_MS, retentionDays: RETENTION_DAYS })
 }

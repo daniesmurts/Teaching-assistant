@@ -4,6 +4,7 @@
 
 import { pool } from '../db/connection'
 import { logger } from '../lib/logger'
+import { runWithLease } from './schedulerLease'
 import { sendTelegramMessage } from '../lib/telegramAlert'
 import { getStalledTeachers } from '../db/queries/activation'
 
@@ -62,13 +63,14 @@ export async function sendActivationDigest(): Promise<void> {
 // so the window matches exactly one tick per week.
 
 export function startActivationDigestScheduler(): void {
-  const instanceId = process.env.NODE_APP_INSTANCE ?? '0'
-  if (instanceId !== '0') return
-
   const HOUR = 60 * 60 * 1000
-  const maybeSend = () => {
+  // The lease is taken only when the send window actually matches, so an
+  // idle hourly tick costs no database write. A 50-minute lease then covers
+  // the single Monday-08:xx tick across every instance.
+  const maybeSend = (): void => {
     const now = new Date()
-    if (now.getDay() === 1 && now.getHours() === 8) void sendActivationDigest()
+    if (now.getDay() !== 1 || now.getHours() !== 8) return
+    void runWithLease('activation_digest', 50 * 60_000, () => sendActivationDigest())
   }
   setInterval(maybeSend, HOUR)
   logger.info({ message: 'Activation digest scheduler started (Mondays 08:00)' })

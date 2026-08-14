@@ -1,5 +1,5 @@
 // Activation nudge sweep — the email counterpart of OnboardingChecklist.tsx.
-// Hourly, worker 0 only (same PM2 gate as renewals.ts). Two-step ladder for
+// Hourly, once per cluster (Postgres lease, same as renewals.ts). Two-step ladder for
 // teachers who registered but never reached the aha moment (first grade):
 //   activation_24h — 24–72h after signup: "проверьте первую работу за 2 минуты"
 //   activation_72h — 72h–7d after signup: the first-steps video, different angle
@@ -9,6 +9,7 @@
 import crypto from 'crypto'
 import { config } from '../lib/config'
 import { logger } from '../lib/logger'
+import { scheduleWithLease } from './schedulerLease'
 import { sendEmail } from './emailTransport'
 import { activation24hEmail, activation72hEmail } from '../lib/emailTemplates'
 import {
@@ -88,13 +89,10 @@ export async function runActivationSweep(): Promise<void> {
 // ─── Scheduler ────────────────────────────────────────────────────────────────
 
 export function startActivationScheduler(): void {
-  // Same worker-0 gate as the payment schedulers — PM2 cluster mode would
-  // otherwise run the sweep once per worker.
-  const instanceId = process.env.NODE_APP_INSTANCE ?? '0'
-  if (instanceId !== '0') return
-
+  // Cluster-safe via a Postgres lease, same as the payment schedulers —
+  // see services/schedulerLease.ts.
   const HOUR = 60 * 60 * 1000
-  setTimeout(() => { void runActivationSweep() }, 2 * 60_000)  // first run 2 min after boot
-  setInterval(() => { void runActivationSweep() }, HOUR)
+  scheduleWithLease('activation_sweep', { intervalMs: HOUR, leaseMs: 50 * 60_000, firstRunDelayMs: 2 * 60_000 },
+    () => runActivationSweep())
   logger.info({ message: 'Activation nudge scheduler started (hourly)' })
 }

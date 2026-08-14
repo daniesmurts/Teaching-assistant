@@ -843,7 +843,17 @@ Strictly sequential; each unblocks the next.
 | 1.1b ◆ | **Integration tests in CI** — `pgvector/pgvector:pg15` service container (matches prod), disposable `.env.test` via `backend/scripts/generateTestEnv.ts` | **✅ shipped 2026-08-15**, green — 27 files / 200 tests. (Two stale §7.10 tests in `domainAccess.integration.test.ts` surfaced with it and were rewritten to the current domain design, not skipped.) |
 | 1.2 ◆ | **Version honesty** — fail the deploy on a dirty tree; semantic version; `VERSION` carries `1.5.0 (date+SHA)` | §7.1. Every telemetry claim rests on it. **✅ shipped 2026-08-15** — semver single-sourced from the root `package.json` (now `1.5.0`); deploy warns when no matching `v{semver}` git tag exists. Tag enforcement becomes a hard gate for `stable` in Track 4.1. |
 | 1.3 ▲◆ | **Build artifact in CI** — `backend/Dockerfile` (multi-stage, Debian-based), built on every run, pushed to Yandex Container Registry when secrets are set | The source→artifact inversion (§7.2). **✅ shipped 2026-08-15.** Publishing is opt-in: set `YC_REGISTRY_ID` + `YC_SA_JSON_KEY` repo secrets to turn it on; until then the image is built (proving the Dockerfile works) but not pushed. Runtime smoke test of the image deferred to 3.7 — the build asserts the entry point exists, but nothing boots the container yet. |
-| 1.4 ◆ | **`deploy.sh` promotes an image** instead of rsyncing source; rollback = repoint tag | Immediately better than today: no compiler on prod, real rollback |
+| 1.4a ◆ | **Cluster-safe schedulers** — replace the PM2 `NODE_APP_INSTANCE` worker-0 gate with a Postgres lease (migration 112, `services/schedulerLease.ts`) | **✅ shipped 2026-08-15.** Discovered while scoping 1.4: that variable is set only by PM2, so in a container every replica reads itself as worker 0 and renewals/payment reconciliation would fire once *per replica*. Any replica count is now safe. |
+| 1.4b ◆ | **`deploy.sh` promotes an image** instead of rsyncing source; rollback = repoint tag | Immediately better than today: no compiler on prod, real rollback. **Blocked on operator prerequisites** — see below. |
+
+**1.4b prerequisites (operator actions, not code):**
+1. Create a Yandex Container Registry; add `YC_REGISTRY_ID` + `YC_SA_JSON_KEY` as
+   GitHub repository secrets so CI actually publishes the image built in 1.3.
+2. Install Docker + compose plugin on the production VM (`vm-setup.sh` addition).
+3. Decide replica count. The 1.4a lease makes any count safe; two replicas
+   preserve today's PM2 two-worker throughput but need a one-time nginx
+   `upstream` block, since nginx currently proxies to a single `127.0.0.1:3000`.
+4. Postgres stays on the host — it holds live data and is not containerised.
 | 1.5 ◆ | **Image scanning + SBOM** in CI (Trivy) | §15.5. Trivial once 1.1+1.3 exist; a procurement gate later. |
 | 1.6 ▲◆ | **Control-plane skeleton** — own host + DB, 4 tables, signed ingest endpoint; **our cloud pushes to itself** | §5.3. Full architecture, one deployment, zero on-prem risk. |
 | 1.7 ◆ | **`deployment_id` dimension** across admin queries + fleet overview page | §5.4. The bulk of the dashboard work, done while there is one deployment to be wrong about. |

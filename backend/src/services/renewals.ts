@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 import { logger } from '../lib/logger'
+import { scheduleWithLease, INSTANCE_ID } from './schedulerLease'
 import { paymentsConfigured, chargeRecurrent, buildSubscriptionReceipt, getPaymentState } from './tbank'
 import { PURCHASABLE_PLANS } from '../config/pricing'
 import {
@@ -134,19 +135,24 @@ export function startRenewalScheduler(): void {
     return
   }
 
-  // In PM2 cluster mode every worker would otherwise run the scheduler. Gate
-  // to worker 0 only so renewals + reconciliation fire exactly once per VM.
-  // (NODE_APP_INSTANCE is set by PM2; unset in dev or fork mode → defaults to '0'.)
-  const instanceId = process.env.NODE_APP_INSTANCE ?? '0'
-  if (instanceId !== '0') {
-    logger.info({ message: 'Payment schedulers skipped on this worker', instanceId })
-    return
-  }
-
+  // Every instance runs these timers; a Postgres lease decides who actually
+  // executes each tick (services/schedulerLease.ts). This replaces a
+  // `NODE_APP_INSTANCE !== '0'` gate that depended on PM2 setting that
+  // variable — in a container it is unset, so every replica read itself as
+  // worker 0 and this scheduler would have charged renewals once per replica.
   const DAY = 24 * 60 * 60 * 1000
-  setTimeout(() => { void runRenewals() }, 60_000)     // first renewal run 1 min after boot
-  setInterval(() => { void runRenewals() }, DAY)        // then daily
 
-  setInterval(() => { void reconcilePendingPayments() }, 5 * 60 * 1000)  // every 5 min
-  logger.info({ message: 'Payment schedulers started (renewals daily, reconciliation 5 min)' })
+  // 23h lease on a daily job: at most one renewal sweep per day across the
+  // whole cluster. NOTE this also means a restart no longer re-runs the sweep
+  // 1 minute after boot — previously every deploy triggered another pass.
+  // runRenewals only acts on subscriptions that are actually due, so the old
+  // behaviour was wasteful rather than harmful, but "charges are attempted
+  // once per day, whatever we deploy" is the property worth having.
+  scheduleWithLease('renewals', { intervalMs: DAY, leaseMs: 23 * 60 * 60 * 1000, firstRunDelayMs: 60_000 },
+    () => runRenewals())
+
+  scheduleWithLease('payment_reconciliation', { intervalMs: 5 * 60 * 1000, leaseMs: 4 * 60 * 1000 },
+    () => reconcilePendingPayments())
+
+  logger.info({ message: 'Payment schedulers started (renewals daily, reconciliation 5 min)', instanceId: INSTANCE_ID })
 }

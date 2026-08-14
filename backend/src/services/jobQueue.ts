@@ -19,10 +19,11 @@
 // requires Node >=20, matching production's NodeSource 20.x provisioning
 // (vm-setup.sh) exactly.
 //
-// Workers run in every PM2 cluster process independently — unlike the daily
-// renewal scheduler (which gates on NODE_APP_INSTANCE to avoid double-firing
-// a cron), pg-boss's SKIP LOCKED polling is safe and intended to run from
-// multiple processes: whichever worker polls first claims the job.
+// Workers run in every instance independently — unlike the daily renewal
+// scheduler (which takes a Postgres lease per tick to avoid double-firing a
+// cron; see services/schedulerLease.ts), pg-boss's SKIP LOCKED polling is safe
+// and intended to run from multiple processes: whichever worker polls first
+// claims the job. Nothing here needs the lease.
 
 import PgBoss from 'pg-boss'
 import { logger } from '../lib/logger'

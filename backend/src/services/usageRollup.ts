@@ -10,6 +10,7 @@
 
 import { computeEffectiveTier } from '../lib/planTier'
 import { logger } from '../lib/logger'
+import { scheduleWithLease } from './schedulerLease'
 import { getUsdRubRate, rubToUsd } from './fxRate'
 import { getCurrentInstitutionContract } from '../db/queries/institutionContracts'
 import {
@@ -180,14 +181,8 @@ async function refreshRollups(): Promise<void> {
  *  same precedent as services/renewals.ts's startRenewalScheduler — so cluster mode doesn't
  *  recompute the same month N times per tick. */
 export function startUsageRollupScheduler(): void {
-  const instanceId = process.env.NODE_APP_INSTANCE ?? '0'
-  if (instanceId !== '0') {
-    logger.info({ message: 'Usage rollup scheduler skipped on this worker', instanceId })
-    return
-  }
-
   const SIX_HOURS = 6 * 60 * 60 * 1000
-  setTimeout(() => { void refreshRollups() }, 2 * 60_000)      // first run 2 min after boot
-  setInterval(() => { void refreshRollups() }, SIX_HOURS)       // then every 6h
+  scheduleWithLease('usage_rollup', { intervalMs: SIX_HOURS, leaseMs: 5 * 60 * 60 * 1000, firstRunDelayMs: 2 * 60_000 },
+    () => refreshRollups())
   logger.info({ message: 'Usage rollup scheduler started', intervalHours: 6 })
 }
