@@ -1,0 +1,67 @@
+name: CI
+
+# docs/on-prem-deployment.md §15.1 / §16 Track 1.1 — the repository's first
+# pipeline. Everything downstream in that plan (immutable artifacts, version
+# honesty, release branches, the upgrade test, image scanning, SBOM) assumes a
+# build server exists; this is it.
+#
+# Deliberately NOT here yet, each a follow-up slice:
+#   • integration tests   — need a Postgres + pgvector service container and
+#                           `npm run test:integration:setup` (Track 1.1b)
+#   • bundle smoke test   — needs the Compose bundle (Track 3.7)
+#   • upgrade test        — needs a seeded DB snapshot at the oldest supported
+#                           version (Track 3.7)
+#   • image build + scan  — Track 1.3 / 1.5
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# The newest push to a ref is the only one whose result matters — cancel
+# superseded runs rather than paying for them.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck + unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 20 matches the production VM (vm-setup.sh installs nodesource
+      # 20.x). Do NOT bump this to track whatever is newest on a dev laptop —
+      # CI exists to catch what breaks in production, and a version skew
+      # between the two is exactly the class of bug it should be finding.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # Root install covers both workspaces via the root package-lock.json.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (backend)
+        run: npm run typecheck --workspace=backend
+
+      - name: Unit tests (backend)
+        run: npm run test --workspace=backend
+
+      - name: Unit tests (frontend)
+        run: npm run test --workspace=frontend
+
+      # `npm run build --workspace=frontend` is `tsc && vite build`, so this
+      # covers the frontend typecheck AND catches Vite/PWA build failures that
+      # tsc alone would not. The frontend build runs on every deploy, so a
+      # broken one must fail here rather than at deploy time.
+      - name: Typecheck + build (frontend)
+        run: npm run build --workspace=frontend

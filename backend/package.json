@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "node --env-file=../.env $(npm root)/.bin/tsx watch --ignore '../node_modules/**' --ignore '../frontend/**' src/index.ts",
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "start": "node --env-file=../.env dist/backend/src/index.js",
     "migrate": "node --env-file=../.env scripts/migrate.js",
     "test": "vitest run",

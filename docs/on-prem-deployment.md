@@ -682,3 +682,242 @@ At one-to-twenty deployments, each of these costs more than it returns.
 - [ ] Air-gap: separate SKU, or decline for now? (§1)
 - [ ] Accept that on-prem customers do not feed the RAG flywheel, or negotiate anonymised contribution? (§10)
 - [ ] Release cadence for `stable`: quarterly, or semester-aligned? (§7.3)
+- [ ] Prompts as shipped content vs. compiled-in code — and the IP exposure that follows (§15.2)
+- [ ] Who holds `platform_admin` inside their deployment? (§15.6)
+- [ ] Source escrow and business-continuity clauses — decide policy before procurement asks (§15.7)
+- [ ] Is this deal worth displacing the existing pilot roadmap? (§15.9)
+
+---
+
+## 15. Additional findings (2026-08-14 review)
+
+Nine items surfaced after the first draft. Two of them (15.1, 15.2) change the
+critical path.
+
+### 15.1 There is no CI in this repository — at all
+
+No `.github/`, no pipeline of any kind. §7.6 says "CI gains three jobs"; it
+actually gains **its first job**. Every downstream item — immutable artifacts,
+version honesty, release branches, the upgrade test, image scanning, SBOM —
+assumes a build server that does not exist.
+
+This is the true Phase 1 prerequisite and the item most likely to blow the
+schedule, precisely because the current plan renders it invisible.
+
+### 15.2 Prompts are compiled into the code, and that freezes our fastest loop
+
+Prompts live inline across 20+ files in `backend/src/services/` (`grading.ts`,
+`presentations.ts`, `longReview.ts`, `topics.ts`, `fosGenerator.ts`, …). There
+is no `prompts/` module.
+
+Under a quarterly release train, **an on-prem customer's grading quality
+freezes for three months at a time.** A prompt fix shipped to cloud on a
+Tuesday reaches them in November. Prompt iteration is our fastest improvement
+loop, and self-managed throttles it to the slowest cadence we have.
+
+**Fix:** make prompts — and rubric templates, criteria libraries, FGOS
+reference data — **versioned content shipped independently of code**. A signed
+*content pack* the deployment pulls from the control plane, or applies from a
+file when air-gapped. Same pattern security vendors use for detection rules:
+engine on a slow cadence, content on a fast one. Cloud benefits too — prompt
+changes stop requiring a deploy.
+
+**Do this before the first on-prem release, not after.** Retrofitting it once
+a customer is live means their first three months are on frozen prompts.
+
+**IP dimension of the same fact:** our prompts *are* the product, and on-prem
+they sit as readable JS on a university server. Minification is theatre. The
+real answer is contractual (non-reverse-engineering clauses) plus accepting
+that iteration speed is the moat — but it must be a conscious decision, not a
+discovery.
+
+### 15.3 Canary evals running inside their deployment
+
+We have `services/evalHarness.ts`, the `eval_runs` table and
+`scripts/runEval.ts`. Ship a small **synthetic** corpus — never real student
+work — run it on a schedule inside their deployment, and report the scores in
+the heartbeat (§5.2).
+
+This converts "we are blind to their quality" into a tracked number, and
+catches the exact failure we most fear: their sysadmin swaps a checkpoint and
+grading quietly degrades (§3.2). Mostly assembly of parts that already exist.
+**Highest value-per-effort item in this document.**
+
+### 15.4 Cloud pilot first, then migrate
+
+The realistic sequence is not on-prem from day one: a small cloud pilot proves
+value while procurement grinds, then the deployment moves into their perimeter.
+That de-risks the whole engagement.
+
+It requires a **deployment-level export/import path** that does not exist —
+`services/accountExport.ts` is per-account. Migration necessarily **re-embeds
+everything** (§3.4: vector spaces do not transfer; `npm run
+backfill:embeddings` is the tool). Build it deliberately rather than
+improvising under deadline.
+
+### 15.5 Procurement security artifacts
+
+State university ИБ increasingly requires an **SBOM**, **container image
+vulnerability scanning**, a documented **CVE patch SLA**, and sometimes a
+**pentest report**. `docs/legal/security-overview.md` is the base to extend.
+
+Cheap once CI exists (Trivy + SBOM generation are a few lines), and frequently
+a hard gate — have them before the questionnaire comes back.
+
+Related and nearly free: **a `/metrics` endpoint** (none today) so their ops
+team can watch ИСПУМ in their own Zabbix/Prometheus. Low cost, and it makes
+their infrastructure people allies rather than obstacles.
+
+### 15.6 Who holds `platform_admin` inside their deployment?
+
+Unresolved governance hole. The role sees everything and can change provider
+settings, model config and institution-wide flags. If they hold it, they can
+break their own support contract. If we hold it, they will object on principle.
+
+Likely answer: **they hold it, and the licence gates which platform-admin
+actions are available in `onprem` mode.** Decide before go-live.
+
+### 15.7 The legal posture inverts, and one detail bites
+
+On-prem, **they** become the оператор ПДн and we stop processing their data
+entirely — our 152-ФЗ posture simplifies, and the DPA becomes a licence +
+support contract.
+
+The detail: the §5.1 attestation flow has students consenting without accounts,
+and `CONSENT_VERSION` plus the consent copy in `routes/publicWrite.ts` name
+ИСПУМ as the party. That wording is deployment-specific on-prem and must be
+parameterised.
+
+Also expect procurement to ask for **source escrow** and a
+**business-continuity clause** — Russian state buyers routinely do. Decide the
+policy before they ask.
+
+### 15.8 Support capacity is the constraint, not code
+
+When their deployment is down at 09:00 during exam week, who answers? Match the
+SLA to the team that actually exists — **business hours only in the first
+contract, explicitly written.** Vendors are hurt by self-managed customers
+through support load, not engineering.
+
+### 15.9 Opportunity cost against the existing pilot
+
+`docs/KNITU-feature-map.md`, `docs/KNITU-roadmap.md` and
+`docs/rop-pilot-onboarding.md` record live pilot commitments. Tracks 1–2 below
+improve the cloud product regardless; **Tracks 3–4 are months of work shipping
+zero features to existing users**, carried for one customer.
+
+Is this deal large enough — or strategically load-bearing enough (Реестр, the
+state-university segment, the sovereignty story) — to justify displacing the
+pilot roadmap? Probably yes, but decide it explicitly with a number attached,
+not by drift.
+
+---
+
+## 16. Ordered plan
+
+Tracks are ordered by dependency. Within a track, numbered items are largely
+sequential; tracks 1 and L run in parallel.
+
+**Legend:** ▲ = blocks other work · ◆ = valuable even if the deal dies ·
+◇ = on-prem-only cost
+
+### Track 0 — Before signing (weeks 1–3, near-zero engineering)
+
+| # | Item | Notes |
+|---|---|---|
+| 0.1 ▲ | Send the §12 discovery questionnaire | Unblocks every sizing decision. Do this first, today. |
+| 0.2 ◆ | Confirm **Реестр отечественного ПО** status | May be a bigger commercial lever than the deal (§9) |
+| 0.3 ▲ | **Technical spike** — thinking toggle (§3.2), JSON mode (§3.6), embedding dims (§3.4), throughput (§3.8), quality delta via `runEval.ts` / `evalPresentations.ts` / `runConfidenceEval.ts` with `providerOverride` | 2 weeks. Produces the numbers we negotiate with. |
+| 0.4 | Decide deployment model: BYOC vs self-managed vs air-gap (§1) | Depends on 0.1 |
+| 0.5 | Decide opportunity cost vs pilot roadmap (§15.9) | Depends on 0.3 giving a real effort estimate |
+
+> **Gate:** do not sign without 0.3's measured numbers and 0.5's explicit decision.
+
+### Track 1 — Foundations (do regardless of the deal) ◆
+
+Strictly sequential; each unblocks the next.
+
+| # | Item | Why here |
+|---|---|---|
+| 1.1 ▲◆ | **CI from zero** — typecheck + unit tests on push (`.github/workflows/ci.yml`) | §15.1. Nothing else in this plan is possible without it. **✅ shipped 2026-08-15** — Node 20 to match prod. |
+| 1.1b ◆ | **Integration tests in CI** — Postgres + pgvector service container, `test:integration:setup` | Split out of 1.1 to get a green pipeline first. **← next** |
+| 1.2 ◆ | **Version honesty** — fail the deploy on a dirty tree; semantic version + git tag; `VERSION` carries `1.7.0 / date+SHA` | §7.1. Cheap, and every telemetry claim rests on it. **🟡 partial** — dirty-tree guard + `+dirty` marker shipped 2026-08-15; semantic version/tags still to do (needs a starting version — see §14). |
+| 1.3 ▲◆ | **Build artifact in CI** — Docker images, tagged, pushed to Yandex Container Registry | The source→artifact inversion (§7.2) |
+| 1.4 ◆ | **`deploy.sh` promotes an image** instead of rsyncing source; rollback = repoint tag | Immediately better than today: no compiler on prod, real rollback |
+| 1.5 ◆ | **Image scanning + SBOM** in CI (Trivy) | §15.5. Trivial once 1.1+1.3 exist; a procurement gate later. |
+| 1.6 ▲◆ | **Control-plane skeleton** — own host + DB, 4 tables, signed ingest endpoint; **our cloud pushes to itself** | §5.3. Full architecture, one deployment, zero on-prem risk. |
+| 1.7 ◆ | **`deployment_id` dimension** across admin queries + fleet overview page | §5.4. The bulk of the dashboard work, done while there is one deployment to be wrong about. |
+| 1.8 ◆ | **Expand/contract migrations adopted as policy** | §7.7. Cheapest to adopt now. |
+
+> **Gate:** cloud must run entirely on this path for several weeks before anything ships externally.
+
+### Track 2 — Multi-deployment product changes (needs signature or high confidence)
+
+| # | Item | Notes |
+|---|---|---|
+| 2.1 ▲ | `DEPLOYMENT_MODE` + **boot-time config validation** per mode | §4, §7.8 |
+| 2.2 | **Runtime frontend config** — drop build-time `VITE_API_BASE_URL` | §2 |
+| 2.3 ▲◆ | **Prompts → content packs** (prompts, rubric templates, criteria, FGOS data), versioned and shipped independently | §15.2. **Earlier than instinct suggests** — retrofitting after go-live means three frozen months. Benefits cloud too. |
+| 2.4 | **Adapter extraction** — storage (MinIO), OCR, search, embeddings; `services/llm/registry.ts` is the template | §2 |
+| 2.5 | **Embedding provider per deployment**; restate rule #9; wire the re-embed path | §3.4 |
+| 2.6 | **Egress policy** — no cross-provider fallback in `onprem`; fail loud | §3.5. Audit-critical. |
+| 2.7 | **Licence file** + `canUseFeature` / `checkPlan` wiring; fail-open grace | §6 |
+| 2.8 | **Cost accounting in tokens / GPU-seconds** for `onprem`; split `AdminCapacity` | §3.7 |
+| 2.9 | **`platform_admin` gating** in `onprem` mode | §15.6 |
+| 2.10 ◆ | **Deployment-level export/import** (cloud pilot → on-prem migration, incl. re-embed) | §15.4. Promote earlier if the pilot-first path is chosen. |
+
+### Track 3 — Packaging & operations ◇
+
+| # | Item | Notes |
+|---|---|---|
+| 3.1 ▲ | **Compose bundle** + installer + `upgrade.sh` | §4 |
+| 3.2 | **Telemetry agent** (pg-boss job) + envelope + **customer-inspectable payload page** | §5.2. The inspectable page is what gets ИБ approval. |
+| 3.3 | **In-deployment canary eval** → score in heartbeat | §15.3. Highest value-per-effort here. |
+| 3.4 | **`support:bundle` command** | §8. Build before the first incident, not after. |
+| 3.5 | **`/metrics` endpoint** for their own monitoring | §15.5. Nearly free goodwill. |
+| 3.6 | **Russian runbooks + GPU sizing guide** (numbers from 0.3) | §8 |
+| 3.7 | **Bundle smoke test + upgrade test** in CI | §7.6. The job every vendor skips and regrets. |
+
+### Track 4 — Release process ◇
+
+| # | Item |
+|---|---|
+| 4.1 | Release branches + `stable` channel; cloud as canary (§7.3) |
+| 4.2 | N-2 supported-version window, written into the contract (§7.5) |
+| 4.3 | Content-pack cadence decoupled from code releases (§15.2) |
+| 4.4 | Hotfix / cherry-pick procedure documented (§7.5) |
+
+### Track L — Legal & commercial (parallel with Tracks 1–3)
+
+| # | Item |
+|---|---|
+| L1 | Parameterise §5.1 consent copy + `CONSENT_VERSION` per deployment (§15.7) |
+| L2 | Source escrow + business-continuity clauses (§15.7) |
+| L3 | Supported-models matrix in the contract (§10) |
+| L4 | Telemetry appendix — exact payload schema, published (§5.2) |
+| L5 | SLA matched to actual team capacity — business hours in v1 (§15.8) |
+| L6 | On-prem SKU: implementation fee + annual licence + support tier + minimum term (§10) |
+
+### Track 5 — Deferred / conditional
+
+| # | Item | Condition |
+|---|---|---|
+| 5.1 | Air-gap bundle, offline licence, offline usage export | Only if genuinely required; separate SKU |
+| 5.2 | Helm chart | Only on customer demand |
+| 5.3 | Fine-tuned RU pedagogical model (Research.md §3.8) | Independent bet; on-prem GPUs make it more attractive |
+
+### Critical path
+
+```
+0.1 questionnaire ──┐
+0.3 spike ──────────┴─> 0.5 go/no-go
+                              │
+1.1 CI ─> 1.3 artifact ─> 1.6 control plane ─> 1.7 fleet UI
+                              │
+                    2.1 mode ─┴─> 2.3 content packs ─> 3.1 bundle ─> 3.2 telemetry ─> 3.3 canary eval
+```
+
+**If only five things get done:** 1.1 (CI), 1.3 (artifacts), 1.6 (control
+plane), 2.3 (content packs), 3.3 (canary evals). The first three are owed to
+the cloud product anyway; the last two are what keep an on-prem customer from
+silently degrading while we watch a dashboard that says everything is fine.

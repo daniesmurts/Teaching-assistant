@@ -19,6 +19,37 @@ APP_DIR="/var/www/gradeassist"
 FRONTEND_BUCKET="gradeassist-frontend"
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── Working-tree guard (docs/on-prem-deployment.md §7.1, §16 Track 1.2) ──────
+# This script rsyncs the WORKING TREE, but stamps VERSION from `git rev-parse
+# HEAD`. Deploying with uncommitted changes therefore puts code in production
+# that no commit contains, labelled with a commit that doesn't describe it —
+# so the version string can't be trusted to attribute a bug report to a build.
+# Survivable with one server; fatal once telemetry from multiple deployments
+# is keyed on version. Refuse by default; ALLOW_DIRTY_DEPLOY=1 overrides for a
+# genuine emergency and marks the version `+dirty` so the lie is at least visible.
+DIRTY_SUFFIX=""
+if [ -n "$(git status --porcelain)" ]; then
+  if [ "${ALLOW_DIRTY_DEPLOY:-}" = "1" ]; then
+    echo "⚠ DIRTY working tree deployed on purpose (ALLOW_DIRTY_DEPLOY=1) — version marked +dirty:"
+    git status --short | sed 's/^/    /'
+    DIRTY_SUFFIX="+dirty"
+  else
+    echo "❌ Working tree has uncommitted changes — refusing to deploy."
+    git status --short | sed 's/^/    /'
+    echo ""
+    echo "   Commit them first, or re-run with ALLOW_DIRTY_DEPLOY=1 for an emergency deploy."
+    exit 1
+  fi
+fi
+
+# Unpushed commits aren't a correctness problem — the SHA is real and the code
+# genuinely matches it — but production would be running something nobody else
+# can check out. Warn, don't block.
+UNPUSHED="$(git rev-list --count @{u}..HEAD 2>/dev/null || echo 0)"
+if [ "$UNPUSHED" != "0" ]; then
+  echo "⚠ ${UNPUSHED} commit(s) not pushed to origin — prod will run code that isn't on the remote."
+fi
+
 # Build/deploy identifier — `{date}+{git short SHA}`, e.g. 2026-07-14+a1b2c3d.
 # Distinct from the hand-curated "Версия 1.4" marketing changelog
 # (frontend/src/pages/Changelog.tsx): that one is bumped by hand when we want
@@ -27,7 +58,7 @@ FRONTEND_BUCKET="gradeassist-frontend"
 # zero chance of forgetting to bump it. Read by vite.config.ts (frontend) and
 # backend/src/lib/version.ts (backend) — both fall back to 'dev' if the
 # VERSION file is absent, which is the normal state outside of a deploy.
-BUILD_VERSION="$(date -u +%Y-%m-%d)+$(git rev-parse --short HEAD)"
+BUILD_VERSION="$(date -u +%Y-%m-%d)+$(git rev-parse --short HEAD)${DIRTY_SUFFIX}"
 echo "$BUILD_VERSION" > VERSION
 echo "▶ [0/7] Build version: ${BUILD_VERSION}"
 
