@@ -40,34 +40,62 @@ export IMAGE_TAG="${TAG}"
 # different, already-pulled tags, no error from compose. A rollback is the
 # one place this silently not taking effect matters most — never trust it
 # implicitly here.
-docker compose pull api
+docker compose pull api api2
+
+# Rolling, not simultaneous — same reasoning as deploy.sh: recreating both
+# replicas at once means a window with NEITHER healthy, exactly the outage a
+# second replica exists to avoid. A rollback is not the moment to skip this.
+wait_healthy() {
+  local name="\$1"
+  for i in \$(seq 1 24); do   # up to 24 × 5s = 120s
+    status="\$(docker inspect "\$name" --format '{{.State.Health.Status}}' 2>/dev/null || echo missing)"
+    if [ "\$status" = "healthy" ]; then return 0; fi
+    sleep 5
+  done
+  echo "❌ \$name did not become healthy within 120s (last status: \$status). Recent logs:"
+  docker logs "\$name" --tail=30 2>&1 | sed 's/^/    /'
+  return 1
+}
+
+docker compose up -d --force-recreate api2
+wait_healthy ispum-api-2
+echo "  ✓ api2 healthy — recreating api…"
 docker compose up -d --force-recreate api
-ACTUAL_IMAGE="\$(docker inspect ispum-api --format '{{.Config.Image}}')"
+wait_healthy ispum-api
+echo "  ✓ api healthy"
+
 EXPECTED_IMAGE="cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${TAG}"
-if [ "\$ACTUAL_IMAGE" != "\$EXPECTED_IMAGE" ]; then
-  echo "❌ Running image is \$ACTUAL_IMAGE, expected \$EXPECTED_IMAGE — rollback did not take effect."
-  exit 1
-fi
-echo "  ✓ Running image confirmed: \$ACTUAL_IMAGE"
+for name in ispum-api ispum-api-2; do
+  ACTUAL_IMAGE="\$(docker inspect "\$name" --format '{{.Config.Image}}')"
+  if [ "\$ACTUAL_IMAGE" != "\$EXPECTED_IMAGE" ]; then
+    echo "❌ \$name is running \$ACTUAL_IMAGE, expected \$EXPECTED_IMAGE — rollback did not take effect."
+    exit 1
+  fi
+  echo "  ✓ \$name running image confirmed: \$ACTUAL_IMAGE"
+done
 docker image prune -f >/dev/null
 REMOTE
 
 echo "▶ Verifying…"
 ssh "$VM_HOST" 'set -e
-  ok=""
-  for i in 1 2 3 4 5 6; do
-    if curl -fsS --max-time 5 http://127.0.0.1:3000/api/health >/dev/null; then
-      ok=1; break
+  for port in 3000 3001; do
+    ok=""
+    for i in 1 2 3 4 5 6; do
+      if curl -fsS --max-time 5 "http://127.0.0.1:${port}/api/health" >/dev/null; then
+        ok=1; break
+      fi
+      sleep 5
+    done
+    if [ -z "$ok" ]; then
+      echo "  ✗ API on :${port} — FAILED after 30s. Recent container logs:"
+      name=$([ "$port" = "3000" ] && echo ispum-api || echo ispum-api-2)
+      docker logs "$name" --tail=30 2>&1 | sed "s/^/    /"
+      exit 1
     fi
-    sleep 5
+    echo "  ✓ API on :${port}:"
+    curl -fsS "http://127.0.0.1:${port}/api/health"
+    echo ""
   done
-  if [ -z "$ok" ]; then
-    echo "  ✗ API (local) — FAILED after 30s. Recent container logs:"
-    docker logs ispum-api --tail=30 2>&1 | sed "s/^/    /"
-    exit 1
-  fi
-  curl -fsS http://127.0.0.1:3000/api/health
-  echo ""
 '
 
-echo "✅ Rolled back to ${TAG}."
+echo "✅ Rolled back to ${TAG} on both replicas."

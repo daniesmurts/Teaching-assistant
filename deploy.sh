@@ -34,12 +34,13 @@
 #     ssh boadtech@93.77.161.62
 #     pm2 delete gradeassist-api && pm2 save
 # Expect a brief outage during THIS ONE cutover — the container can't bind
-# :3000 until PM2 releases it. Also worth knowing going forward: with a
-# single replica, every future deploy has a few seconds of downtime at the
-# restart itself (docker compose up -d recreates the container) — PM2's
-# `pm2 reload` used to do a zero-downtime rolling restart across its 2
-# workers; a lone container doesn't get that for free. A second replica later
-# is what buys it back, not just extra throughput.
+# :3000 until PM2 releases it. Every deploy AFTER this one is zero-downtime,
+# same as PM2's old `pm2 reload`: [6/8] below rolls api2 and api one at a
+# time, waiting for Docker's own healthcheck on each before touching the
+# other, so nginx's upstream (least_conn, deploy/nginx/gradeassist.conf)
+# always has at least one live backend to route to (docs/on-prem-deployment.md
+# §16 TODO #13 — two replicas, shipped once the single-replica pipeline had
+# a track record of ordinary, independently-verified deploys).
 #
 # Rollback: deploy/rollback.sh <image-tag> — repoints the running container to
 # a previously pushed tag without rebuilding or re-migrating.
@@ -208,7 +209,7 @@ echo "▶ [5/8] Syncing compose file → VM…"
 # tree. Only this one small config file ships.
 rsync -avz "deploy/docker-compose.cloud.yml" "${VM_HOST}:${APP_DIR}/docker-compose.yml"
 
-echo "▶ [6/8] Pulling ${IMAGE_TAG}, migrating, restarting on VM…"
+echo "▶ [6/8] Pulling ${IMAGE_TAG}, migrating, rolling restart on VM…"
 # Unquoted heredoc delimiter (REMOTE, not 'REMOTE') is deliberate here, unlike
 # the other ssh blocks in this file — IMAGE_TAG/YC_REGISTRY_ID must be
 # substituted by THIS shell before the commands reach the VM; the remote
@@ -218,10 +219,11 @@ set -euo pipefail
 cd "${APP_DIR}"
 export YC_REGISTRY_ID="${YC_REGISTRY_ID}"
 export IMAGE_TAG="${IMAGE_TAG}"
-docker compose pull api migrate
+docker compose pull api api2 migrate
 # One-shot migration container, same image about to serve traffic — not the
 # code that happened to be sitting on the VM at rsync time (there isn't any
-# anymore). Idempotent, tracked in the migrations table.
+# anymore). Idempotent, tracked in the migrations table. Runs ONCE regardless
+# of replica count — migrations aren't per-container state.
 #
 # -T (--no-TTY) + </dev/null — ROOT CAUSE, found 2026-08-15 after THREE
 # separate deploys each silently failed to recreate the api container with
@@ -238,20 +240,51 @@ docker compose pull api migrate
 # read any of the remaining heredoc regardless of that flag's exact
 # behaviour — belt-and-suspenders on the fix that actually matters here.
 docker compose run --rm -T migrate < /dev/null
-# --force-recreate: kept as defense-in-depth even now the real cause is
-# fixed above — never rely on Compose's own diffing deciding a recreate is
-# warranted; force it unconditionally.
+
+# Rolling restart, not simultaneous — the entire point of a second replica
+# (§16 TODO #13) is zero-downtime deploys. Recreating both containers at once
+# would recreate the SAME all-at-once outage a single replica has, just with
+# extra infrastructure. Bring up api2 first and wait for DOCKER'S OWN
+# healthcheck (not just a single curl) to report healthy before touching
+# api — nginx's upstream (least_conn, deploy/nginx/gradeassist.conf) always
+# has at least one live backend to route to throughout.
+wait_healthy() {
+  local name="\$1"
+  for i in \$(seq 1 24); do   # up to 24 × 5s = 120s
+    status="\$(docker inspect "\$name" --format '{{.State.Health.Status}}' 2>/dev/null || echo missing)"
+    if [ "\$status" = "healthy" ]; then return 0; fi
+    sleep 5
+  done
+  echo "❌ \$name did not become healthy within 120s (last status: \$status). Recent logs:"
+  docker logs "\$name" --tail=30 2>&1 | sed 's/^/    /'
+  return 1
+}
+
+# --force-recreate: never rely on Compose's own diffing deciding a recreate
+# is warranted; force it unconditionally (found 2026-08-15 that Compose's
+# change-detection was NOT actually the mechanism at fault that day, but this
+# stays as defense-in-depth regardless — see the stdin-eating fix above for
+# what the real bug was).
+docker compose up -d --force-recreate api2
+wait_healthy ispum-api-2
+echo "  ✓ api2 healthy — recreating api…"
 docker compose up -d --force-recreate api
-# Belt-and-suspenders for the same reason: assert the container that's
-# ACTUALLY running matches what we just told it to run, and fail loudly
-# rather than silently serve stale code if it somehow still doesn't.
-ACTUAL_IMAGE="\$(docker inspect ispum-api --format '{{.Config.Image}}')"
+wait_healthy ispum-api
+echo "  ✓ api healthy"
+
+# Belt-and-suspenders: assert BOTH containers are ACTUALLY running what we
+# just told them to run, and fail loudly rather than silently serve stale
+# code on one replica if it somehow still doesn't match.
 EXPECTED_IMAGE="cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${IMAGE_TAG}"
-if [ "\$ACTUAL_IMAGE" != "\$EXPECTED_IMAGE" ]; then
-  echo "❌ Running image is \$ACTUAL_IMAGE, expected \$EXPECTED_IMAGE — deploy did not take effect."
-  exit 1
-fi
-echo "  ✓ Running image confirmed: \$ACTUAL_IMAGE"
+for name in ispum-api ispum-api-2; do
+  ACTUAL_IMAGE="\$(docker inspect "\$name" --format '{{.Config.Image}}')"
+  if [ "\$ACTUAL_IMAGE" != "\$EXPECTED_IMAGE" ]; then
+    echo "❌ \$name is running \$ACTUAL_IMAGE, expected \$EXPECTED_IMAGE — deploy did not take effect."
+    exit 1
+  fi
+  echo "  ✓ \$name running image confirmed: \$ACTUAL_IMAGE"
+done
+
 # Dangling-only (untagged intermediate layers) — never removes a still-tagged
 # release, so the previous image tag stays pullable for a manual rollback.
 docker image prune -f >/dev/null
@@ -313,20 +346,28 @@ echo "▶ [8/8] Verifying health…"
 # to get from "curl failed" to "here's the actual crash reason"; that
 # diagnosis should happen automatically, in the deploy's own output, not in
 # a follow-up SSH round trip.
+#
+# Checks BOTH replicas directly (127.0.0.1:3000 and :3001), not just via
+# nginx's upstream — nginx would happily report healthy off ONE working
+# replica while the other silently failed its own rolling recreate earlier in
+# [6/8]. This is the check that would actually catch that.
 ssh "$VM_HOST" 'set -e
-  ok=""
-  for i in 1 2 3 4 5 6; do
-    if curl -fsS --max-time 5 http://127.0.0.1:3000/api/health >/dev/null; then
-      ok=1; break
+  for port in 3000 3001; do
+    ok=""
+    for i in 1 2 3 4 5 6; do
+      if curl -fsS --max-time 5 "http://127.0.0.1:${port}/api/health" >/dev/null; then
+        ok=1; break
+      fi
+      sleep 5
+    done
+    if [ -z "$ok" ]; then
+      echo "  ✗ API on :${port} (local) — FAILED after 30s. Recent container logs:"
+      name=$([ "$port" = "3000" ] && echo ispum-api || echo ispum-api-2)
+      docker logs "$name" --tail=30 2>&1 | sed "s/^/    /"
+      exit 1
     fi
-    sleep 5
+    echo "  ✓ API on :${port} (local)"
   done
-  if [ -z "$ok" ]; then
-    echo "  ✗ API (local) — FAILED after 30s. Recent container logs:"
-    docker logs ispum-api --tail=30 2>&1 | sed "s/^/    /"
-    exit 1
-  fi
-  echo "  ✓ API (local)"
   if ! curl -fsS --max-time 10 https://ispum.ru/api/health >/dev/null; then
     echo "  ✗ API (public, from VM) — FAILED"; exit 1
   fi

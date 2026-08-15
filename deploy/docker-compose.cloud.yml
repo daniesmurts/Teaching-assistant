@@ -1,10 +1,10 @@
-# deploy/docker-compose.cloud.yml — docs/on-prem-deployment.md §16 Track 1.4b.
+# deploy/docker-compose.cloud.yml — docs/on-prem-deployment.md §16 Track 1.4b, 1.4b-replica2.
 #
-# Runs the backend API as a container on the existing single Yandex Cloud VM,
-# replacing PM2. Everything else is UNCHANGED: Postgres stays on the host
-# (§16 Track 1.4 prerequisite 4 — it holds live data and is not
-# containerised), nginx is untouched, and the frontend still deploys straight
-# to Object Storage. This file only containerises the Node process.
+# Runs the backend API as TWO containers on the existing single Yandex Cloud
+# VM, replacing PM2's 2-worker cluster. Everything else is UNCHANGED: Postgres
+# stays on the host (§16 Track 1.4 prerequisite 4 — it holds live data and is
+# not containerised), the frontend still deploys straight to Object Storage.
+# This file only containerises the Node process.
 #
 # NAMED "cloud" deliberately, distinct from the future on-prem customer
 # bundle (Track 3.1) — that one will also run Postgres + MinIO and is a
@@ -16,50 +16,76 @@
 #      "localhost" inside the container mean the same thing it always did —
 #      no DATABASE_URL rewrite, no bridge-gateway workaround, no .env change
 #      at all for this migration.
-#   2. nginx already proxies to 127.0.0.1:3000 (deploy/nginx/gradeassist.conf)
-#      — a host-networked container binding that same port needs zero nginx
-#      change for this single-replica deploy.
-# A second replica later (docs/on-prem-deployment.md §16 Track 1.4b note)
-# stays on this same model: a second service with PORT=3001 in its env,
-# still network_mode: host, with nginx gaining an upstream block across
-# 127.0.0.1:3000 and :3001 — not a switch to bridge networking.
+#   2. nginx now load-balances across 127.0.0.1:3000 and :3001 (an `upstream`
+#      block, deploy/nginx/gradeassist.conf) — host-networked containers
+#      binding those same ports directly needs no bridge networking to make
+#      that work.
+# Two host-networked containers can't both bind :3000, so each gets its own
+# PORT (api=3000, api2=3001) via an env override — everything else about the
+# two services is identical, including the image tag, so there is no
+# "primary" replica, just two of the same thing.
 #
-# ONE-TIME CUTOVER: the container binds port 3000 directly (host networking),
-# so PM2 must be stopped first or the bind fails — see the deploy.sh header
-# comment for the exact one-time command. Not something deploy.sh does for
-# you automatically: an unconditional `pm2 delete` baked into every future
-# deploy would itself fail loudly (`set -e`) once PM2 no longer manages
-# anything, breaking every deploy after the first.
+# Cluster-safety for background work was ALREADY solved before this file grew
+# a second replica: services/schedulerLease.ts (Track 1.4a) means both
+# containers run every scheduled job's timer, but only one wins the lease per
+# tick — renewals, the control-plane heartbeat, etc. still fire exactly once
+# regardless of replica count. Nothing in this file coordinates that; it's
+# already correct by construction.
+#
+# ONE-TIME CUTOVER (api's first deploy under this model): the container binds
+# port 3000 directly (host networking), so PM2 must be stopped first or the
+# bind fails — see the deploy.sh header comment for the exact one-time
+# command. Not something deploy.sh does for you automatically: an
+# unconditional `pm2 delete` baked into every future deploy would itself fail
+# loudly (`set -e`) once PM2 no longer manages anything, breaking every
+# deploy after the first.
 #
 # migrate is a one-shot job — `profiles: [tools]` keeps it out of `up`, run
-# explicitly via `docker compose run --rm migrate` before `up -d api`. It
-# uses the SAME image as api: the point (see backend/Dockerfile) is
-# migrating with the exact code that's about to serve traffic, not whatever
-# happened to be checked out on the VM at rsync time.
+# ONCE (not once per replica) via `docker compose run --rm migrate` before
+# `up -d api api2`. It uses the SAME image as api/api2: the point (see
+# backend/Dockerfile) is migrating with the exact code that's about to serve
+# traffic, not whatever happened to be checked out on the VM at rsync time.
+
+x-api-common: &api-common
+  image: cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${IMAGE_TAG}
+  network_mode: host
+  env_file: .env
+  restart: unless-stopped
+  healthcheck:
+    # node's own http module, not curl/wget — node:20-slim doesn't ship
+    # either, and adding one just for a healthcheck isn't worth the layer.
+    # Reads process.env.PORT rather than a hardcoded port so this ONE
+    # definition works for both replicas via YAML anchor reuse below —
+    # Node reads its own container's env regardless of exec form, so this
+    # needs no shell/CMD-SHELL trick to pick up the per-service PORT override.
+    test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:'+process.env.PORT+'/api/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+    interval: 30s
+    timeout: 5s
+    start_period: 15s
+    retries: 3
+  volumes:
+    # Bind-mounted to the SAME path PM2's Node process used, not a fresh
+    # named volume — a named volume would silently orphan whatever's
+    # already in backend/uploads on the host (the local-disk fallback when
+    # Yandex Object Storage isn't configured; likely near-empty in
+    # production since Object Storage IS configured there, but a data-loss
+    # trap on the off chance it isn't must not happen silently). Both
+    # replicas mount the SAME host path — they're stateless siblings, not
+    # separate instances with separate local storage.
+    - /var/www/gradeassist/backend/uploads:/app/backend/uploads
 
 services:
   api:
-    image: cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${IMAGE_TAG}
+    <<: *api-common
     container_name: ispum-api
-    network_mode: host
-    env_file: .env
-    restart: unless-stopped
-    healthcheck:
-      # node's own http module, not curl/wget — node:20-slim doesn't ship
-      # either, and adding one just for a healthcheck isn't worth the layer.
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
-    volumes:
-      # Bind-mounted to the SAME path PM2's Node process used, not a fresh
-      # named volume — a named volume would silently orphan whatever's
-      # already in backend/uploads on the host (the local-disk fallback when
-      # Yandex Object Storage isn't configured; likely near-empty in
-      # production since Object Storage IS configured there, but a data-loss
-      # trap on the off chance it isn't must not happen silently).
-      - /var/www/gradeassist/backend/uploads:/app/backend/uploads
+    environment:
+      PORT: "3000"
+
+  api2:
+    <<: *api-common
+    container_name: ispum-api-2
+    environment:
+      PORT: "3001"
 
   migrate:
     image: cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${IMAGE_TAG}
