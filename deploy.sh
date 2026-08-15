@@ -261,10 +261,30 @@ sleep 2
 # network. This is the hard gate: if the public site is truly down, this fails.
 #   - local Node health (the API process is up)
 #   - public TLS from the VM itself (nginx → bucket/API path works)
+#
+# FOUND 2026-08-15, during the first live container cutover: `curl ... &&
+# echo` looks like it gates under `set -e`, but it doesn't — POSIX explicitly
+# exempts "any command of an AND-OR list other than the last" from -e, so a
+# failing curl here (not the last command in its `&&` list — echo is) never
+# aborted the script. deploy.sh printed "✅ Deploy complete" while the API
+# was actually down (a PM2/container port conflict that morning) and curl
+# was failing outright. Rewritten as explicit `if ! cmd; then exit 1; fi` —
+# the one construct `set -e` genuinely does NOT trigger on (a command inside
+# an `if` condition), used here on purpose and correctly, rather than by the
+# accident the old `&&` form was.
 ssh "$VM_HOST" 'set -e
-  curl -fsS --max-time 10 http://127.0.0.1:3000/api/health >/dev/null && echo "  ✓ API (local)"
-  curl -fsS --max-time 10 https://ispum.ru/api/health      >/dev/null && echo "  ✓ API (public, from VM)"
-  curl -fsS --max-time 10 -o /dev/null https://ispum.ru/   && echo "  ✓ frontend (from VM)"
+  if ! curl -fsS --max-time 10 http://127.0.0.1:3000/api/health >/dev/null; then
+    echo "  ✗ API (local) — FAILED"; exit 1
+  fi
+  echo "  ✓ API (local)"
+  if ! curl -fsS --max-time 10 https://ispum.ru/api/health >/dev/null; then
+    echo "  ✗ API (public, from VM) — FAILED"; exit 1
+  fi
+  echo "  ✓ API (public, from VM)"
+  if ! curl -fsS --max-time 10 -o /dev/null https://ispum.ru/; then
+    echo "  ✗ frontend (from VM) — FAILED"; exit 1
+  fi
+  echo "  ✓ frontend (from VM)"
 '
 
 # BEST-EFFORT check from this laptop — confirms YOUR path to prod, but a flaky
