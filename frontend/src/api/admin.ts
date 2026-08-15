@@ -691,3 +691,25 @@ export async function updatePricingAssumptions(
   const res = await client.put<PricingAssumptions>('/api/admin/pricing/assumptions', patch, { params: { institutionId } })
   return res.data
 }
+
+// ─── Fleet — control-plane deployment registry (docs/on-prem-deployment.md §16 Track 1.7) ──
+
+export interface DeploymentSummary {
+  id:                     string
+  name:                   string
+  mode:                   string
+  expected_connectivity:  string
+  current_version:        string | null
+  first_seen_at:          string | null
+  last_heartbeat_at:      string | null
+  active_seats:           number | null
+  db_ok:                  boolean | null
+  queue_depth:            number | null
+  uptime_seconds:         number | null
+  errors_24h:             number
+}
+
+export async function getAdminDeployments(): Promise<DeploymentSummary[]> {
+  const res = await client.get<DeploymentSummary[]>('/api/admin/deployments')
+  return res.data
+}

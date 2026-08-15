@@ -1,6 +1,57 @@
 import { pool } from '../connection'
 import type { TelemetryEnvelope, UsageRow, IncidentCount } from '../../services/controlPlane/envelope'
 
+export interface DeploymentSummaryRow {
+  id:                 string
+  name:               string
+  mode:               string
+  expected_connectivity: string
+  current_version:    string | null
+  first_seen_at:      string | null
+  last_heartbeat_at:  string | null
+  active_seats:       number | null
+  db_ok:              boolean | null
+  queue_depth:        number | null
+  uptime_seconds:      number | null
+  errors_24h:         number
+}
+
+/**
+ * One row per deployment — Track 1.7's fleet overview (§5.4). Pulls the
+ * seats/health snapshot from whichever heartbeat is MOST RECENT for that
+ * deployment (a lateral join, not a second round trip), straight out of the
+ * envelope JSONB rather than a separate summary table — there's nothing to
+ * keep in sync that way. `connectivity` (live/stale/offline, §5.5) is
+ * deliberately NOT computed here — it depends on "now" at render time, not
+ * at query time, so the caller derives it from `last_heartbeat_at`.
+ */
+export async function listDeploymentsSummary(): Promise<DeploymentSummaryRow[]> {
+  const { rows } = await pool.query<DeploymentSummaryRow>(
+    `SELECT
+       d.id, d.name, d.mode, d.expected_connectivity,
+       d.current_version, d.first_seen_at, d.last_heartbeat_at,
+       (h.envelope -> 'seats' ->> 'active')::int          AS active_seats,
+       (h.envelope -> 'health' ->> 'dbOk')::boolean        AS db_ok,
+       (h.envelope -> 'health' ->> 'queueDepth')::int      AS queue_depth,
+       (h.envelope -> 'platform' ->> 'uptimeSeconds')::int AS uptime_seconds,
+       COALESCE(e.errors_24h, 0)                           AS errors_24h
+     FROM deployments d
+     LEFT JOIN LATERAL (
+       SELECT envelope FROM deployment_heartbeats
+        WHERE deployment_id = d.id
+        ORDER BY received_at DESC
+        LIMIT 1
+     ) h ON true
+     LEFT JOIN LATERAL (
+       SELECT SUM(count)::int AS errors_24h
+         FROM deployment_incidents
+        WHERE deployment_id = d.id AND window_end > NOW() - INTERVAL '24 hours'
+     ) e ON true
+     ORDER BY d.first_seen_at ASC NULLS LAST, d.name`
+  )
+  return rows
+}
+
 /** Grouped incident counts for the outbound envelope — code only, never `message` (§5.2's aggregates-only rule). */
 export async function getIncidentCountsSince(windowStart: Date, windowEnd: Date): Promise<IncidentCount[]> {
   const { rows } = await pool.query<{ code: string; count: number }>(

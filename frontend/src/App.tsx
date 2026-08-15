@@ -58,6 +58,7 @@ import AdminInstitutions from './pages/admin/AdminInstitutions'
 import AdminFeedback from './pages/admin/AdminFeedback'
 import AdminMessages from './pages/admin/AdminMessages'
 import AdminErrors from './pages/admin/AdminErrors'
+import AdminDeployments from './pages/admin/AdminDeployments'
 import AdminAudit from './pages/admin/AdminAudit'
 import AdminEvals from './pages/admin/AdminEvals'
 import AdminFgos from './pages/admin/AdminFgos'
@@ -336,6 +337,7 @@ export default function App() {
             <Route path="feedback"  element={<AdminFeedback />} />
             <Route path="messages"  element={<AdminMessages />} />
             <Route path="errors"    element={<AdminErrors />} />
+            <Route path="deployments" element={<AdminDeployments />} />
             <Route path="audit"     element={<AdminAudit />} />
             <Route path="evals"     element={<AdminEvals />} />
             <Route path="fgos"      element={<AdminFgos />} />

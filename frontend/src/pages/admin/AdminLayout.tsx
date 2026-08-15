@@ -18,6 +18,7 @@ const NAV: Array<{ to: string; label: string; icon: IconName; end: boolean }> = 
   { to: '/admin/feedback', label: 'Отзывы',              icon: 'mail',       end: false },
   { to: '/admin/messages', label: 'Обращения',           icon: 'mail',       end: false },
   { to: '/admin/errors',   label: 'Ошибки',              icon: 'shield',     end: false },
+  { to: '/admin/deployments', label: 'Развёртывания',    icon: 'layers',     end: false },
   { to: '/admin/audit',    label: 'Журнал действий',     icon: 'clock',      end: false },
   { to: '/admin/evals',    label: 'Эксперименты',        icon: 'sparkle',    end: false },
   { to: '/admin/fgos',     label: 'ФГОС',                icon: 'file-check', end: false },

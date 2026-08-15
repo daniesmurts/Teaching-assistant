@@ -26,6 +26,7 @@ import { listFeedback } from '../db/queries/feedback'
 import { listContactMessages, markContactMessageRead } from '../db/queries/contactMessages'
 import { listAudit } from '../db/queries/audit'
 import { getFunnelSummary, getFunnelByWeek, getStalledTeachers } from '../db/queries/activation'
+import { listDeploymentsSummary } from '../db/queries/controlPlane'
 import {
   findPaymentsByTeacher, findPaymentByOrderId, markPaymentRefunded,
   listAllPayments, getPaymentsSummary, getRevenueByMonth,
@@ -117,6 +118,12 @@ router.get('/usage/by-model', asyncHandler(async (req, res) => {
 router.get('/errors', asyncHandler(async (req, res) => {
   const days = parseInt((req.query.days as string) ?? '7', 10)
   res.json(await getRecentErrors(Math.min(days, 90)))
+}))
+
+// ─── Fleet — control-plane deployment registry (docs/on-prem-deployment.md
+// §16 Track 1.7) ────────────────────────────────────────────────────────────
+router.get('/deployments', asyncHandler(async (_req, res) => {
+  res.json(await listDeploymentsSummary())
 }))
 
 // ─── Business metrics — payments & renewals ───────────────────────────────────
