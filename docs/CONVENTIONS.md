@@ -121,10 +121,18 @@ A migration must leave the schema compatible with the **previous** release, not 
 3. Pick `leaseMs` shorter than `intervalMs`, long enough to outlast a slow run — see the existing schedulers for the ratios they use (`renewals.ts`'s daily sweep uses a 23h lease on a 24h interval, for example).
 4. If the job only sometimes fires (a specific day/hour window), check the condition first and only call `runWithLease()` when it's actually met, so an idle tick costs no database write.
 
+### Adding a public docs article (`/docs`, for university IT teams)
+1. Create `docs-site/articles/<section>/<slug>.md` — sections are `integration`, `security`, `on-prem` (see `docs-site/sections.json`). No code changes, no route to register, no import to add — `frontend/scripts/buildDocs.mjs` auto-discovers every `.md` file under `docs-site/articles/` at build time (wired as `predev`/`prebuild` hooks).
+2. Give it frontmatter: `title`, `description`, `order` (position within the section), `appliesTo` (the version you verified the instructions against — never guessed).
+3. Write the body in plain markdown. `##` headings are auto-slugified into anchors and collected into a table of contents at build time — no manual anchor list to maintain.
+4. Run `npm run dev --workspace=frontend` (or `build`) to regenerate `frontend/src/generated/docs/` and see it live at `/docs/<section>/<slug>`.
+5. **Any feature with an IT-visible integration surface (SSO, LTI, provisioning, org roles, data handling) ships its docs article in the same commit as the feature** — same discipline as `FEATURES.md`/`CHANGELOG.md`, not a follow-up. See `docs-site/README.md` for the fuller per-section guidance (e.g. why `on-prem/` stays a stub until Track 2/3 of `on-prem-deployment.md` actually ships).
+
 ## Workflow checklist (from CLAUDE.md)
 
 Before opening a PR:
 - [ ] `FEATURES.md` updated if a user-facing feature changed
+- [ ] `docs-site/articles/` updated if the feature has an IT-visible integration surface (SSO, LTI, provisioning, org roles, data handling)
 - [ ] `CHANGELOG.md` `[Unreleased]` section updated
 - [ ] Relevant item in `TODO.md` moved to `CHANGELOG.md` if it was shipped
 - [ ] Tests written alongside the code (prompt paths, validation, DB queries)

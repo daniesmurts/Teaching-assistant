@@ -199,6 +199,7 @@ Teacher publishes assignment → per-student tokenised link → student writes i
 
 1. **Read context** — check FEATURES.md → CHANGELOG.md → TODO.md
 2. **Update FEATURES.md** in the same commit as any feature change
-3. **Update CHANGELOG.md** under [Unreleased] for every meaningful change
-4. **Write tests** alongside code (prompt paths, validation, DB queries)
-5. **Run relevant tests** before committing
+3. **Update `docs-site/articles/`** in the same commit as any feature with an IT-visible integration surface (SSO, LTI, provisioning, org roles, data handling) — markdown-only, see `docs/CONVENTIONS.md`'s "Adding a public docs article" recipe
+4. **Update CHANGELOG.md** under [Unreleased] for every meaningful change
+5. **Write tests** alongside code (prompt paths, validation, DB queries)
+6. **Run relevant tests** before committing
