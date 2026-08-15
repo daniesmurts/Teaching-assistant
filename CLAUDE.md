@@ -121,6 +121,9 @@ Every POST/PUT/PATCH/DELETE from an authenticated user with 2xx response is logg
 ### 11. Recurring jobs go through the scheduler lease
 Any `setInterval`-style background job that must run only once across however many API instances are live (renewals, activation sweeps, resource sampling, usage rollups) uses `services/schedulerLease.ts`'s `scheduleWithLease`/`runWithLease`, never a PM2-specific check. `NODE_APP_INSTANCE` is set only by PM2 — a container never sets it, so a check gated on it silently degrades to "every instance thinks it's the one" the moment the deployment model changes, which is exactly how it was found (backend/src/services/renewals.ts and four siblings, migration 112).
 
+### 12. Migrations are expand/contract — never rename or drop in the release that stops using it
+A migration must leave the schema compatible with the **previous** release, not just the one shipping it: add a column, ship code that writes both old and new, drop the old column in a *later* migration — never the same one that stops using it. This is what makes `deploy/rollback.sh` (repoint to a previous image tag, no re-migration) actually safe rather than theoretically safe — a same-release drop means rolling back the code without rolling back the schema, and the old code breaks against a column that's already gone. Adopted deliberately while there is exactly one deployment to be wrong about (docs/on-prem-deployment.md §7.7) — retrofitting this discipline gets harder, not easier, once multiple deployments can be on different versions at once.
+
 ---
 
 ## Architecture Invariants

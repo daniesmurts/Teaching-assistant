@@ -81,6 +81,13 @@ Any background job that ticks on an interval and must run only **once** across h
 
 **How to apply:** `scheduleWithLease('job_name', { intervalMs, leaseMs, firstRunDelayMs? }, fn)` replaces the `setTimeout` + `setInterval` shape directly. `leaseMs` must be shorter than `intervalMs` or ticks get silently skipped. If the job only *sometimes* needs to run on a given tick (checking a day-of-week/hour window, say), only take the lease when the condition is actually met — see `activationDigest.ts` for the pattern.
 
+### 12. Migrations are expand/contract
+A migration must leave the schema compatible with the **previous** release, not just the one shipping it. Add a column → ship code that writes both old and new → drop the old column in a *later* migration. Never rename or drop a column in the same migration that stops using it.
+
+**Why:** `deploy/rollback.sh` repoints to a previous image tag without re-running migrations — that's only actually safe if the previous release's code still works against whatever the schema currently is. A same-release drop means rolling the code back without rolling the schema back, and the old code breaks against a column that's already gone. Adopted deliberately while there is exactly one deployment to be wrong about (docs/on-prem-deployment.md §7.7) — this gets harder to retrofit, not easier, once multiple deployments can be on different versions of the schema at once.
+
+**How to apply:** renaming a column is two migrations, not one (add the new column + dual-write, then a later migration drops the old one once nothing reads it). Dropping a column follows the same shape: stop reading it in code first, ship and confirm that release, *then* drop it in a subsequent migration. `backend/migrations/*.sql` is forward-only with no down-migration mechanism regardless (see the recipe below) — this rule is specifically about *sequencing* drops/renames across releases, not about migrations being reversible.
+
 ## Recipes
 
 ### Adding a new route
@@ -98,8 +105,9 @@ Any background job that ticks on an interval and must run only **once** across h
 ### Adding a migration
 1. Create `backend/migrations/0NN_description.sql` (next number after the highest existing one).
 2. Write forward-only, additive SQL — there's no down-migration mechanism, so a bad migration is fixed with a new corrective migration, not a rollback.
-3. Run `npm run migrate --workspace=backend` locally to apply and verify it.
-4. If it affects test setup, integration tests re-run migrations against a fresh test DB automatically (`test:integration:setup`) — no separate step needed there.
+3. Renaming or dropping a column? That's expand/contract, not one migration — see rule #12 above. Never rename/drop a column in the same migration that stops using it in code.
+4. Run `npm run migrate --workspace=backend` locally to apply and verify it.
+5. If it affects test setup, integration tests re-run migrations against a fresh test DB automatically (`test:integration:setup`) — no separate step needed there.
 
 ### Adding an LLM call
 1. Never import a provider SDK directly — go through `services/llm/registry.ts`.
