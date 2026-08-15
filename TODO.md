@@ -80,6 +80,44 @@ deploys that silently weren't).
   http://127.0.0.1:3000`), `deploy.sh` + `deploy/rollback.sh` (pull+start
   both replicas).
 
+### 14. Rework AdminUsage / AdminCapacity / AdminErrors for the fleet · Effort: M — gated on a second deployment existing
+
+`docs/on-prem-deployment.md` §16 Track 1.7 / §5.4 originally planned all
+three of these pages gaining a deployment dimension, alongside `AdminOverview`
+becoming fleet cards. The `AdminOverview` half of that was deliberately
+dropped — `Развёртывания` (shipped 2026-08-15) already covers the
+one-card-per-deployment role, and replacing `AdminOverview`'s teacher/cost/
+quality stats with fleet cards would have been redundant *and* thrown away
+a page in daily use for something unrelated to fleet size. These three are
+parked for a related but distinct reason: with exactly one deployment in
+existence, none of "split by mode," "filter by deployment," or "group by
+deployment" has anything to act on — every row collapses to the one row.
+Building the UI now means designing on-prem capacity metrics (tokens/sec,
+GPU saturation) before Track 0's technical spike has even measured what
+those numbers look like against a real self-hosted deployment.
+
+- **Why** — the plumbing (a `deployment_id` dimension in these queries) is
+  cheap and was explicitly meant to be done "while there's one deployment
+  to be wrong about" (§5.6) — but the *UI* built against that plumbing has
+  nothing real to validate against yet, and guessing wrong here is more
+  expensive to unwind than waiting.
+- **Gate** — a second real deployment (a cloud-pilot dedicated tenant, or
+  the on-prem deal actually landing) — whichever comes first. At that
+  point the fields these pages need becomes an observed requirement, not a
+  guess.
+- **Data-source correction, worth remembering when this is picked up**:
+  `AdminErrors` currently reads `api_usage_log` (AI-provider call failures —
+  rate limits, timeouts). `deployment_incidents` is a *different* concept
+  (uncaught 500s / DB-unavailable, via `errorHandler.ts` → `production_incidents`).
+  §5.4's "AdminErrors grouped by deployment and version" means the latter —
+  this should land as a new section/table, not a replacement of the
+  AI-error view that's already there and already useful for its own purpose.
+- **Touches** — `AdminUsage.tsx`/`AdminCapacity.tsx`/`AdminErrors.tsx`,
+  their backing queries in `db/queries/usageLog.ts` /
+  `db/queries/capacity.ts`, and `db/queries/controlPlane.ts` for the
+  `deployment_incidents` half.
+  both replicas).
+
 ## Features
 
 ### A. Bulk grading · Effort: L
