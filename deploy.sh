@@ -6,11 +6,40 @@
 #   - SSH access to the VM as the `gradeassist` user (key-based)
 #   - `yc` CLI installed & authenticated (https://yandex.cloud/docs/cli/)
 #     OR `s3cmd`/aws CLI configured for the frontend bucket
-#   - The VM already provisioned via vm-setup.sh, with /var/www/gradeassist/.env in place
+#   - `gh` CLI installed & authenticated — this script now GATES on CI status
+#     for the current commit before deploying (see below)
+#   - The VM already provisioned via vm-setup.sh, with /var/www/gradeassist/.env
+#     in place, Docker installed, and `docker login cr.yandex` already done
+#     (docs/on-prem-deployment.md §16 Track 1.4b)
+#   - YC_REGISTRY_ID set in .env (see .env.example) — the registry CI pushes
+#     the backend image to
 #   - (optional, for CDN purge) CDN_RESOURCE_ID set in the shell or .env — the id
 #     of the CDN resource fronting ispum.ru. Find it with: `yc cdn resource list`.
 #     Without it the deploy still works; clients just update on the SW's own
 #     no-cache revalidation instead of an immediate edge purge.
+#
+# ── Backend deploy model changed (§16 Track 1.4b) ────────────────────────────
+# The backend is no longer built here or on the VM — CI already built and
+# tested it (see .github/workflows/ci.yml's "image" job) and this script pulls
+# that exact, already-verified image by tag. Only the frontend (which isn't
+# containerised — it still ships straight to Object Storage) is built locally.
+#
+# ── ONE-TIME CUTOVER, before the FIRST run of this version of the script ────
+# The container binds port 3000 directly (network_mode: host — see
+# deploy/docker-compose.cloud.yml), so PM2 must let go of it first, or the
+# container fails to start. This is NOT baked into the script below on
+# purpose: an unconditional `pm2 delete` on every future deploy would itself
+# fail loudly once PM2 no longer manages anything, breaking every deploy
+# after the first. Run once, by hand, before your first run of this script:
+#     ssh boadtech@93.77.161.62
+#     pm2 delete gradeassist-api && pm2 save
+# Expect a brief outage during THIS ONE cutover — the container can't bind
+# :3000 until PM2 releases it. Also worth knowing going forward: with a
+# single replica, every future deploy has a few seconds of downtime at the
+# restart itself (docker compose up -d recreates the container) — PM2's
+# `pm2 reload` used to do a zero-downtime rolling restart across its 2
+# workers; a lone container doesn't get that for free. A second replica later
+# is what buys it back, not just extra throughput.
 set -euo pipefail
 
 # ── Config ───────────────────────────────────────────────────────────────────
@@ -42,12 +71,21 @@ if [ -n "$(git status --porcelain)" ]; then
   fi
 fi
 
-# Unpushed commits aren't a correctness problem — the SHA is real and the code
-# genuinely matches it — but production would be running something nobody else
-# can check out. Warn, don't block.
-UNPUSHED="$(git rev-list --count @{u}..HEAD 2>/dev/null || echo 0)"
+# Unpushed commits used to be a soft problem (rsync shipped the working tree
+# regardless of git state) — now it's a hard one. deploy.sh pulls a PRE-BUILT
+# image tagged from this commit's SHA (§16 Track 1.4b); if CI never saw the
+# commit, no such image exists and the pull below fails. Escalated from a
+# warning to a block for exactly that reason.
+if ! git rev-parse --verify --quiet @{u} >/dev/null; then
+  echo "❌ No upstream tracking branch for $(git branch --show-current) — can't verify this commit is pushed."
+  echo "   git push -u origin $(git branch --show-current)"
+  exit 1
+fi
+UNPUSHED="$(git rev-list --count @{u}..HEAD)"
 if [ "$UNPUSHED" != "0" ]; then
-  echo "⚠ ${UNPUSHED} commit(s) not pushed to origin — prod will run code that isn't on the remote."
+  echo "❌ ${UNPUSHED} commit(s) not pushed to origin — CI never built these, so no image exists yet."
+  echo "   Push first: git push"
+  exit 1
 fi
 
 # ── Release identity (docs/on-prem-deployment.md §7.4, §16 Track 1.2) ────────
@@ -65,6 +103,13 @@ if ! git rev-parse --verify --quiet "refs/tags/v${SEMVER}" >/dev/null; then
   echo "⚠ No git tag v${SEMVER} — this release isn't tagged. Create it with: git tag v${SEMVER}"
 fi
 
+# SHORT_SHA is its own variable (not just inlined into BUILD_VERSION below)
+# because IMAGE_TAG needs the exact same value — it must byte-for-byte match
+# the tag ci.yml's "image" job computed and pushed for this commit
+# (`${SEMVER}-${SHORT_SHA}`), or the pull two sections down 404s.
+SHORT_SHA="$(git rev-parse --short HEAD)"
+IMAGE_TAG="${SEMVER}-${SHORT_SHA}"
+
 # Build/deploy identifier — `{semver} ({date}+{git short SHA})`,
 # e.g. 1.5.0 (2026-07-14+a1b2c3d).
 # Distinct from the hand-curated "Версия 1.4" marketing changelog
@@ -74,18 +119,60 @@ fi
 # zero chance of forgetting to bump it. Read by vite.config.ts (frontend) and
 # backend/src/lib/version.ts (backend) — both fall back to 'dev' if the
 # VERSION file is absent, which is the normal state outside of a deploy.
-BUILD_VERSION="${SEMVER} ($(date -u +%Y-%m-%d)+$(git rev-parse --short HEAD)${DIRTY_SUFFIX})"
+#
+# Frontend-only now: the backend image already carries its own VERSION,
+# baked in at CI build time from this same SEMVER+SHORT_SHA formula (see
+# ci.yml's "Compute version" step) — deploy.sh no longer writes or rsyncs a
+# VERSION file for the backend, only for the frontend build below, which
+# isn't containerised and still needs vite.config.ts's readBuildVersion()
+# to find one on disk.
+BUILD_VERSION="${SEMVER} ($(date -u +%Y-%m-%d)+${SHORT_SHA}${DIRTY_SUFFIX})"
 echo "$BUILD_VERSION" > VERSION
-echo "▶ [0/7] Build version: ${BUILD_VERSION}"
+echo "▶ [0/8] Build version: ${BUILD_VERSION}  (image tag: ${IMAGE_TAG})"
 
-echo "▶ [1/7] Building frontend…"
+# ── CI gate (docs/on-prem-deployment.md §16 Track 1.4b) ──────────────────────
+# The whole point of building images in CI is that a tag is a promise about
+# what's inside it — never deploy a tag that hasn't actually passed. Poll
+# rather than assume: CI takes ~2 minutes end to end, so a push-then-
+# immediately-deploy is a real race, not a hypothetical one.
+echo "▶ [1/8] Waiting for CI to confirm ${SHORT_SHA} is safe to deploy…"
+if ! command -v gh >/dev/null 2>&1; then
+  echo "❌ gh CLI not found — can't verify CI status. Install: https://cli.github.com"
+  exit 1
+fi
+CI_ATTEMPTS=0
+CI_MAX_ATTEMPTS=40   # 40 × 15s = 10 minutes
+while true; do
+  read -r CI_STATUS CI_CONCLUSION <<< "$(gh run list --commit "$(git rev-parse HEAD)" --workflow=CI --limit 1 \
+    --json status,conclusion --jq '(.[0].status // "not_found") + " " + (.[0].conclusion // "none")' 2>/dev/null || echo "not_found none")"
+
+  if [ "$CI_STATUS" = "completed" ] && [ "$CI_CONCLUSION" = "success" ]; then
+    echo "  ✓ CI passed for ${SHORT_SHA}"
+    break
+  elif [ "$CI_STATUS" = "completed" ]; then
+    echo "❌ CI did not pass for ${SHORT_SHA} (conclusion: ${CI_CONCLUSION}). Refusing to deploy."
+    echo "   gh run list --commit $(git rev-parse HEAD)"
+    exit 1
+  fi
+
+  CI_ATTEMPTS=$((CI_ATTEMPTS + 1))
+  if [ "$CI_ATTEMPTS" -ge "$CI_MAX_ATTEMPTS" ]; then
+    echo "❌ Timed out after 10 minutes waiting for CI on ${SHORT_SHA}."
+    echo "   gh run list --commit $(git rev-parse HEAD)"
+    exit 1
+  fi
+  echo "  … ${CI_STATUS} (attempt ${CI_ATTEMPTS}/${CI_MAX_ATTEMPTS}), waiting 15s"
+  sleep 15
+done
+
+echo "▶ [2/8] Building frontend…"
 npm run build --workspace=frontend
 
-echo "▶ [2/7] Uploading frontend → s3://${FRONTEND_BUCKET}/ …"
+echo "▶ [3/8] Uploading frontend → s3://${FRONTEND_BUCKET}/ …"
 # Uses S3 static keys (no yc/OAuth). Reads YANDEX_STORAGE_* from the local .env.
 node --env-file=.env scripts/upload-frontend.mjs frontend/dist "${FRONTEND_BUCKET}"
 
-echo "▶ [3/7] Purging CDN cache for the no-cache entrypoints…"
+echo "▶ [4/8] Purging CDN cache for the no-cache entrypoints…"
 # index.html / sw.js / registerSW.js / manifest.webmanifest ship with
 # `no-cache, must-revalidate` from Object Storage (upload-frontend.mjs), but the
 # CDN edge can still hold an old copy — which is exactly what leaves PWA clients
@@ -105,44 +192,41 @@ else
   echo "  ⚠ CDN purge failed (non-fatal) — clients still update within the SW's no-cache revalidation window."
 fi
 
-echo "▶ [4/7] Syncing backend source → VM…"
-rsync -avz --delete \
-  --exclude 'node_modules' --exclude '.env' --exclude 'dist' --exclude 'uploads' \
-  backend/ "${VM_HOST}:${APP_DIR}/backend/"
-# shared/ types are imported by the backend at build time
-rsync -avz --delete shared/ "${VM_HOST}:${APP_DIR}/shared/"
-# VERSION lives at the repo root next to .env — backend/src/lib/version.ts reads
-# it as `../VERSION` relative to its cwd (backend/), same convention as .env.
-rsync -avz VERSION "${VM_HOST}:${APP_DIR}/VERSION"
+# Deploy-only — id of the registry the image lives in. See .env.example.
+YC_REGISTRY_ID="${YC_REGISTRY_ID:-$(sed -n 's/^YC_REGISTRY_ID=//p' .env 2>/dev/null | tr -d '"'\''' | head -n1)}"
+if [ -z "${YC_REGISTRY_ID:-}" ]; then
+  echo "❌ YC_REGISTRY_ID not set — add it to .env (see .env.example). Find it on the registry's console page."
+  exit 1
+fi
 
-echo "▶ [5/7] Installing, building, migrating on VM…"
-ssh "$VM_HOST" bash -s <<'REMOTE'
+echo "▶ [5/8] Syncing compose file → VM…"
+# The backend's SOURCE no longer goes to the VM at all — the image built and
+# tested in CI is the artifact now (§16 Track 1.3/1.4b), not the working
+# tree. Only this one small config file ships.
+rsync -avz "deploy/docker-compose.cloud.yml" "${VM_HOST}:${APP_DIR}/docker-compose.yml"
+
+echo "▶ [6/8] Pulling ${IMAGE_TAG}, migrating, restarting on VM…"
+# Unquoted heredoc delimiter (REMOTE, not 'REMOTE') is deliberate here, unlike
+# the other ssh blocks in this file — IMAGE_TAG/YC_REGISTRY_ID must be
+# substituted by THIS shell before the commands reach the VM; the remote
+# shell has no way to know them otherwise.
+ssh "$VM_HOST" bash -s <<REMOTE
 set -euo pipefail
-cd /var/www/gradeassist/backend
-# backend/package.json is self-contained (workspaces lockfile is at the repo root,
-# which we don't ship), so use install, not ci. Force-include devDeps —
-# the TypeScript compiler is a devDependency needed by `npm run build`.
-npm install --include=dev
-# Compile TypeScript → dist/ (clean first so no stale artifacts linger).
-rm -rf dist
-npm run build
-# Fail loudly if the entry point didn't get built (catches silent build issues).
-test -f dist/backend/src/index.js || { echo "❌ Build did not produce dist/backend/src/index.js"; exit 1; }
-# Apply any pending DB migrations (idempotent — tracked in migrations table)
-node --env-file=../.env scripts/migrate.js
+cd "${APP_DIR}"
+export YC_REGISTRY_ID="${YC_REGISTRY_ID}"
+export IMAGE_TAG="${IMAGE_TAG}"
+docker compose pull api migrate
+# One-shot migration container, same image about to serve traffic — not the
+# code that happened to be sitting on the VM at rsync time (there isn't any
+# anymore). Idempotent, tracked in the migrations table.
+docker compose run --rm migrate
+docker compose up -d api
+# Dangling-only (untagged intermediate layers) — never removes a still-tagged
+# release, so the previous image tag stays pullable for a manual rollback.
+docker image prune -f >/dev/null
 REMOTE
 
-echo "▶ [6/7] Restarting API…"
-ssh "$VM_HOST" bash -s <<'REMOTE'
-set -euo pipefail
-cd /var/www/gradeassist/backend
-# Reload if already running, else start fresh
-pm2 reload gradeassist-api --update-env 2>/dev/null \
-  || pm2 start ecosystem.config.js --env production
-pm2 save
-REMOTE
-
-echo "▶ [7/7] nginx guard…"
+echo "▶ [7/8] nginx guard…"
 # nginx is NOT restarted on deploy — there's no reason to. If you ever change
 # its config, do it by hand:  sudo nginx -t && sudo systemctl reload nginx
 # (reload keeps the old config serving if the new one is broken; restart does
@@ -170,7 +254,7 @@ fi
 echo "nginx: $(systemctl is-active nginx)"
 REMOTE
 
-echo "▶ Verifying health…"
+echo "▶ [8/8] Verifying health…"
 sleep 2
 
 # AUTHORITATIVE check — runs ON the VM, so it can't be fooled by the laptop's
