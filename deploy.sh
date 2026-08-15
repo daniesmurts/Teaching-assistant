@@ -40,6 +40,9 @@
 # `pm2 reload` used to do a zero-downtime rolling restart across its 2
 # workers; a lone container doesn't get that for free. A second replica later
 # is what buys it back, not just extra throughput.
+#
+# Rollback: deploy/rollback.sh <image-tag> — repoints the running container to
+# a previously pushed tag without rebuilding or re-migrating.
 set -euo pipefail
 
 # ── Config ───────────────────────────────────────────────────────────────────
@@ -255,7 +258,6 @@ echo "nginx: $(systemctl is-active nginx)"
 REMOTE
 
 echo "▶ [8/8] Verifying health…"
-sleep 2
 
 # AUTHORITATIVE check — runs ON the VM, so it can't be fooled by the laptop's
 # network. This is the hard gate: if the public site is truly down, this fails.
@@ -272,9 +274,29 @@ sleep 2
 # the one construct `set -e` genuinely does NOT trigger on (a command inside
 # an `if` condition), used here on purpose and correctly, rather than by the
 # accident the old `&&` form was.
+#
+# The local check RETRIES (up to 30s) rather than firing once immediately —
+# `docker compose up -d` returns as soon as the container is CREATED, not
+# once the Node process inside has actually bound the port; a single
+# immediate curl can false-negative on a legitimately slow cold start (DB
+# pool connect, migrations already ran but the process itself still has
+# module-load work to do). On genuine failure it now dumps the container's
+# own recent logs INLINE — today's incident took ~10 back-and-forth messages
+# to get from "curl failed" to "here's the actual crash reason"; that
+# diagnosis should happen automatically, in the deploy's own output, not in
+# a follow-up SSH round trip.
 ssh "$VM_HOST" 'set -e
-  if ! curl -fsS --max-time 10 http://127.0.0.1:3000/api/health >/dev/null; then
-    echo "  ✗ API (local) — FAILED"; exit 1
+  ok=""
+  for i in 1 2 3 4 5 6; do
+    if curl -fsS --max-time 5 http://127.0.0.1:3000/api/health >/dev/null; then
+      ok=1; break
+    fi
+    sleep 5
+  done
+  if [ -z "$ok" ]; then
+    echo "  ✗ API (local) — FAILED after 30s. Recent container logs:"
+    docker logs ispum-api --tail=30 2>&1 | sed "s/^/    /"
+    exit 1
   fi
   echo "  ✓ API (local)"
   if ! curl -fsS --max-time 10 https://ispum.ru/api/health >/dev/null; then
