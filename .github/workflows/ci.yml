@@ -179,6 +179,15 @@ jobs:
           # Push only from main — a PR build proves the image builds without
           # publishing an artifact for a commit that may never land.
           push: ${{ steps.registry.outputs.enabled == 'true' && github.event_name == 'push' }}
+          # buildx attaches a provenance/SBOM attestation manifest by default
+          # since v0.11 — a multi-manifest OCI structure Docker Hub/GHCR
+          # understand but Yandex Container Registry rejects outright
+          # ("Cannot read manifest data") even though every layer pushed
+          # fine. Not a build problem; a registry-compatibility one. Disable
+          # both explicitly rather than relying on the (registry-dependent)
+          # default.
+          provenance: false
+          sbom: false
           build-args: |
             BUILD_VERSION=${{ steps.version.outputs.build_version }}
           tags: |
