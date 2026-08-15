@@ -124,8 +124,21 @@ Highest-value first, per the earlier discussion:
    mapping every real `LTI_*` error code from `routes/lti.ts`/`services/lti.ts`
    to a plain-language cause and fix — not paraphrased, grepped directly
    from the code so the codes and Russian messages match exactly.
-2. **Настройка входа по SAML** — rewrite from `docs/saml-testing.md`
-   ("how we test it" → "how you configure it").
+2. ~~**Настройка входа по SAML**~~ — ✅ shipped 2026-08-15
+   (`docs-site/articles/integration/saml-setup.md`). Rewritten from
+   `docs/saml-testing.md`'s "how we test it" into "how it works" — turned
+   out to be a materially different article than LTI's, not just a
+   find-replace: SAML has **no self-serve institution UI** (confirmed via
+   `requireAdmin` gating `admin.ts`, vs. LTI's institution-scoped
+   `institution.ts`) — it's platform-admin-configured on the customer's
+   behalf via a panel in `AdminInstitutions.tsx`, so the article frames it
+   as a two-sided value exchange coordinated out of band, not a
+   self-service walkthrough, and says plainly that there's no settings page
+   to go looking for. Error codes/messages (`SAML_CONFIG_INCOMPLETE`,
+   `SAML_NOT_CONFIGURED`, `SAML_VALIDATION_FAILED`, `SAML_NO_PROFILE`,
+   `SAML_NO_EMAIL`, `SSO_REQUIRED`, `ACCOUNT_DISABLED`) grepped verbatim
+   from `services/saml.ts`/`routes/sso.ts`/`routes/auth.ts`, same discipline
+   as the LTI article.
 3. **Модель доступа: оргструктура, роли, домены** — rewrite from
    `docs/ACCESS-MATRIX.md`; the domain axis has already caused real
    confusion internally (see CLAUDE.md's Org Tree Authorisation section),
