@@ -124,6 +124,14 @@ Production today is a single Yandex Cloud VM. The backend runs as one container 
 
 Full deployment architecture — including the split planned between this cloud deployment and future self-managed/on-prem deployments — is in [`on-prem-deployment.md`](on-prem-deployment.md).
 
+## Control plane — fleet telemetry
+
+Every ИСПУМ deployment — today just our own cloud, eventually self-managed/on-prem customers too — signs and pushes an aggregate telemetry envelope (version, schema, model health, usage, incidents; never submission text or teacher identities) to a control plane every 15 minutes via [`services/controlPlaneAgent.ts`](../backend/src/services/controlPlaneAgent.ts). Phase 1 (today): our own cloud pushes to *itself* over localhost — the control plane is colocated in the same database, not yet a separate host — so the admin dashboard can be built and tested against real data before any second deployment exists.
+
+Each deployment signs with its own keypair rather than a shared one ([`services/controlPlane/signing.ts`](../backend/src/services/controlPlane/signing.ts) — the envelope *is* the signed JWT payload), so one deployment's key can never forge another's telemetry. `POST /api/control-plane/ingest` has no JWT/session auth — a deployment agent has no teacher — it authenticates purely via that signature, the same shape as the existing T-Bank webhook route. The admin **Развёртывания** page (`AdminDeployments.tsx`) reads the resulting `deployments`/`deployment_heartbeats` tables, never production data directly, so cloud and on-prem deployments render identically to the dashboard code.
+
+Full design (the four-table schema, the connectivity/freshness model, the eventual multi-deployment fleet view) is in [`on-prem-deployment.md`](on-prem-deployment.md) §5.
+
 ## Cross-cutting concerns
 
 - **Prompt injection**: any user-supplied text going into an LLM prompt passes through `sanitiseForPrompt()` first — no exceptions.
