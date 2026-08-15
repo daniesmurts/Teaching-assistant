@@ -171,8 +171,21 @@ Highest-value first, per the earlier discussion:
    to students; fully reversible; self-deactivation blocked) — verified
    against `middleware/authenticate.ts`'s `ACCOUNT_DISABLED` check rather
    than assumed from the button label.
-5. **Диагностика типовых проблем** (login/SSO/LTI/upload) — written last,
-   once the setup articles above exist to link back to.
+5. ~~**Диагностика типовых проблем**~~ — ✅ shipped 2026-08-15
+   (`docs-site/articles/integration/troubleshooting.md`). Symptom-first
+   triage, not a fifth copy of the other four articles' error tables — a
+   routing table pointing to the right deep-dive, plus the two categories
+   none of them own: plain password-login failures and file uploads.
+   Documents two real gaps found while researching, both worth fixing (see
+   TODO #17/#18) but documented as current behaviour in the meantime:
+   deactivated accounts pass the login screen and only fail on the next
+   request (cross-linked to the provisioning article rather than
+   duplicated), and uploads between 20–21 MB get ИСПУМ's own clean error
+   while uploads over ~21 MB hit nginx's `client_max_body_size` first and
+   get its raw, unstyled default error page — a real, confirmed
+   discontinuity in what the user sees, not a guess. Includes `GET
+   /api/health` as the one self-serve way to rule out "is it just us"
+   before assuming the fault is local configuration.
 6. Expand `security/overview.md` into the fuller obzor + DPA pair, sourced
    from `docs/legal/security-overview.md` / `docs/legal/152-fz-dpa.md` —
    **needs lawyer sign-off before publishing**, per that file's own header
@@ -186,6 +199,57 @@ Highest-value first, per the earlier discussion:
   reduction, not by ease.
 - **Touches** — `docs-site/articles/<section>/*.md` only; no code changes
   once the shell exists, per `docs-site/README.md`'s workflow.
+
+### 17. Seat-cap accounting is inconsistent between single and bulk teacher invite · Effort: S
+
+Found while writing the teacher-provisioning docs article, not from a
+support report. `POST /api/institution/teachers/invite` (single) checks
+`max_teachers` against active members only — the code comment says so
+explicitly ("max_teachers includes pending invites is out of scope — count
+members only"). `POST /api/institution/teachers/invite-bulk` checks
+`max_teachers` against active members **plus outstanding pending
+invites**. Same cap, two different definitions of "how full are we,"
+depending on which button an admin happens to click.
+
+- **Why** — an admin near their seat limit gets a materially different
+  answer to "can I invite one more?" depending on which form they use, with
+  no indication anywhere that the two forms count differently. At best
+  confusing; at worst an admin invites via the single form believing they
+  have room, when the bulk form would have told them otherwise (or vice
+  versa).
+- **Fix** — pick one definition (bulk's — members + pending — is the more
+  correct one, since a pending invite is a real claim on a seat once
+  accepted) and make the single-invite endpoint match it.
+- **Touches** — `backend/src/routes/institution.ts`'s `/teachers/invite`
+  handler; add a regression test asserting both endpoints compute the same
+  available-seats number for the same institution state.
+
+### 18. Expired/invalid invite link fails silently instead of showing an error · Effort: S
+
+Also found while writing the teacher-provisioning docs article.
+`POST /api/auth/register` with an `invite_token` that's expired or
+otherwise doesn't resolve via `findValidInviteByToken` doesn't reject the
+request — the code comment confirms this is deliberate: *"An invalid/
+expired token is ignored — registration still succeeds as a normal
+teacher."* The person registering gets no error and no indication anything
+was wrong; they just end up with a normal, org-less account instead of
+joining the inviting institution.
+
+- **Why** — this is the leading (and currently undiagnosable-by-the-user)
+  explanation for "I registered but don't see my organization" support
+  requests. The docs article now tells IT admins to suspect a stale link
+  and re-invite, but that's a workaround for a real gap, not a fix — the
+  person who actually hit the expired link gets no signal at all that
+  anything went wrong.
+- **Fix** — when `invite_token` is present but doesn't resolve, surface it
+  distinctly (e.g. a non-blocking notice on the registration success page:
+  "Приглашение больше не действительно — обратитесь к администратору
+  организации за новой ссылкой") rather than registering silently as if no
+  token had been provided at all. Registration should still succeed either
+  way — this is about the person and the inviting admin both getting a
+  correct signal, not about blocking signup.
+- **Touches** — `backend/src/routes/auth.ts`'s `POST /register` handler,
+  the response shape consumed by `frontend/src/pages/Register.tsx`.
 
 ## Features
 
