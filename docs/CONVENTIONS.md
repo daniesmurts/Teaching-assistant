@@ -74,6 +74,13 @@ Every authenticated POST/PUT/PATCH/DELETE that returns 2xx is logged automatical
 
 **How to apply:** you don't need to do anything for a plain mutation route — it's audited for free. Only touch `res.locals.selfAudited` if you're already writing a custom, more detailed audit log entry for that route.
 
+### 11. Recurring jobs go through the scheduler lease
+Any background job that ticks on an interval and must run only **once** across however many API instances are live — not once per instance — calls `services/schedulerLease.ts`'s `scheduleWithLease()` (or `runWithLease()` for a job with its own irregular trigger, like the activation digest's day/hour check). Never gate on `NODE_APP_INSTANCE`.
+
+**Why:** `NODE_APP_INSTANCE` is set only by PM2. Five schedulers (`renewals.ts`, `activation.ts`, `activationDigest.ts`, `usageRollup.ts`, `resourceSampler.ts`) used to check `process.env.NODE_APP_INSTANCE ?? '0'` and skip unless it equalled `'0'` — a container never sets that variable, so every replica read itself as worker 0 and would have fired the same job (including real payment charges in `renewals.ts`) once per replica. The lease claims a short-lived row in `scheduler_leases` per tick (migration 112) instead of electing a leader at start-up, so it stays correct under any instance count, and a holder dying mid-tick self-heals on the next tick rather than needing a restart.
+
+**How to apply:** `scheduleWithLease('job_name', { intervalMs, leaseMs, firstRunDelayMs? }, fn)` replaces the `setTimeout` + `setInterval` shape directly. `leaseMs` must be shorter than `intervalMs` or ticks get silently skipped. If the job only *sometimes* needs to run on a given tick (checking a day-of-week/hour window, say), only take the lease when the condition is actually met — see `activationDigest.ts` for the pattern.
+
 ## Recipes
 
 ### Adding a new route
@@ -99,6 +106,12 @@ Every authenticated POST/PUT/PATCH/DELETE that returns 2xx is logged automatical
 2. If the call needs deterministic JSON, use `chatJSON<T>()`, not `chat()` + manual parsing.
 3. Sanitise any user text going into the prompt (`sanitiseForPrompt()`).
 4. If the output includes claimed quotes/citations, validate them (`validateCitation()`) before persisting.
+
+### Adding a recurring background job
+1. Write the job body as a plain `async function`, unaware of scheduling or instance count.
+2. Start it with `scheduleWithLease('unique_job_name', { intervalMs, leaseMs }, fn)` (`services/schedulerLease.ts`) — not a raw `setInterval`, and never gated on `NODE_APP_INSTANCE`.
+3. Pick `leaseMs` shorter than `intervalMs`, long enough to outlast a slow run — see the existing schedulers for the ratios they use (`renewals.ts`'s daily sweep uses a 23h lease on a 24h interval, for example).
+4. If the job only sometimes fires (a specific day/hour window), check the condition first and only call `runWithLease()` when it's actually met, so an idle tick costs no database write.
 
 ## Workflow checklist (from CLAUDE.md)
 

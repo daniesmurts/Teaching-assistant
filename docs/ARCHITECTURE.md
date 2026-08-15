@@ -116,11 +116,20 @@ Full DDL is in [`backend/src/db/schema.sql`](../backend/src/db/schema.sql) plus 
 
 Every time a teacher approves a grade, a new row goes into `approved_revisions` — the `assignments` row itself gets updated in place, but the history of every approval (including edits/re-approvals) survives independently. Never `UPDATE` or `DELETE` an existing `approved_revisions` row.
 
+## Deployment
+
+CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs on every push/PR: typecheck + unit tests, then integration tests against a `pgvector/pgvector:pg15` service container — the same major version production runs, deliberately, so a version-specific SQL difference is caught here rather than in production — then builds the backend as a Docker image ([`backend/Dockerfile`](../backend/Dockerfile)) and pushes it to Yandex Container Registry once `main` has passed both suites. An image tag is a promise about what's inside it precisely because nothing gets tagged until it's been tested.
+
+Production today is a single Yandex Cloud VM. The backend runs as one container with `network_mode: host` — it binds `127.0.0.1:3000` directly and reads the existing `DATABASE_URL=...@localhost:5432/...` unchanged, no bridge-networking translation needed. Postgres stays on the host, not containerised (it holds live data). nginx, also on the host and otherwise unchanged, proxies `/api/` to the container and `/` to the frontend's Object Storage bucket. `deploy.sh` pulls a specific, already-CI-verified image tag rather than building anything on the VM; [`deploy/rollback.sh`](../deploy/rollback.sh) `<tag>` repoints to a previous tag without re-running migrations. Migrations ship *inside* the image and run as a one-shot container (`docker compose run --rm migrate`) immediately before the API container starts, so a deploy always migrates with the exact code that's about to serve traffic, never with whatever happened to be on the VM already.
+
+Full deployment architecture — including the split planned between this cloud deployment and future self-managed/on-prem deployments — is in [`on-prem-deployment.md`](on-prem-deployment.md).
+
 ## Cross-cutting concerns
 
 - **Prompt injection**: any user-supplied text going into an LLM prompt passes through `sanitiseForPrompt()` first — no exceptions.
 - **SQL**: parameterised queries only (`pool.query(text, params[])`); no string interpolation into SQL, ever.
 - **Plan gating**: paid features call `canUseFeature(planTier, 'featureName')` at the route level — limits are never hardcoded per-route.
 - **Audit logging**: [`middleware/auditLog.ts`](../backend/src/middleware/auditLog.ts) logs every authenticated POST/PUT/PATCH/DELETE that returns 2xx, globally. Routes that need richer audit detail than the generic logger captures set `res.locals.selfAudited` to signal they've handled their own logging.
+- **Background job scheduling**: a recurring job that must run once across the whole deployment — not once per API instance — claims a short per-tick lease via [`services/schedulerLease.ts`](../backend/src/services/schedulerLease.ts) (`scheduler_leases` table), not a check on which process it happens to be. Correctness holds regardless of instance count; see Non-Negotiable Rule #11 in [`../CLAUDE.md`](../CLAUDE.md).
 
 These are enforced conventions, not suggestions — see [`CONVENTIONS.md`](CONVENTIONS.md) for the full non-negotiable list and how to apply it when writing new code.

@@ -118,6 +118,9 @@ Regardless of provider preference, embedding calls route through Yandex (vector-
 ### 10. Global audit middleware
 Every POST/PUT/PATCH/DELETE from an authenticated user with 2xx response is logged. Routes with richer audit data set `res.locals.selfAudited`.
 
+### 11. Recurring jobs go through the scheduler lease
+Any `setInterval`-style background job that must run only once across however many API instances are live (renewals, activation sweeps, resource sampling, usage rollups) uses `services/schedulerLease.ts`'s `scheduleWithLease`/`runWithLease`, never a PM2-specific check. `NODE_APP_INSTANCE` is set only by PM2 — a container never sets it, so a check gated on it silently degrades to "every instance thinks it's the one" the moment the deployment model changes, which is exactly how it was found (backend/src/services/renewals.ts and four siblings, migration 112).
+
 ---
 
 ## Architecture Invariants
