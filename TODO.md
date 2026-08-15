@@ -155,10 +155,22 @@ Highest-value first, per the earlier discussion:
    grant detection) and states plainly that invite/deactivate/primary-
    department/LTI/model/RAG settings stay root-admin-only regardless of
    any grant — matches `project_it-owns-provisioning`.
-4. **Управление преподавателями** (invite/activate/deactivate) — should
-   state plainly that provisioning is centrally IT-owned, not delegated
-   per subtree (see `project_it-owns-provisioning` memory / TODO's own
-   Phase 3 slice B notes).
+4. ~~**Управление преподавателями**~~ — ✅ shipped 2026-08-15
+   (`docs-site/articles/integration/teacher-provisioning.md`). States
+   plainly that provisioning is centrally IT-owned, not delegated per
+   subtree, matching `project_it-owns-provisioning`. Documents two real
+   gotchas found while researching, both easy to be surprised by if you
+   only read the UI: (1) single-invite and bulk-invite count differently
+   against the seat cap — single counts only active members, bulk also
+   counts outstanding pending invites; (2) an expired/invalid invite link
+   doesn't show an error — it silently degrades to a normal, org-less
+   self-registration, so a teacher who "registered but doesn't see the
+   organisation" almost certainly used a stale link. Also covers what
+   deactivation actually does (blocks every subsequent request, not the
+   login screen itself; already-published assignments/grades stay visible
+   to students; fully reversible; self-deactivation blocked) — verified
+   against `middleware/authenticate.ts`'s `ACCOUNT_DISABLED` check rather
+   than assumed from the button label.
 5. **Диагностика типовых проблем** (login/SSO/LTI/upload) — written last,
    once the setup articles above exist to link back to.
 6. Expand `security/overview.md` into the fuller obzor + DPA pair, sourced
