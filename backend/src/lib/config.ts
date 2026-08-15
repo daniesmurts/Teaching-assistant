@@ -55,6 +55,15 @@ export const config = {
     botToken: optional('TELEGRAM_BOT_TOKEN'),
     chatId:   optional('TELEGRAM_CHAT_ID'),
   },
+  // docs/on-prem-deployment.md §16 Track 1.6 — Phase 1 has our own cloud
+  // heartbeat to ITSELF (controlPlaneUrl defaults to localhost), proving the
+  // full sign → ingest → store path before any real remote deployment exists.
+  // deploymentId defaults to migration 113's seeded 'ispum-cloud' row.
+  controlPlane: {
+    privateKey:   optional('CONTROL_PLANE_PRIVATE_KEY'),
+    deploymentId: process.env.CONTROL_PLANE_DEPLOYMENT_ID ?? '00000000-0000-0000-0000-000000000001',
+    url:          process.env.CONTROL_PLANE_URL ?? '',   // resolved against config.port at call time if unset — see agent.ts
+  },
 } as const
 
 /** Call once at boot. Validates essentials and warns about degraded features. */
@@ -75,6 +84,10 @@ export function validateConfig(): void {
 
   if (!config.telegram.botToken || !config.telegram.chatId) {
     warnings.push('Telegram incident alerts (production errors will only be logged, not pushed)')
+  }
+
+  if (!config.controlPlane.privateKey) {
+    warnings.push('Control-plane telemetry (heartbeats will not be sent — run scripts/generateControlPlaneKeypair.ts)')
   }
 
   if (warnings.length > 0 && config.nodeEnv === 'production') {

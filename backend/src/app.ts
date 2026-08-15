@@ -10,6 +10,7 @@ import { generalLimiter } from './middleware/rateLimits'
 import { auditLog } from './middleware/auditLog'
 import { abortMonitor } from './middleware/abortMonitor'
 import authRouter from './routes/auth'
+import controlPlaneIngestRouter from './routes/controlPlaneIngest'
 import ssoRouter from './routes/sso'
 import ltiRouter from './routes/lti'
 import coursesRouter from './routes/courses'
@@ -146,6 +147,7 @@ app.get('/api/health', async (_req, res) => {
   }
 })
 
+app.use('/api/control-plane', controlPlaneIngestRouter)   // server-to-server, own signature auth — no `authenticate`
 app.use('/api/auth',          authRouter)
 app.use('/api/sso',           ssoRouter)
 app.use('/api/lti',           ltiRouter)

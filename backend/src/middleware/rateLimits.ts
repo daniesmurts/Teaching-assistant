@@ -2,6 +2,20 @@ import rateLimit from 'express-rate-limit'
 import type { Request } from 'express'
 import { PgRateLimitStore } from '../services/rateLimitStore'
 
+// FOUND 2026-08-15: the integration suite runs `fileParallelism: false`
+// (vitest.integration.config.ts — required so DB_POOL_MAX=1's transaction-
+// per-test isolation works), which means every test FILE shares one Node
+// process and therefore one in-memory rate-limit counter for the whole
+// `vitest run`, never resetting between files. None of these limiters had a
+// test-mode exemption, so the suite's cumulative request count was ALWAYS
+// going to cross generalLimiter's 200/15min ceiling eventually as more
+// integration tests get added — a new test file (control-plane's) tipped it
+// over first, failing an unrelated SSO test with no code connection to it.
+// Confirmed by reverting: the same full-suite run was clean before that
+// file existed. Gated on NODE_ENV alone — `.env.test` sets it, dev/prod
+// never do — so this has zero effect outside the test harness.
+const SKIP_IN_TEST = process.env.NODE_ENV === 'test'
+
 // ─── Auth endpoints — IP-based brute-force guard ──────────────────────────────
 // Login and register: 10 attempts per 15 minutes per IP.
 //
@@ -21,6 +35,7 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   store: new PgRateLimitStore('auth'),
   message: { error: 'Слишком много попыток входа. Попробуйте через 15 минут.' },
+  skip: () => SKIP_IN_TEST,
 })
 
 // ─── AI endpoints — user-based (university networks share one IP) ─────────────
@@ -34,6 +49,7 @@ export const aiLimiter = rateLimit({
   keyGenerator: (req: Request) =>
     req.teacher?.id ?? req.ip ?? 'anonymous',
   message: { error: 'Превышен лимит запросов к ИИ (30 в час). Попробуйте позже.' },
+  skip: () => SKIP_IN_TEST,
 })
 
 // ─── Public marketing-site forms — unauthenticated, spam-prone ────────────────
@@ -44,6 +60,7 @@ export const publicFormLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Слишком много обращений. Попробуйте позже или напишите на hello@ispum.ru.' },
+  skip: () => SKIP_IN_TEST,
 })
 
 // ─── LTI launch — platform-initiated but still bounded ────────────────────────
@@ -60,6 +77,7 @@ export const ltiLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Слишком много запросов LTI. Попробуйте позже.' },
+  skip: () => SKIP_IN_TEST,
 })
 
 // ─── Payment webhook — server-to-server, but still bounded per source IP ──────
@@ -76,6 +94,7 @@ export const webhookLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many requests' },
+  skip: () => SKIP_IN_TEST,
 })
 
 // ─── General API — broad IP-based catch-all ───────────────────────────────────
@@ -90,6 +109,7 @@ export const generalLimiter = rateLimit({
   // sized for sustained ~2s polling for the length of a whole lecture —
   // 200/15min would throttle a single device within minutes).
   skip: (req) =>
+    SKIP_IN_TEST ||
     req.path === '/api/health' ||
     req.path.startsWith('/api/live-sessions') ||
     req.path.startsWith('/api/live-join'),
@@ -111,6 +131,7 @@ export const liveLimiter = rateLimit({
   keyGenerator: (req: Request) =>
     (req.body?.participant_token as string) || (req.query?.participant_token as string) || req.ip || 'anonymous',
   message: { error: 'Слишком много запросов. Подождите немного.' },
+  skip: () => SKIP_IN_TEST,
 })
 
 // ─── Live QR quiz join — IP-keyed, tighter than liveLimiter ──────────────────
@@ -126,4 +147,5 @@ export const liveJoinLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Слишком много попыток присоединения. Подождите немного.' },
+  skip: () => SKIP_IN_TEST,
 })
