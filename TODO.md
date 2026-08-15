@@ -53,6 +53,33 @@ entirely, not just the "rebuild in Excel" step v1 already removed.
   `backend/src/index.ts`, `rpd_snapshots.source_filename` becomes nullable
   (no upload) or gets a `source: 'upload' | 'auto'` discriminator.
 
+### 13. Add a second backend replica · Effort: S — gated, not on a deadline
+
+The container deploy (`docs/on-prem-deployment.md` §16 Track 1.4) currently
+runs one replica on purpose. The mechanical work is small — `PORT` is
+already env-driven (`config.port`), host networking is already the model,
+and the Track 1.4a scheduler lease already makes concurrent instances safe
+— but don't pick this up until the **gate** below is satisfied; picking it
+up early adds a second moving part on top of a deploy pipeline that just
+had three same-day incidents (one real port conflict, two "clean-looking"
+deploys that silently weren't).
+
+- **Why** — restores zero-downtime deploys (a lone container has a few
+  seconds of downtime per deploy that PM2's old `pm2 reload` didn't) and
+  the throughput PM2's 2-worker cluster used to provide.
+- **Gate** — a small handful of ordinary, unremarkable deploys on the
+  current single-replica pipeline, each with the live version spot-checked
+  independently (`curl https://ispum.ru/api/health`) rather than trusted
+  from `deploy.sh`'s own exit code. Two deploys on 2026-08-15 looked clean
+  by every check the script itself ran and were both wrong — see
+  `docs/on-prem-deployment.md` §16 Track 1.4b for the full incident writeup
+  and the exact criterion.
+- **Touches** — `deploy/docker-compose.cloud.yml` (second `api` service
+  block, its own `PORT`/`container_name`), a one-time nginx `upstream` edit
+  (`deploy/nginx/gradeassist.conf`, currently a single `proxy_pass
+  http://127.0.0.1:3000`), `deploy.sh` + `deploy/rollback.sh` (pull+start
+  both replicas).
+
 ## Features
 
 ### A. Bulk grading · Effort: L
