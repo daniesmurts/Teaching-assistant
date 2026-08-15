@@ -218,7 +218,7 @@ jobs:
       # baseline exists is a natural follow-up (one flag flip), tracked
       # rather than silently deferred — see TODO.md.
       - name: Vulnerability scan (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.registry.outputs.repo }}:${{ steps.version.outputs.image_tag }}
           format: table
@@ -237,7 +237,7 @@ jobs:
       # security teams ask for; SPDX is a one-line format change if a
       # specific customer needs that instead.
       - name: Generate SBOM (Trivy, CycloneDX)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.registry.outputs.repo }}:${{ steps.version.outputs.image_tag }}
           format: cyclonedx
