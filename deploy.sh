@@ -222,15 +222,25 @@ docker compose pull api migrate
 # One-shot migration container, same image about to serve traffic — not the
 # code that happened to be sitting on the VM at rsync time (there isn't any
 # anymore). Idempotent, tracked in the migrations table.
-docker compose run --rm migrate
-# --force-recreate: FOUND 2026-08-15 — plain \`up -d api\` left the running
-# container on its OLD image across two consecutive deploys with genuinely
-# different, already-pulled tags (confirmed via \`docker inspect --format
-# .Created\` — the container hadn't been recreated since its first manual
-# start hours earlier), with no error from compose. Root cause in Compose's
-# own change-detection not fully understood; not worth chasing further when
-# forcing it removes the whole question. Never rely on Compose deciding a
-# recreate is warranted — always force it.
+#
+# -T (--no-TTY) + </dev/null — ROOT CAUSE, found 2026-08-15 after THREE
+# separate deploys each silently failed to recreate the api container with
+# no error at all. \`docker compose run\` forwards its OWN stdin into the
+# container by default, even without a real TTY — and here, that stdin IS
+# the rest of THIS heredoc (bash -s reads its script from stdin). Every
+# command after this line was being silently consumed/discarded as
+# migrate's stdin before its container exited, so \`docker compose up -d
+# api\` (and, once added, --force-recreate + the image-match assertion
+# below) never actually ran — not a Compose change-detection quirk as first
+# suspected, the commands simply never reached bash at all. \`-T\` disables
+# TTY allocation (the documented flag for scripted/automated use); the
+# explicit redirect makes it physically impossible for the container to
+# read any of the remaining heredoc regardless of that flag's exact
+# behaviour — belt-and-suspenders on the fix that actually matters here.
+docker compose run --rm -T migrate < /dev/null
+# --force-recreate: kept as defense-in-depth even now the real cause is
+# fixed above — never rely on Compose's own diffing deciding a recreate is
+# warranted; force it unconditionally.
 docker compose up -d --force-recreate api
 # Belt-and-suspenders for the same reason: assert the container that's
 # ACTUALLY running matches what we just told it to run, and fail loudly
