@@ -139,10 +139,22 @@ Highest-value first, per the earlier discussion:
    `SAML_NO_EMAIL`, `SSO_REQUIRED`, `ACCOUNT_DISABLED`) grepped verbatim
    from `services/saml.ts`/`routes/sso.ts`/`routes/auth.ts`, same discipline
    as the LTI article.
-3. **Модель доступа: оргструктура, роли, домены** — rewrite from
-   `docs/ACCESS-MATRIX.md`; the domain axis has already caused real
-   confusion internally (see CLAUDE.md's Org Tree Authorisation section),
-   IT will hit the same subtleties.
+3. ~~**Модель доступа: оргструктура, роли, домены**~~ — ✅ shipped
+   2026-08-15 (`docs-site/articles/integration/access-model.md`). Written
+   entirely in the UI's own Russian labels (Наблюдатель/Редактор/
+   Администратор; Все области/Платформа/Учебно-методическая работа/Учебный
+   процесс/УМУ) — confirmed via `InstitutionStructure.tsx` that the raw
+   domain slugs (`curriculum`, `umu`, etc.) are never shown to an admin, so
+   the article never uses them either. Domain-axis rationale is the
+   Заведующий кафедрой example, sourced from the near-identical comment
+   repeated verbatim across `orgUnits.ts`/`rpdMonitor.ts`/`rpdApprovals.ts`
+   — not invented, and cross-checked against ACCESS-MATRIX.md §4's own
+   compliance table ("ЗК не видит Мониторинг РПД ✅ нет гранта `umu`").
+   Also documents the built-in grant-form guardrails (root-only
+   admin+all, governance/admin_office institution-wide warning, redundant-
+   grant detection) and states plainly that invite/deactivate/primary-
+   department/LTI/model/RAG settings stay root-admin-only regardless of
+   any grant — matches `project_it-owns-provisioning`.
 4. **Управление преподавателями** (invite/activate/deactivate) — should
    state plainly that provisioning is centrally IT-owned, not delegated
    per subtree (see `project_it-owns-provisioning` memory / TODO's own
