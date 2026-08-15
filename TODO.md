@@ -117,11 +117,13 @@ stamp, 2026-08-15) ships with one scaffold overview article per section,
 proving the pipeline end-to-end but not yet useful to a real IT admin.
 Highest-value first, per the earlier discussion:
 
-1. **Настройка LTI 1.3 (Moodle)** — highest priority. We shipped LTI 1.3
-   incl. deep linking and NRPS (migrations 066–068, 109–110) with zero
-   public documentation; a Moodle admin configuring an external tool is the
-   single most likely IT reader to get stuck and email support instead of
-   self-serving.
+1. ~~**Настройка LTI 1.3 (Moodle)**~~ — ✅ shipped 2026-08-15
+   (`docs-site/articles/integration/lti-setup.md`). Both registration paths
+   (dynamic + manual, sourced from the exact `InstitutionLti.tsx` field
+   labels), the Deep Linking requirement, and a troubleshooting table
+   mapping every real `LTI_*` error code from `routes/lti.ts`/`services/lti.ts`
+   to a plain-language cause and fix — not paraphrased, grepped directly
+   from the code so the codes and Russian messages match exactly.
 2. **Настройка входа по SAML** — rewrite from `docs/saml-testing.md`
    ("how we test it" → "how you configure it").
 3. **Модель доступа: оргструктура, роли, домены** — rewrite from
