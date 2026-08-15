@@ -37,6 +37,7 @@ institution's tier (`backend/src/middleware/authenticate.ts`).
 - Login (password reveal, inline errors)
 - Forgot / reset password (email link, 1-hour token)
 - Yandex Metrica analytics (public pages only; Webvisor never runs on authenticated pages — 152-ФЗ)
+- **Public documentation hub (`/docs`)** — separate from marketing pages and from `docs/` (internal dev docs): articles for university IT teams, organised by reader (Интеграция и настройка / Безопасность и соответствие / Локальное развёртывание), not by our internal architecture. Content lives as markdown in `docs-site/articles/`, compiled at build time (`frontend/scripts/buildDocs.mjs`) — search sidebar, per-article version stamp (`appliesTo`). Statically prerendered per-article `index.html` with real `<title>`/meta description (`frontend/scripts/postbuildDocs.mjs`) plus a generated `sitemap.xml`/`robots.txt`, since the app is a pure client-rendered SPA with no server to render on request otherwise. 🚧 shell shipped with 3 scaffold articles (one per section); real content (SAML/LTI setup, org-role model, teacher provisioning, troubleshooting) is added incrementally — see TODO.md.
 
 ---
 

@@ -110,6 +110,44 @@ deploy on a backlog nobody has looked at yet.
 - **Touches** — `.github/workflows/ci.yml` only, one flag flip once the
   triage is done.
 
+### 16. Write the real `/docs` articles · Effort: M
+
+The shell (`docs-site/`, build/postbuild pipeline, nav + search + version
+stamp, 2026-08-15) ships with one scaffold overview article per section,
+proving the pipeline end-to-end but not yet useful to a real IT admin.
+Highest-value first, per the earlier discussion:
+
+1. **Настройка LTI 1.3 (Moodle)** — highest priority. We shipped LTI 1.3
+   incl. deep linking and NRPS (migrations 066–068, 109–110) with zero
+   public documentation; a Moodle admin configuring an external tool is the
+   single most likely IT reader to get stuck and email support instead of
+   self-serving.
+2. **Настройка входа по SAML** — rewrite from `docs/saml-testing.md`
+   ("how we test it" → "how you configure it").
+3. **Модель доступа: оргструктура, роли, домены** — rewrite from
+   `docs/ACCESS-MATRIX.md`; the domain axis has already caused real
+   confusion internally (see CLAUDE.md's Org Tree Authorisation section),
+   IT will hit the same subtleties.
+4. **Управление преподавателями** (invite/activate/deactivate) — should
+   state plainly that provisioning is centrally IT-owned, not delegated
+   per subtree (see `project_it-owns-provisioning` memory / TODO's own
+   Phase 3 slice B notes).
+5. **Диагностика типовых проблем** (login/SSO/LTI/upload) — written last,
+   once the setup articles above exist to link back to.
+6. Expand `security/overview.md` into the fuller obzor + DPA pair, sourced
+   from `docs/legal/security-overview.md` / `docs/legal/152-fz-dpa.md` —
+   **needs lawyer sign-off before publishing**, per that file's own header
+   ("перед передачей клиенту согласуйте с юристом"). Don't just copy it in.
+
+- **Why** — this is the actual product of the docs site; the shell alone
+  answers nobody's question. But it wasn't done in the same pass as the
+  shell because writing several articles is genuinely separate work from
+  building the pipeline they render through, worth its own review pass.
+- **Gate** — none; can start immediately. Ordered by expected support-load
+  reduction, not by ease.
+- **Touches** — `docs-site/articles/<section>/*.md` only; no code changes
+  once the shell exists, per `docs-site/README.md`'s workflow.
+
 ## Features
 
 ### A. Bulk grading · Effort: L

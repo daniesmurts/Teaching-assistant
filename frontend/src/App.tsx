@@ -43,6 +43,10 @@ import Settings from './pages/Settings'
 import Leadership from './pages/Leadership'
 import LeadershipTeacher from './pages/LeadershipTeacher'
 import Help from './pages/Help'
+import DocsLayout from './pages/docs/DocsLayout'
+import DocsIndex from './pages/docs/DocsIndex'
+import DocsSectionIndex from './pages/docs/DocsSectionIndex'
+import DocsArticle from './pages/docs/DocsArticle'
 import Feedback from './pages/Feedback'
 import AdminLayout from './pages/admin/AdminLayout'
 import AdminOverview from './pages/admin/AdminOverview'
@@ -273,6 +277,11 @@ export default function App() {
           <Route path="/pricing"  element={<Pricing />} />
           <Route path="/changelog" element={<Changelog />} />
           <Route path="/use-cases" element={<UseCases />} />
+          <Route path="/docs" element={<DocsLayout />}>
+            <Route index element={<DocsIndex />} />
+            <Route path=":section" element={<DocsSectionIndex />} />
+            <Route path=":section/:slug" element={<DocsArticle />} />
+          </Route>
           <Route path="/legal"    element={<LegalIndex />} />
           <Route path="/acceptable-use" element={<AcceptableUse />} />
           <Route path="/offer"    element={<Offer />} />

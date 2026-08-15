@@ -132,6 +132,16 @@ Each deployment signs with its own keypair rather than a shared one ([`services/
 
 Full design (the four-table schema, the connectivity/freshness model, the eventual multi-deployment fleet view) is in [`on-prem-deployment.md`](on-prem-deployment.md) §5.
 
+## Public documentation site (`/docs`)
+
+Markdown source lives in [`docs-site/articles/`](../docs-site/) — a directory distinct from `docs/` (this file's own directory, internal-only: dev conventions, deploy runbooks, planning docs) and from the marketing pages under `frontend/src/pages/`. `docs-site/` is written for university IT teams and is public.
+
+Two build-time scripts, wired as `predev`/`prebuild`/`postbuild` hooks in `frontend/package.json` so they can never go stale relative to the markdown:
+- [`frontend/scripts/buildDocs.mjs`](../frontend/scripts/buildDocs.mjs) compiles each article's frontmatter + markdown body (via `marked`) into `frontend/src/generated/docs/` (gitignored) — a `manifest.json` the React sidebar/index pages import directly, and one rendered `.html` fragment per article, lazy-loaded per route via `import.meta.glob` so visiting one article doesn't pull every article into the bundle.
+- [`frontend/scripts/postbuildDocs.mjs`](../frontend/scripts/postbuildDocs.mjs) runs after `vite build` and writes a real static `index.html` per article/section into `dist/docs/...` — correct `<title>`/`<meta description>`, article HTML inlined in a `<noscript>` block — plus `dist/sitemap.xml`. The frontend is a pure client-rendered SPA served from Object Storage with no server to prerender on request, so without this a non-JS crawler would see an empty `<div id="root">` on every docs URL; real browsers still boot the normal SPA and the static markup is invisible once JS takes over.
+
+Same discipline as `FEATURES.md`/`CHANGELOG.md`: any feature with an IT-visible integration surface (SSO, LTI, provisioning, org roles) ships its docs article in the same commit as the feature, not as a follow-up — see `docs-site/README.md`.
+
 ## Cross-cutting concerns
 
 - **Prompt injection**: any user-supplied text going into an LLM prompt passes through `sanitiseForPrompt()` first — no exceptions.
