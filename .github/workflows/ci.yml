@@ -9,7 +9,6 @@ name: CI
 #   • bundle smoke test   — needs the Compose bundle (Track 3.7)
 #   • upgrade test        — needs a seeded DB snapshot at the oldest supported
 #                           version (Track 3.7)
-#   • image build + scan  — Track 1.3 / 1.5
 
 on:
   push:
@@ -179,6 +178,15 @@ jobs:
           # Push only from main — a PR build proves the image builds without
           # publishing an artifact for a commit that may never land.
           push: ${{ steps.registry.outputs.enabled == 'true' && github.event_name == 'push' }}
+          # ALSO load into the runner's local Docker daemon regardless of
+          # push — Trivy (below) scans a local image reference, and this way
+          # scanning runs on every build, PRs included, not just pushes to
+          # main. Distinct from the `sbom: false` two lines down: that flag
+          # disables buildx's OWN embedded-in-the-manifest SBOM attestation
+          # (the multi-manifest structure that broke the Yandex Container
+          # Registry push, see the comment below) — it has nothing to do
+          # with the standalone SBOM file Trivy generates as a separate step.
+          load: true
           # buildx attaches a provenance/SBOM attestation manifest by default
           # since v0.11 — a multi-manifest OCI structure Docker Hub/GHCR
           # understand but Yandex Container Registry rejects outright
@@ -195,6 +203,55 @@ jobs:
             ${{ steps.registry.outputs.repo }}:main
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # ─── Vulnerability scan + SBOM (docs/on-prem-deployment.md §15.5, §16
+      # Track 1.5) — procurement artifacts state-university ИБ increasingly
+      # requires before they'll even open the questionnaire. Scans the image
+      # that was just built (loaded locally above), not a registry pull, so
+      # this runs on every push AND every PR.
+      #
+      # Non-blocking by design, for now: `exit-code: 0` means a CRITICAL/HIGH
+      # finding is reported, not a failed build. Day one of scanning is not
+      # the day to hard-fail CI on whatever the base image and npm tree
+      # already carry — that would block every deploy on a backlog that
+      # doesn't exist yet. Tightening this to fail on CRITICAL once a real
+      # baseline exists is a natural follow-up (one flag flip), tracked
+      # rather than silently deferred — see TODO.md.
+      - name: Vulnerability scan (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.registry.outputs.repo }}:${{ steps.version.outputs.image_tag }}
+          format: table
+          output: trivy-results.txt
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+
+      - name: Vulnerability scan summary
+        run: |
+          echo "### Vulnerability scan (Trivy, CRITICAL+HIGH)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat trivy-results.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "(scan did not produce output)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      # SBOM — CycloneDX, the more common format procurement/customer
+      # security teams ask for; SPDX is a one-line format change if a
+      # specific customer needs that instead.
+      - name: Generate SBOM (Trivy, CycloneDX)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.registry.outputs.repo }}:${{ steps.version.outputs.image_tag }}
+          format: cyclonedx
+          output: sbom.cdx.json
+
+      - name: Upload scan + SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-${{ steps.version.outputs.image_tag }}
+          path: |
+            trivy-results.txt
+            sbom.cdx.json
+          if-no-files-found: warn
+          retention-days: 90
 
       - name: Summary
         run: |

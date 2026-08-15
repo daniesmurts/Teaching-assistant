@@ -116,7 +116,26 @@ those numbers look like against a real self-hosted deployment.
   their backing queries in `db/queries/usageLog.ts` /
   `db/queries/capacity.ts`, and `db/queries/controlPlane.ts` for the
   `deployment_incidents` half.
-  both replicas).
+
+### 15. Tighten Trivy to fail CI on CRITICAL vulnerabilities · Effort: S — gated on a triaged baseline
+
+`.github/workflows/ci.yml`'s image job (§16 Track 1.5) scans every build with
+Trivy but is deliberately non-blocking (`exit-code: '0'`) — day one of
+scanning is not the day to hard-fail CI on whatever the `node:20-slim` base
+image and the current npm tree already carry, since that would block every
+deploy on a backlog nobody has looked at yet.
+
+- **Why** — a scan nobody acts on is a compliance checkbox, not real
+  security posture. Once the current findings have been triaged (accepted,
+  patched, or shown to be false positives / not reachable), failing on new
+  CRITICAL findings going forward is what actually prevents regressions.
+- **Gate** — do a first triage pass over `trivy-results.txt` from a recent
+  run (uploaded as a workflow artifact, 90-day retention) to establish
+  what's already known-accepted, then flip `exit-code: '0'` → `'1'` on the
+  `Vulnerability scan (Trivy)` step, scoped to `severity: CRITICAL` only —
+  HIGH stays report-only until there's more appetite for it.
+- **Touches** — `.github/workflows/ci.yml` only, one flag flip once the
+  triage is done.
 
 ## Features
 
