@@ -15,6 +15,38 @@ const REPO_ROOT = join(__dirname, '..', '..')
 const CONTENT_ROOT = join(REPO_ROOT, 'docs-site')
 const OUT_ROOT = join(__dirname, '..', 'src', 'generated', 'docs')
 
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-zа-яё0-9\s-]/gi, '')
+    .trim()
+    .replace(/\s+/g, '-')
+}
+
+// Collects ## headings from the article currently being rendered, so
+// DocsArticle can show an in-page "Содержание" table of contents without a
+// second markdown pass. Reset before each marked.parse() call below — safe
+// because the build script is single-threaded and strictly sequential.
+let currentHeadings = []
+const usedIds = new Set()
+marked.use({
+  renderer: {
+    heading({ tokens, depth }) {
+      const html = this.parser.parseInline(tokens)
+      const plain = html.replace(/<[^>]+>/g, '')
+      let id = slugify(plain)
+      if (usedIds.has(id)) {
+        let i = 2
+        while (usedIds.has(`${id}-${i}`)) i++
+        id = `${id}-${i}`
+      }
+      usedIds.add(id)
+      if (depth === 2) currentHeadings.push({ id, text: plain })
+      return `<h${depth} id="${id}">${html}</h${depth}>\n`
+    },
+  },
+})
+
 // Deliberately hand-rolled instead of pulling in gray-matter: the frontmatter
 // shape here is fixed and simple (flat string keys, one per line), so a real
 // YAML parser is a dependency we don't need yet.
@@ -68,6 +100,8 @@ function main() {
       const slug = file.replace(/\.md$/, '')
       const raw = readFileSync(join(sectionDir, file), 'utf8')
       const { fm, body } = parseFrontmatter(raw, `docs-site/articles/${section.slug}/${file}`)
+      currentHeadings = []
+      usedIds.clear()
       const html = marked.parse(body)
 
       const contentDir = join(OUT_ROOT, 'content', section.slug)
@@ -81,6 +115,7 @@ function main() {
         description: fm.description,
         order: fm.order ? Number(fm.order) : 999,
         appliesTo: fm.appliesTo ?? '',
+        headings: currentHeadings,
       }
     })
 

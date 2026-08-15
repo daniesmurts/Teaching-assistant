@@ -24,7 +24,7 @@ export default function DocsIndex() {
           <Link
             key={section.slug}
             to={`/docs/${section.slug}`}
-            className="block rounded-lg border border-ink/10 bg-white p-5 hover:border-amber/40 hover:shadow-sm transition-all"
+            className="block rounded-lg border border-ink/10 bg-white p-5 hover:border-amber/40 hover:shadow-sm transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2"
           >
             <h2 className="font-semibold mb-1.5">{section.title}</h2>
             <p className="text-sm text-ink-secondary">{section.description}</p>
