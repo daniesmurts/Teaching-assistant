@@ -223,7 +223,25 @@ docker compose pull api migrate
 # code that happened to be sitting on the VM at rsync time (there isn't any
 # anymore). Idempotent, tracked in the migrations table.
 docker compose run --rm migrate
-docker compose up -d api
+# --force-recreate: FOUND 2026-08-15 — plain \`up -d api\` left the running
+# container on its OLD image across two consecutive deploys with genuinely
+# different, already-pulled tags (confirmed via \`docker inspect --format
+# .Created\` — the container hadn't been recreated since its first manual
+# start hours earlier), with no error from compose. Root cause in Compose's
+# own change-detection not fully understood; not worth chasing further when
+# forcing it removes the whole question. Never rely on Compose deciding a
+# recreate is warranted — always force it.
+docker compose up -d --force-recreate api
+# Belt-and-suspenders for the same reason: assert the container that's
+# ACTUALLY running matches what we just told it to run, and fail loudly
+# rather than silently serve stale code if it somehow still doesn't.
+ACTUAL_IMAGE="\$(docker inspect ispum-api --format '{{.Config.Image}}')"
+EXPECTED_IMAGE="cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${IMAGE_TAG}"
+if [ "\$ACTUAL_IMAGE" != "\$EXPECTED_IMAGE" ]; then
+  echo "❌ Running image is \$ACTUAL_IMAGE, expected \$EXPECTED_IMAGE — deploy did not take effect."
+  exit 1
+fi
+echo "  ✓ Running image confirmed: \$ACTUAL_IMAGE"
 # Dangling-only (untagged intermediate layers) — never removes a still-tagged
 # release, so the previous image tag stays pullable for a manual rollback.
 docker image prune -f >/dev/null

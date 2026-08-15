@@ -34,8 +34,21 @@ set -euo pipefail
 cd "${APP_DIR}"
 export YC_REGISTRY_ID="${YC_REGISTRY_ID}"
 export IMAGE_TAG="${TAG}"
+# --force-recreate + a post-check that the running image actually matches —
+# see the matching comment in deploy.sh. FOUND 2026-08-15: plain \`up -d\`
+# left a container running its OLD image across two consecutive deploys with
+# different, already-pulled tags, no error from compose. A rollback is the
+# one place this silently not taking effect matters most — never trust it
+# implicitly here.
 docker compose pull api
-docker compose up -d api
+docker compose up -d --force-recreate api
+ACTUAL_IMAGE="\$(docker inspect ispum-api --format '{{.Config.Image}}')"
+EXPECTED_IMAGE="cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${TAG}"
+if [ "\$ACTUAL_IMAGE" != "\$EXPECTED_IMAGE" ]; then
+  echo "❌ Running image is \$ACTUAL_IMAGE, expected \$EXPECTED_IMAGE — rollback did not take effect."
+  exit 1
+fi
+echo "  ✓ Running image confirmed: \$ACTUAL_IMAGE"
 docker image prune -f >/dev/null
 REMOTE
 
