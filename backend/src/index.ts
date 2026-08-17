@@ -14,6 +14,7 @@ dns.setDefaultResultOrder('ipv4first')
 import { app } from './app'
 import { logger } from './lib/logger'
 import { config } from './lib/config'
+import { verifyDeploymentReadiness } from './lib/deploymentReadiness'
 import { startRenewalScheduler } from './services/renewals'
 import { startActivationScheduler } from './services/activation'
 import { startActivationDigestScheduler } from './services/activationDigest'
@@ -29,6 +30,12 @@ import { startControlPlaneAgent } from './services/controlPlaneAgent'
 const PORT = config.port
 
 async function main(): Promise<void> {
+  // onprem only (docs/on-prem-deployment.md §7.8) — confirms the
+  // customer-configured model endpoint is actually reachable before we
+  // accept traffic, rather than letting a typo surface as "ИСПУМ не
+  // работает" three days later. No-ops instantly for saas/dedicated.
+  await verifyDeploymentReadiness()
+
   // Start the job queue (and register its workers) before accepting HTTP
   // traffic — POST /api/grading/review enqueues onto it immediately.
   const boss = await startJobQueue()

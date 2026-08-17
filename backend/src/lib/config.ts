@@ -16,12 +16,31 @@ function optional(key: string): string | undefined {
   return value && value.length > 0 ? value : undefined
 }
 
+// docs/on-prem-deployment.md §4/§16 Track 2.1 — one codebase, deployment
+// profiles, never a fork. `saas` is the only mode that exists in production
+// today (this default), so adding this couldn't change our own cloud's
+// behaviour by construction — every mode-specific check below is additive
+// and gated on a value nothing sets yet.
+const DEPLOYMENT_MODES = ['saas', 'dedicated', 'onprem'] as const
+export type DeploymentMode = typeof DEPLOYMENT_MODES[number]
+
+function deploymentMode(): DeploymentMode {
+  const raw = process.env.DEPLOYMENT_MODE?.trim() || 'saas'
+  if (!(DEPLOYMENT_MODES as readonly string[]).includes(raw)) {
+    throw new Error(
+      `Invalid DEPLOYMENT_MODE "${raw}" — must be one of: ${DEPLOYMENT_MODES.join(', ')}`
+    )
+  }
+  return raw as DeploymentMode
+}
+
 export const config = {
-  nodeEnv:     process.env.NODE_ENV ?? 'development',
-  isDev:       process.env.NODE_ENV !== 'production',
-  port:        Number(process.env.PORT) || 3000,
-  frontendUrl: required('FRONTEND_URL'),
-  logLevel:    process.env.LOG_LEVEL ?? 'info',
+  nodeEnv:       process.env.NODE_ENV ?? 'development',
+  isDev:         process.env.NODE_ENV !== 'production',
+  deploymentMode: deploymentMode(),
+  port:          Number(process.env.PORT) || 3000,
+  frontendUrl:   required('FRONTEND_URL'),
+  logLevel:      process.env.LOG_LEVEL ?? 'info',
 
   db:       { url: required('DATABASE_URL') },
   auth:     { jwtSecret: required('JWT_SECRET') },

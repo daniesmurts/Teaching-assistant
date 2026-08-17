@@ -905,9 +905,27 @@ Strictly sequential; each unblocks the next.
 
 ### Track 2 — Multi-deployment product changes (needs signature or high confidence)
 
+**Gate crossed 2026-08-17 on "high confidence," not a signature.** Track 0
+itself (§16 above) has not run — no discovery questionnaire sent, no
+technical spike, neither of Track 0's own listed items has a status marker.
+Track 1's own "several weeks in production" bar hadn't been met either (Track
+1 shipped 2026-08-15, two days prior). Explicit decision at the time: the
+university side has high confidence a deal is imminent (all necessary parties
+met, terms being finalised, a spec sheet expected from them), and starting
+the *deal-agnostic* slice of Track 2 now — the items that don't depend on
+their specific GPU/network/IdP answers — is worth the risk of some rework if
+the deal doesn't close, versus being caught flat-footed if it closes fast.
+A §12-based discovery questionnaire (translated and reworded for external
+use, not the internal bullet list) was drafted the same day this gate was
+crossed, ready to send — Track 0.1 is in motion in parallel, not skipped,
+though it still depends on the operator actually sending it. Items still
+gated on their actual answers (2.4 exact
+adapter choices, 2.5 embedding provider, 2.8 cost-accounting shape, 2.10
+export/import) are left for when the questionnaire comes back, not guessed at.
+
 | # | Item | Notes |
 |---|---|---|
-| 2.1 ▲ | `DEPLOYMENT_MODE` + **boot-time config validation** per mode | §4, §7.8 |
+| 2.1 ▲ | `DEPLOYMENT_MODE` + **boot-time config validation** per mode | §4, §7.8. **✅ shipped 2026-08-17** — see below. |
 | 2.2 | **Runtime frontend config** — drop build-time `VITE_API_BASE_URL` | §2 |
 | 2.3 ▲◆ | **Prompts → content packs** (prompts, rubric templates, criteria, FGOS data), versioned and shipped independently | §15.2. **Earlier than instinct suggests** — retrofitting after go-live means three frozen months. Benefits cloud too. |
 | 2.4 | **Adapter extraction** — storage (MinIO), OCR, search, embeddings; `services/llm/registry.ts` is the template | §2 |
@@ -917,6 +935,16 @@ Strictly sequential; each unblocks the next.
 | 2.8 | **Cost accounting in tokens / GPU-seconds** for `onprem`; split `AdminCapacity` | §3.7 |
 | 2.9 | **`platform_admin` gating** in `onprem` mode | §15.6 |
 | 2.10 ◆ | **Deployment-level export/import** (cloud pilot → on-prem migration, incl. re-embed) | §15.4. Promote earlier if the pilot-first path is chosen. |
+
+**2.1 — what shipped:** `DEPLOYMENT_MODE` (`saas | dedicated | onprem`, default `saas`) on `config.deploymentMode` (`backend/src/lib/config.ts`), validated eagerly at module load — an unrecognised value throws immediately with the valid list in the message, same "fail loud, not silent" standard as every other required var here. Default is deliberately `saas`: our own cloud never sets this var, so its behaviour is provably unchanged by construction, not just by intent — matches the "never fork, same code everywhere" rule in §4.
+
+Boot-time validation split into two pieces on purpose, not one: `validateConfig()` (`lib/config.ts`) stays synchronous — it runs at module-eval time in `app.ts`, which supertest also imports directly for a bare `app` with no network side effects, so it can only ever check presence, never reachability. The new `verifyDeploymentReadiness()` (`backend/src/lib/deploymentReadiness.ts`) does the actual "endpoints reachable, model responding" check §7.8 asks for — a real HTTP round-trip to `${DEEPSEEK_BASE_URL}/models` — and is called from `index.ts`'s `main()`, before `app.listen()`, the one place a slow or failed check should block startup rather than race the first request. No-ops instantly for `saas`/`dedicated`.
+
+Two failure modes it catches, both silent today without it: (1) `onprem` set but `DEEPSEEK_BASE_URL` left unset — model calls would go to the public DeepSeek cloud API instead of the local deployment, exactly the cross-border transfer an on-prem deployment exists to avoid, and nothing today would ever tell an operator that happened; (2) `onprem` set with `DEEPSEEK_BASE_URL` pointed at something that's unreachable or doesn't respond with a real model list — a config typo that would otherwise surface as "ИСПУМ не работает" three days later, per §7.8's own framing, now fails at the first boot with the endpoint and the underlying cause (connection refused, timeout, wrong status) in the message.
+
+**Deliberately not in this slice:** the egress-allowlist enforcement (2.6) and licence-file entitlements (2.7) that would give `onprem` its other §4 table rows — those are separate tracked items, not bundled in here just because they're adjacent. Also not done: mode-specific behaviour for SAML/LTI/email being unconfigured — those already degrade gracefully in every mode via the existing `validateConfig()` warnings, and a customer legitimately choosing not to use SSO is not a misconfiguration worth failing loud over.
+
+11 unit tests (`config.test.ts`, `deploymentReadiness.test.ts`) — mode parsing (default, all three valid values, rejection), and the readiness check's four real branches (no-op ×2, unset-base-URL rejection, reachable success, unreachable failure, malformed-response failure) via a mocked `axios`, not a real network call.
 
 ### Track 3 — Packaging & operations ◇
 
