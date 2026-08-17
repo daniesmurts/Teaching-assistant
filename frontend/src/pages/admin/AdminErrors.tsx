@@ -8,7 +8,7 @@ export default function AdminErrors() {
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-3xl mx-auto px-6 py-6">
         <h1 className="font-display text-2xl font-bold text-ink mb-1">Ошибки</h1>
-        <p className="text-xs font-sans text-ink-tertiary mb-5">Неуспешные вызовы ИИ за последние 7 дней</p>
+        <p className="text-xs font-sans text-ink-tertiary mb-5">Неуспешные вызовы модели за последние 7 дней</p>
 
         <div className="bg-surface border border-border rounded-lg overflow-hidden">
           <table className="w-full text-xs font-sans">

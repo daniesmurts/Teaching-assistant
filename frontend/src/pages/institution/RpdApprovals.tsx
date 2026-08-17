@@ -39,7 +39,7 @@ function ForwardedCard({ submission, onAct, busy }: {
           </div>
         </div>
         <div className="text-right flex-shrink-0">
-          <div className="text-[10px] font-sans text-ink-tertiary uppercase tracking-wider">Покрытие ИИ</div>
+          <div className="text-[10px] font-sans text-ink-tertiary uppercase tracking-wider">Покрытие анализом</div>
           <div className="text-sm font-sans font-medium text-ink">{coveragePct(submission)}</div>
         </div>
       </div>

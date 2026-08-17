@@ -50,7 +50,7 @@ export default function AdminOverview() {
         {editDistance && editDistance.n_30d > 0 && (
           <div className="mb-8">
             <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">
-              Качество ИИ-черновика (за 30 дней)
+              Качество черновика (за 30 дней)
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <StatCard
@@ -78,7 +78,7 @@ export default function AdminOverview() {
               <p className="text-[11px] font-sans text-ink-tertiary mt-2">
                 За 90 дней среднее расхождение: {editDistance.mean_score_delta_90d}.{' '}
                 {editDistance.mean_score_delta_30d < editDistance.mean_score_delta_90d
-                  ? 'Тренд — снижение (ИИ приближается к стилю преподавателей).'
+                  ? 'Тренд — снижение (система приближается к стилю преподавателей).'
                   : editDistance.mean_score_delta_30d > editDistance.mean_score_delta_90d
                     ? 'Тренд — рост (стоит проверить промпты или модель).'
                     : 'Стабильно.'}

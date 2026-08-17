@@ -63,7 +63,7 @@ function CardGrid({ data }: { data: LearningLoopSummary }) {
       {/* Hero card — style match */}
       <MetricCard
         accent
-        label="Похожесть оценки ИИ на ваш стиль"
+        label="Похожесть автоматической оценки на ваш стиль"
         value={styleMatchEnough ? `${style_match.current_pct}%` : null}
         sub={
           styleMatchEnough
@@ -89,18 +89,18 @@ function CardGrid({ data }: { data: LearningLoopSummary }) {
 
       {/* Used as RAG example */}
       <MetricCard
-        label="Ваши работы как образец для ИИ"
+        label="Ваши работы как образец для системы"
         value={used_as_example_30d.toString()}
         sub={
           used_as_example_30d > 0
-            ? 'случаев за 30 дней, когда ИИ опирался на ваши прошлые оценки'
+            ? 'случаев за 30 дней, когда система опиралась на ваши прошлые оценки'
             : 'появится после ≥ 2 утверждённых работ по одному предмету'
         }
       />
 
       {/* Bullets retention */}
       <MetricCard
-        label="Сохранено пунктов ИИ"
+        label="Сохранено пунктов рубрики"
         value={retentionEnough ? `${bullets_retention_30d.pct}%` : null}
         sub={
           retentionEnough
@@ -187,7 +187,7 @@ function TrendChart({ series }: { series: LearningLoopSummary['trend_weekly'] })
           Динамика согласия со временем
         </div>
         <p className="text-sm text-ink-secondary">
-          Появится после нескольких недель с утверждёнными работами — мы сможем показать, как ИИ постепенно приближается к вашему стилю.
+          Появится после нескольких недель с утверждёнными работами — мы сможем показать, как система постепенно приближается к вашему стилю.
         </p>
       </div>
     )
@@ -217,7 +217,7 @@ function TrendChart({ series }: { series: LearningLoopSummary['trend_weekly'] })
           Динамика согласия со временем
         </div>
         <div className="text-[11px] font-sans text-ink-tertiary">
-          среднее расхождение балла ИИ ↔ ваш балл
+          среднее расхождение автооценки ↔ ваш балл
         </div>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto">
@@ -239,7 +239,7 @@ function TrendChart({ series }: { series: LearningLoopSummary['trend_weekly'] })
         <text x={W - PAD.r} y={H - 8} textAnchor="end" className="fill-ink-tertiary text-[10px] font-sans">{formatWeek(lastWeek)}</text>
       </svg>
       <p className="text-[11px] font-sans text-ink-tertiary leading-relaxed mt-2">
-        Чем ниже линия и чем устойчивее снижение, тем ближе автоматические оценки ИИ к вашим решениям. Идеально — постепенное снижение в сторону нуля.
+        Чем ниже линия и чем устойчивее снижение, тем ближе автоматические оценки к вашим решениям. Идеально — постепенное снижение в сторону нуля.
       </p>
     </div>
   )

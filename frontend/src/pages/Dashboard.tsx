@@ -259,7 +259,7 @@ export default function Dashboard() {
               </div>
               <div className="space-y-2">
                 {[
-                  { to: '/grading',       icon: '✦', label: 'Проверить работу',    sub: 'ИИ + рубрика' },
+                  { to: '/grading',       icon: '✦', label: 'Проверить работу',    sub: 'Проверка по рубрике' },
                   { to: '/presentations', icon: '▤', label: 'Создать презентацию', sub: 'По теме лекции' },
                   { to: '/quizzes',       icon: null, label: 'Тест в аудитории',   sub: 'QR-сессия в реальном времени' },
                   { to: '/courses',       icon: '◫', label: 'Управление предметами', sub: `${courses.length} предмет${courses.length === 1 ? '' : courses.length < 5 ? 'а' : 'ов'}` },

@@ -116,7 +116,7 @@ function StudentDetail({ student, courseId, onBack }: { student: StudentSummary;
             <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ backgroundColor: 'var(--color-warning)' }} />частично {stats.corrections.partial}</span>
             <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ backgroundColor: 'var(--color-danger)' }} />не исправлено {stats.corrections.not_addressed}</span>
           </div>
-          <p className="text-[10px] font-sans text-ink-tertiary mt-2">По замечаниям из отзыва, проверенным ИИ при повторной сдаче ({totalChecks} зам.)</p>
+          <p className="text-[10px] font-sans text-ink-tertiary mt-2">По замечаниям из отзыва, повторно проверенным при пересдаче ({totalChecks} зам.)</p>
         </div>
       )}
 

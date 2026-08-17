@@ -217,7 +217,7 @@ function InvestorView({ data, pseudonymise }: { data: CapacityOverview; pseudony
         </div>
         <p className="text-xs font-sans text-ink-tertiary mt-3">
           Фиксированная стоимость ВМ не зависит от числа пользователей — при росте она размывается на всех.
-          Переменная стоимость ИИ растёт линейно с активностью. Итого за месяц: {fmtUsd(totalCost)}.
+          Переменная стоимость модели растёт линейно с активностью. Итого за месяц: {fmtUsd(totalCost)}.
         </p>
       </section>
 

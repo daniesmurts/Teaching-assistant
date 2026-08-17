@@ -244,7 +244,7 @@ export default function Criteria() {
                 <textarea
                   className={`${inputClass} resize-none`}
                   rows={3}
-                  placeholder="Что именно оценивается — это попадает в подсказку ИИ при проверке"
+                  placeholder="Что именно оценивается — попадает в подсказку для проверки"
                   value={form.description}
                   onChange={(e) => { setForm((f) => ({ ...f, description: e.target.value })); setSuggestion(null) }}
                 />

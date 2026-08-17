@@ -131,7 +131,7 @@ export default function Institutions() {
                 </ul>
                 <div className="mt-6 px-4 py-3 bg-amber-light border border-amber/20 rounded-lg text-sm">
                   <span className="font-semibold text-ink">Финальное слово — за преподавателем.</span>
-                  <span className="text-ink-secondary"> ИИ не выставляет оценку самостоятельно.</span>
+                  <span className="text-ink-secondary"> ИСПУМ не выставляет оценку самостоятельно.</span>
                 </div>
               </div>
             </div>

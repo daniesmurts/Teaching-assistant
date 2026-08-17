@@ -60,7 +60,7 @@ export default function AdminRubrics() {
             <textarea
               className={`${inputClass} w-full resize-none`}
               rows={3}
-              placeholder="Описание — что именно оценивается (попадает в подсказку ИИ)"
+              placeholder="Описание — что именно оценивается (попадает в подсказку для проверки)"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />

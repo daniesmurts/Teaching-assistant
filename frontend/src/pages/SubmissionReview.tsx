@@ -163,7 +163,7 @@ function AiGradeSection({ grade, grading, onGrade, onOpenJournal }: {
     return (
       <div className="flex items-center justify-between gap-3 bg-surface border border-border rounded-lg px-5 py-4">
         <div>
-          <div className="text-sm font-sans font-medium text-ink">Проверка ИИ</div>
+          <div className="text-sm font-sans font-medium text-ink">Черновая проверка</div>
           <div className="text-xs font-sans text-ink-tertiary mt-0.5">
             Получите предварительную оценку. Итоговую проверку и утверждение вы делаете в Журнале.
           </div>
@@ -181,7 +181,7 @@ function AiGradeSection({ grade, grading, onGrade, onOpenJournal }: {
           {grade.ai_grade ?? '—'}
         </div>
         <div className="min-w-0">
-          <div className="text-sm font-sans font-medium text-ink">{grade.ai_grade_label ?? 'Предварительная оценка ИИ'}</div>
+          <div className="text-sm font-sans font-medium text-ink">{grade.ai_grade_label ?? 'Предварительная оценка'}</div>
           {grade.ai_score != null && <div className="text-xs font-sans text-ink-tertiary">{grade.ai_score} баллов</div>}
         </div>
         <button onClick={onOpenJournal}

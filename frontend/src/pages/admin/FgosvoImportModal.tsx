@@ -208,7 +208,7 @@ export default function FgosvoImportModal({ onClose, onImported }: { onClose: ()
               <div className="h-full bg-amber transition-all" style={{ width: `${Math.round((progress.current / Math.max(progress.total, 1)) * 100)}%` }} />
             </div>
             <p className="font-sans text-xs text-ink-tertiary mt-3">
-              Каждый файл скачивается и обрабатывается ИИ — это может занять много минут для большого списка.
+              Каждый файл скачивается и обрабатывается — это может занять много минут для большого списка.
               Не закрывайте окно до завершения.
             </p>
           </div>

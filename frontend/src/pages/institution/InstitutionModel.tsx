@@ -29,7 +29,7 @@ export default function InstitutionModel() {
     mutationFn: setInstitutionModel,
     onSuccess: (fresh) => {
       qc.setQueryData(['institution-model'], fresh)
-      addToast('Модель ИИ изменена', 'success')
+      addToast('Модель изменена', 'success')
       setPendingPick(undefined)
     },
     onError: () => addToast('Не удалось изменить настройку', 'error'),
@@ -54,9 +54,9 @@ export default function InstitutionModel() {
   return (
     <div className="flex-1 overflow-y-auto">
     <div className="max-w-3xl mx-auto px-6 py-6">
-      <h1 className="font-display text-2xl font-bold text-ink mb-2">Модель ИИ для проверок</h1>
+      <h1 className="font-display text-2xl font-bold text-ink mb-2">Модель для проверок</h1>
       <p className="text-xs font-sans text-ink-tertiary mb-6 max-w-prose leading-relaxed">
-        Выберите, на каком ИИ-провайдере будут работать новые проверки. Изменение влияет только на
+        Выберите, на каком провайдере будут работать новые проверки. Изменение влияет только на
         будущие проверки — прошлые оценки остаются как есть. Накопленный «учебный цикл» (критерии,
         рубрики, RAG-маховик) сохраняется при смене модели.
       </p>
@@ -179,7 +179,7 @@ function ConfirmSwitchDialog({
       <div className="bg-surface rounded-xl w-full max-w-md border border-border overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="px-6 pt-6 pb-5">
           <h2 className="font-display text-xl font-bold text-ink tracking-tight mb-2">
-            Сменить модель ИИ?
+            Сменить модель?
           </h2>
           <p className="font-sans text-sm text-ink-secondary leading-relaxed mb-3">
             С <strong>«{fromLabel}»</strong> на <strong>«{toLabel}»</strong>.
