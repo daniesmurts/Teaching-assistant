@@ -20,7 +20,23 @@ import type {
 // own §12 — never an LLM guess at "what this field usually needs", which
 // would be the one ungrounded finding in an otherwise citation-backed check.
 
-const MAX_DOC_CHARS = 20000
+// A naive slice(0, N) from the start — same bug found in assessmentLinkage.ts
+// 2026-08-20, same fix. §12 «Материально-техническое обеспечение» sits near
+// the END of a real РПД (after §9-11), so a flat window starting from page 1
+// routinely never reached it: confirmed against a real 14-page document
+// where §12 clearly listed ABBYY FineReader/MS Office/7-Zip/etc., but the
+// check reported "раздел пуст" — because §12's text was never in the prompt,
+// not because the model misread it. Reuses documentReview.ts's
+// selectRelevantSections with a heading set tuned for what THIS check needs
+// (§12 first — it's the one that was silently missing — then labs/practicals
+// for the isHandsOn/cross-check logic below).
+const MAX_DOC_CHARS = 40000
+const MTO_HEADINGS: { key: string; re: RegExp }[] = [
+  { key: 'mto',         re: /^[\s\d.]*материально-техническ/im },
+  { key: 'labs',        re: /^[\s\d.]*лабораторн/im },
+  { key: 'practicals',  re: /^[\s\d.]*(?:практич|семинарск)/im },
+]
+const MTO_PRIORITY = ['mto', 'labs', 'practicals']
 const AFFINITY_THRESHOLD = 0.75   // cosine floor for "similar enough content to borrow its МТО"
 
 function finding(
@@ -215,7 +231,7 @@ export interface ReviewMtoParams {
 }
 
 export async function reviewMto(params: ReviewMtoParams): Promise<MtoReviewResult> {
-  const text = (params.documentText ?? '').trim().slice(0, MAX_DOC_CHARS)
+  const text = selectRelevantSections((params.documentText ?? '').trim(), MAX_DOC_CHARS, MTO_HEADINGS, MTO_PRIORITY)
   if (text.length < 80) {
     return {
       software_items: [], generic_items: [],

@@ -3,7 +3,7 @@ import type {
   Program, ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramAnalysis,
   ProgramPracticeType, ProgramDocumentKind, ProgramDocument, ProgramDocumentReview,
   ProgramDocumentDiff, MarketEvidence, SupportedRegion, RpdSubmission, ProgramTopology, ProgramContentUnit,
-  ProgramPlacementReview, ProgramMtoReview,
+  ProgramPlacementReview, ProgramMtoReview, PkFormulationFinding, ProfstandardOption,
 } from '../types'
 
 // Academic programs (учебные планы) — institution-admin feature.
@@ -361,9 +361,23 @@ export async function saveDisciplines(id: string, disciplines: ProgramDiscipline
   return res.data
 }
 
-export async function saveCompetencies(id: string, competencies: ProgramCompetency[]): Promise<ProgramDetail> {
-  const res = await client.put<ProgramDetail>(`/api/institution/programs/${id}/competencies`, { competencies })
+export async function saveCompetencies(
+  id: string, competencies: ProgramCompetency[]
+): Promise<ProgramDetail & { formulation_warnings: PkFormulationFinding[] }> {
+  const res = await client.put<ProgramDetail & { formulation_warnings: PkFormulationFinding[] }>(
+    `/api/institution/programs/${id}/competencies`, { competencies }
+  )
   return res.data
+}
+
+// ПК↔ОТФ picker (migration 115, методист feedback item 3) — the программе's
+// профстандарты (via the ФГОС registry) with each ОТФ flagged for whether
+// its «требования к образованию» matches this programme's level.
+export async function getProfstandardOptions(id: string): Promise<ProfstandardOption[]> {
+  const res = await client.get<{ profstandards: ProfstandardOption[] }>(
+    `/api/institution/programs/${id}/profstandard-options`
+  )
+  return res.data.profstandards
 }
 
 export async function analyzeProgram(id: string): Promise<ProgramAnalysis> {

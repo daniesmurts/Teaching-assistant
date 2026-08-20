@@ -52,4 +52,9 @@ export const replaceCompetenciesRules = [
   body('competencies.*.title').isString().trim().isLength({ min: 1, max: 600 }),
   body('competencies.*.code').optional({ nullable: true }).isString().trim().isLength({ max: 30 }),
   body('competencies.*.sort_order').optional().isInt({ min: 0 }),
+  body('competencies.*.profstandard_otf_id').optional({ nullable: true }).isUUID(),
+  body('competencies.*.indicators').optional().isArray({ max: 20 }).withMessage('Слишком много индикаторов'),
+  body('competencies.*.indicators.*.code').optional().isString().trim().isLength({ min: 1, max: 30 }),
+  body('competencies.*.indicators.*.title').optional().isString().trim().isLength({ min: 1, max: 600 }),
+  body('competencies.*.indicators.*.sort_order').optional().isInt({ min: 0 }),
 ]

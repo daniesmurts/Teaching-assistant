@@ -10,15 +10,17 @@ import {
 } from '../db/queries/programTopology'
 import { findPublishedFgosCompetencies } from '../db/queries/fgos'
 import { setCompetencyFgosLinks } from '../db/queries/programs'
+import { getOtfByIds } from '../db/queries/profstandards'
 import { inferFgosLevel, matchProgramCompetenciesToFgos } from './fgosMatch'
 import { extractContentUnits } from './programContentUnits'
+import { findCopiedPkFormulations, type PkCompetencyInput } from './pkFormulation'
 import { ValidationError } from '../errors/AppError'
 import { logger } from '../lib/logger'
 import type {
   ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramAnalysis,
   PrerequisiteEdge, SequencingResult, SequencingStructure, SequencingLayerNode,
   CompetencyProgressionRow, CompetencyTimelineCell, OutcomeDelivery, MappingConfidence, ContentConfidence,
-  CoverageLevel, RedundancyItem, RelatednessCluster, SemesterLoad, LoadCheck,
+  CoverageLevel, RedundancyItem, RelatednessCluster, SemesterLoad, LoadCheck, PkFormulationFinding,
 } from '../../../shared/types'
 
 // Program-level architecture analysis (учебные планы). Given an ordered,
@@ -119,6 +121,11 @@ export async function analyzeProgram(params: {
   // 4) Gaps & redundancy — derived from (2)+(3) + declared codes.
   const { orphans, missing } = deriveGaps(disciplines, progression)
 
+  // 5) ПК formulation copy-check (deterministic, methodist feedback item 3)
+  // — only for competencies with an ОТФ actually linked; nothing to compare
+  // against otherwise.
+  const pkFormulationFindings = await derivePkFormulationFindings(program.competencies)
+
   const score = overallScore(sequencing, progression)
 
   return {
@@ -137,7 +144,33 @@ export async function analyzeProgram(params: {
     content_confidence: deriveContentConfidence(disciplines, docTextByDiscipline),
     load_check:         deriveLoadCheck(load, disciplines, program.duration_semesters, program.reported_semester_totals),
     warnings:           warnings.length > 0 ? warnings : undefined,
+    pk_formulation_findings: pkFormulationFindings.length > 0 ? pkFormulationFindings : undefined,
   }
+}
+
+/** Resolves each ПК competency's linked ОТФ (if any) and runs the
+ *  deterministic copy-check. Exported so routes/programs.ts's competency-save
+ *  handler can run the same check inline without a second analysis pass. */
+export async function derivePkFormulationFindings(
+  competencies: ProgramCompetency[]
+): Promise<PkFormulationFinding[]> {
+  const withOtf = competencies.filter((c) => c.kind === 'competency' && c.profstandard_otf_id)
+  if (withOtf.length === 0) return []
+
+  const otfRows = await getOtfByIds(withOtf.map((c) => c.profstandard_otf_id as string))
+  const otfById = new Map(otfRows.map((o) => [o.id, o]))
+
+  const inputs: PkCompetencyInput[] = withOtf.map((c) => {
+    const otf = otfById.get(c.profstandard_otf_id as string)
+    return {
+      code:  c.code,
+      title: c.title,
+      indicators: (c.indicators ?? []).map((i) => ({ code: i.code, title: i.title })),
+      otf: otf ? { otf_code: otf.otf_code, name: otf.name } : null,
+    }
+  })
+
+  return findCopiedPkFormulations(inputs)
 }
 
 // Topology graph substrate (docs/topology-spec.md, Increment 0). Best-effort

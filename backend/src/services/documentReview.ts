@@ -233,24 +233,37 @@ export async function detectDeclaredCompetencyCodes(params: {
 // in `PRIORITY` is the order we consume the budget: content and assessment
 // sections first (that's what the indicator scorer needs verbatim quotes from),
 // then indicators/results, then competency declaration.
-export function selectRelevantSections(fullText: string, budget: number): string {
+// Default heading set — the §5-§8/§12 coverage check's own needs. Callers
+// with a different target section (e.g. services/assessmentLinkage.ts,
+// which needs §4/§8/§8.1/§9 instead) pass their own `headings`/`priority`;
+// the packing/proportional-trim logic below is shared regardless of which
+// sections are being hunted for.
+const DEFAULT_HEADINGS: { key: string; re: RegExp }[] = [
+  { key: 'lectures',    re: /^[\s\d.]*(?:содержание\s+(?:разделов|дисциплины)|тематический\s+план|лекц|разделы\s+дисциплины)/im },
+  { key: 'practicals',  re: /^[\s\d.]*(?:практич|семинарск)/im },
+  { key: 'labs',        re: /^[\s\d.]*лабораторн/im },
+  { key: 'srs',         re: /^[\s\d.]*(?:самостоятельн(?:ая|ой)\s+работ|срс)/im },
+  { key: 'assessment',  re: /^[\s\d.]*(?:фонд\s+оценочных\s+средств|фос|оценочные\s+материалы|формы\s+(?:и\s+)?методы\s+контроля|текущ\w*\s+контроль|промежуточн\w*\s+аттестац)/im },
+  { key: 'results',     re: /^[\s\d.]*(?:планируем\w+\s+результат|результаты\s+обучения)/im },
+  { key: 'competencies', re: /^[\s\d.]*(?:компетенции|индикаторы\s+достижени)/im },
+]
+const DEFAULT_PRIORITY = ['lectures', 'practicals', 'labs', 'srs', 'assessment', 'results', 'competencies']
+
+export function selectRelevantSections(
+  fullText: string,
+  budget: number,
+  headings: { key: string; re: RegExp }[] = DEFAULT_HEADINGS,
+  priority: string[] = DEFAULT_PRIORITY,
+): string {
   const text = fullText ?? ''
   if (text.length <= budget) return text
 
   // Section-heading regex → each captures its own start position. We match on
   // line-starts to avoid false hits inside prose. `sm` flags let ^ match per
   // line and `.` cross lines.
-  const HEADINGS: { key: string; re: RegExp }[] = [
-    { key: 'lectures',    re: /^[\s\d.]*(?:содержание\s+(?:разделов|дисциплины)|тематический\s+план|лекц|разделы\s+дисциплины)/im },
-    { key: 'practicals',  re: /^[\s\d.]*(?:практич|семинарск)/im },
-    { key: 'labs',        re: /^[\s\d.]*лабораторн/im },
-    { key: 'srs',         re: /^[\s\d.]*(?:самостоятельн(?:ая|ой)\s+работ|срс)/im },
-    { key: 'assessment',  re: /^[\s\d.]*(?:фонд\s+оценочных\s+средств|фос|оценочные\s+материалы|формы\s+(?:и\s+)?методы\s+контроля|текущ\w*\s+контроль|промежуточн\w*\s+аттестац)/im },
-    { key: 'results',     re: /^[\s\d.]*(?:планируем\w+\s+результат|результаты\s+обучения)/im },
-    { key: 'competencies', re: /^[\s\d.]*(?:компетенции|индикаторы\s+достижени)/im },
-  ]
+  const HEADINGS = headings
   // Priority = order sections are packed into the budget.
-  const PRIORITY = ['lectures', 'practicals', 'labs', 'srs', 'assessment', 'results', 'competencies']
+  const PRIORITY = priority
 
   // Locate each heading; skip those not present. Section end = start of the
   // NEXT heading (any category, further in the text).

@@ -527,6 +527,44 @@ export async function importFgosvoItem(item: { code: string; name: string; level
   return res.data
 }
 
+// ─── Профстандарт/ОТФ registry (migration 115) ─────────────────────────────
+
+import type { Profstandard, ProfstandardWithChildren, ProfstandardDraft } from '../types'
+
+export async function getProfstandards(
+  params: { page?: number; search?: string } = {}
+): Promise<{ standards: Profstandard[]; total: number }> {
+  const res = await client.get<{ standards: Profstandard[]; total: number }>('/api/admin/profstandards', { params })
+  return res.data
+}
+export async function getProfstandard(id: string): Promise<ProfstandardWithChildren> {
+  const res = await client.get<ProfstandardWithChildren>(`/api/admin/profstandards/${id}`)
+  return res.data
+}
+export async function extractProfstandardDraft(file: File): Promise<ProfstandardDraft> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await client.post<ProfstandardDraft>('/api/admin/profstandards/extract', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return res.data
+}
+export async function createProfstandardDraft(payload: ProfstandardDraft): Promise<Profstandard> {
+  const res = await client.post<Profstandard>('/api/admin/profstandards', payload)
+  return res.data
+}
+export async function publishProfstandard(id: string, payload: ProfstandardDraft): Promise<Profstandard> {
+  const res = await client.post<Profstandard>(`/api/admin/profstandards/${id}/publish`, payload)
+  return res.data
+}
+export async function deleteProfstandard(id: string): Promise<void> {
+  await client.delete(`/api/admin/profstandards/${id}`)
+}
+export async function importProfstandardByUrl(item: { code: string; name: string; url: string }): Promise<Profstandard> {
+  const res = await client.post<Profstandard>('/api/admin/profstandards/import-one', item)
+  return res.data
+}
+
 // ─── Capacity + unit economics (TODO.md Feature AL Phase 2) ───────────────────
 
 export interface TierDistributionRow {

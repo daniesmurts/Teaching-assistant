@@ -1,4 +1,4 @@
-import { normaliseText, tokenize } from '../lib/ruText'
+import { normaliseText, tokenize, tokenContainment } from '../lib/ruText'
 import type { OutcomeFormulationFinding, OutcomeKind } from '../../../shared/types'
 
 // «Знать/Уметь/Владеть» formulation check — raised by a методист reviewing a
@@ -59,20 +59,10 @@ export function contentTokens(s: string): string[] {
   return tokenize(words.slice(start).join(' '))
 }
 
-/**
- * How much of the SHORTER item's vocabulary the longer one already contains
- * (0–1). Containment rather than a symmetric measure (Jaccard/Dice) because
- * the observed defect is asymmetric: the ЗУВ item is the indicator with its
- * verb prefix chopped off, so it's a near-subset of a longer string, and a
- * symmetric score would be dragged down by the indicator's extra words.
- */
+/** ЗУВ-specific wrapper over ruText.ts's tokenContainment, comparing after
+ *  the leading verb frame is stripped from both sides. */
 export function containment(a: string, b: string): number {
-  const setA = new Set(contentTokens(a))
-  const setB = new Set(contentTokens(b))
-  if (setA.size === 0 || setB.size === 0) return 0
-  let shared = 0
-  for (const t of setA) if (setB.has(t)) shared++
-  return shared / Math.min(setA.size, setB.size)
+  return tokenContainment(contentTokens(a), contentTokens(b))
 }
 
 const OUTCOME_LABEL: Record<OutcomeKind, string> = {

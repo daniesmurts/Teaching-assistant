@@ -54,3 +54,22 @@ export function tokenize(s: string): string[] {
     .filter((t) => !STOPWORDS.has(t))
     .map(stem)
 }
+
+/**
+ * How much of the SHORTER token set the longer one already contains (0–1).
+ * Containment rather than a symmetric measure (Jaccard/Dice): the copy
+ * defects this powers are asymmetric — a short reformulation is a near-
+ * subset of a longer source phrase with its lead-in words chopped off, and
+ * a symmetric score would be dragged down by the source's extra words.
+ * Extracted from services/outcomeFormulation.ts once a second consumer
+ * appeared (services/pkFormulation.ts) — same reasoning as this file's own
+ * extraction above.
+ */
+export function tokenContainment(tokensA: string[], tokensB: string[]): number {
+  const setA = new Set(tokensA)
+  const setB = new Set(tokensB)
+  if (setA.size === 0 || setB.size === 0) return 0
+  let shared = 0
+  for (const t of setA) if (setB.has(t)) shared++
+  return shared / Math.min(setA.size, setB.size)
+}

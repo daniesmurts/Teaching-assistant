@@ -41,11 +41,12 @@ export interface FgosStructureRequirementRow {
 }
 
 export interface FgosProfstandardRefRow {
-  id:               string
-  fgos_standard_id: string
-  code:             string
-  name:             string
-  source_url:       string | null
+  id:                string
+  fgos_standard_id:  string
+  code:              string
+  name:              string
+  source_url:        string | null
+  profstandard_id:   string | null
 }
 
 export interface FgosStandardWithChildren extends FgosStandardRow {
@@ -195,9 +196,10 @@ export interface FgosStructureRequirementInput {
 }
 
 export interface FgosProfstandardRefInput {
-  code:        string
-  name:        string
-  source_url?: string | null
+  code:              string
+  name:              string
+  source_url?:       string | null
+  profstandard_id?:  string | null
 }
 
 export interface FgosStandardPayload {
@@ -315,9 +317,9 @@ async function insertChildren(
   }
   for (const p of payload.profstandardRefs) {
     await client.query(
-      `INSERT INTO fgos_profstandard_refs (fgos_standard_id, code, name, source_url)
-       VALUES ($1, $2, $3, $4)`,
-      [standardId, p.code, p.name, p.source_url ?? null]
+      `INSERT INTO fgos_profstandard_refs (fgos_standard_id, code, name, source_url, profstandard_id)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [standardId, p.code, p.name, p.source_url ?? null, p.profstandard_id ?? null]
     )
   }
 }

@@ -1345,12 +1345,30 @@ export interface SyllabusDraft {
 export type ProgramLevel = 'bachelor' | 'master' | 'specialist'
 export type CompetencyKind = 'goal' | 'competency'
 
+// A ПК indicator (ПК-1.1/.2/.3) — unlike УК/ОПК indicators (which come
+// verbatim from the ФГОС), ПК indicators are institution-authored, so they
+// exist only as data the ОП itself owns, not as a reference-registry row.
+export interface ProgramCompetencyIndicator {
+  id?:         string
+  code:        string
+  title:       string
+  sort_order:  number
+}
+
 export interface ProgramCompetency {
   id?:         string
   kind:        CompetencyKind
   code:        string | null      // 'УК-1' / 'ОПК-2' / 'ПК-3'; null for goals
   title:       string
   sort_order:  number
+  // Traceability for ПК only (migration 115, методист feedback item 3) —
+  // which ОТФ (обобщённая трудовая функция) inside which профстандарт this
+  // ПК was derived from. УК/ОПК use fgos_competency_id (migration 099)
+  // instead; the two links are deliberately separate columns/fields since
+  // the invariant they support is opposite (УК/ОПК SHOULD be verbatim
+  // federal text; ПК must NOT be verbatim ОТФ text).
+  profstandard_otf_id?:  string | null
+  indicators?:           ProgramCompetencyIndicator[]
 }
 
 export interface ProgramDiscipline {
@@ -1840,6 +1858,10 @@ export interface ProgramAnalysis {
   // these so a section that came back empty is understood as a transient
   // failure, not a real "no data".
   warnings?: string[]
+  // ПК formulation copy-check (methodist feedback item 3, migration 115).
+  // Optional (legacy caches predate it, and it's empty when no ПК in the
+  // programme has an ОТФ linked yet).
+  pk_formulation_findings?: PkFormulationFinding[]
 }
 
 // ─── Topology graph substrate (docs/topology-spec.md, Increment 0+) ────────────
@@ -2063,10 +2085,15 @@ export interface FgosStructureRequirement {
 }
 
 export interface FgosProfstandardRef {
-  id?:         string
-  code:        string
-  name:        string
-  source_url:  string | null
+  id?:              string
+  code:             string
+  name:             string
+  source_url:       string | null
+  // Migration 115 — links this bare reference to the real профстандарт
+  // registry once an admin has matched/published one. Nullable: a ref
+  // extracted from a ФГОС's appendix starts unlinked, same as before this
+  // column existed.
+  profstandard_id?: string | null
 }
 
 export interface FgosStandard {
@@ -2102,6 +2129,76 @@ export interface FgosDraft {
   competencies:            FgosCompetency[]
   structureRequirements:   FgosStructureRequirement[]
   profstandardRefs:        FgosProfstandardRef[]
+}
+
+// ─── Профстандарт/ОТФ registry (migration 115, методист feedback item 3) ──────
+// Mirrors the ФГОС registry above exactly: federal reference data (a
+// профстандарт is independent of any one ФГОС — many ФГОС can cite the same
+// one), admin-curated, draft until the review screen is confirmed (rule #3).
+// Consumed by the Конструктор's ПК↔ОТФ picker and services/pkFormulation.ts.
+
+export interface ProfstandardOtf {
+  id?:                     string
+  otf_code:                string          // 'A' / 'B' / 'C' …
+  name:                    string          // ОТФ formulation, verbatim from source
+  qualification_level:     string | null   // уровень квалификации, e.g. '6'
+  education_requirement:   string | null   // «Требования к образованию» cell
+  is_verbatim_verified:    boolean
+  sort_order:              number
+}
+
+export interface Profstandard {
+  id:           string
+  code:         string
+  name:         string
+  source_url:   string | null
+  status:       'draft' | 'published'
+  created_at:   string
+}
+
+export interface ProfstandardWithChildren extends Profstandard {
+  otf: ProfstandardOtf[]
+}
+
+export interface ProfstandardDraft {
+  standard: {
+    code: string | null
+    name: string | null
+  }
+  otf: ProfstandardOtf[]
+}
+
+// Options for the Конструктор's ПК↔ОТФ picker — one entry per профстандарт
+// the programme's ФГОС cites, each ОТФ flagged with whether its «требования
+// к образованию» matches the programme's own level (computed server-side
+// via services/fgosMatch.ts's inferFgosLevel, not re-derived on the client).
+export interface ProfstandardOtfOption extends ProfstandardOtf {
+  level_match: boolean
+}
+export interface ProfstandardOption {
+  id:   string
+  code: string
+  name: string
+  otf:  ProfstandardOtfOption[]
+}
+
+// ─── ПК formulation copy-check (methodist feedback item 3) ────────────────────
+// Same defect class as OutcomeFormulationFinding above, one level up: a ПК
+// competency or indicator that merely restates its linked ОТФ's wording
+// instead of conveying its meaning through the programme's own content.
+// Deterministic — see services/pkFormulation.ts's header for why.
+
+export interface PkFormulationFinding {
+  competency_code:  string | null
+  competency_title: string
+  // Which part of the competency was flagged — the ПК title itself, or one
+  // of its ПК-N.1 indicators.
+  indicator_code:   string | null
+  otf_code:         string
+  otf_name:         string
+  similarity:        number
+  detail:            string
+  recommendation:    string
 }
 
 // ─── Feature AE v1 — БРС engine (TODO.md "### AE") ────────────────────────────

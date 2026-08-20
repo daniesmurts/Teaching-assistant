@@ -112,15 +112,26 @@ interface CompetencyRow {
   code: string | null
   title: string
   sort_order: number
+  profstandard_otf_id: string | null
 }
 
-function toCompetency(r: CompetencyRow): ProgramCompetency {
+interface CompetencyIndicatorRow {
+  id: string
+  program_competency_id: string
+  code: string
+  title: string
+  sort_order: number
+}
+
+function toCompetency(r: CompetencyRow, indicators: CompetencyIndicatorRow[]): ProgramCompetency {
   return {
     id: r.id,
     kind: r.kind === 'goal' ? 'goal' : 'competency',
     code: r.code,
     title: r.title,
     sort_order: r.sort_order,
+    profstandard_otf_id: r.profstandard_otf_id,
+    indicators: indicators.map((i) => ({ id: i.id, code: i.code, title: i.title, sort_order: i.sort_order })),
   }
 }
 
@@ -196,17 +207,33 @@ export async function getProgramDetail(id: string, institutionId: string): Promi
       [id]
     ),
     pool.query<CompetencyRow>(
-      `SELECT id, kind, code, title, sort_order
+      `SELECT id, kind, code, title, sort_order, profstandard_otf_id
        FROM program_competencies WHERE program_id = $1
        ORDER BY sort_order`,
       [id]
     ),
   ])
 
+  const competencyIds = competencies.rows.map((c) => c.id)
+  const { rows: indicators } = competencyIds.length > 0
+    ? await pool.query<CompetencyIndicatorRow>(
+        `SELECT * FROM program_competency_indicators
+          WHERE program_competency_id = ANY($1)
+          ORDER BY sort_order`,
+        [competencyIds]
+      )
+    : { rows: [] as CompetencyIndicatorRow[] }
+  const indicatorsByCompetency = new Map<string, CompetencyIndicatorRow[]>()
+  for (const i of indicators) {
+    const list = indicatorsByCompetency.get(i.program_competency_id) ?? []
+    list.push(i)
+    indicatorsByCompetency.set(i.program_competency_id, list)
+  }
+
   return {
     ...program,
     disciplines: disciplines.rows.map(toDiscipline),
-    competencies: competencies.rows.map(toCompetency),
+    competencies: competencies.rows.map((c) => toCompetency(c, indicatorsByCompetency.get(c.id) ?? [])),
   }
 }
 
@@ -367,13 +394,25 @@ export async function replaceCompetencies(
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
+    // ON DELETE CASCADE on program_competency_indicators takes care of the
+    // indicator rows — no separate DELETE needed for them.
     await client.query('DELETE FROM program_competencies WHERE program_id = $1', [programId])
     for (const [i, c] of competencies.entries()) {
-      await client.query(
-        `INSERT INTO program_competencies (program_id, kind, code, title, sort_order)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [programId, c.kind === 'goal' ? 'goal' : 'competency', c.code ?? null, c.title, c.sort_order ?? i]
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO program_competencies (program_id, kind, code, title, sort_order, profstandard_otf_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id`,
+        [programId, c.kind === 'goal' ? 'goal' : 'competency', c.code ?? null, c.title, c.sort_order ?? i,
+         c.profstandard_otf_id ?? null]
       )
+      const competencyId = rows[0].id
+      for (const [j, ind] of (c.indicators ?? []).entries()) {
+        await client.query(
+          `INSERT INTO program_competency_indicators (program_competency_id, code, title, sort_order)
+           VALUES ($1, $2, $3, $4)`,
+          [competencyId, ind.code, ind.title, ind.sort_order ?? j]
+        )
+      }
     }
     await client.query('UPDATE programs SET updated_at = NOW() WHERE id = $1', [programId])
     await client.query('COMMIT')

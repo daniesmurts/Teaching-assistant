@@ -20,7 +20,7 @@ import { listSubmittedForPrograms, findSubmissionByDiscipline } from '../db/quer
 import { transitionSubmission } from '../services/rpdSubmissions'
 import { canEditProgram, canReadProgram } from '../services/programAccess'
 import { listAncestorsOfUnit } from '../db/queries/orgUnits'
-import { analyzeProgram, persistTopology, persistContentUnits } from '../services/programAnalysis'
+import { analyzeProgram, persistTopology, persistContentUnits, derivePkFormulationFindings } from '../services/programAnalysis'
 import { reviewDocumentCoverage, detectDeclaredCompetencyCodes } from '../services/documentReview'
 import { reviewPlacement } from '../services/placementReview'
 import { reviewMto } from '../services/mtoReview'
@@ -52,6 +52,7 @@ import { parseSvedenPage, selectProgramRow, matchDiscipline } from '../services/
 import { getLimits } from '../config/planLimits'
 import { logger } from '../lib/logger'
 import { getProfstandardRefsForDirection } from '../db/queries/fgos'
+import { getPublishedOtfForCodes } from '../db/queries/profstandards'
 import { inferFgosLevel } from '../services/fgosMatch'
 import { getLatestMarketEvidence, createMarketEvidence, updateMarketEvidenceText } from '../db/queries/programMarketEvidence'
 import { fetchVacancySnapshot, SUPPORTED_REGIONS } from '../services/labourMarket'
@@ -447,13 +448,23 @@ router.put('/:id/competencies', validate(replaceCompetenciesRules), asyncHandler
   assertEdit(req, program.org_unit_id)
 
   const competencies: ProgramCompetency[] = (req.body.competencies as ProgramCompetency[]).map((c, i) => ({
-    kind:       c.kind === 'goal' ? 'goal' : 'competency',
-    code:       c.code ?? null,
-    title:      c.title,
-    sort_order: c.sort_order ?? i,
+    kind:                 c.kind === 'goal' ? 'goal' : 'competency',
+    code:                 c.code ?? null,
+    title:                c.title,
+    sort_order:           c.sort_order ?? i,
+    profstandard_otf_id:  c.profstandard_otf_id ?? null,
+    indicators: (c.indicators ?? []).map((ind, j) => ({
+      code: ind.code, title: ind.title, sort_order: ind.sort_order ?? j,
+    })),
   }))
   await replaceCompetencies(program.id, competencies)
-  res.json(await getProgramDetail(program.id, institutionId(req)))
+  const detail = await getProgramDetail(program.id, institutionId(req))
+  // Inline formulation check (methodist feedback item 3) — cheap and
+  // deterministic (services/pkFormulation.ts), so it runs on every save
+  // instead of needing a second round-trip; the Конструктор shows any
+  // warning right under the offending ПК row.
+  const formulationWarnings = detail ? await derivePkFormulationFindings(detail.competencies) : []
+  res.json({ ...detail, formulation_warnings: formulationWarnings })
 }))
 
 // ── Analysis ────────────────────────────────────────────────────────────────────
@@ -522,6 +533,42 @@ router.get('/:id/analysis.pdf', asyncHandler(async (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${fname}"`)
   res.setHeader('Content-Length', pdf.length)
   res.end(pdf)
+}))
+
+// GET /:id/profstandard-options — Конструктор's ПК↔ОТФ picker (migration
+// 115, методист feedback item 3). Resolves the programme's own профстандарты
+// (via the ФГОС registry, same lookup market-evidence below already does)
+// and each one's published ОТФ list, flagging every ОТФ with whether its
+// «требования к образованию» matches this programme's own level — computed
+// server-side via fgosMatch.ts's inferFgosLevel (already relied on at line
+// ~558 below and tested for exactly this free-text parsing), never
+// re-derived client-side.
+router.get('/:id/profstandard-options', asyncHandler(async (req, res) => {
+  const detail = await loadReadable(req)
+  if (!detail.code) { res.json({ profstandards: [] }); return }
+  const fgosLevel = inferFgosLevel(detail)
+  if (!fgosLevel) { res.json({ profstandards: [] }); return }
+
+  const refs = await getProfstandardRefsForDirection(detail.code, fgosLevel)
+  const standards = await getPublishedOtfForCodes(refs.map((r) => r.code))
+
+  const profstandards = standards.map((s) => ({
+    id:   s.id,
+    code: s.code,
+    name: s.name,
+    otf: s.otf.map((o) => ({
+      id:                     o.id,
+      otf_code:               o.otf_code,
+      name:                   o.name,
+      qualification_level:    o.qualification_level,
+      education_requirement:  o.education_requirement,
+      is_verbatim_verified:   o.is_verbatim_verified,
+      sort_order:             o.sort_order,
+      level_match: inferFgosLevel({ level: null, education_level: o.education_requirement }) === fgosLevel,
+    })),
+  }))
+
+  res.json({ profstandards })
 }))
 
 // ── РОП Студия v0 — market evidence (TODO.md Feature Z, Phase 0) ───────────────

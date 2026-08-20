@@ -1,6 +1,7 @@
 import { chatJSON } from './deepseek'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { tokenize } from '../lib/ruText'
+import { selectRelevantSections } from './documentReview'
 import type {
   AssessmentLinkageResult, AssessmentLinkageFinding, LinkageSlot,
   ParsedAssessmentLinkage,
@@ -36,8 +37,33 @@ import type {
 // "checked and failed", and the UI must show that distinction, not collapse
 // it into a red mark.
 
-const MAX_TEXT_CHARS = 14000
+// A naive slice(0, N) from the start was the original approach here — wrong
+// for this check specifically, because ВСЕ four things it needs (§4's table,
+// §8 СРС, §8.1 КСР, §9 БРС) routinely sit in the back half of a real РПД:
+// found in production 2026-08-20 against a 14-page РПД whose §9 (page 11)
+// never made it inside a 14000-char window that started from page 1 — every
+// instrument came back "missing from п.9" not because the linkage was
+// broken, but because the model was never shown §9's text at all. Reuses
+// documentReview.ts's selectRelevantSections (heading-anchored, packs by
+// priority, proportional-trim) with THIS check's own heading set instead of
+// its default one, same fix documented in fgosExtractor.ts for the same
+// failure mode (a late-document appendix silently truncated away).
+const MAX_TEXT_CHARS = 40000
 const MAX_FOS_TEXT_CHARS = 40000   // ФОС files run long (question banks, rubrics) — search, don't summarise
+
+const LINKAGE_HEADINGS: { key: string; re: RegExp }[] = [
+  // §4 «Структура и содержание дисциплины» — same anchor documentReview.ts's
+  // default 'lectures' heading uses; renamed here since this check reads the
+  // table's оценочные средства column, not the lecture topics.
+  { key: 'structure', re: /^[\s\d.]*(?:содержание\s+(?:разделов|дисциплины)|тематический\s+план|разделы\s+дисциплины)/im },
+  { key: 'srs',        re: /^[\s\d.]*(?:самостоятельн(?:ая|ой)\s+работ|срс)/im },
+  { key: 'ksr',         re: /^[\s\d.]*(?:контрол[ья]\s+самостоятельной\s+работ|кср)/im },
+  { key: 'ratings',     re: /^[\s\d.]*(?:рейтинговой\s+систем|балльно-рейтингов|использование\s+рейтинговой)/im },
+]
+// §4 first — with no instrument list, the check produces nothing regardless
+// of what else is in budget. §9 next, since a truncated §9 is exactly the
+// failure mode this reuse was built to fix.
+const LINKAGE_PRIORITY = ['structure', 'ratings', 'srs', 'ksr']
 
 // «Экзамен»/«зачёт» are промежуточная аттестация, not текущий контроль. They
 // legitimately carry points in §9 but have no «заслушивание» in КСР, and
@@ -68,7 +94,7 @@ export async function parseAssessmentLinkage(
     'Отвечайте только валидным JSON на русском языке.'
 
   const user =
-    `## Текст РПД\n${sanitiseForPrompt(text.slice(0, MAX_TEXT_CHARS))}\n\n` +
+    `## Текст РПД\n${sanitiseForPrompt(selectRelevantSections(text, MAX_TEXT_CHARS, LINKAGE_HEADINGS, LINKAGE_PRIORITY))}\n\n` +
     `## Задача\nИзвлеките четыре списка.\n\n` +
     `1) "instruments" — ОЦЕНОЧНЫЕ СРЕДСТВА из таблицы раздела «Структура и содержание дисциплины» ` +
     `(п.4), последний столбец «Оценочные средства для проведения текущей и промежуточной аттестации». ` +
@@ -112,17 +138,34 @@ export async function parseAssessmentLinkage(
   }
 }
 
+// Splits an instrument name on internal synonym separators — «Доклад,
+// сообщение» names ONE assessment genre with two interchangeable words for
+// it (a common РПД convention), not two co-required concepts, and «Деловая
+// и/или ролевая игра» is explicit OR by its own wording. Found in production
+// 2026-08-20: requiring every token of «Доклад, сообщение» together made
+// «Подготовка доклада» fail to match (it has «доклад» but not «сообщение»)
+// even though it's unambiguously preparation for that instrument.
+const SYNONYM_SEPARATOR = /\s*,\s*|\s+и\s*\/\s*или\s+|\s+или\s+|\s*\/\s*/i
+
+function nameAlternatives(name: string): string[] {
+  const parts = name.split(SYNONYM_SEPARATOR).map((s) => s.trim()).filter(Boolean)
+  return parts.length > 0 ? parts : [name]
+}
+
 /**
  * Is this instrument referenced by that phrase? True when every content stem
- * of the instrument name appears in the phrase — «Доклад» matches «Подготовка
- * доклада», and «Контрольная работа» matches «Проверка контрольных работ»,
- * while «Доклад» does not match «Лабораторная работа». Exported for tests.
+ * of ANY ONE of the instrument's name alternatives appears in the phrase —
+ * «Доклад» matches «Подготовка доклада», «Доклад, сообщение» also matches it
+ * (via its «Доклад» alternative), and «Контрольная работа» matches «Проверка
+ * контрольных работ», while «Доклад» does not match «Лабораторная работа».
+ * Exported for tests.
  */
 export function mentions(phrase: string, instrument: string): boolean {
-  const needle = tokenize(instrument)
-  if (needle.length === 0) return false
   const hay = new Set(tokenize(phrase))
-  return needle.every((t) => hay.has(t))
+  return nameAlternatives(instrument).some((alt) => {
+    const needle = tokenize(alt)
+    return needle.length > 0 && needle.every((t) => hay.has(t))
+  })
 }
 
 /**

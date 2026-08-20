@@ -66,6 +66,7 @@ import AdminDeployments from './pages/admin/AdminDeployments'
 import AdminAudit from './pages/admin/AdminAudit'
 import AdminEvals from './pages/admin/AdminEvals'
 import AdminFgos from './pages/admin/AdminFgos'
+import AdminProfstandards from './pages/admin/AdminProfstandards'
 import InstitutionLayout from './pages/institution/InstitutionLayout'
 import InstitutionOverview from './pages/institution/InstitutionOverview'
 import InstitutionUsage from './pages/institution/InstitutionUsage'
@@ -354,6 +355,7 @@ export default function App() {
             <Route path="audit"     element={<AdminAudit />} />
             <Route path="evals"     element={<AdminEvals />} />
             <Route path="fgos"      element={<AdminFgos />} />
+            <Route path="profstandards" element={<AdminProfstandards />} />
           </Route>
 
           {/* Institution admin — institution_admin or platform_admin */}

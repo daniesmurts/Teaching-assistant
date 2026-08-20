@@ -1,6 +1,9 @@
-import { describe, it, expect } from 'vitest'
-import { checkAssessmentLinkage, mentions } from './assessmentLinkage'
+import { describe, it, expect, vi } from 'vitest'
+import { checkAssessmentLinkage, mentions, parseAssessmentLinkage } from './assessmentLinkage'
 import type { ParsedAssessmentLinkage } from '../../../shared/types'
+
+const { chatJSONMock } = vi.hoisted(() => ({ chatJSONMock: vi.fn() }))
+vi.mock('./deepseek', () => ({ chatJSON: chatJSONMock }))
 
 // The worked example is the методист's own, verbatim from her report
 // (2026-08-20): «если в п.4 есть оценочное средство "ДОКЛАД", то в СРС должно
@@ -157,5 +160,51 @@ describe('mentions', () => {
   it('does not match a different instrument that shares a generic word', () => {
     expect(mentions('Лабораторная работа', 'Контрольная работа')).toBe(false)
     expect(mentions('Подготовка доклада', 'Реферат')).toBe(false)
+  })
+
+  // Found in production 2026-08-20: a real РПД's «Доклад, сообщение» instrument
+  // (one genre, two interchangeable words for it — standard РПД convention)
+  // was flagged missing from СРС/КСР even though «Подготовка доклада» and
+  // «Заслушивание доклада» were right there, because the old all-tokens
+  // matching required BOTH «доклад» and «сообщение» together in one phrase.
+  it('matches a comma-joined synonym instrument via either alternative', () => {
+    expect(mentions('Подготовка доклада', 'Доклад, сообщение')).toBe(true)
+    expect(mentions('Заслушивание доклада', 'Доклад, сообщение')).toBe(true)
+    expect(mentions('Проверка сообщения на занятии', 'Доклад, сообщение')).toBe(true)
+    expect(mentions('Лабораторная работа', 'Доклад, сообщение')).toBe(false)
+  })
+
+  it('matches an explicit «X и/или Y» instrument via either branch', () => {
+    expect(mentions('Подготовка к проекту', 'Доклад и/или Проект')).toBe(true)
+    expect(mentions('Подготовка доклада', 'Доклад и/или Проект')).toBe(true)
+    expect(mentions('Подготовка к тестированию', 'Доклад и/или Проект')).toBe(false)
+  })
+})
+
+describe('parseAssessmentLinkage — §9 must survive truncation on a real-length РПД', () => {
+  // Found in production 2026-08-20: a naive slice(0, 14000) from the start of
+  // the document cut off §9 (page 11 of a 14-page РПД), so every instrument
+  // came back "missing from п.9" — not a matching bug, §9's text was simply
+  // never shown to the model. Reproduces the shape: §4's table near the top,
+  // ~20000 chars of unrelated content sections in between, §9 near the end —
+  // well past the old 14000-char boundary.
+  it('includes §9 text in the prompt even when it sits past the old 14000-char cutoff', async () => {
+    chatJSONMock.mockResolvedValueOnce({ instruments: [], srs_forms: [], ksr_forms: [], brs_items: [] })
+
+    const filler = 'Лекционный материал по теме. '.repeat(1000)   // ~30000 chars
+    const text = [
+      '4. Структура и содержание дисциплины',
+      'Раздел 1 | Доклад',
+      filler,
+      '9. Использование рейтинговой системы оценки знаний',
+      'Доклад, сообщение | 3 | 18 | 30',
+    ].join('\n')
+    expect(text.length).toBeGreaterThan(14000)
+
+    await parseAssessmentLinkage('t1', text)
+
+    const userMessage = chatJSONMock.mock.calls[0][0][1].content as string
+    expect(userMessage).toContain('Использование рейтинговой системы')
+    expect(userMessage).toContain('Доклад, сообщение')
   })
 })

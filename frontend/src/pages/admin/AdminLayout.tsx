@@ -22,6 +22,7 @@ const NAV: Array<{ to: string; label: string; icon: IconName; end: boolean }> = 
   { to: '/admin/audit',    label: 'Журнал действий',     icon: 'clock',      end: false },
   { to: '/admin/evals',    label: 'Эксперименты',        icon: 'sparkle',    end: false },
   { to: '/admin/fgos',     label: 'ФГОС',                icon: 'file-check', end: false },
+  { to: '/admin/profstandards', label: 'Профстандарты',  icon: 'file-check', end: false },
 ]
 
 export default function AdminLayout() {

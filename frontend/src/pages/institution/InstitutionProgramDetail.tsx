@@ -22,6 +22,7 @@ import {
   diffDiscipline, getAssignableTeachers, setDisciplineResponsible, type AssignableTeacher,
   reviewDisciplinePlacement, getPlacementReviews,
   reviewDisciplineMto, getMtoReviews,
+  getProfstandardOptions,
 } from '../../api/programs'
 import { getCourses } from '../../api/courses'
 import { getPickableProgramUnits } from '../../api/programs'
@@ -37,9 +38,10 @@ import { useAuthStore } from '../../store/authStore'
 import { EXAMPLE_PROGRAM } from '../../lib/programExample'
 import { useUIStore } from '../../store/uiStore'
 import type {
-  ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramAnalysis,
+  ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramCompetencyIndicator, ProgramAnalysis,
   CompetencyProgressionRow, CoverageLevel, PrerequisiteEdge,
   ProgramTopology, ProgramPrerequisite,
+  PkFormulationFinding, ProfstandardOption,
 } from '../../types'
 
 type EditDiscipline = ProgramDiscipline & { _k: string }
@@ -69,6 +71,10 @@ export default function InstitutionProgramDetail() {
   const [competencies, setCompetencies] = useState<EditCompetency[]>([])
   const [dirty, setDirty] = useState(false)
   const [analysis, setAnalysis] = useState<ProgramAnalysis | null>(null)
+  // ПК↔ОТФ formulation warnings (migration 115, методист feedback item 3) —
+  // returned inline by the last saveCompetencies call, shown under the
+  // offending ПК row rather than requiring a separate check to surface them.
+  const [formulationWarnings, setFormulationWarnings] = useState<PkFormulationFinding[]>([])
 
   const { data: program } = useQuery({ queryKey: ['program', id], queryFn: () => getProgram(id) })
   const { data: courses = [] } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
@@ -98,6 +104,13 @@ export default function InstitutionProgramDetail() {
     queryKey: ['program-mto-reviews', id],
     queryFn:  () => getMtoReviews(id),
     enabled:  tab === 'documents',
+  })
+  // ПК↔ОТФ picker options (migration 115) — only needed on the Конструктор
+  // tab, same lazy-load rule as topology/placementReviews above.
+  const { data: profstandardOptions = [] } = useQuery({
+    queryKey: ['program-profstandard-options', id],
+    queryFn:  () => getProfstandardOptions(id),
+    enabled:  tab === 'builder',
   })
 
   // Read-only mode when the server says this caller can't edit this program.
@@ -163,11 +176,13 @@ export default function InstitutionProgramDetail() {
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      await saveCompetencies(id, competencies.map(stripC))
+      const result = await saveCompetencies(id, competencies.map(stripC))
       await saveDisciplines(id, disciplines.map(stripD))
+      return result
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       setDirty(false)
+      setFormulationWarnings(result.formulation_warnings)
       qc.invalidateQueries({ queryKey: ['program', id] })
       addToast('Учебный план сохранён', 'success')
     },
@@ -176,7 +191,8 @@ export default function InstitutionProgramDetail() {
   const analyzeMut = useMutation({
     mutationFn: async () => {
       // Always persist the current edits before analysing.
-      await saveCompetencies(id, competencies.map(stripC))
+      const result = await saveCompetencies(id, competencies.map(stripC))
+      setFormulationWarnings(result.formulation_warnings)
       await saveDisciplines(id, disciplines.map(stripD))
       setDirty(false)
       return analyzeProgram(id)
@@ -345,6 +361,8 @@ export default function InstitutionProgramDetail() {
               addCompetency={addCompetency}
               updateCompetency={updateCompetency}
               removeCompetency={removeCompetency}
+              profstandardOptions={profstandardOptions}
+              formulationWarnings={formulationWarnings}
               onDelete={() => { if (confirm('Удалить эту программу?')) deleteMut.mutate() }}
               canDelete={canEdit}
             />
@@ -467,6 +485,8 @@ interface BuilderProps {
   addCompetency: () => void
   updateCompetency: (k: string, patch: Partial<ProgramCompetency>) => void
   removeCompetency: (k: string) => void
+  profstandardOptions: ProfstandardOption[]
+  formulationWarnings: PkFormulationFinding[]
   onDelete: () => void
   canDelete: boolean
 }
@@ -496,24 +516,14 @@ function Builder(p: BuilderProps) {
             <p className="px-2 py-3 text-xs font-sans text-ink-tertiary">Добавьте компетенции ФГОС (УК/ОПК/ПК) и цели, которые план должен формировать.</p>
           )}
           {p.competencies.map((c) => (
-            <div key={c._k} className="flex items-center gap-2">
-              <div className="w-32 flex-shrink-0">
-                <Select
-                  value={c.kind}
-                  onChange={(v) => p.updateCompetency(c._k, { kind: v as 'goal' | 'competency', code: v === 'goal' ? null : (c.code ?? '') })}
-                  options={[{ value: 'competency', label: 'Компетенция' }, { value: 'goal', label: 'Цель' }]}
-                />
-              </div>
-              {c.kind === 'competency' && (
-                <input value={c.code ?? ''} onChange={(e) => p.updateCompetency(c._k, { code: e.target.value })}
-                  placeholder="ОПК-1"
-                  className="w-24 flex-shrink-0 text-sm font-mono bg-surface border border-border rounded-md px-2 py-2 focus:border-border-strong outline-none" />
-              )}
-              <input value={c.title} onChange={(e) => p.updateCompetency(c._k, { title: e.target.value })}
-                placeholder="Формулировка компетенции или цели"
-                className="flex-1 text-sm font-sans bg-surface border border-border rounded-md px-3 py-2 focus:border-border-strong outline-none" />
-              <button onClick={() => p.removeCompetency(c._k)} className="text-ink-tertiary hover:text-danger px-1.5 flex-shrink-0">×</button>
-            </div>
+            <CompetencyRow
+              key={c._k}
+              c={c}
+              onUpdate={(patch) => p.updateCompetency(c._k, patch)}
+              onRemove={() => p.removeCompetency(c._k)}
+              profstandardOptions={p.profstandardOptions}
+              warnings={p.formulationWarnings.filter((w) => w.competency_code === c.code)}
+            />
           ))}
         </div>
       </section>
@@ -552,6 +562,171 @@ function Builder(p: BuilderProps) {
 
       {p.canDelete && (
         <button onClick={p.onDelete} className="text-xs font-sans text-danger hover:underline">Удалить программу</button>
+      )}
+    </div>
+  )
+}
+
+// A ПК code (case-insensitive) gets the ОТФ-derivation sub-panel below;
+// УК/ОПК don't — they come verbatim from the ФГОС (fgos_competency_id,
+// migration 099) and being identical to federal text is correct for them,
+// the opposite invariant from what this panel checks.
+function isPkCode(code: string | null): boolean {
+  return !!code && code.trim().toUpperCase().startsWith('ПК')
+}
+
+function CompetencyRow({ c, onUpdate, onRemove, profstandardOptions, warnings }: {
+  c:                    EditCompetency
+  onUpdate:             (patch: Partial<ProgramCompetency>) => void
+  onRemove:             () => void
+  profstandardOptions:  ProfstandardOption[]
+  warnings:             PkFormulationFinding[]
+}) {
+  const [expanded, setExpanded] = useState(false)
+  // Which профстандарт is being browsed in the picker — independent of the
+  // persisted profstandard_otf_id until an ОТФ is actually chosen, so
+  // switching the first dropdown can filter the second before committing to
+  // anything.
+  const [pickedPsId, setPickedPsId] = useState('')
+  const isPk = c.kind === 'competency' && isPkCode(c.code)
+
+  const selectedOtf = profstandardOptions
+    .flatMap((ps) => ps.otf.map((o) => ({ ps, o })))
+    .find(({ o }) => o.id === c.profstandard_otf_id)
+  const activePsId = pickedPsId || selectedOtf?.ps.id || ''
+  const otfOptions = profstandardOptions.find((ps) => ps.id === activePsId)?.otf ?? []
+
+  function updateIndicator(i: number, patch: Partial<ProgramCompetencyIndicator>) {
+    onUpdate({ indicators: (c.indicators ?? []).map((ind, idx) => idx === i ? { ...ind, ...patch } : ind) })
+  }
+  function removeIndicator(i: number) {
+    onUpdate({ indicators: (c.indicators ?? []).filter((_, idx) => idx !== i) })
+  }
+  function addIndicator() {
+    const n = (c.indicators ?? []).length + 1
+    onUpdate({ indicators: [...(c.indicators ?? []), { code: `${c.code ?? 'ПК'}.${n}`, title: '', sort_order: n - 1 }] })
+  }
+
+  return (
+    <div className="rounded-md border border-border-mid overflow-hidden">
+      <div className="flex items-center gap-2 p-1.5">
+        <div className="w-32 flex-shrink-0">
+          <Select
+            value={c.kind}
+            onChange={(v) => onUpdate({ kind: v as 'goal' | 'competency', code: v === 'goal' ? null : (c.code ?? '') })}
+            options={[{ value: 'competency', label: 'Компетенция' }, { value: 'goal', label: 'Цель' }]}
+          />
+        </div>
+        {c.kind === 'competency' && (
+          <input value={c.code ?? ''} onChange={(e) => onUpdate({ code: e.target.value })}
+            placeholder="ОПК-1"
+            className="w-24 flex-shrink-0 text-sm font-mono bg-surface border border-border rounded-md px-2 py-2 focus:border-border-strong outline-none" />
+        )}
+        <input value={c.title} onChange={(e) => onUpdate({ title: e.target.value })}
+          placeholder="Формулировка компетенции или цели"
+          className="flex-1 text-sm font-sans bg-surface border border-border rounded-md px-3 py-2 focus:border-border-strong outline-none" />
+        {isPk && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            title="Связать с профстандартом/ОТФ и индикаторами"
+            className={`flex-shrink-0 text-xs font-sans px-2 py-1.5 rounded-md border transition-colors ${
+              c.profstandard_otf_id
+                ? 'border-success/40 text-success bg-success-bg'
+                : warnings.length > 0
+                  ? 'border-warning/40 text-warning bg-warning-bg'
+                  : 'border-border-mid text-ink-secondary hover:border-amber/60 hover:text-amber'
+            }`}
+          >
+            {c.profstandard_otf_id ? 'ОТФ связана' : 'Связать с ОТФ'}
+          </button>
+        )}
+        <button onClick={onRemove} className="text-ink-tertiary hover:text-danger px-1.5 flex-shrink-0">×</button>
+      </div>
+
+      {isPk && expanded && (
+        <div className="border-t border-border-mid bg-surface-warm p-3 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <select
+              value={activePsId}
+              onChange={(e) => { setPickedPsId(e.target.value); onUpdate({ profstandard_otf_id: null }) }}
+              className="text-sm font-sans bg-surface border border-border rounded-md px-2 py-1.5 outline-none focus:border-border-strong"
+            >
+              <option value="">— профстандарт —</option>
+              {profstandardOptions.map((ps) => (
+                <option key={ps.id} value={ps.id}>{ps.code} {ps.name}</option>
+              ))}
+            </select>
+            <select
+              value={c.profstandard_otf_id ?? ''}
+              onChange={(e) => onUpdate({ profstandard_otf_id: e.target.value || null })}
+              disabled={!activePsId}
+              className="text-sm font-sans bg-surface border border-border rounded-md px-2 py-1.5 outline-none focus:border-border-strong disabled:opacity-50"
+            >
+              <option value="">— ОТФ —</option>
+              {otfOptions.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.otf_code}{o.level_match ? '' : ' ⚠'} — {o.name.slice(0, 60)}{o.name.length > 60 ? '…' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {profstandardOptions.length === 0 && (
+            <p className="text-xs font-sans text-ink-tertiary">
+              Для направления этой программы в реестре ФГОС не найдено ни одного опубликованного профстандарта с ОТФ — сначала добавьте их в /admin/profstandards.
+            </p>
+          )}
+
+          {selectedOtf && (
+            <div className="bg-surface border border-border rounded-md px-3 py-2">
+              <p className="text-xs font-sans text-ink leading-relaxed">
+                <span className="font-medium">ОТФ {selectedOtf.o.otf_code}:</span> {selectedOtf.o.name}
+              </p>
+              {selectedOtf.o.education_requirement && (
+                <p className="text-[11px] font-sans text-ink-tertiary mt-1">
+                  Требования к образованию: {selectedOtf.o.education_requirement}
+                </p>
+              )}
+              {!selectedOtf.o.level_match && (
+                <p className="text-[11px] font-sans text-warning mt-1.5">
+                  ⚠ Уровень этой ОТФ не совпадает с уровнем программы — проверьте, тот ли уровень квалификации выбран.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-sans font-semibold text-ink-tertiary uppercase tracking-wider">Индикаторы</span>
+              <button onClick={addIndicator} className="text-xs font-sans text-amber hover:underline">+ добавить</button>
+            </div>
+            <div className="space-y-1">
+              {(c.indicators ?? []).map((ind, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input value={ind.code} onChange={(e) => updateIndicator(i, { code: e.target.value })}
+                    placeholder={`${c.code ?? 'ПК'}.1`}
+                    className="w-24 flex-shrink-0 text-xs font-mono bg-surface border border-border rounded-md px-2 py-1.5 focus:border-border-strong outline-none" />
+                  <input value={ind.title} onChange={(e) => updateIndicator(i, { title: e.target.value })}
+                    placeholder="Формулировка индикатора"
+                    className="flex-1 text-xs font-sans bg-surface border border-border rounded-md px-2 py-1.5 focus:border-border-strong outline-none" />
+                  <button onClick={() => removeIndicator(i)} className="text-ink-tertiary hover:text-danger px-1 flex-shrink-0">×</button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {warnings.length > 0 && (
+            <div className="space-y-1.5">
+              {warnings.map((w, i) => (
+                <div key={i} className="bg-warning-bg border border-warning/30 rounded-md px-3 py-2 text-xs font-sans text-ink leading-relaxed">
+                  <p>{w.detail}</p>
+                  <p className="text-ink-secondary mt-1">{w.recommendation}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
