@@ -1830,7 +1830,7 @@ capital efficiency ("we can absorb 5× users on the current VM").
   new `pages/admin/AdminCapacity.tsx`, `config/planLimits.ts`,
   `docs/scaling.md` (becomes the doc the page renders, not a parallel copy).
 
-### AM. Кабинет методиста — one place for a методист to run every РПД/ОП check · Effort: Phase 0 M, 🟢 SHIPPED (2026-08-19) · Phase 1 M, 🟢 SHIPPED (2026-08-19) · Phase 2 M, 🟢 SHIPPED (2026-08-20) · Phase 3 M
+### AM. Кабинет методиста — one place for a методист to run every РПД/ОП check · Effort: Phase 0 M, 🟢 SHIPPED (2026-08-19) · Phase 1 M, 🟢 SHIPPED (2026-08-19) · Phase 2 M, 🟢 SHIPPED (2026-08-20) · Phase 3 M, 🟢 SHIPPED (2026-08-20) · 🏁 ALL PHASES SHIPPED
 
 Prompted by user testing (2026-08-19) with a real методист: the role's grants
 were correct, but every check they needed (РПД competency coverage, «Место
@@ -1998,14 +1998,91 @@ studio-jumping; a new page on top of the same anchor would just relocate it.
   analysis + overlap + per-discipline coverage roll-up), ad-hoc file-upload
   target, exports via the existing `services/programReportPdf.ts` /
   `services/rpdReportXlsx.ts`.
-- **Touches (all shipped through Phase 2):** `services/methodist/target.ts`,
+  🟢 **Очередь tab shipped (2026-08-20).** Now the default landing tab.
+  Reuses `services/umcDashboard.ts`'s aggregation (Feature V) wholesale — new
+  `GET /api/methodist/queue` route
+  ([routes/methodist.ts](backend/src/routes/methodist.ts)) calls the exact
+  same `getUmcDashboard()` the Готовность УМК page calls, just gated
+  differently: `requireDomainOnUnitTypes('curriculum', 'view',
+  METHODIST_UNIT_TYPES)` instead of `requireDomain('umu', 'view')`.
+  **Deliberately not a widened gate on the existing `/institution/umc-dashboard`
+  route** — docs/ACCESS-MATRIX.md documents "Готовность УМК строго УМУ + РУМЦ"
+  as a real, incident-driven exclusion (a plain РОП reaching institution-wide
+  stats was the original bug); this is a separate screen for a different
+  audience (adds МУМЦ) reading the same underlying signals, not a change to
+  that invariant. Frontend: new `QueueTab` in
+  `InstitutionMethodist.tsx` filters the full readiness matrix down to only
+  "needs attention" rows (`queueUrgency`: no РПД → not yet reviewed →
+  reviewed with <50% coverage, in that priority order) instead of
+  reproducing Готовность УМК's exhaustive matrix — triage, not a duplicate
+  dashboard. Clicking a row jumps straight into «Проверка дисциплины» with
+  that programme+discipline preselected (`disciplineId` state lifted from
+  `DisciplineChecksTab` to the page root to make the cross-tab jump
+  possible). 5 new frontend unit tests (`InstitutionMethodist.test.ts`) pin
+  `queueUrgency`'s classification, including the null-coverage-counts-as-low
+  edge case. Verified: both typechecks clean, 807 backend + 46 frontend
+  tests pass, page loads without a console error (after clearing a stale
+  Vite dep cache unrelated to this change — a dev-server artifact from
+  repeated restarts this session, confirmed by the same crash occurring on
+  the unrelated `/` route before the cache clear).
+  🟢 **«Проверка ОП» shipped (2026-08-20).** New tab reuses
+  `services/programAnalysis.ts` wholesale via the exact same
+  `analyzeProgram`/`getAnalysis`/`downloadAnalysisPdf` endpoints the
+  programme detail page's Report tab already calls — nothing new
+  server-side, satisfying the Phase 3 "exports via the existing
+  `services/programReportPdf.ts`" clause for free. Cached analysis loads on
+  tab open (`getAnalysis`); a button re-runs it (`analyzeProgram`, ~2–3 min,
+  synchronous like `analyzeProgramOverlap` — not pg-boss, matching how the
+  programme page already runs it).
+  New [components/curriculum/ProgramAnalysisSummary.tsx](frontend/src/components/curriculum/ProgramAnalysisSummary.tsx)
+  extracts the small reusable atoms out of
+  [InstitutionProgramDetail.tsx](frontend/src/pages/institution/InstitutionProgramDetail.tsx)'s
+  `Report` (`scoreColor`, `Stat`, `SectionLabel`, `OutcomeDeliveryCard`,
+  `GapColumn`, `EdgeCard` — all now imported by both pages, not duplicated)
+  plus a NEW `ProgramAnalysisSummary` composite — deliberately **not** a
+  byte-identical port of `Report`. It keeps score/verdict/warnings/outcome-
+  delivery/sequencing-inversions/gaps/load (exactly what a методист is
+  checking for) and drops the competency-progression heatmap table and the
+  dependency-layer pathway graph — both wide, editing-adjacent
+  visualisations that don't fit a ~700px results column and belong more to
+  the РОП's authoring workspace (`/programs/:id`) than a методист's
+  read-only check. `InstitutionProgramDetail.tsx`'s own `Report`/`TopologyTab`
+  untouched in content, only rewired to import the shared atoms — 2305 →
+  2203 lines, zero behaviour change. Verified: both typechecks clean, 807
+  backend + 46 frontend tests pass, `/institution/methodist` and `/programs`
+  both load without a console error.
+  🟢 **Ad-hoc file target shipped (2026-08-20) — Phase 3 complete.** New
+  «Отдельный файл» tab + `POST /api/methodist/ad-hoc-review`
+  ([routes/methodist.ts](backend/src/routes/methodist.ts)): the §5–§8
+  evidence-citation check for a РПД that isn't attached to any programme at
+  all (arrived by email, still being drafted) — the one target that has no
+  `getProgramAccessScope` to check, gated purely on `methodist_access`
+  (`requireDomainOnUnitTypes('curriculum', 'view', METHODIST_UNIT_TYPES)`).
+  Accepts either an uploaded file (same MIME allowlist/magic-byte
+  verification as every other upload path — `uploadConfig` +
+  `verifyFileContent`) or pasted text; calls `services/documentExtractor.ts`'s
+  `extractText` for the file case, then `reviewSyllabus` directly with no
+  competencies/goals — the parser extracts them from the document's own
+  declared sections, same as the raw-text path `routes/curriculum.ts`'s
+  syllabus-review already supports. **Nothing persisted anywhere** — no
+  run row either, since a single check with no programme/discipline target
+  has nothing worth polling for; the result lives only in the tab's client
+  state, same as every other in-flight check here. Frontend:
+  `reviewAdHocSyllabus` (`api/methodist.ts`, `FormData` upload, mirrors
+  `api/mySyllabi.ts`'s `submitSyllabusFile`), a file/text mode toggle, and
+  the same `SyllabusReviewReport` every other syllabus check in this app
+  renders through. Verified: both typechecks clean, 807 backend + 46
+  frontend tests pass, page loads without a console error.
+- **Touches (Phase 3 complete — all slices shipped):**
+  `services/methodist/target.ts`,
   `services/methodist/checks.ts`, `services/methodist/runWorker.ts`,
   `routes/methodist.ts`, `validation/methodistValidation.ts`,
   `db/queries/methodistRuns.ts`, migration 114 (`methodist_runs` table),
   `pages/institution/InstitutionMethodist.tsx`, `api/methodist.ts`,
   `components/curriculum/SyllabusReviewReport.tsx` / `CheckPanels.tsx` /
-  `OverlapReport.tsx` (renderer extraction), `docs/ACCESS-MATRIX.md`
-  (Table B + §4, МУМЦ resolution).
+  `OverlapReport.tsx` / `ProgramAnalysisSummary.tsx` (renderer extraction),
+  `pages/institution/InstitutionProgramDetail.tsx` (rewired, not rewritten),
+  `docs/ACCESS-MATRIX.md` (Table B + §4, МУМЦ resolution).
 - **Not doing:** no new domain — `methodist_access` (§ above) is a
   unit-type-narrowed derived flag on the existing `curriculum` domain, same
   shape as `criteria_access`/`org_overview_access`, not a fifth domain. No
@@ -2062,7 +2139,4 @@ Keeping these here so they don't get re-proposed.
 
 ## In progress
 
-- **AM. Кабинет методиста** — Phases 0–2 shipped (shell, МУМЦ access gate,
-  4-check «Проверка дисциплины» tab now running async via pg-boss, overlap
-  tab). Next: Phase 3 (cross-programme triage queue, «Проверка ОП», ad-hoc
-  upload target). See full entry above for phasing.
+*(empty — pick from above)*

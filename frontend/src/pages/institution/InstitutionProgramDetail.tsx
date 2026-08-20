@@ -13,6 +13,9 @@ import {
   PlacementReviewPanel, MtoReviewPanel, CoverageItemRow, CoverageChip, countByStatus,
 } from '../../components/curriculum/CheckPanels'
 import {
+  scoreColor, Stat, SectionLabel, OutcomeDeliveryCard, GapColumn, EdgeCard,
+} from '../../components/curriculum/ProgramAnalysisSummary'
+import {
   getProgram, getAnalysis, getProgramTopology, saveDisciplines, saveCompetencies, analyzeProgram, deleteProgram,
   downloadAnalysisPdf, updateProgram, uploadProgramDocument, deleteProgramDocument,
   downloadProgramDocument, reviewDiscipline, getDisciplineReviews, openDisciplineInStudio,
@@ -633,12 +636,6 @@ const STATUS_META: Record<CompetencyProgressionRow['status'], { label: string; b
   uncovered: { label: 'Не покрыто',      badge: 'bg-danger-bg text-danger' },
 }
 
-function scoreColor(s: number): string {
-  if (s >= 75) return 'var(--color-success)'
-  if (s >= 50) return 'var(--color-warning)'
-  return 'var(--color-danger)'
-}
-
 const DownloadIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1007,47 +1004,6 @@ function ProgressionRow({ row, duration }: { row: CompetencyProgressionRow; dura
 // Outcome-delivery headline — does the whole plan build up the graduate
 // profile? Rolls up the per-competency progression into one verdict + a
 // covered/thin/late/uncovered breakdown. Server-derived; this is presentation.
-const DELIVERY_META: Record<OutcomeDelivery['verdict'], { label: string; fg: string; bg: string; border: string }> = {
-  delivered: { label: 'Результаты обеспечены',        fg: 'text-success', bg: 'bg-success-bg', border: 'border-success/20' },
-  partial:   { label: 'Обеспечены частично',          fg: 'text-warning', bg: 'bg-warning-bg', border: 'border-warning/20' },
-  gaps:      { label: 'Есть необеспеченные результаты', fg: 'text-danger',  bg: 'bg-danger-bg',  border: 'border-danger/20' },
-}
-
-function OutcomeDeliveryCard({ d }: { d: OutcomeDelivery }) {
-  const meta = DELIVERY_META[d.verdict]
-  const chip = (label: string, value: number, color: string) => (
-    <span className="inline-flex items-center gap-1.5 text-xs font-sans">
-      <span className="w-2 h-2 rounded-full inline-block" style={{ background: color }} />
-      <span className="font-medium text-ink">{value}</span>
-      <span className="text-ink-secondary">{label}</span>
-    </span>
-  )
-  return (
-    <div className={`rounded-lg border p-4 ${meta.bg} ${meta.border}`}>
-      <div className="flex items-center justify-between gap-3 mb-2">
-        <div className="text-[10px] font-sans font-semibold uppercase tracking-wider text-ink-tertiary">
-          Достижение результатов программы
-        </div>
-        <span className={`text-[10px] font-sans font-semibold uppercase tracking-wide ${meta.fg}`}>{meta.label}</span>
-      </div>
-      <div className="flex items-center gap-4">
-        <div className="text-center flex-shrink-0">
-          <div className="font-display text-3xl font-bold leading-none" style={{ color: scoreColor(d.score) }}>{d.score}</div>
-          <div className="text-[10px] font-sans text-ink-tertiary uppercase tracking-wider mt-0.5">из 100</div>
-        </div>
-        <p className="text-sm font-sans text-ink leading-relaxed">{d.headline}</p>
-      </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3 pt-3 border-t border-border">
-        {chip('полностью сформированы', d.fully, 'var(--color-success)')}
-        {d.thin > 0      && chip('поверхностно', d.thin, 'var(--color-warning)')}
-        {d.late > 0      && chip('поздно',       d.late, 'var(--color-warning)')}
-        {d.uncovered > 0 && chip('не обеспечены', d.uncovered, 'var(--color-danger)')}
-        <span className="text-xs font-sans text-ink-tertiary ml-auto self-center">всего {d.total}</span>
-      </div>
-    </div>
-  )
-}
-
 // Whole-plan structure: dependency layers (foundational → professional), the
 // critical prerequisite chains, and disciplines outside the graph. Derived
 // server-side from the same edges — this is just the presentation.
@@ -1125,49 +1081,6 @@ function PathwayView({ structure }: { structure: SequencingStructure }) {
           </div>
         </details>
       )}
-    </div>
-  )
-}
-
-function EdgeCard({ edge, inverted = false }: { edge: PrerequisiteEdge; inverted?: boolean }) {
-  return (
-    <div className={`rounded-lg p-3 border ${inverted ? 'bg-danger-bg border-danger/15' : 'bg-surface border-border'}`}>
-      <div className="flex items-center gap-2 text-sm font-sans mb-1">
-        <span className="text-ink">{edge.from_name}</span>
-        <span className="text-ink-tertiary text-xs">сем. {edge.from_semester}</span>
-        <span className="text-ink-tertiary">→</span>
-        <span className="text-ink">{edge.to_name}</span>
-        <span className="text-ink-tertiary text-xs">сем. {edge.to_semester}</span>
-        {inverted && <span className="ml-auto text-[10px] font-medium text-danger uppercase tracking-wide">нарушение порядка</span>}
-      </div>
-      {edge.reason && <p className="text-xs font-sans text-ink-secondary leading-relaxed">{edge.reason}</p>}
-      {inverted && edge.recommendation && (
-        <p className="text-xs font-sans text-ink mt-1.5 leading-relaxed">
-          <span className="font-medium text-amber">Рекомендация: </span>{edge.recommendation}
-        </p>
-      )}
-    </div>
-  )
-}
-
-function GapColumn({ title, items, tone }: {
-  title: string; items: { name: string; reason: string; recommendation: string }[]; tone: 'warning' | 'danger'
-}) {
-  const bg = tone === 'danger' ? 'bg-danger-bg border-danger/15' : 'bg-warning-bg border-warning/15'
-  const fg = tone === 'danger' ? 'text-danger' : 'text-warning'
-  return (
-    <div className={`rounded-lg border p-3 ${bg}`}>
-      <div className={`text-[10px] font-sans font-semibold uppercase tracking-wide mb-2 ${fg}`}>{title}</div>
-      {items.length === 0
-        ? <p className="text-xs font-sans text-ink-tertiary">Нет</p>
-        : <div className="space-y-2.5">
-            {items.map((it, i) => (
-              <div key={i}>
-                <div className="text-sm font-sans text-ink">{it.name}</div>
-                {it.recommendation && <div className="text-xs font-sans text-ink-secondary leading-relaxed mt-0.5">{it.recommendation}</div>}
-              </div>
-            ))}
-          </div>}
     </div>
   )
 }
@@ -1423,21 +1336,6 @@ function TopologyTab({
       )}
     </div>
   )
-}
-
-function Stat({ label, value, danger = false }: { label: string; value: number; danger?: boolean }) {
-  return (
-    <div className="bg-surface border border-border rounded-lg p-4">
-      <div className="font-display text-3xl font-bold leading-none" style={{ color: danger ? 'var(--color-danger)' : 'var(--color-ink)' }}>
-        {value}
-      </div>
-      <div className="text-xs font-sans text-ink-secondary mt-1.5">{label}</div>
-    </div>
-  )
-}
-
-function SectionLabel({ children }: { children: ReactNode }) {
-  return <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">{children}</div>
 }
 
 // Documents tab — рабочая программа (per discipline) + практики. РПД is

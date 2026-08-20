@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import FeatureIntro from '../../components/ui/FeatureIntro'
 import Button from '../../components/ui/Button'
 import Icon, { type IconName } from '../../components/ui/Icon'
@@ -7,13 +7,21 @@ import LoadingSpinner from '../../components/ui/LoadingSpinner'
 import SyllabusReviewReport from '../../components/curriculum/SyllabusReviewReport'
 import OverlapReport from '../../components/curriculum/OverlapReport'
 import { PlacementReviewPanel, MtoReviewPanel, CoverageItemRow, CoverageChip, countByStatus } from '../../components/curriculum/CheckPanels'
-import { listPrograms, getProgram, getDisciplineReviews, getPlacementReviews, getMtoReviews } from '../../api/programs'
+import ProgramAnalysisSummary from '../../components/curriculum/ProgramAnalysisSummary'
+import {
+  listPrograms, getProgram, getDisciplineReviews, getPlacementReviews, getMtoReviews,
+  analyzeProgram, getAnalysis, downloadAnalysisPdf,
+} from '../../api/programs'
 import { analyzeProgramOverlap } from '../../api/curriculum'
-import { createMethodistRun, getMethodistRun, type MethodistCheckKey, type MethodistRun } from '../../api/methodist'
+import {
+  createMethodistRun, getMethodistRun, getMethodistQueue, reviewAdHocSyllabus,
+  type MethodistCheckKey, type MethodistRun,
+} from '../../api/methodist'
 import { useUIStore } from '../../store/uiStore'
 import { useSessionStorageState } from '../../hooks/useSessionStorageState'
 import type {
   SyllabusReview, CurriculumAnalysis, ProgramDocumentReview, ProgramPlacementReview, ProgramMtoReview,
+  UmcReadinessRow, ProgramAnalysis,
 } from '../../types'
 
 // Кабинет методиста (TODO.md Feature AM) — one place to run the РПД/ОП
@@ -36,7 +44,7 @@ import type {
 // mobile the two panels become tab-switched views so the picker never
 // buries the button, and the button never buries the report.
 
-type Tab = 'discipline' | 'overlap'
+type Tab = 'queue' | 'discipline' | 'overlap' | 'program' | 'adhoc'
 type MobileView = 'form' | 'result'
 
 const CHECK_LABEL: Record<MethodistCheckKey, string> = {
@@ -51,8 +59,9 @@ const MAX_POLLS = 100
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export default function InstitutionMethodist() {
-  const [tab, setTab] = useState<Tab>('discipline')
+  const [tab, setTab] = useState<Tab>('adhoc')
   const [programId, setProgramId] = useSessionStorageState('methodist:programId', '')
+  const [disciplineId, setDisciplineId] = useSessionStorageState('methodist:disciplineId', '')
 
   const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: listPrograms })
   const { data: program, isLoading: loadingProgram } = useQuery({
@@ -60,6 +69,15 @@ export default function InstitutionMethodist() {
     queryFn: () => getProgram(programId),
     enabled: !!programId,
   })
+
+  // Очередь row click → jump straight into «Проверка дисциплины» with that
+  // programme+discipline preselected, instead of making the методист look
+  // it up again by hand.
+  function jumpToDiscipline(newProgramId: string, newDisciplineId: string) {
+    setProgramId(newProgramId)
+    setDisciplineId(newDisciplineId)
+    setTab('discipline')
+  }
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -71,41 +89,64 @@ export default function InstitutionMethodist() {
 
         <div className="flex items-end justify-between gap-4 flex-wrap mt-4">
           <div className="flex gap-1">
+            <TabButton icon="import" active={tab === 'adhoc'} onClick={() => setTab('adhoc')}>
+              Отдельный файл
+            </TabButton>
+            <TabButton icon="bar-chart" active={tab === 'queue'} onClick={() => setTab('queue')}>
+              Очередь
+            </TabButton>
             <TabButton icon="file-check" active={tab === 'discipline'} onClick={() => setTab('discipline')}>
               Проверка дисциплины
             </TabButton>
             <TabButton icon="layers" active={tab === 'overlap'} onClick={() => setTab('overlap')}>
               Пересечение содержания
             </TabButton>
+            <TabButton icon="scale" active={tab === 'program'} onClick={() => setTab('program')}>
+              Проверка ОП
+            </TabButton>
           </div>
 
-          <label className="flex flex-col gap-1 pb-2 min-w-[260px]">
-            <span className="text-[10px] font-sans font-semibold uppercase tracking-wider text-ink-tertiary">
-              Образовательная программа
-            </span>
-            <select
-              value={programId}
-              onChange={(e) => setProgramId(e.target.value)}
-              disabled={programs.length === 0}
-              className="px-3 py-1.5 rounded-md border border-border-mid bg-surface text-sm font-sans text-ink focus:outline-none focus:border-border-strong disabled:text-ink-tertiary"
-            >
-              <option value="">
-                {programs.length === 0 ? 'Нет доступных программ' : '— выберите программу —'}
-              </option>
-              {programs.map((p) => (
-                <option key={p.id} value={p.id}>{p.code ? `${p.code} · ${p.name}` : p.name}</option>
-              ))}
-            </select>
-          </label>
+          {tab !== 'queue' && tab !== 'adhoc' && (
+            <label className="flex flex-col gap-1 pb-2 min-w-[260px]">
+              <span className="text-[10px] font-sans font-semibold uppercase tracking-wider text-ink-tertiary">
+                Образовательная программа
+              </span>
+              <select
+                value={programId}
+                onChange={(e) => setProgramId(e.target.value)}
+                disabled={programs.length === 0}
+                className="px-3 py-1.5 rounded-md border border-border-mid bg-surface text-sm font-sans text-ink focus:outline-none focus:border-border-strong disabled:text-ink-tertiary"
+              >
+                <option value="">
+                  {programs.length === 0 ? 'Нет доступных программ' : '— выберите программу —'}
+                </option>
+                {programs.map((p) => (
+                  <option key={p.id} value={p.id}>{p.code ? `${p.code} · ${p.name}` : p.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       </div>
 
       <div className="flex-1 overflow-hidden">
+        <div className={tab === 'queue' ? 'h-full' : 'hidden'}>
+          <QueueTab onSelectDiscipline={jumpToDiscipline} />
+        </div>
         <div className={tab === 'discipline' ? 'h-full' : 'hidden'}>
-          <DisciplineChecksTab programId={programId} program={program} loadingProgram={loadingProgram} />
+          <DisciplineChecksTab
+            programId={programId} program={program} loadingProgram={loadingProgram}
+            disciplineId={disciplineId} setDisciplineId={setDisciplineId}
+          />
         </div>
         <div className={tab === 'overlap' ? 'h-full' : 'hidden'}>
           <OverlapCheckTab programId={programId} program={program} loadingProgram={loadingProgram} />
+        </div>
+        <div className={tab === 'program' ? 'h-full' : 'hidden'}>
+          <ProgramCheckTab programId={programId} program={program} />
+        </div>
+        <div className={tab === 'adhoc' ? 'h-full' : 'hidden'}>
+          <AdHocReviewTab />
         </div>
       </div>
     </div>
@@ -238,11 +279,13 @@ function CheckSection({ title, children }: { title: string; children: ReactNode 
 }
 
 function DisciplineChecksTab({
-  programId, program, loadingProgram,
-}: { programId: string; program: ProgramWithDisciplines; loadingProgram: boolean }) {
+  programId, program, loadingProgram, disciplineId, setDisciplineId,
+}: {
+  programId: string; program: ProgramWithDisciplines; loadingProgram: boolean
+  disciplineId: string; setDisciplineId: (id: string) => void
+}) {
   const addToast = useUIStore((s) => s.addToast)
 
-  const [disciplineId, setDisciplineId] = useSessionStorageState('methodist:disciplineId', '')
   const [selected, setSelected] = useSessionStorageState<MethodistCheckKey[]>('methodist:checks:selected', ALL_CHECKS)
   const [mobileView, setMobileView] = useState<MobileView>('form')
 
@@ -581,6 +624,349 @@ function OverlapCheckTab({
                 </div>
               )}
               {result && <OverlapReport result={result} />}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Same three-tier classification as UmcDashboard.tsx's readinessStatus —
+// kept as a small local duplicate rather than a shared import, matching
+// this codebase's existing convention for this exact 4-line classifier
+// (see services/umcDashboardXlsx.ts's coverageStatus). "Needs attention" =
+// no РПД, uploaded-but-never-reviewed, or reviewed with low coverage — the
+// same threshold УМК dashboard's status dot uses, just filtered down to
+// only the rows worth a методист's time instead of the full matrix.
+export type QueueUrgency = 'no-rpd' | 'not-reviewed' | 'low-coverage'
+const QUEUE_URGENCY_LABEL: Record<QueueUrgency, string> = {
+  'no-rpd':       'РПД не загружена',
+  'not-reviewed': 'Загружена, не проверена',
+  'low-coverage': 'Низкое покрытие',
+}
+const QUEUE_URGENCY_BADGE: Record<QueueUrgency, string> = {
+  'no-rpd':       'bg-danger-bg text-danger',
+  'not-reviewed': 'bg-warning-bg text-warning',
+  'low-coverage': 'bg-warning-bg text-warning',
+}
+
+export function queueUrgency(row: UmcReadinessRow): QueueUrgency | null {
+  if (!row.has_syllabus) return 'no-rpd'
+  if (!row.reviewed) return 'not-reviewed'
+  if ((row.overall_coverage ?? 0) < 50) return 'low-coverage'
+  return null
+}
+
+function QueueTab({ onSelectDiscipline }: { onSelectDiscipline: (programId: string, disciplineId: string) => void }) {
+  const { data, isLoading } = useQuery({ queryKey: ['methodist-queue'], queryFn: getMethodistQueue })
+
+  const needsAttention = (data?.rows ?? [])
+    .map((row) => ({ row, urgency: queueUrgency(row) }))
+    .filter((x): x is { row: UmcReadinessRow; urgency: QueueUrgency } => x.urgency !== null)
+    // no-rpd first (nothing to check at all), then not-reviewed, then low-coverage
+    .sort((a, b) => {
+      const order: Record<QueueUrgency, number> = { 'no-rpd': 0, 'not-reviewed': 1, 'low-coverage': 2 }
+      return order[a.urgency] - order[b.urgency]
+    })
+
+  return (
+    <div className="h-full overflow-y-auto">
+      <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-6">
+        <FeatureIntro
+          id="methodist-cabinet-queue"
+          title="Как это работает"
+          description="Список дисциплин по всем образовательным программам, которым нужно внимание — нет загруженной рабочей программы, она никогда не проверялась, или проверка показала низкое покрытие компетенций. Нажмите на дисциплину, чтобы сразу перейти к её проверке."
+        />
+
+        {isLoading ? (
+          <div className="py-12 text-center text-xs font-sans text-ink-tertiary">Загрузка…</div>
+        ) : !data || data.rows.length === 0 ? (
+          <p className="text-sm font-sans text-ink-secondary py-8 text-center">
+            Нет ни одной образовательной программы с добавленными дисциплинами.
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-surface border border-border rounded-lg p-4">
+                <div className="text-xs font-sans text-ink-secondary mb-1.5">Всего дисциплин</div>
+                <div className="font-display text-2xl font-bold text-ink">{data.totals.discipline_count}</div>
+              </div>
+              <div className="bg-surface border border-border rounded-lg p-4">
+                <div className="text-xs font-sans text-ink-secondary mb-1.5">РПД загружено</div>
+                <div className="font-display text-2xl font-bold text-ink">{data.totals.syllabus_count}</div>
+              </div>
+              <div className="bg-surface border border-border rounded-lg p-4">
+                <div className="text-xs font-sans text-ink-secondary mb-1.5">Проверено</div>
+                <div className="font-display text-2xl font-bold text-ink">{data.totals.reviewed_count}</div>
+              </div>
+              <div className="bg-surface border border-border rounded-lg p-4">
+                <div className="text-xs font-sans text-ink-secondary mb-1.5">Требуют внимания</div>
+                <div className="font-display text-2xl font-bold text-danger">{needsAttention.length}</div>
+              </div>
+            </div>
+
+            {needsAttention.length === 0 ? (
+              <div className="bg-success-bg border border-success/15 rounded-lg p-4 text-sm font-sans text-success">
+                Все дисциплины загружены и проверены с хорошим покрытием — очередь пуста.
+              </div>
+            ) : (
+              <div className="bg-surface border border-border rounded-lg overflow-hidden">
+                <div className="px-4 py-3 border-b border-border text-sm font-sans font-medium text-ink">
+                  Требуют внимания ({needsAttention.length})
+                </div>
+                <div className="divide-y divide-border">
+                  {needsAttention.map(({ row, urgency }) => (
+                    <button
+                      key={row.discipline_id}
+                      onClick={() => onSelectDiscipline(row.program_id, row.discipline_id)}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-warm transition-colors"
+                    >
+                      <span className={`text-[10px] font-sans font-medium px-1.5 py-0.5 rounded-sm flex-shrink-0 ${QUEUE_URGENCY_BADGE[urgency]}`}>
+                        {QUEUE_URGENCY_LABEL[urgency]}
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-sans text-ink truncate">{row.discipline_name}</span>
+                        <span className="block text-xs font-sans text-ink-tertiary truncate">
+                          {row.program_name}{row.program_code && ` · ${row.program_code}`}
+                          {row.department_name && ` · ${row.department_name}`}
+                        </span>
+                      </span>
+                      {urgency === 'low-coverage' && row.overall_coverage != null && (
+                        <span className="text-xs font-mono font-medium text-warning flex-shrink-0">{row.overall_coverage}%</span>
+                      )}
+                      <Icon name="chevron-down" size={14} className="text-ink-tertiary flex-shrink-0 -rotate-90" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// «Проверка ОП» (TODO Feature AM, Phase 3) — whole-programme analysis:
+// sequencing/prerequisites, competency gaps & redundancy, thematic clusters,
+// credit-load sanity, outcome-delivery synthesis. Reuses
+// services/programAnalysis.ts wholesale via the same `analyzeProgram`/
+// `getAnalysis` endpoints the programme detail page's Report tab already
+// calls — nothing new server-side. Renders via `ProgramAnalysisSummary`
+// (components/curriculum/ProgramAnalysisSummary.tsx), a leaner extraction of
+// that page's `Report` that drops the wide progression-heatmap table and
+// dependency-graph view (both better suited to the РОП's authoring
+// workspace than a read-only check in a ~700px results column) and keeps
+// exactly what a методист is checking for: score, verdict, gaps, load.
+function ProgramCheckTab({ programId, program }: { programId: string; program: ProgramWithDisciplines }) {
+  const qc = useQueryClient()
+  const addToast = useUIStore((s) => s.addToast)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
+
+  const { data: cachedAnalysis, isLoading: loadingCached } = useQuery({
+    queryKey: ['methodist-program-analysis', programId],
+    queryFn: () => getAnalysis(programId),
+    enabled: !!programId,
+  })
+
+  const analyzeMut = useMutation({
+    mutationFn: () => analyzeProgram(programId),
+    onSuccess: (data) => qc.setQueryData(['methodist-program-analysis', programId], data),
+  })
+
+  const analysis: ProgramAnalysis | null | undefined = analyzeMut.data ?? cachedAnalysis
+
+  async function exportPdf() {
+    if (!program) return
+    setDownloadingPdf(true)
+    try {
+      await downloadAnalysisPdf(programId, 'Анализ ОП.pdf')
+    } catch {
+      addToast('Не удалось скачать PDF', 'error')
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
+
+  return (
+    <div className="h-full overflow-y-auto">
+      <div className="p-4 md:p-6 max-w-3xl mx-auto space-y-6">
+        <FeatureIntro
+          id="methodist-cabinet-program"
+          title="Как это работает"
+          description="Целостный анализ учебного плана программы: логика последовательности дисциплин, пробелы и избыточность в компетенциях, тематические кластеры, нагрузка по семестрам и достижение результатов программы в целом."
+          steps={[
+            'Выберите программу вверху страницы',
+            'Запустите анализ — может занять до 2–3 минут',
+            'Результат сохраняется — при следующем открытии показывается сразу, без повторного запуска',
+          ]}
+        />
+
+        {!programId ? (
+          <p className="text-sm font-sans text-ink-secondary">Сначала выберите программу вверху страницы.</p>
+        ) : (
+          <>
+            <div className="flex items-center gap-3">
+              <Button onClick={() => analyzeMut.mutate()} loading={analyzeMut.isPending}>
+                {analysis ? 'Обновить анализ' : 'Запустить анализ'}
+              </Button>
+              {analysis && (
+                <Button variant="secondary" onClick={exportPdf} loading={downloadingPdf}>
+                  Экспорт в PDF
+                </Button>
+              )}
+              <span className="text-xs font-sans text-ink-tertiary">Анализ может занять 2–3 минуты</span>
+            </div>
+
+            {(analyzeMut.isPending) ? (
+              <div className="flex flex-col items-center justify-center text-center px-6 py-16">
+                <LoadingSpinner size={20} />
+                <p className="text-sm font-sans text-ink-secondary mt-3">Анализируем учебный план…</p>
+              </div>
+            ) : loadingCached ? (
+              <div className="py-12 text-center text-xs font-sans text-ink-tertiary">Загрузка…</div>
+            ) : analysis ? (
+              <ProgramAnalysisSummary analysis={analysis} />
+            ) : (
+              <EmptyState icon="scale" text="Запустите анализ, чтобы увидеть последовательность, пробелы и нагрузку учебного плана." />
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const ADHOC_ACCEPT = '.pdf,.doc,.docx,.jpg,.jpeg,.png'
+
+// «Отдельный файл» (TODO Feature AM, Phase 3, final slice) — the §5-§8
+// evidence-citation check for a РПД that isn't attached to any programme
+// yet (arrived by email, still being drafted). No programme/discipline
+// target at all, so this is the one check in Кабинет методиста that isn't
+// gated on `getProgramAccessScope` — POST /api/methodist/ad-hoc-review is
+// gated purely on `methodist_access` instead. Nothing is persisted
+// server-side (see the route's own comment for why); the result only lives
+// in this tab's state, same as every other in-progress check here.
+function AdHocReviewTab() {
+  const addToast = useUIStore((s) => s.addToast)
+  const [mode, setMode] = useState<'file' | 'text'>('file')
+  const [file, setFile] = useState<File | null>(null)
+  const [text, setText] = useState('')
+  const [result, setResult] = useState<SyllabusReview | null>(null)
+  const [runError, setRunError] = useState<string | null>(null)
+  const [mobileView, setMobileView] = useState<MobileView>('form')
+
+  const reviewMut = useMutation({
+    mutationFn: () => reviewAdHocSyllabus(mode === 'file' ? { file: file ?? undefined } : { text }),
+    onSuccess: (data) => { setResult(data); setRunError(null) },
+    onError: (err) => {
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+      setRunError(message ?? 'Не удалось выполнить проверку — попробуйте ещё раз.')
+    },
+  })
+
+  function run() {
+    if (mode === 'file' && !file) { addToast('Выберите файл', 'error'); return }
+    if (mode === 'text' && text.trim().length < 80) { addToast('Вставьте текст РПД (минимум несколько абзацев)', 'error'); return }
+    setResult(null)
+    setRunError(null)
+    setMobileView('result')
+    reviewMut.mutate()
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      <MobileSubtabs view={mobileView} onChange={setMobileView} />
+
+      <div className="flex-1 flex overflow-hidden">
+        <div className={`
+          md:w-[340px] md:flex-shrink-0 md:border-r md:border-border md:flex bg-surface-warm overflow-y-auto flex-col
+          ${mobileView === 'form' ? 'flex w-full' : 'hidden'} md:flex
+        `}>
+          <div className="p-4 space-y-4">
+            <FeatureIntro
+              id="methodist-cabinet-adhoc"
+              title="Как это работает"
+              description="Проверьте рабочую программу, которая ещё не привязана к образовательной программе — например, файл, полученный по почте. Загрузите файл или вставьте текст; система найдёт цели, компетенции и разделы содержания сама."
+              steps={[
+                'Загрузите файл (PDF, Word, скан) или вставьте текст РПД',
+                'Система разбирает документ и находит требования сама',
+                'Каждое требование оценивается с цитатой источника',
+              ]}
+            />
+
+            <div className="flex gap-1 border-b border-border">
+              <button
+                onClick={() => setMode('file')}
+                className={`px-3 py-1.5 -mb-px text-xs font-sans font-medium border-b-2 transition-colors ${
+                  mode === 'file' ? 'border-amber text-ink' : 'border-transparent text-ink-secondary hover:text-ink'
+                }`}
+              >
+                Файл
+              </button>
+              <button
+                onClick={() => setMode('text')}
+                className={`px-3 py-1.5 -mb-px text-xs font-sans font-medium border-b-2 transition-colors ${
+                  mode === 'text' ? 'border-amber text-ink' : 'border-transparent text-ink-secondary hover:text-ink'
+                }`}
+              >
+                Текст
+              </button>
+            </div>
+
+            {mode === 'file' ? (
+              <div>
+                <input
+                  type="file"
+                  accept={ADHOC_ACCEPT}
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  className="block w-full text-xs font-sans text-ink-secondary file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border file:border-border-mid file:bg-surface file:text-sm file:font-sans file:text-ink file:cursor-pointer hover:file:bg-surface-warm"
+                />
+                <p className="text-xs font-sans text-ink-tertiary mt-1.5">PDF, Word или скан, до 20 МБ</p>
+              </div>
+            ) : (
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Вставьте текст рабочей программы…"
+                rows={10}
+                className="w-full px-3 py-2 rounded-md border border-border-mid bg-surface text-sm font-sans text-ink focus:outline-none focus:border-border-strong resize-y"
+              />
+            )}
+
+            <div className="pt-1 space-y-2">
+              <Button
+                onClick={run} loading={reviewMut.isPending}
+                disabled={mode === 'file' ? !file : text.trim().length < 80}
+                className="w-full justify-center"
+              >
+                Проверить
+              </Button>
+              <p className="text-xs font-sans text-ink-tertiary text-center">Анализ может занять до минуты</p>
+            </div>
+          </div>
+        </div>
+
+        <div className={`
+          flex-1 bg-surface overflow-y-auto flex-col
+          ${mobileView === 'result' ? 'flex' : 'hidden'} md:flex
+        `}>
+          {reviewMut.isPending ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-6 py-16">
+              <LoadingSpinner size={20} />
+              <p className="text-sm font-sans text-ink-secondary mt-3">Разбираем РПД на разделы и проверяем покрытие…</p>
+            </div>
+          ) : !result && !runError ? (
+            <EmptyState icon="import" text="Загрузите файл или вставьте текст — результат появится здесь." />
+          ) : (
+            <div className="p-4 md:p-6 space-y-4 max-w-2xl mx-auto w-full">
+              {runError && (
+                <div className="bg-danger-bg border border-danger/15 rounded-lg p-3 text-xs font-sans text-danger">
+                  {runError}
+                </div>
+              )}
+              {result && <SyllabusReviewReport result={result} />}
             </div>
           )}
         </div>
