@@ -1830,7 +1830,7 @@ capital efficiency ("we can absorb 5× users on the current VM").
   new `pages/admin/AdminCapacity.tsx`, `config/planLimits.ts`,
   `docs/scaling.md` (becomes the doc the page renders, not a parallel copy).
 
-### AM. Кабинет методиста — one place for a методист to run every РПД/ОП check · Effort: Phase 0 M, 🟢 SHIPPED (2026-08-19) · Phase 1 M, 🟢 SHIPPED (2026-08-19) · Phase 2 M · Phase 3 M
+### AM. Кабинет методиста — one place for a методист to run every РПД/ОП check · Effort: Phase 0 M, 🟢 SHIPPED (2026-08-19) · Phase 1 M, 🟢 SHIPPED (2026-08-19) · Phase 2 M, 🟢 SHIPPED (2026-08-20) · Phase 3 M
 
 Prompted by user testing (2026-08-19) with a real методист: the role's grants
 were correct, but every check they needed (РПД competency coverage, «Место
@@ -1945,26 +1945,67 @@ studio-jumping; a new page on top of the same anchor would just relocate it.
   `/institution/methodist` and `/curriculum` both load without a console
   error post-extraction. **Not done yet:** Phase 2's registry/pg-boss runs
   and Phase 3's cross-programme triage queue + ad-hoc upload target.
-- **Phase 2 — check registry + pg-boss runs.** `services/methodist/checks.ts`:
-  a registry where each entry is a thin adapter onto an existing service
-  (`{scope: 'discipline'|'program', needs: [...], run}`) — «полная экспертиза»
-  costs one registry entry, not one page. `routes/methodist.ts`:
-  `POST /runs`, `GET /runs/:id`, `GET /queue`. Runs go through
-  [services/jobQueue.ts](backend/src/services/jobQueue.ts) (pg-boss) — a full
-  expertise pass is 4–6 LLM calls, too slow for a synchronous request. New
-  additive table `methodist_runs` (target refs + status + pointers into the
-  existing per-check result tables — `program_document_reviews` etc. stay the
-  source of truth, no duplication).
+- **Phase 2 — check registry + pg-boss runs.** 🟢 SHIPPED (2026-08-20).
+  [services/methodist/checks.ts](backend/src/services/methodist/checks.ts):
+  a registry (`RUNNERS: Record<CheckKey, ...>`) where each of the 4 entries
+  is a thin adapter onto an existing service — `reviewSyllabus`,
+  `reviewDocumentCoverage`, `reviewPlacement` (incl. the same best-effort
+  topology-graph densification the programme-page route performs — a run
+  from here behaves identically to one from `/institution/programs/:id`,
+  not a lesser version), `reviewMto`. Each persists to the SAME table the
+  equivalent programme-page route already writes
+  (`program_document_reviews`/`program_placement_reviews`/`program_mto_reviews` —
+  no parallel result store; `syllabus` is the one exception, stored inline
+  on the run row since it has no dedicated table anywhere in the codebase).
+  `runCheck` converts any thrown error into a per-check `{status:'error'}`
+  outcome instead of aborting the batch — a run missing one discipline's
+  competency codes still returns the other 3 results — except
+  `NotFoundError` (bad target), which aborts the whole run since every
+  check shares one target.
+  [routes/methodist.ts](backend/src/routes/methodist.ts): `POST /runs`
+  (validates target+access via `loadReadableDiscipline` *before* enqueueing,
+  so a bad id 403/404s immediately instead of queuing a run that's certain
+  to fail), `GET /runs/:id` (poll), `GET /runs` (recent history). Runs go
+  through [services/jobQueue.ts](backend/src/services/jobQueue.ts) (pg-boss,
+  `services/methodist/runWorker.ts` — mirrors `fosWorker.ts`) — up to 4
+  independent LLM calls in parallel, bounded by the slowest one, too slow to
+  hold an HTTP request open for. New additive table `methodist_runs`
+  (migration 114: target refs + status + `checks: CheckOutcome[]` — pointers
+  into the existing tables, `result_id` per check, not duplicated content).
+  Frontend: `InstitutionMethodist.tsx`'s «Проверка дисциплины» tab now
+  enqueues one run instead of 4 parallel synchronous mutations, polls
+  (`api/methodist.ts`, same poll-loop shape as `FosStudio.tsx`), then
+  re-fetches each `ok` outcome's full result from its table by
+  `result_id` (`getDisciplineReviews`/`getPlacementReviews`/`getMtoReviews`
+  — already-existing endpoints, no new GET-by-id routes needed) and renders
+  per-check error banners for any `status:'error'` outcome instead of
+  silently dropping it. 5 new backend tests (`checks.test.ts`) pin the
+  per-check error-isolation contract. Verified: backend typecheck clean, 807
+  tests pass, frontend typecheck clean, `/institution/methodist` loads
+  without a console error.
+  🟢 **UX fix, same day (caught in review):** neither picker showed which
+  disciplines had a working programme document attached — a методист could
+  select disciplines with no РПД at all and get either a doomed request
+  (overlap: fewer than 2 with content → throws before producing anything,
+  only a transient global toast) or a run that returns nothing useful. Both
+  pickers now show a `disciplinesWithRpd` badge/warning per discipline
+  (derived from `program.documents`, already returned by `GET
+  /institution/programs/:id` — no new endpoint), `run()` in both tabs
+  pre-empts a doomed request client-side with a clear message, and the
+  overlap tab's error now renders as a banner that stays on screen instead
+  of relying solely on the transient toast.
 - **Phase 3 — Очередь tab (cross-programme triage), «Проверка ОП»** (programme
   analysis + overlap + per-discipline coverage roll-up), ad-hoc file-upload
   target, exports via the existing `services/programReportPdf.ts` /
   `services/rpdReportXlsx.ts`.
-- **Touches:** `services/methodist/target.ts` (shipped), `services/methodist/checks.ts`
-  (Phase 2), `routes/methodist.ts` (Phase 2), new `methodist_runs` table
-  (Phase 2 migration), `pages/institution/InstitutionMethodist.tsx` (shipped),
+- **Touches (all shipped through Phase 2):** `services/methodist/target.ts`,
+  `services/methodist/checks.ts`, `services/methodist/runWorker.ts`,
+  `routes/methodist.ts`, `validation/methodistValidation.ts`,
+  `db/queries/methodistRuns.ts`, migration 114 (`methodist_runs` table),
+  `pages/institution/InstitutionMethodist.tsx`, `api/methodist.ts`,
   `components/curriculum/SyllabusReviewReport.tsx` / `CheckPanels.tsx` /
-  `OverlapReport.tsx` (shipped — renderer extraction), `docs/ACCESS-MATRIX.md`
-  (Table B + §4, МУМЦ resolution — shipped).
+  `OverlapReport.tsx` (renderer extraction), `docs/ACCESS-MATRIX.md`
+  (Table B + §4, МУМЦ resolution).
 - **Not doing:** no new domain — `methodist_access` (§ above) is a
   unit-type-narrowed derived flag on the existing `curriculum` domain, same
   shape as `criteria_access`/`org_overview_access`, not a fifth domain. No
@@ -2021,6 +2062,7 @@ Keeping these here so they don't get re-proposed.
 
 ## In progress
 
-- **AM. Кабинет методиста** — Phase 0 and Phase 1 both shipped (shell,
-  МУМЦ access gate, 4-check «Проверка дисциплины» tab, overlap tab). Next:
-  Phase 2 (check registry + pg-boss runs). See full entry above for phasing.
+- **AM. Кабинет методиста** — Phases 0–2 shipped (shell, МУМЦ access gate,
+  4-check «Проверка дисциплины» tab now running async via pg-boss, overlap
+  tab). Next: Phase 3 (cross-programme triage queue, «Проверка ОП», ad-hoc
+  upload target). See full entry above for phasing.

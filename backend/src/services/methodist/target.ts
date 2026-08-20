@@ -27,7 +27,7 @@ export interface ResolvedProgramDisciplineText {
   competencies:   CompetencyInput[]
 }
 
-type Teacher = { id: string; is_platform_admin: boolean; institution_id: string | null }
+export type Teacher = { id: string; is_platform_admin: boolean; institution_id: string | null }
 
 // Below this, an uploaded РПД has nothing useful to check — mirrors
 // curriculumAnalysis.ts's MIN_CONTENT_CHARS (kept as a literal, not a shared
@@ -38,8 +38,11 @@ const MIN_TEXT_CHARS = 80
 /** One round trip for the programme + access check, reused by both the
  *  single- and batch-discipline resolvers below so a multi-discipline call
  *  (overlap) doesn't refetch the same programme once per discipline. Throws
- *  ForbiddenError if the caller's programAccessScope doesn't reach it. */
-async function loadReadableProgram(programId: string, teacher: Teacher) {
+ *  ForbiddenError if the caller's programAccessScope doesn't reach it.
+ *  Exported for services/methodist/checks.ts — the placement/MTO/coverage
+ *  check adapters need the same programme+discipline resolution but persist
+ *  to their own tables, so they can't just call resolveProgramDisciplineText. */
+export async function loadReadableProgram(programId: string, teacher: Teacher) {
   if (!teacher.institution_id) throw new ValidationError('Ваш аккаунт не привязан к организации')
 
   const detail = await getProgramDetail(programId, teacher.institution_id)
@@ -52,16 +55,22 @@ async function loadReadableProgram(programId: string, teacher: Teacher) {
   return detail
 }
 
+/** loadReadableProgram + discipline lookup — the other common step every
+ *  per-discipline check needs. */
+export async function loadReadableDiscipline(target: ProgramDisciplineTarget, teacher: Teacher) {
+  const detail = await loadReadableProgram(target.programId, teacher)
+  const discipline = detail.disciplines.find((d) => d.id === target.disciplineId)
+  if (!discipline) throw new NotFoundError('Дисциплина')
+  return { detail, discipline }
+}
+
 /** Same {text, declared competencies} shape as resolveCourseText, sourced
  *  from the programme structure instead of a personal course. */
 export async function resolveProgramDisciplineText(
   target: ProgramDisciplineTarget,
   teacher: Teacher
 ): Promise<ResolvedProgramDisciplineText> {
-  const detail = await loadReadableProgram(target.programId, teacher)
-
-  const discipline = detail.disciplines.find((d) => d.id === target.disciplineId)
-  if (!discipline) throw new NotFoundError('Дисциплина')
+  const { detail, discipline } = await loadReadableDiscipline(target, teacher)
 
   const found = await findWorkingProgrammeForDiscipline(detail.id, discipline.id!)
   const text = (found?.extractedText ?? '').trim()
