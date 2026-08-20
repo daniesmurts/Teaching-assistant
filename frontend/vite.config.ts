@@ -46,6 +46,16 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2}'],
         navigateFallback: '/index.html',
+        // Default is 2 MiB — the main chunk (every non-lazy page, including
+        // the whole authenticated app) crossed that during the ПК/ОТФ work
+        // (2026-08-20), hard-failing the build rather than just warning.
+        // Bumped with headroom rather than tuned to the exact current size,
+        // so the next few KB of legitimate growth don't immediately break
+        // the build again — the real fix is code-splitting the admin/
+        // institution routes the way the public marketing pages already are
+        // (see the `lazy(() => import(...))` block in App.tsx), tracked
+        // separately, not something to rush alongside an unrelated change.
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         runtimeCaching: [
           {
             // Cache Google Fonts
