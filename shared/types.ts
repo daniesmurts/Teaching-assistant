@@ -1124,6 +1124,54 @@ export interface OutcomeFormulationFinding {
   recommendation:  string
 }
 
+// ─── «Связка оценочного средства» — п.4 ↔ СРС ↔ КСР ↔ п.9 ↔ ФОС ──────────────
+// Raised by a методист (2026-08-20): an оценочное средство named in §4's
+// «Оценочные средства» column is a promise the rest of the РПД has to keep —
+// the student needs time to prepare it (СРС), the teacher needs to be
+// scheduled to assess it (КСР), and it has to carry points in the БРС (§9).
+// A name that appears in §4 and nowhere else is an assessment that exists
+// only on paper. Produced by services/assessmentLinkage.ts: LLM extraction
+// (reading the table out of prose), deterministic linkage (whether «Доклад»
+// is present in «Подготовка доклада» is a measurable string question).
+//
+// ФОС is deliberately NOT verified — it's a separate document governed by the
+// institution's own положение and isn't in the РПД text, so each finding
+// carries an explicit "check the ФОС yourself" reminder instead.
+
+export type LinkageSlot = 'srs' | 'ksr' | 'brs' | 'fos'
+
+export interface ParsedAssessmentLinkage {
+  instruments: { name: string; section: string | null }[]   // §4, last column
+  srs_forms:   string[]                                     // СРС forms
+  ksr_forms:   string[]                                     // КСР forms
+  brs_items:   { name: string; points: number | null }[]    // §9 БРС checkpoints
+}
+
+export interface AssessmentLinkageFinding {
+  instrument:          string
+  section:             string | null   // раздел дисциплины it was declared under
+  missing:             LinkageSlot[]   // 'fos' only ever appears here when fos_available is true
+  brs_missing_points:  boolean         // named in §9 but with no max balls
+  matched_srs:         string | null   // the phrase that satisfied the link, when it did
+  matched_ksr:         string | null
+  matched_brs:         string | null
+  matched_fos:         string | null   // non-null when the instrument was found in an uploaded ФОС
+  detail:              string
+  recommendation:      string
+}
+
+export interface AssessmentLinkageResult {
+  parsed:        ParsedAssessmentLinkage
+  // Whether an institution-filed ФОС document was attached to this
+  // discipline (via program_documents' 'fos' kind) and actually checked.
+  // False means every finding's ФОС link is genuinely unverified, not
+  // "checked and failed" — the report must not conflate the two.
+  fos_available: boolean
+  findings:      AssessmentLinkageFinding[]
+  summary:       string
+  generated_at:  string
+}
+
 export interface SyllabusReview {
   competencies_source: 'declared' | 'provided'   // extracted from the РПД vs. supplied
   goals_source:        'declared' | 'provided'
@@ -1354,7 +1402,16 @@ export interface Program {
 }
 
 // Migration 050 attachments — рабочая программа + практики.
-export type ProgramDocumentKind = 'working_programme' | 'practice'
+// 'fos' (methodist feedback, 2026-08-20) — a discipline's real, institution-
+// filed ФОС (фонд оценочных средств), attached the same way as a working
+// programme (one CURRENT file per discipline, supersede-on-reupload). Lets
+// «Связка оценочного средства» (services/assessmentLinkage.ts) actually
+// verify the ФОС link instead of only reminding the reader to check it by
+// hand. Deliberately NOT the same thing as fos_documents (Feature X's
+// «Собрать ФОС» generator) — that's an AI DRAFT tied to a teacher's personal
+// course, this is the institution's own filed document tied to a programme
+// discipline.
+export type ProgramDocumentKind = 'working_programme' | 'practice' | 'fos'
 
 export type ProgramPracticeType =
   | 'production_technological'      // Производственная (технологическая /

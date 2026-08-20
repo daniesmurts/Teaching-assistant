@@ -131,6 +131,45 @@ export async function findWorkingProgrammeForDiscipline(
 }
 
 /**
+ * The current ФОС (kind='fos') document for a discipline, if any — mirrors
+ * findWorkingProgrammeForDiscipline exactly (same one-current-file,
+ * supersede-on-reupload shape), kept as a separate function rather than a
+ * shared `kind` parameter because findWorkingProgrammeForDiscipline already
+ * has ~10 call sites across routes/services/tests that assume it's always
+ * working_programme; a signature change there is out of proportion to what
+ * this needs. See ProgramDocumentKind's 'fos' doc comment for why this is a
+ * different thing from the fos_documents / «Собрать ФОС» generator table.
+ */
+export async function findFosForDiscipline(
+  programId: string, disciplineId: string
+): Promise<{ document: ProgramDocument; extractedText: string | null } | null> {
+  const { rows } = await pool.query<ProgramDocumentRow>(
+    `SELECT * FROM program_documents
+      WHERE program_id = $1 AND discipline_id = $2 AND kind = 'fos'
+        AND superseded_at IS NULL
+      LIMIT 1`,
+    [programId, disciplineId]
+  )
+  const r = rows[0]
+  return r ? { document: toDocument(r), extractedText: r.extracted_text } : null
+}
+
+/** Supersede-on-reupload for kind='fos' — mirrors supersedeWorkingProgrammeForDiscipline. */
+export async function supersedeFosForDiscipline(
+  programId: string, disciplineId: string
+): Promise<{ id: string } | null> {
+  const { rows } = await pool.query<{ id: string }>(
+    `UPDATE program_documents
+        SET superseded_at = NOW()
+      WHERE program_id = $1 AND discipline_id = $2 AND kind = 'fos'
+        AND superseded_at IS NULL
+      RETURNING id`,
+    [programId, disciplineId]
+  )
+  return rows[0] ? { id: rows[0].id } : null
+}
+
+/**
  * Marks the current working_programme row for a discipline as superseded (if
  * any), so a re-upload replaces the "current" pointer without discarding the
  * previous extraction — migration 084, Research.md §9.6 (РПД year-over-year

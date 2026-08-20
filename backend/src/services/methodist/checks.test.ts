@@ -70,6 +70,45 @@ describe('runCheck — per-check error isolation', () => {
   })
 })
 
+describe('runCheck — linkage', () => {
+  it('passes the discipline\'s uploaded ФОС text through to the linkage check, when one exists', async () => {
+    vi.spyOn(target, 'resolveProgramDisciplineText').mockResolvedValue({
+      disciplineName: 'Матанализ', text: 'x'.repeat(200), competencies: [],
+    })
+    const programDocuments = await import('../../db/queries/programDocuments')
+    vi.spyOn(programDocuments, 'findFosForDiscipline').mockResolvedValue({
+      document: { id: 'fos1' } as any, extractedText: 'фос текст',
+    })
+    const linkage = await import('../assessmentLinkage')
+    vi.spyOn(linkage, 'parseAssessmentLinkage').mockResolvedValue({
+      instruments: [], srs_forms: [], ksr_forms: [], brs_items: [],
+    })
+    const checkSpy = vi.spyOn(linkage, 'checkAssessmentLinkage')
+
+    const outcome = await runCheck('linkage', { programId: 'prog1', disciplineId: 'disc1' }, teacher)
+
+    expect(outcome.status).toBe('ok')
+    expect(checkSpy).toHaveBeenCalledWith(expect.anything(), 'фос текст')
+  })
+
+  it('runs with no ФОС text when none was uploaded — does not throw or block the check', async () => {
+    vi.spyOn(target, 'resolveProgramDisciplineText').mockResolvedValue({
+      disciplineName: 'Матанализ', text: 'x'.repeat(200), competencies: [],
+    })
+    const programDocuments = await import('../../db/queries/programDocuments')
+    vi.spyOn(programDocuments, 'findFosForDiscipline').mockResolvedValue(null)
+    const linkage = await import('../assessmentLinkage')
+    vi.spyOn(linkage, 'parseAssessmentLinkage').mockResolvedValue({
+      instruments: [], srs_forms: [], ksr_forms: [], brs_items: [],
+    })
+
+    const outcome = await runCheck('linkage', { programId: 'prog1', disciplineId: 'disc1' }, teacher)
+
+    expect(outcome.status).toBe('ok')
+    expect((outcome.result as { fos_available: boolean }).fos_available).toBe(false)
+  })
+})
+
 describe('runChecks — batch independence', () => {
   it('one failing check does not block the others from returning a result', async () => {
     vi.spyOn(target, 'loadReadableDiscipline').mockResolvedValue({

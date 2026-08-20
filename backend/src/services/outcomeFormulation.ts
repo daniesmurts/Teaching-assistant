@@ -1,3 +1,4 @@
+import { normaliseText, tokenize } from '../lib/ruText'
 import type { OutcomeFormulationFinding, OutcomeKind } from '../../../shared/types'
 
 // «Знать/Уметь/Владеть» formulation check — raised by a методист reviewing a
@@ -49,57 +50,13 @@ const FRAME_PREFIX_TOKENS = new Set([
   'способен', 'способность', 'демонстрирует', 'применяет', 'использует', 'и',
 ])
 
-// Function words carry no subject matter — including them would inflate the
-// overlap between any two Russian sentences of similar shape.
-const STOPWORDS = new Set([
-  'и', 'в', 'во', 'на', 'с', 'со', 'для', 'по', 'при', 'к', 'ко', 'от', 'из',
-  'о', 'об', 'а', 'но', 'или', 'же', 'как', 'что', 'том', 'числе', 'т', 'ч',
-  'также', 'их', 'его', 'её', 'ее', 'а также',
-])
-
-/** Lowercase, ё→е, drop punctuation, collapse whitespace. */
-export function normaliseText(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/ё/g, 'е')
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-// Russian inflectional endings, longest first. Lifting a phrase out of an
-// indicator and into a «Знать:» list changes its grammatical frame, so the
-// case endings shift even when nothing else does («производство процессов» →
-// «производства процессов»). Without this, that trivially-reworded copy —
-// the «почти дословно» half of what the методист described — scores well
-// below the threshold and slips through, while the exact copy is caught.
-// A crude suffix strip, not a real morphological analyser: it only needs to
-// make two inflections of the same word compare equal, and a stem floor
-// keeps it from collapsing genuinely distinct short words.
-const RU_ENDINGS = [
-  'иями', 'ями', 'ами', 'ого', 'его', 'ому', 'ему', 'ыми', 'ими', 'ией',
-  'их', 'ых', 'ую', 'юю', 'ою', 'ею', 'ии', 'ия', 'ью',
-  'ая', 'яя', 'ое', 'ее', 'ые', 'ие', 'ой', 'ей', 'ый', 'ий', 'ом', 'ем',
-  'ах', 'ях', 'ов', 'ев', 'ам', 'ям',
-  'ы', 'и', 'а', 'я', 'о', 'е', 'у', 'ю', 'й', 'ь',
-]
-const MIN_STEM_LENGTH = 4
-
-function stem(token: string): string {
-  for (const ending of RU_ENDINGS) {
-    if (token.length - ending.length >= MIN_STEM_LENGTH && token.endsWith(ending)) {
-      return token.slice(0, -ending.length)
-    }
-  }
-  return token
-}
-
-/** Normalised, stemmed tokens with the leading frame words and stopwords removed. */
+/** Shared tokenizer, minus the ЗУВ-specific leading verb frame. Stripped
+ *  BEFORE tokenizing so the frame words can't survive as stems. */
 export function contentTokens(s: string): string[] {
-  const tokens = normaliseText(s).split(' ').filter(Boolean)
+  const words = normaliseText(s).split(' ').filter(Boolean)
   let start = 0
-  while (start < tokens.length && FRAME_PREFIX_TOKENS.has(tokens[start])) start++
-  return tokens.slice(start).filter((t) => !STOPWORDS.has(t)).map(stem)
+  while (start < words.length && FRAME_PREFIX_TOKENS.has(words[start])) start++
+  return tokenize(words.slice(start).join(' '))
 }
 
 /**
@@ -121,6 +78,8 @@ export function containment(a: string, b: string): number {
 const OUTCOME_LABEL: Record<OutcomeKind, string> = {
   knowledge: 'Знать', skill: 'Уметь', mastery: 'Владеть',
 }
+
+export { normaliseText }
 
 export interface IndicatorInput { code: string; title: string }
 export interface OutcomesInput { knowledge: string[]; skills: string[]; mastery: string[] }

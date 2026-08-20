@@ -27,7 +27,7 @@ import { getCourses } from '../../api/courses'
 import { getPickableProgramUnits } from '../../api/programs'
 import {
   PROGRAM_PRACTICE_LABEL, PROGRAM_PRACTICE_TYPES,
-  type ProgramDocument, type ProgramPracticeType, type ProgramDocumentReview,
+  type ProgramDocument, type ProgramPracticeType, type ProgramDocumentReview, type ProgramDocumentKind,
   type SequencingStructure,
   type OutcomeDelivery, type ProgramDocumentDiff, type DiffChangeKind,
   type ProgramPlacementReview,
@@ -1398,6 +1398,15 @@ function DocumentsPanel({
   const [expandedMto, setExpandedMto] = useState<Set<string>>(new Set())
 
   const workingProgrammeByDiscipline = currentWorkingProgrammeMap(documents)
+  // ФОС (kind='fos', migration TODO Feature AM) — one CURRENT file per
+  // discipline, same supersede-on-reupload contract as working_programme.
+  // Only wired to the assessment-linkage check (services/assessmentLinkage.ts);
+  // deliberately not the same thing as fos_documents (Feature X's AI-drafted
+  // ФОС tied to a personal course).
+  const fosByDiscipline = new Map<string, ProgramDocument>()
+  for (const d of documents) {
+    if (d.kind === 'fos' && d.discipline_id && !d.superseded_at) fosByDiscipline.set(d.discipline_id, d)
+  }
   const reviewByDiscipline = new Map(reviews.map((r) => [r.discipline_id, r]))
   const placementByDiscipline = new Map(placementReviews.map((r) => [r.discipline_id, r]))
   const mtoByDiscipline = new Map(mtoReviews.map((r) => [r.discipline_id, r]))
@@ -1417,7 +1426,7 @@ function DocumentsPanel({
   }
 
   async function attachOne(
-    input: { kind: 'working_programme' | 'practice'; practiceType?: ProgramPracticeType | null; disciplineId?: string | null }
+    input: { kind: ProgramDocumentKind; practiceType?: ProgramPracticeType | null; disciplineId?: string | null }
       & ({ file: File } | { fileUrl: string })
   ) {
     setUploading(true)
@@ -1622,6 +1631,9 @@ function DocumentsPanel({
                 onUpload={(file) => attachOne({ file, kind: 'working_programme', disciplineId: d.id })}
                 onUploadUrl={(fileUrl) => attachOne({ fileUrl, kind: 'working_programme', disciplineId: d.id })}
                 onRemove={(doc) => removeOne(doc)}
+                fosDoc={d.id ? fosByDiscipline.get(d.id) ?? null : null}
+                onUploadFos={(file) => attachOne({ file, kind: 'fos', disciplineId: d.id })}
+                onRemoveFos={(doc) => removeOne(doc)}
                 onReview={() => runReview(d)}
                 placementReview={d.id ? placementByDiscipline.get(d.id) ?? null : null}
                 placementExpanded={d.id ? expandedPlacements.has(d.id) : false}
@@ -1819,6 +1831,7 @@ function DisciplineDocumentRow({
   placementReview, placementExpanded, onTogglePlacementExpanded, placing, onPlacementReview,
   mtoReview, mtoExpanded, onToggleMtoExpanded, mtoing, onMtoReview,
   assignableTeachers, assigning, onAssignResponsible,
+  fosDoc, onUploadFos, onRemoveFos,
 }: {
   discipline:            ProgramDiscipline
   doc:                   ProgramDocument | null
@@ -1856,6 +1869,12 @@ function DisciplineDocumentRow({
   assignableTeachers:    AssignableTeacher[]
   assigning:             boolean
   onAssignResponsible:   (teacherId: string | null) => void
+  // ФОС (kind='fos') — same supersede-on-reupload contract as `doc` above,
+  // used only to power a real ФОС chip in «Проверка дисциплины»'s связка
+  // check instead of an unconditional "проверьте вручную" reminder.
+  fosDoc:       ProgramDocument | null
+  onUploadFos:  (file: File) => void
+  onRemoveFos:  (doc: ProgramDocument) => void
 }) {
   const hasCodes = discipline.competency_codes.length > 0
   const kb = doc ? Math.round(doc.file_size / 1024) : 0
@@ -1946,6 +1965,22 @@ function DisciplineDocumentRow({
           />
         </div>
       )}
+      <div className="mt-2.5 pl-8 flex items-center gap-2.5 flex-wrap">
+        <span className="text-[11px] font-sans text-ink-tertiary uppercase tracking-wider">ФОС</span>
+        {fosDoc ? (
+          <>
+            <span className="text-xs font-sans text-ink-secondary truncate">{fosDoc.file_name}</span>
+            {canEdit && (
+              <button onClick={() => onRemoveFos(fosDoc)} className="text-xs font-sans text-ink-tertiary hover:text-danger transition-colors">Удалить</button>
+            )}
+          </>
+        ) : (
+          <span className="text-xs font-sans text-ink-tertiary">Не загружен — связка с ФОС не проверяется</span>
+        )}
+        {canEdit && (
+          <UploadPill label={fosDoc ? 'Заменить' : 'Загрузить'} onPick={onUploadFos} disabled={uploading} />
+        )}
+      </div>
       {doc && (
         <div className="mt-2.5 pl-8 flex flex-wrap items-center gap-2">
           {canEdit && (

@@ -11,7 +11,7 @@
 
 import { ValidationError, NotFoundError } from '../../errors/AppError'
 import { loadReadableDiscipline, resolveProgramDisciplineText, type Teacher } from './target'
-import { findWorkingProgrammeForDiscipline } from '../../db/queries/programDocuments'
+import { findWorkingProgrammeForDiscipline, findFosForDiscipline } from '../../db/queries/programDocuments'
 import { insertReview } from '../../db/queries/programDocumentReviews'
 import { insertPlacementReview, getLatestPlacementReviewsByProgram } from '../../db/queries/programPlacementReviews'
 import { insertMtoReview, getLatestMtoReviewsByProgram } from '../../db/queries/programMtoReviews'
@@ -20,9 +20,10 @@ import { reviewDocumentCoverage } from '../documentReview'
 import { reviewPlacement } from '../placementReview'
 import { reviewMto } from '../mtoReview'
 import { reviewSyllabus } from '../syllabusReview'
+import { parseAssessmentLinkage, checkAssessmentLinkage } from '../assessmentLinkage'
 import { logger } from '../../lib/logger'
 
-export const ALL_CHECK_KEYS = ['syllabus', 'coverage', 'placement', 'mto'] as const
+export const ALL_CHECK_KEYS = ['syllabus', 'coverage', 'placement', 'mto', 'linkage'] as const
 export type CheckKey = (typeof ALL_CHECK_KEYS)[number]
 
 export interface CheckTarget { programId: string; disciplineId: string }
@@ -44,6 +45,20 @@ async function runSyllabusCheck(target: CheckTarget, teacher: Teacher): Promise<
     teacherId: teacher.id, syllabusText: resolved.text, competencies: resolved.competencies,
   })
   return { key: 'syllabus', status: 'ok', result }
+}
+
+// «Связка оценочного средства» (методист feedback, 2026-08-20) — п.4 ↔ СРС ↔
+// КСР ↔ п.9. Like syllabus-review it has no dedicated results table, so the
+// result travels inline on the run row rather than inventing a table for a
+// check whose output is a findings list.
+async function runLinkageCheck(target: CheckTarget, teacher: Teacher): Promise<CheckOutcome> {
+  const resolved = await resolveProgramDisciplineText(target, teacher)
+  const parsed = await parseAssessmentLinkage(teacher.id, resolved.text)
+  // Best-effort — an uploaded ФОС that fails to load must not break the rest
+  // of the check; checkAssessmentLinkage treats a null/undefined fosText the
+  // same as "none uploaded" (fos_available: false).
+  const fos = await findFosForDiscipline(target.programId, target.disciplineId).catch(() => null)
+  return { key: 'linkage', status: 'ok', result: checkAssessmentLinkage(parsed, fos?.extractedText) }
 }
 
 async function runCoverageCheck(target: CheckTarget, teacher: Teacher): Promise<CheckOutcome> {
@@ -155,6 +170,7 @@ const RUNNERS: Record<CheckKey, (target: CheckTarget, teacher: Teacher) => Promi
   coverage:  runCoverageCheck,
   placement: runPlacementCheck,
   mto:       runMtoCheck,
+  linkage:   runLinkageCheck,
 }
 
 /** Runs one check, converting any thrown error into a per-check failure

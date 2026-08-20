@@ -35,6 +35,7 @@ import { downloadObject, deleteObject } from '../services/objectStorage'
 import {
   listProgramDocuments, findProgramDocument, deleteProgramDocument,
   findWorkingProgrammeForDiscipline, supersedeWorkingProgrammeForDiscipline, deletePracticeForType,
+  supersedeFosForDiscipline,
   listWorkingProgrammeVersions,
 } from '../db/queries/programDocuments'
 import { attachProgramDocument } from '../services/programDocumentAttach'
@@ -639,7 +640,7 @@ router.post(
     const kind         = String(req.body.kind ?? '') as ProgramDocumentKind
     const practiceType = (req.body.practice_type ? String(req.body.practice_type) : null) as ProgramPracticeType | null
 
-    if (kind !== 'working_programme' && kind !== 'practice') {
+    if (kind !== 'working_programme' && kind !== 'practice' && kind !== 'fos') {
       throw new ValidationError('Неверный тип документа')
     }
     if (kind === 'practice') {
@@ -670,10 +671,12 @@ router.post(
     // no longer current — the caller needs to know so it can prompt
     // «Проверить соответствие» again rather than showing a stale result.
     let replacedReview = false
-    if (kind === 'working_programme') {
+    if (kind === 'working_programme' || kind === 'fos') {
       disciplineId = String(req.body.discipline_id ?? '')
       if (!disciplineId) {
-        throw new ValidationError('Укажите дисциплину, к которой относится рабочая программа')
+        throw new ValidationError(
+          kind === 'fos' ? 'Укажите дисциплину, к которой относится ФОС' : 'Укажите дисциплину, к которой относится рабочая программа'
+        )
       }
       // A discipline_id that no longer matches any current discipline almost
       // always means the page is stale — the учебный план was re-saved (which
@@ -684,9 +687,13 @@ router.post(
           'Дисциплина не найдена — возможно, учебный план был изменён. Обновите страницу и загрузите файл заново.'
         )
       }
-      const priorReview = await getLatestReviewForDiscipline(disciplineId)
-      replacedReview = !!priorReview
-      await supersedeWorkingProgrammeForDiscipline(detail.id, disciplineId)
+      if (kind === 'working_programme') {
+        const priorReview = await getLatestReviewForDiscipline(disciplineId)
+        replacedReview = !!priorReview
+        await supersedeWorkingProgrammeForDiscipline(detail.id, disciplineId)
+      } else {
+        await supersedeFosForDiscipline(detail.id, disciplineId)
+      }
     }
 
     // Extraction is best-effort — a failed parse doesn't block the attach,

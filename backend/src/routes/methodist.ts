@@ -14,9 +14,9 @@ import { createMethodistRun, getMethodistRun, listRecentMethodistRuns } from '..
 import { getUmcDashboard } from '../services/umcDashboard'
 import { getRootUnitForInstitution } from '../db/queries/orgUnits'
 import { METHODIST_UNIT_TYPES } from '../services/accessScope'
-import { uploadConfig, verifyFileContent } from '../middleware/fileValidation'
+import { uploadFields, verifyFileContent } from '../middleware/fileValidation'
 import { extractText } from '../services/documentExtractor'
-import { reviewSyllabus } from '../services/syllabusReview'
+import { runAdHocChecks, AD_HOC_CHECK_KEYS, type AdHocCheckKey } from '../services/methodist/adHocChecks'
 
 const router = Router()
 router.use(authenticate)
@@ -110,36 +110,61 @@ router.get(
 )
 
 // POST /api/methodist/ad-hoc-review — Кабинет методиста (TODO Feature AM,
-// Phase 3). §5-§8 evidence-citation coverage check for a РПД that isn't
-// attached to any programme yet — a file received by email, or one still
-// being drafted outside the system. Accepts either an uploaded file (PDF/
-// Word/image — same MIME allowlist as every other upload path) or pasted
-// text. Reuses services/syllabusReview.ts's reviewSyllabus directly, exactly
-// as routes/curriculum.ts's syllabus-review does for the raw-text case — no
-// competencies/goals are passed, so the parser extracts them from the
-// document's own declared sections (competencies_source: 'declared').
-// Nothing is persisted: there's no programme/discipline to key a result
-// row to, and syllabus-review has never had a dedicated results table (see
-// checks.ts's header comment) — this is the same "no home for it" case,
-// just without even a run row, since a single check with no target has
-// nothing worth polling for.
+// Phase 3). Runs the requested checks against a document that isn't
+// attached to any programme discipline yet — a file received by email, or
+// one still being drafted outside the system, most often a new РПД being
+// checked before it's published to the university site / attached to an ОП.
+// Accepts either an uploaded file (PDF/Word/image — same MIME allowlist as
+// every other upload path) or pasted text; the extraction happens once
+// here, then every requested check runs off the same text via
+// services/methodist/adHocChecks.ts, which is the smaller, honest subset of
+// the discipline-tab registry that can actually run without real programme
+// data (see that file's header for exactly why coverage/placement can't).
+//
+// A second, optional `fos_file` field lets the caller attach the discipline's
+// ФОС at the same time, for the same reason the РПД itself isn't attached
+// yet — the discipline doesn't exist in the system for either to belong to.
+// Its text is extracted the same way and passed straight into the linkage
+// check for this one run; NOTHING here is persisted anywhere (not even a run
+// row — a target-less check has nothing worth polling for), so a методист
+// who later attaches the discipline for real still has to upload the ФОС
+// again through `POST /:id/documents` (kind='fos') to keep it checked going
+// forward. The response is the finished result, same shape as a completed
+// MethodistRun's `checks` array.
 router.post(
   '/ad-hoc-review',
   aiLimiter,
   requireDomainOnUnitTypes('curriculum', 'view', METHODIST_UNIT_TYPES),
-  uploadConfig.single('file'),
+  uploadFields([{ name: 'file', maxCount: 1 }, { name: 'fos_file', maxCount: 1 }]),
   verifyFileContent,
   asyncHandler(async (req, res) => {
-    let text = typeof req.body?.syllabus_text === 'string' ? req.body.syllabus_text.trim() : ''
+    const files = (req.files ?? {}) as Record<string, Express.Multer.File[]>
+    const mainFile = files.file?.[0]
+    const fosFile = files.fos_file?.[0]
 
-    if (req.file) {
-      const extracted = await extractText(req.file.buffer, req.file.mimetype)
+    let text = typeof req.body?.syllabus_text === 'string' ? req.body.syllabus_text.trim() : ''
+    if (mainFile) {
+      const extracted = await extractText(mainFile.buffer, mainFile.mimetype)
       text = extracted.text
     }
     if (!text) throw new ValidationError('Загрузите файл или вставьте текст РПД.')
 
-    const review = await reviewSyllabus({ teacherId: req.teacher.id, syllabusText: text })
-    res.json(review)
+    let fosText: string | undefined
+    if (fosFile) {
+      const extracted = await extractText(fosFile.buffer, fosFile.mimetype)
+      fosText = extracted.text
+    }
+
+    const requested = typeof req.body?.checks === 'string'
+      ? req.body.checks.split(',').map((s: string) => s.trim()).filter(Boolean)
+      : []
+    const checks = requested.filter((c: string): c is AdHocCheckKey =>
+      (AD_HOC_CHECK_KEYS as readonly string[]).includes(c)
+    )
+    if (checks.length === 0) throw new ValidationError('Выберите хотя бы одну проверку.')
+
+    const outcomes = await runAdHocChecks(checks, req.teacher.id, text, { fosText })
+    res.json({ checks: outcomes })
   })
 )
 

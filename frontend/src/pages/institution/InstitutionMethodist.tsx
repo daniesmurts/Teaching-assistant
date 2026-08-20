@@ -8,20 +8,21 @@ import SyllabusReviewReport from '../../components/curriculum/SyllabusReviewRepo
 import OverlapReport from '../../components/curriculum/OverlapReport'
 import { PlacementReviewPanel, MtoReviewPanel, CoverageItemRow, CoverageChip, countByStatus } from '../../components/curriculum/CheckPanels'
 import ProgramAnalysisSummary from '../../components/curriculum/ProgramAnalysisSummary'
+import AssessmentLinkageReport from '../../components/curriculum/AssessmentLinkageReport'
 import {
   listPrograms, getProgram, getDisciplineReviews, getPlacementReviews, getMtoReviews,
   analyzeProgram, getAnalysis, downloadAnalysisPdf,
 } from '../../api/programs'
 import { analyzeProgramOverlap } from '../../api/curriculum'
 import {
-  createMethodistRun, getMethodistRun, getMethodistQueue, reviewAdHocSyllabus,
-  type MethodistCheckKey, type MethodistRun,
+  createMethodistRun, getMethodistRun, getMethodistQueue, reviewAdHoc,
+  type MethodistCheckKey, type MethodistRun, type AdHocCheckKey, type AdHocCheckOutcome,
 } from '../../api/methodist'
 import { useUIStore } from '../../store/uiStore'
 import { useSessionStorageState } from '../../hooks/useSessionStorageState'
 import type {
   SyllabusReview, CurriculumAnalysis, ProgramDocumentReview, ProgramPlacementReview, ProgramMtoReview,
-  UmcReadinessRow, ProgramAnalysis,
+  UmcReadinessRow, ProgramAnalysis, AssessmentLinkageResult,
 } from '../../types'
 
 // Кабинет методиста (TODO.md Feature AM) — one place to run the РПД/ОП
@@ -52,8 +53,9 @@ const CHECK_LABEL: Record<MethodistCheckKey, string> = {
   coverage:  'Соответствие компетенциям',
   placement: 'Место дисциплины в структуре ОП (§2)',
   mto:       'Материально-техническое обеспечение (§12)',
+  linkage:   'Связка оценочных средств (п.4 ↔ СРС/КСР/п.9)',
 }
-const ALL_CHECKS: MethodistCheckKey[] = ['syllabus', 'coverage', 'placement', 'mto']
+const ALL_CHECKS: MethodistCheckKey[] = ['syllabus', 'coverage', 'placement', 'mto', 'linkage']
 const POLL_INTERVAL_MS = 3000
 const MAX_POLLS = 100
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -293,6 +295,7 @@ function DisciplineChecksTab({
   const [coverageResult, setCoverageResult]   = useSessionStorageState<ProgramDocumentReview | null>('methodist:result:coverage', null)
   const [placementResult, setPlacementResult] = useSessionStorageState<ProgramPlacementReview | null>('methodist:result:placement', null)
   const [mtoResult, setMtoResult]             = useSessionStorageState<ProgramMtoReview | null>('methodist:result:mto', null)
+  const [linkageResult, setLinkageResult]     = useSessionStorageState<AssessmentLinkageResult | null>('methodist:result:linkage', null)
   const [checkErrors, setCheckErrors] = useState<Partial<Record<MethodistCheckKey, string>>>({})
   const [runStatus, setRunStatus] = useState<'idle' | 'processing' | 'ready' | 'failed'>('idle')
 
@@ -306,6 +309,7 @@ function DisciplineChecksTab({
     for (const outcome of run.checks ?? []) {
       if (outcome.status === 'error') { errors[outcome.key] = outcome.error ?? 'Не удалось выполнить проверку'; continue }
       if (outcome.key === 'syllabus') { setSyllabusResult(outcome.result as SyllabusReview); continue }
+      if (outcome.key === 'linkage')  { setLinkageResult(outcome.result as AssessmentLinkageResult); continue }
       if (!outcome.result_id) continue
       if (outcome.key === 'coverage') {
         const found = (await getDisciplineReviews(programId)).find((r) => r.id === outcome.result_id)
@@ -346,7 +350,7 @@ function DisciplineChecksTab({
   })
 
   const running = createMut.isPending || runStatus === 'processing'
-  const hasResults = !!(coverageResult || placementResult || mtoResult || syllabusResult)
+  const hasResults = !!(coverageResult || placementResult || mtoResult || syllabusResult || linkageResult)
   const hasErrors = Object.keys(checkErrors).length > 0
 
   function toggle(key: MethodistCheckKey) {
@@ -362,7 +366,7 @@ function DisciplineChecksTab({
     }
     pollingId.current = null   // cancel any in-flight poll from a previous click
     setRunStatus('idle')
-    setSyllabusResult(null); setCoverageResult(null); setPlacementResult(null); setMtoResult(null)
+    setSyllabusResult(null); setCoverageResult(null); setPlacementResult(null); setMtoResult(null); setLinkageResult(null)
     setCheckErrors({})
     setMobileView('result')
     createMut.mutate()
@@ -468,6 +472,9 @@ function DisciplineChecksTab({
               )}
               {selected.includes('syllabus') && syllabusResult && (
                 <CheckSection title={CHECK_LABEL.syllabus}><SyllabusReviewReport result={syllabusResult} /></CheckSection>
+              )}
+              {selected.includes('linkage') && linkageResult && (
+                <CheckSection title={CHECK_LABEL.linkage}><AssessmentLinkageReport result={linkageResult} /></CheckSection>
               )}
             </div>
           )}
@@ -839,41 +846,60 @@ function ProgramCheckTab({ programId, program }: { programId: string; program: P
 }
 
 const ADHOC_ACCEPT = '.pdf,.doc,.docx,.jpg,.jpeg,.png'
+const ADHOC_CHECKS: AdHocCheckKey[] = ['syllabus', 'linkage', 'mto']
 
-// «Отдельный файл» (TODO Feature AM, Phase 3, final slice) — the §5-§8
-// evidence-citation check for a РПД that isn't attached to any programme
-// yet (arrived by email, still being drafted). No programme/discipline
-// target at all, so this is the one check in Кабинет методиста that isn't
-// gated on `getProgramAccessScope` — POST /api/methodist/ad-hoc-review is
-// gated purely on `methodist_access` instead. Nothing is persisted
-// server-side (see the route's own comment for why); the result only lives
-// in this tab's state, same as every other in-progress check here.
+// «Отдельный файл» (TODO Feature AM, Phase 3) — checks for a РПД that isn't
+// attached to any programme yet (arrived by email, still being drafted). No
+// programme/discipline target at all, so this is the one tab in Кабинет
+// методиста that isn't gated on `getProgramAccessScope` — POST
+// /api/methodist/ad-hoc-review is gated purely on `methodist_access`
+// instead. Runs the same three checks the discipline tab offers that don't
+// need real programme data (services/methodist/adHocChecks.ts) — coverage
+// and placement stay discipline-tab-only, see that file's header for why.
+// Nothing is persisted server-side; every result only lives in this tab's
+// state, same as every other in-progress check here.
 function AdHocReviewTab() {
   const addToast = useUIStore((s) => s.addToast)
   const [mode, setMode] = useState<'file' | 'text'>('file')
   const [file, setFile] = useState<File | null>(null)
   const [text, setText] = useState('')
-  const [result, setResult] = useState<SyllabusReview | null>(null)
+  // ФОС uploaded alongside the main document, for this run only — the
+  // discipline doesn't exist in the system yet at this stage, so there's
+  // nowhere to persist it; it only feeds the «связка» check below.
+  const [fosFile, setFosFile] = useState<File | null>(null)
+  const [selected, setSelected] = useState<AdHocCheckKey[]>(ADHOC_CHECKS)
+  const [outcomes, setOutcomes] = useState<AdHocCheckOutcome[]>([])
   const [runError, setRunError] = useState<string | null>(null)
   const [mobileView, setMobileView] = useState<MobileView>('form')
 
   const reviewMut = useMutation({
-    mutationFn: () => reviewAdHocSyllabus(mode === 'file' ? { file: file ?? undefined } : { text }),
-    onSuccess: (data) => { setResult(data); setRunError(null) },
+    mutationFn: () => reviewAdHoc(
+      { ...(mode === 'file' ? { file: file ?? undefined } : { text }), fosFile: fosFile ?? undefined },
+      selected,
+    ),
+    onSuccess: (data) => { setOutcomes(data); setRunError(null) },
     onError: (err) => {
       const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
       setRunError(message ?? 'Не удалось выполнить проверку — попробуйте ещё раз.')
     },
   })
 
+  function toggle(key: AdHocCheckKey) {
+    setSelected((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])
+  }
+
   function run() {
     if (mode === 'file' && !file) { addToast('Выберите файл', 'error'); return }
     if (mode === 'text' && text.trim().length < 80) { addToast('Вставьте текст РПД (минимум несколько абзацев)', 'error'); return }
-    setResult(null)
+    if (selected.length === 0) { addToast('Выберите хотя бы одну проверку', 'error'); return }
+    setOutcomes([])
     setRunError(null)
     setMobileView('result')
     reviewMut.mutate()
   }
+
+  const errors = outcomes.filter((o) => o.status === 'error')
+  const results = outcomes.filter((o) => o.status === 'ok')
 
   return (
     <div className="h-full flex flex-col">
@@ -890,7 +916,7 @@ function AdHocReviewTab() {
               title="Как это работает"
               description="Проверьте рабочую программу, которая ещё не привязана к образовательной программе — например, файл, полученный по почте. Загрузите файл или вставьте текст; система найдёт цели, компетенции и разделы содержания сама."
               steps={[
-                'Загрузите файл (PDF, Word, скан) или вставьте текст РПД',
+                'Загрузите файл (PDF, Word, скан) или вставьте текст РПД и отметьте проверки',
                 'Система разбирает документ и находит требования сама',
                 'Каждое требование оценивается с цитатой источника',
               ]}
@@ -935,15 +961,53 @@ function AdHocReviewTab() {
               />
             )}
 
+            <div className="space-y-1">
+              {ADHOC_CHECKS.map((key) => (
+                <label key={key} className="flex items-center gap-2.5 py-1.5 px-2 -mx-2 rounded-md cursor-pointer hover:bg-surface transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(key)}
+                    onChange={() => toggle(key)}
+                    className="accent-amber w-4 h-4 flex-shrink-0"
+                  />
+                  <span className="text-sm font-sans text-ink leading-snug">{CHECK_LABEL[key]}</span>
+                </label>
+              ))}
+            </div>
+
+            {selected.includes('linkage') && (
+              <div className="pt-1 border-t border-border">
+                <label className="text-xs font-sans font-medium text-ink-secondary block mt-3 mb-1.5">
+                  ФОС (необязательно)
+                </label>
+                {fosFile ? (
+                  <div className="flex items-center gap-2 text-xs font-sans">
+                    <span className="text-ink truncate flex-1">{fosFile.name}</span>
+                    <button onClick={() => setFosFile(null)} className="text-ink-tertiary hover:text-danger transition-colors flex-shrink-0">Убрать</button>
+                  </div>
+                ) : (
+                  <input
+                    type="file"
+                    accept={ADHOC_ACCEPT}
+                    onChange={(e) => setFosFile(e.target.files?.[0] ?? null)}
+                    className="block w-full text-xs font-sans text-ink-secondary file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border file:border-border-mid file:bg-surface file:text-sm file:font-sans file:text-ink file:cursor-pointer hover:file:bg-surface-warm"
+                  />
+                )}
+                <p className="text-xs font-sans text-ink-tertiary mt-1.5">
+                  Если у дисциплины уже есть фонд оценочных средств — приложите его, и «связка оценочного средства» проверит его по-настоящему, а не оставит как «не загружен». Не сохраняется — только для этой проверки.
+                </p>
+              </div>
+            )}
+
             <div className="pt-1 space-y-2">
               <Button
                 onClick={run} loading={reviewMut.isPending}
-                disabled={mode === 'file' ? !file : text.trim().length < 80}
+                disabled={(mode === 'file' ? !file : text.trim().length < 80) || selected.length === 0}
                 className="w-full justify-center"
               >
                 Проверить
               </Button>
-              <p className="text-xs font-sans text-ink-tertiary text-center">Анализ может занять до минуты</p>
+              <p className="text-xs font-sans text-ink-tertiary text-center">Каждая проверка может занять до минуты</p>
             </div>
           </div>
         </div>
@@ -955,10 +1019,10 @@ function AdHocReviewTab() {
           {reviewMut.isPending ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center px-6 py-16">
               <LoadingSpinner size={20} />
-              <p className="text-sm font-sans text-ink-secondary mt-3">Разбираем РПД на разделы и проверяем покрытие…</p>
+              <p className="text-sm font-sans text-ink-secondary mt-3">Выполняем выбранные проверки…</p>
             </div>
-          ) : !result && !runError ? (
-            <EmptyState icon="import" text="Загрузите файл или вставьте текст — результат появится здесь." />
+          ) : outcomes.length === 0 && !runError ? (
+            <EmptyState icon="import" text="Загрузите файл или вставьте текст — результаты появятся здесь." />
           ) : (
             <div className="p-4 md:p-6 space-y-4 max-w-2xl mx-auto w-full">
               {runError && (
@@ -966,7 +1030,23 @@ function AdHocReviewTab() {
                   {runError}
                 </div>
               )}
-              {result && <SyllabusReviewReport result={result} />}
+              {errors.map((o) => (
+                <div key={o.key} className="bg-danger-bg border border-danger/15 rounded-lg p-3 text-xs font-sans text-danger">
+                  <span className="font-medium">{CHECK_LABEL[o.key]}: </span>{o.error}
+                </div>
+              ))}
+              {results.map((o) => (
+                <CheckSection key={o.key} title={CHECK_LABEL[o.key]}>
+                  {o.key === 'syllabus' && <SyllabusReviewReport result={o.result as SyllabusReview} />}
+                  {o.key === 'linkage' && <AssessmentLinkageReport result={o.result as AssessmentLinkageResult} />}
+                  {o.key === 'mto' && (
+                    <MtoReviewPanel review={{
+                      id: 'adhoc', program_id: '', discipline_id: '', document_id: '',
+                      result: o.result as ProgramMtoReview['result'], created_at: new Date().toISOString(),
+                    }} />
+                  )}
+                </CheckSection>
+              ))}
             </div>
           )}
         </div>
