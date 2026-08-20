@@ -318,6 +318,8 @@ are under-using the platform? Useful institutional decisions data.
 
 ### K. РПД ↔ competency/goals conformance check (Admin A2) · Effort: M · 🟡 PARTIALLY SHIPPED
 
+**Formulation check added (2026-08-20, methodist feedback).** A методист reviewing a real РПД found the check scoring «Знать/Уметь/Владеть» items at 100% «Обеспечена» when they were the competency indicators copy-pasted verbatim. Her rule: a ЗУВ formulation must convey the indicator's MEANING through the discipline's own content — identical wording is a defect, not a pass. `services/outcomeFormulation.ts` now flags these deterministically (no LLM — a copy is a measurable string question; token containment + a crude Russian stemmer so a re-inflected copy can't slip past), as its own findings list rather than a coverage-status demotion (delivery and wording are independent questions — see that file's header). The verdict line now refuses to report coverage without the formulation result, so a РПД whose content delivers copy-pasted ЗУВ items no longer reads as «полностью обеспечивает».
+
 **Status (2026-07-02):** the programme-scoped slice shipped as part of the
 discipline-scoped document library (Migration 051, see CHANGELOG). A discipline's
 uploaded рабочая программа is checked against `program_disciplines.competency_codes`

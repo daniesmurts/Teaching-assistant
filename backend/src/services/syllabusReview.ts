@@ -1,9 +1,10 @@
 import { chatJSON } from './deepseek'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { ValidationError } from '../errors/AppError'
+import { findCopiedOutcomeFormulations } from './outcomeFormulation'
 import type {
   SyllabusReview, SyllabusCoverageItem, CoverageStatus, CoverageSource,
-  ContentSection, RequirementKind, ParsedSyllabusReport,
+  ContentSection, RequirementKind, ParsedSyllabusReport, OutcomeFormulationFinding,
 } from '../../../shared/types'
 
 // КНИТУ admin feature A2 — «Анализ соответствия РПД». Structure-aware version:
@@ -72,12 +73,24 @@ export async function reviewSyllabus(params: ReviewParams): Promise<SyllabusRevi
   // 4) Score each requirement against the CONTENT sections only.
   const items = await scoreCoverage(params.teacherId, parsed.content, requirements)
 
+  // 5) Formulation quality — is each ЗУВ item a real reformulation of the
+  // indicator through this discipline's content, or just a copy of it?
+  // Deterministic and independent of the coverage scoring above (see
+  // services/outcomeFormulation.ts's header for why it's neither an LLM call
+  // nor a status demotion). Empty on the РПД-студия path: caller-supplied
+  // competencies carry no indicators to compare against.
+  const formulationFindings = findCopiedOutcomeFormulations(
+    parsed.competencies.flatMap((c) => c.indicators),
+    { knowledge: parsed.outcomes.knowledge, skills: parsed.outcomes.skills, mastery: parsed.outcomes.mastery },
+  )
+
   return {
     competencies_source: competenciesProvided ? 'provided' : 'declared',
     goals_source:        goalsProvided ? 'provided' : 'declared',
     parsed: parsedReport(parsed),
     items,
-    summary: summarise(items),
+    formulation_findings: formulationFindings,
+    summary: summarise(items, formulationFindings),
     covered: items.filter((i) => i.status === 'covered').length,
     partial: items.filter((i) => i.status === 'partial').length,
     missing: items.filter((i) => i.status === 'missing').length,
@@ -437,16 +450,34 @@ function parsedReport(p: ParsedSyllabus): ParsedSyllabusReport {
   }
 }
 
-function summarise(items: SyllabusCoverageItem[]): string {
+// The formulation findings deliberately reach the verdict line too. Without
+// this, a РПД whose ЗУВ items are copy-pasted indicators but whose content
+// does deliver them would read as «полностью обеспечивает» — which is the
+// exact false all-clear the методист flagged. Coverage and formulation stay
+// separate facts; the summary just refuses to report one without the other.
+function summarise(items: SyllabusCoverageItem[], findings: OutcomeFormulationFinding[] = []): string {
   const total   = items.length
   if (total === 0) return 'Нет элементов для оценки.'
   const missing = items.filter((i) => i.status === 'missing').length
   const partial = items.filter((i) => i.status === 'partial').length
+
+  const formulationNote = findings.length > 0
+    ? ` Отдельно: ${findings.length} ${plural(findings.length, 'формулировка', 'формулировки', 'формулировок')} ` +
+      `«Знать/Уметь/Владеть» дословно повторяет индикаторы компетенций — их нужно переформулировать через содержание дисциплины.`
+    : ''
+
   if (missing === 0 && partial === 0) {
-    return 'Содержание РПД полностью обеспечивает заявленные требования.'
+    return `Содержание РПД полностью обеспечивает заявленные требования.${formulationNote}`
   }
   const parts: string[] = []
   if (missing) parts.push(`${missing} не обеспечено`)
   if (partial) parts.push(`${partial} частично`)
-  return `Из ${total} требований: ${parts.join(', ')}. Требуется доработка содержания РПД.`
+  return `Из ${total} требований: ${parts.join(', ')}. Требуется доработка содержания РПД.${formulationNote}`
+}
+
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10, mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return one
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few
+  return many
 }

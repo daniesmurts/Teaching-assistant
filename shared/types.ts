@@ -1098,11 +1098,41 @@ export interface ParsedSyllabusReport {
   content_sections:   ContentSection[]   // which content sections were located
 }
 
+// ─── «Знать/Уметь/Владеть» formulation quality ────────────────────────────────
+// Raised by a методист reviewing a real РПД (2026-08-20): the coverage check
+// scored ЗУВ items at 100% «Обеспечена» when they were the competency
+// indicators copy-pasted verbatim. Her rule: a ЗУВ formulation must convey
+// the indicator's MEANING through this discipline's own content — being
+// identical to it is a defect, not a pass. Produced deterministically by
+// services/outcomeFormulation.ts (no LLM — "is this a copy" is a measurable
+// string question), and kept as its own findings list rather than folded
+// into the coverage status, since "is it delivered?" and "is it copy-pasted?"
+// are independent questions.
+
+export type OutcomeKind = 'knowledge' | 'skill' | 'mastery'
+
+export type OutcomeFormulationFindingKind = 'copied_from_indicator'
+
+export interface OutcomeFormulationFinding {
+  kind:            OutcomeFormulationFindingKind
+  outcome_kind:    OutcomeKind
+  outcome_title:   string        // the «должен знать/уметь/владеть» text as written
+  indicator_code:  string | null // e.g. 'ОПК-4.1'; null when the РПД gave no code
+  indicator_title: string        // the indicator it duplicates
+  similarity:      number        // 0–1 token containment
+  detail:          string
+  recommendation:  string
+}
+
 export interface SyllabusReview {
   competencies_source: 'declared' | 'provided'   // extracted from the РПД vs. supplied
   goals_source:        'declared' | 'provided'
   parsed?:      ParsedSyllabusReport             // structural parse summary
   items:        SyllabusCoverageItem[]
+  // Optional — absent on reviews produced before this check shipped, and
+  // empty on the РПД-студия path (caller-supplied competencies carry no
+  // indicators to compare against). The UI guards for both.
+  formulation_findings?: OutcomeFormulationFinding[]
   summary:      string                            // 2–3 sentence overall verdict
   covered:      number
   partial:      number

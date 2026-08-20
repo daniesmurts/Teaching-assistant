@@ -1,7 +1,7 @@
 import ChallengeButton from '../grading/ChallengeButton'
 import type {
   SyllabusReview, SyllabusCoverageItem, CoverageStatus, ContentSection,
-  RequirementKind, ParsedSyllabusReport,
+  RequirementKind, ParsedSyllabusReport, OutcomeFormulationFinding, OutcomeKind,
 } from '../../types'
 
 // Renders a SyllabusReview — the §5-§8 evidence-citation coverage report
@@ -44,6 +44,7 @@ function scoreColor(score: number): string {
 
 export default function SyllabusReviewReport({ result }: { result: SyllabusReview }) {
   const { items, summary, covered, partial, missing, parsed } = result
+  const formulationFindings = result.formulation_findings ?? []
 
   // Group by requirement kind in canonical order (Цели → Компетенции → ...).
   const byKind = (['goal','competency','indicator','knowledge','skill','mastery','technology'] as RequirementKind[])
@@ -77,6 +78,12 @@ export default function SyllabusReviewReport({ result }: { result: SyllabusRevie
       {/* What we parsed */}
       {parsed && <ParsedReport parsed={parsed} />}
 
+      {/* Formulation findings — deliberately ABOVE the coverage breakdown.
+          These are the items the coverage scores rate as fully «Обеспечена»
+          while the wording is a copy of the indicator, so they have to be
+          visible before the reader takes those green scores at face value. */}
+      {formulationFindings.length > 0 && <FormulationFindings findings={formulationFindings} />}
+
       {/* Findings grouped by kind */}
       {byKind.map(({ kind, items }) => (
         <div key={kind} className="space-y-2.5">
@@ -85,6 +92,66 @@ export default function SyllabusReviewReport({ result }: { result: SyllabusRevie
             <span className="text-xs font-sans text-ink-tertiary">({items.length})</span>
           </div>
           {sortItems(items).map((item, i) => <CoverageCard key={i} item={item} />)}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const OUTCOME_KIND_LABEL: Record<OutcomeKind, string> = {
+  knowledge: 'Знать', skill: 'Уметь', mastery: 'Владеть',
+}
+
+// «Знать/Уметь/Владеть» lines that merely restate a competency indicator.
+// Both texts are shown in full, one above the other, because the whole point
+// is that the reader can see the duplication for themselves rather than
+// trust a similarity number — same "show the evidence, don't just assert it"
+// contract the coverage citations follow.
+function FormulationFindings({ findings }: { findings: OutcomeFormulationFinding[] }) {
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2">
+        <h3 className="font-display text-base font-bold text-ink">Формулировки результатов обучения</h3>
+        <span className="text-xs font-sans text-ink-tertiary">({findings.length})</span>
+      </div>
+      <p className="text-xs font-sans text-ink-secondary leading-relaxed">
+        «Знать/Уметь/Владеть» должны раскрывать смысл индикатора через содержание этой дисциплины.
+        Дословное совпадение с индикатором — недоработка, даже если содержание его обеспечивает.
+      </p>
+      {findings.map((f, i) => (
+        <div key={i} className="bg-surface border border-border border-l-2 border-l-warning rounded-lg p-4">
+          <div className="flex items-center gap-2 flex-wrap mb-2.5">
+            <span className="text-[10px] font-sans font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-sm bg-warning-bg text-warning">
+              Повтор индикатора
+            </span>
+            <span className="text-[10px] font-sans font-semibold text-ink-tertiary uppercase tracking-wider">
+              {OUTCOME_KIND_LABEL[f.outcome_kind]}
+            </span>
+            <span className="ml-auto text-xs font-mono font-medium text-warning tabular-nums">
+              {Math.round(f.similarity * 100)}%
+            </span>
+          </div>
+
+          <div className="space-y-1.5">
+            <div>
+              <div className="text-[10px] font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-0.5">
+                В разделе «{OUTCOME_KIND_LABEL[f.outcome_kind]}»
+              </div>
+              <div className="text-sm font-sans text-ink leading-snug">{f.outcome_title}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-0.5">
+                Индикатор{f.indicator_code ? ` ${f.indicator_code}` : ''}
+              </div>
+              <div className="text-sm font-sans text-ink-secondary leading-snug">{f.indicator_title}</div>
+            </div>
+          </div>
+
+          <div className="mt-3 pt-3 border-t border-border">
+            <p className="text-xs font-sans text-ink leading-relaxed">
+              <span className="font-medium text-amber">Рекомендация: </span>{f.recommendation}
+            </p>
+          </div>
         </div>
       ))}
     </div>
