@@ -45,7 +45,10 @@ import { verifyMarketingUnsubToken } from '../services/marketingEmails'
 import { setMarketingEmailsEnabled } from '../db/queries/teachers'
 import { hasLeadershipRole } from '../db/queries/leadership'
 import { getProgramAccessScope } from '../services/programAccess'
-import { getAccessScope, maxLevel, resolveGrantOnUnitTypes, CRITERIA_READ_UNIT_TYPES, TEACHING_OVERVIEW_UNIT_TYPES } from '../services/accessScope'
+import {
+  getAccessScope, maxLevel, resolveGrantOnUnitTypes,
+  CRITERIA_READ_UNIT_TYPES, TEACHING_OVERVIEW_UNIT_TYPES, METHODIST_UNIT_TYPES,
+} from '../services/accessScope'
 import { recordAudit } from '../db/queries/audit'
 
 // Client metadata for auth audit rows. Auth routes are unauthenticated, so the
@@ -102,6 +105,13 @@ async function adminFlags(row: { id: string; institution_id: string | null; is_p
     // «Преподаватели-чтение» specifically — /leadership stays on its own
     // separate is_leader gate, unaffected.
     org_overview_access: resolveGrantOnUnitTypes(access_scope, 'teaching', 'view', TEACHING_OVERVIEW_UNIT_TYPES)?.level ?? 'none',
+    // Narrower than umu_access — see METHODIST_UNIT_TYPES's doc comment
+    // (accessScope.ts). Drives «Кабинет методиста» specifically: it runs off
+    // curriculum-domain program access (getProgramAccessScope), not umu, so
+    // gating it on umu_access wrongly excluded МУМЦ (curriculum:edit only,
+    // no umu grant). Other umu-domain surfaces (Мониторинг РПД, Готовность
+    // УМК, Согласование РПД) keep using umu_access unchanged.
+    methodist_access: resolveGrantOnUnitTypes(access_scope, 'curriculum', 'view', METHODIST_UNIT_TYPES)?.level ?? 'none',
   }
 }
 

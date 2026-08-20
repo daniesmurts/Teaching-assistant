@@ -124,6 +124,16 @@ export interface Teacher {
   // polygroup head's own subtree activity belongs on /leadership instead,
   // an unrelated gate this doesn't touch.
   org_overview_access?:  'none' | 'view' | 'edit' | 'admin'
+  // docs/ACCESS-MATRIX.md — «Кабинет методиста» (TODO Feature AM). Not the
+  // same as umu_access: that domain also gates Мониторинг РПД/Готовность
+  // УМК (docs/ACCESS-MATRIX.md §4: strictly УМУ + РУМЦ), while Кабинет
+  // методиста runs off curriculum-domain program access and is meant for
+  // every УМУ-family role including Методист УМЦ (МУМЦ), who holds
+  // curriculum:edit but no umu grant at all. Computed from getAccessScope
+  // filtered to the unit TYPE a curriculum grant sits on (admin_office —
+  // the type shared by УМУ/РУМЦ/МУМЦ, excluding ЗК/РОП/РПГ/ДИ/ДЕК who also
+  // hold curriculum grants on other unit types).
+  methodist_access?:    'none' | 'view' | 'edit' | 'admin'
   institution_id?: string | null
   // Mirror of the teacher's institution's shared_rag_enabled flag — surfaced
   // here so the Courses page can decide whether to show / enable the "поделиться

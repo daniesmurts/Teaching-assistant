@@ -7,14 +7,20 @@ import { NotFoundError, ValidationError } from '../errors/AppError'
 import {
   analyzeOverlapRules, syllabusReviewRules, syllabusDraftRules, syllabusStudioSaveRules,
 } from '../validation/curriculumValidation'
-import { analyzeCurriculumOverlap } from '../services/curriculumAnalysis'
+import { analyzeCurriculumOverlap, type OverlapItem } from '../services/curriculumAnalysis'
 import { reviewSyllabus, extractDeclared, type CompetencyInput } from '../services/syllabusReview'
 import { draftSyllabus, draftToText } from '../services/syllabusAuthor'
+import { resolveProgramDisciplineText, resolveProgramDisciplinesText } from '../services/methodist/target'
 import { findCourseById } from '../db/queries/courses'
 import { getLatestKnowledgeText } from '../db/queries/documents'
 import { saveSyllabusStudioDraft, getSyllabusStudioDraft } from '../db/queries/syllabusStudioDrafts'
-import type { SyllabusSection, SyllabusReview } from '../../../shared/types'
+import type { SyllabusSection, SyllabusReview, SkippedDiscipline } from '../../../shared/types'
 import { logger } from '../lib/logger'
+
+// Below this, a course's inline syllabus is treated as absent — mirrors
+// services/curriculumAnalysis.ts's own MIN_CONTENT_CHARS (independent
+// constant, not shared — see that file's threshold for why).
+const MIN_OVERLAP_CONTENT_CHARS = 80
 
 const router = Router()
 router.use(authenticate)
@@ -34,39 +40,81 @@ export async function resolveCourseText(courseId: string, teacherId: string) {
 }
 
 // POST /api/curriculum/overlap
-// КНИТУ admin feature A3 — detect duplicated/overlapping topics across the
-// disciplines a single student takes.
+// КНИТУ admin feature A3 — detect duplicated/overlapping topics across
+// disciplines. Accepts either course_ids (a teacher's own «Предметы») or a
+// {program_id, discipline_ids} pair (TODO Feature AM — a методист/УМУ role
+// comparing disciplines inside a programme they have read access to, without
+// owning them as personal courses).
 router.post(
   '/overlap',
   aiLimiter,
   validate(analyzeOverlapRules),
   asyncHandler(async (req, res) => {
-    const { course_ids } = req.body as { course_ids: string[] }
-    const result = await analyzeCurriculumOverlap({ teacherId: req.teacher.id, courseIds: course_ids })
+    const { course_ids, program_id, discipline_ids } = req.body as {
+      course_ids?: string[]; program_id?: string; discipline_ids?: string[]
+    }
+
+    let items: OverlapItem[] = []
+    let preSkipped: SkippedDiscipline[] = []
+
+    if (program_id && discipline_ids && discipline_ids.length > 0) {
+      const { resolved, skipped } = await resolveProgramDisciplinesText(program_id, discipline_ids, req.teacher)
+      items = resolved.map((d) => ({ id: d.id, name: d.name, content: d.text }))
+      preSkipped = skipped.map((s) => ({ course_id: s.id, course_name: s.name, reason: s.reason }))
+    } else if (course_ids && course_ids.length > 0) {
+      for (const courseId of [...new Set(course_ids)]) {
+        const course = await findCourseById(courseId, req.teacher.id)
+        if (!course) {
+          preSkipped.push({ course_id: courseId, course_name: '—', reason: 'Дисциплина не найдена' })
+          continue
+        }
+        const inline = (course.syllabus_text ?? '').trim()
+        let content = inline
+        if (inline.length < MIN_OVERLAP_CONTENT_CHARS) {
+          const doc = await getLatestKnowledgeText(courseId, req.teacher.id)
+          content = [inline, doc ?? ''].filter(Boolean).join('\n\n').trim()
+        }
+        items.push({ id: course.id, name: course.name, content })
+      }
+    } else {
+      throw new ValidationError('Выберите минимум две дисциплины для анализа.')
+    }
+
+    const result = await analyzeCurriculumOverlap({ teacherId: req.teacher.id, items, preSkipped })
     res.json(result)
   })
 )
 
 // POST /api/curriculum/syllabus-review
 // КНИТУ admin feature A2 — score how well a syllabus covers the ОПК/ПК/УК
-// competencies and goals. Accepts either a course_id (resolve text + auto-extract
-// targets) or raw syllabus_text + targets (re-checking an edited РПД-студия draft).
+// competencies and goals. Accepts a course_id (resolve text + auto-extract
+// targets), a {program_id, discipline_id} pair (TODO Feature AM — same check,
+// sourced from the programme structure so a методист/УМУ role can run it
+// without owning the discipline as a personal course), or raw syllabus_text +
+// targets (re-checking an edited РПД-студия draft).
 router.post(
   '/syllabus-review',
   aiLimiter,
   validate(syllabusReviewRules),
   asyncHandler(async (req, res) => {
-    const { course_id, syllabus_text, competencies, goals } = req.body as {
-      course_id?: string; syllabus_text?: string
+    const { course_id, program_id, discipline_id, syllabus_text, competencies, goals } = req.body as {
+      course_id?: string; program_id?: string; discipline_id?: string; syllabus_text?: string
       competencies?: CompetencyInput[]; goals?: string[]
     }
 
     let text = (syllabus_text ?? '').trim()
-    if (!text && course_id) text = (await resolveCourseText(course_id, req.teacher.id)).text
+    let resolvedCompetencies = competencies
+    if (!text && course_id) {
+      text = (await resolveCourseText(course_id, req.teacher.id)).text
+    } else if (!text && program_id && discipline_id) {
+      const resolved = await resolveProgramDisciplineText({ programId: program_id, disciplineId: discipline_id }, req.teacher)
+      text = resolved.text
+      if (!resolvedCompetencies || resolvedCompetencies.length === 0) resolvedCompetencies = resolved.competencies
+    }
     if (!text) throw new ValidationError('Укажите дисциплину или текст РПД.')
 
     const review = await reviewSyllabus({
-      teacherId: req.teacher.id, syllabusText: text, competencies, goals,
+      teacherId: req.teacher.id, syllabusText: text, competencies: resolvedCompetencies, goals,
     })
     res.json(review)
   })

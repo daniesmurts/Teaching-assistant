@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { getAccessScope, levelAtLeast, resolveGrant, resolveGrantOnUnitTypes, maxLevel } from './accessScope'
+import { getAccessScope, levelAtLeast, resolveGrant, resolveGrantOnUnitTypes, maxLevel, METHODIST_UNIT_TYPES } from './accessScope'
 import * as orgUnitsQueries from '../db/queries/orgUnits'
 import type { TeacherRoleScope } from '../db/queries/orgUnits'
 
@@ -151,6 +151,21 @@ describe('resolveGrantOnUnitTypes', () => {
     }
     const grant = resolveGrantOnUnitTypes(scope, 'curriculum', 'edit', ['department'])
     expect(grant?.pathPrefixes).toEqual(['/inst/dept-a/'])
+  })
+
+  // TODO Feature AM / docs/ACCESS-MATRIX.md — Кабинет методиста's
+  // methodist_access flag. МУМЦ (Методист УМЦ) holds curriculum:edit on an
+  // admin_office unit and no umu grant at all; a ЗК holds the same
+  // curriculum:edit level but on a department unit and must NOT qualify.
+  it('admits Методист УМЦ (curriculum:edit on admin_office) via METHODIST_UNIT_TYPES', () => {
+    const scope = { curriculum: [{ level: 'edit' as const, path: '/inst/umc/mumc/', unitType: 'admin_office' as const }] }
+    const grant = resolveGrantOnUnitTypes(scope, 'curriculum', 'view', METHODIST_UNIT_TYPES)
+    expect(grant?.pathPrefixes).toEqual(['/inst/umc/mumc/'])
+  })
+
+  it("rejects a ЗК's department-level curriculum:edit grant via METHODIST_UNIT_TYPES", () => {
+    const scope = { curriculum: [{ level: 'edit' as const, path: '/inst/dept/', unitType: 'department' as const }] }
+    expect(resolveGrantOnUnitTypes(scope, 'curriculum', 'view', METHODIST_UNIT_TYPES)).toBeNull()
   })
 })
 

@@ -83,6 +83,7 @@ import InstitutionStructure from './pages/institution/InstitutionStructure'
 import RpdMonitor from './pages/institution/RpdMonitor'
 import UmcDashboard from './pages/institution/UmcDashboard'
 import RpdApprovals from './pages/institution/RpdApprovals'
+import InstitutionMethodist from './pages/institution/InstitutionMethodist'
 import NewVersionToast from './components/NewVersionToast'
 import LoadingSpinner from './components/ui/LoadingSpinner'
 
@@ -211,18 +212,21 @@ function InstitutionRoute({ children }: { children: React.ReactNode }) {
   const canAdmin =
     (teacher.is_platform_admin ?? teacher.role === 'platform_admin') ||
     (teacher.is_institution_admin ?? teacher.role === 'institution_admin') ||
-    // docs/ACCESS-MATRIX.md — a criteria-, org-overview-, platform-, or umu-
-    // access grant (e.g. a ЗК/ДИ, ПР УР, subtree-scoped institute director,
-    // or УМЦ head) reaches this panel too, without being an institution-root
-    // admin. InstitutionLayout filters the NAV to what the grant actually
-    // covers. `criteria_access`/`org_overview_access`, NOT plain
-    // `curriculum_access`/`teaching_access` — no NAV item is gated on those
-    // broad domains anymore, so a РОП/РПГ/УМУ/РУМЦ/МУМЦ holding only those
-    // would land on an empty panel.
+    // docs/ACCESS-MATRIX.md — a criteria-, org-overview-, platform-, umu-, or
+    // methodist-access grant (e.g. a ЗК/ДИ, ПР УР, subtree-scoped institute
+    // director, УМЦ head, or Методист УМЦ) reaches this panel too, without
+    // being an institution-root admin. InstitutionLayout filters the NAV to
+    // what the grant actually covers. `criteria_access`/`org_overview_access`,
+    // NOT plain `curriculum_access`/`teaching_access` — no NAV item is gated
+    // on those broad domains anymore, so a РОП/РПГ/УМУ/РУМЦ/МУМЦ holding only
+    // those would land on an empty panel. `methodist_access` specifically
+    // covers МУМЦ, who holds curriculum:edit but no umu grant at all — see
+    // METHODIST_UNIT_TYPES's doc comment (accessScope.ts).
     (!!teacher.criteria_access && teacher.criteria_access !== 'none') ||
     (!!teacher.org_overview_access && teacher.org_overview_access !== 'none') ||
     (!!teacher.platform_access && teacher.platform_access !== 'none') ||
-    (!!teacher.umu_access && teacher.umu_access !== 'none')
+    (!!teacher.umu_access && teacher.umu_access !== 'none') ||
+    (!!teacher.methodist_access && teacher.methodist_access !== 'none')
   if (!canAdmin) return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }
@@ -359,6 +363,7 @@ export default function App() {
             <Route path="rpd"       element={<RpdMonitor />} />
             <Route path="umc"       element={<UmcDashboard />} />
             <Route path="rpd-approvals" element={<RpdApprovals />} />
+            <Route path="methodist" element={<InstitutionMethodist />} />
             <Route path="usage"    element={<InstitutionUsage />} />
             <Route path="teachers" element={<InstitutionTeachers />} />
             <Route path="rubrics"  element={<InstitutionRubrics />} />

@@ -167,8 +167,15 @@ export default function Sidebar({ onClose }: Props) {
   // РПД, scoped the same way.
   const hasUmuAccess =
     !!teacher?.umu_access && teacher.umu_access !== 'none'
+  // docs/ACCESS-MATRIX.md — the narrower `methodist_access` flag (Кабинет
+  // методиста). NOT covered by hasUmuAccess: Методист УМЦ (МУМЦ) holds only
+  // curriculum:edit, no umu grant at all — see METHODIST_UNIT_TYPES's doc
+  // comment (accessScope.ts) for why umu_access couldn't just be widened.
+  const hasMethodistAccess =
+    !!teacher?.methodist_access && teacher.methodist_access !== 'none'
   const canSeeInstitutionPanel =
     isInstitutionAdmin || hasCriteriaAccess || hasOrgOverviewAccess || hasPlatformAccess || hasUmuAccess
+    || hasMethodistAccess
 
   function logout() { logoutApi().catch(() => {}); clearAuth(); navigate('/login') }
 

@@ -28,6 +28,28 @@ export async function reviewSyllabus(courseId: string): Promise<SyllabusReview> 
   return res.data
 }
 
+// TODO Feature AM — same check, targeted at a programme discipline instead
+// of a teacher's own course (Кабинет методиста).
+export async function reviewProgramDisciplineSyllabus(
+  programId: string, disciplineId: string
+): Promise<SyllabusReview> {
+  const res = await client.post<SyllabusReview>('/api/curriculum/syllabus-review', {
+    program_id: programId, discipline_id: disciplineId,
+  }, { timeout: 120_000 })
+  return res.data
+}
+
+// TODO Feature AM — overlap analysis across disciplines inside a programme
+// a методист has read access to, instead of a teacher's own courses.
+export async function analyzeProgramOverlap(
+  programId: string, disciplineIds: string[]
+): Promise<CurriculumAnalysis> {
+  const res = await client.post<CurriculumAnalysis>('/api/curriculum/overlap', {
+    program_id: programId, discipline_ids: disciplineIds,
+  }, { timeout: 180_000 })
+  return res.data
+}
+
 // КНИТУ teacher feature T5 — «РПД-студия»: draft content for a course's competencies,
 // then self-check coverage. Returns the draft + its conformance review + the targets used.
 export async function draftSyllabus(courseId: string): Promise<SyllabusDraftResult> {

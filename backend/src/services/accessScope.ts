@@ -134,6 +134,24 @@ export const CRITERIA_CREATE_UNIT_TYPES: OrgUnitType[] = ['division', 'departmen
 // match today — the two policies are independent and may diverge.
 export const TEACHING_OVERVIEW_UNIT_TYPES: OrgUnitType[] = ['governance', 'division', 'department']
 
+// docs/ACCESS-MATRIX.md — Кабинет методиста (TODO Feature AM). Resolved the
+// gap where gating on the `umu` domain outright excluded Методист УМЦ
+// (МУМЦ) — Table A gives МУМЦ only `curriculum:edit`, no `umu` grant at all.
+// Widening МУМЦ's bundle to include `umu` was rejected: `umu` also gates
+// Мониторинг РПД/Готовность УМК, which docs/ACCESS-MATRIX.md §4 verifies as
+// "строго УМУ + РУМЦ" — adding umu:view to МУМЦ would silently widen THOSE
+// too. Кабинет методиста's actual checks run through `getProgramAccessScope`
+// (domain IN ('all','curriculum')), which МУМЦ's existing `curriculum:edit`
+// already satisfies — the domain was never the real gap, only the `umu`-only
+// NAV gate was. `admin_office` is the one unit type all three
+// curriculum-domain УМУ-family roles share (УМУ: admin_office/institution,
+// РУМЦ: admin_office (УМЦ), МУМЦ: admin_office (под-единица УМЦ)) while
+// excluding ЗК (department)/РОП (program)/РПГ (cluster)/ДИ/ДЕК (division) —
+// every other curriculum-domain holder. `resolveGrantOnUnitTypes` always
+// admits an institution-root grant regardless of this list, so 'institution'
+// doesn't need to be listed separately.
+export const METHODIST_UNIT_TYPES: OrgUnitType[] = ['admin_office']
+
 /**
  * Like `resolveGrant`, but additionally requires the grant to sit on a unit
  * whose TYPE is in `allowedTypes` — for surfaces where domain+level alone

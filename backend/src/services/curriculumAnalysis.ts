@@ -1,7 +1,5 @@
 import { chatJSON, embed } from './deepseek'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
-import { findCourseById } from '../db/queries/courses'
-import { getLatestKnowledgeText } from '../db/queries/documents'
 import { ValidationError } from '../errors/AppError'
 import { logger } from '../lib/logger'
 import type {
@@ -16,7 +14,7 @@ import type {
 // surface; cosine is computed in-process so the embedding dimension is irrelevant
 // as long as every vector comes from the same `embed()`.
 
-const MIN_CONTENT_CHARS    = 80     // below this a course has nothing useful to analyse
+const MIN_CONTENT_CHARS    = 80     // below this an item has nothing useful to analyse
 const MAX_CONTENT_CHARS    = 6000   // cap source text sent to the extractor
 const MAX_TOPICS_PER_COURSE = 10   // keeps runtime snappy for a live analysis
 const PREFILTER_THRESHOLD  = 0.70   // cosine floor for a candidate pair
@@ -27,50 +25,55 @@ const EMBED_MAX_RETRIES    = 4     // on HTTP 429 / transient network errors
 interface ExtractedTopic { title: string; summary: string; embedding: number[] }
 interface DisciplineTopics { courseId: string; courseName: string; topics: ExtractedTopic[] }
 
+// One item to compare — a course (teacher path) or a programme discipline
+// (Кабинет методиста / TODO Feature AM path). Deliberately decoupled from
+// `courses.teacher_id`: this service used to resolve courseIds itself via
+// findCourseById(teacherId), which meant only a course's *owner* could ever
+// run an overlap check. Resolution now happens in the caller (routes/curriculum.ts),
+// which can source items from either a teacher's own courses or — via
+// services/methodist/target.ts — a programme a методист has read access to.
+export interface OverlapItem { id: string; name: string; content: string }
+
 export async function analyzeCurriculumOverlap(params: {
   teacherId: string
-  courseIds: string[]
+  items: OverlapItem[]
+  preSkipped?: SkippedDiscipline[]
 }): Promise<CurriculumAnalysis> {
-  const { teacherId, courseIds } = params
+  const { teacherId, items, preSkipped = [] } = params
 
   // De-dupe while preserving order.
-  const ids = [...new Set(courseIds)]
-  if (ids.length < 2) {
+  const seen = new Set<string>()
+  const deduped = items.filter((i) => (seen.has(i.id) ? false : (seen.add(i.id), true)))
+  if (deduped.length < 2) {
     throw new ValidationError('Выберите минимум две дисциплины для анализа.')
   }
 
   const analyzed: AnalyzedDiscipline[] = []
-  const skipped:  SkippedDiscipline[]  = []
+  const skipped:  SkippedDiscipline[]  = [...preSkipped]
   const withTopics: DisciplineTopics[] = []
 
-  for (const courseId of ids) {
-    const course = await findCourseById(courseId, teacherId)
-    if (!course) {
-      skipped.push({ course_id: courseId, course_name: '—', reason: 'Дисциплина не найдена' })
-      continue
-    }
-
-    const content = await resolveCourseContent(courseId, teacherId, course.syllabus_text)
-    if (!content || content.trim().length < MIN_CONTENT_CHARS) {
+  for (const item of deduped) {
+    const content = item.content.trim().slice(0, MAX_CONTENT_CHARS)
+    if (content.length < MIN_CONTENT_CHARS) {
       skipped.push({
-        course_id: course.id, course_name: course.name,
+        course_id: item.id, course_name: item.name,
         reason: 'Нет содержания для анализа — добавьте программу или загрузите РПД',
       })
       continue
     }
 
-    const topics = await extractTopics(teacherId, course.name, content)
+    const topics = await extractTopics(teacherId, item.name, content)
     if (topics.length === 0) {
       skipped.push({
-        course_id: course.id, course_name: course.name,
+        course_id: item.id, course_name: item.name,
         reason: 'Не удалось выделить темы из содержания',
       })
       continue
     }
 
     const embedded = await embedTopics(teacherId, topics)
-    withTopics.push({ courseId: course.id, courseName: course.name, topics: embedded })
-    analyzed.push({ course_id: course.id, course_name: course.name, topic_count: embedded.length })
+    withTopics.push({ courseId: item.id, courseName: item.name, topics: embedded })
+    analyzed.push({ course_id: item.id, course_name: item.name, topic_count: embedded.length })
   }
 
   if (withTopics.length < 2) {
@@ -119,17 +122,6 @@ export async function analyzeCurriculumOverlap(params: {
     pair_summary: summarisePairs(pairs),
     generated_at: new Date().toISOString(),
   }
-}
-
-// ── Content source: inline syllabus first, then latest ready РПД/material ──────
-async function resolveCourseContent(
-  courseId: string, teacherId: string, syllabusText: string | null
-): Promise<string> {
-  const inline = (syllabusText ?? '').trim()
-  if (inline.length >= MIN_CONTENT_CHARS) return inline.slice(0, MAX_CONTENT_CHARS)
-  const doc = await getLatestKnowledgeText(courseId, teacherId)
-  const combined = [inline, doc ?? ''].filter(Boolean).join('\n\n').trim()
-  return combined.slice(0, MAX_CONTENT_CHARS)
 }
 
 // ── Topic extraction (one LLM call per discipline) ────────────────────────────

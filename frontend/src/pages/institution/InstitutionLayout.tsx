@@ -10,12 +10,16 @@ import { logout as logoutApi } from '../../api/auth'
 // domain's grant; `minLevel` matches the backend's requireDomain minimum so
 // a lower-level grant doesn't see a tab that would just 403 (org-structure
 // CRUD requires 'admin'; the Phase 2 teaching routes are all read-only so
-// 'view' suffices). 'criteria' and 'orgOverview' are NOT real domains —
-// they're narrower `criteria_access`/`org_overview_access` flags
-// (docs/ACCESS-MATRIX.md: department/institute leadership only, not every
-// role holding the underlying `curriculum`/`teaching` domain grant — see
-// accessScope.ts's CRITERIA_READ_UNIT_TYPES / TEACHING_OVERVIEW_UNIT_TYPES).
-type NavDomain = 'curriculum' | 'teaching' | 'platform' | 'umu' | 'criteria' | 'orgOverview'
+// 'view' suffices). 'criteria', 'orgOverview' and 'methodist' are NOT real
+// domains — they're narrower `criteria_access`/`org_overview_access`/
+// `methodist_access` flags (docs/ACCESS-MATRIX.md: department/institute
+// leadership only for criteria/orgOverview, not every role holding the
+// underlying `curriculum`/`teaching` domain grant — see accessScope.ts's
+// CRITERIA_READ_UNIT_TYPES / TEACHING_OVERVIEW_UNIT_TYPES. `methodist` is
+// the opposite narrowing: plain `umu_access` would have *excluded* Методист
+// УМЦ (МУМЦ), who holds curriculum:edit but no umu grant at all — see
+// METHODIST_UNIT_TYPES's doc comment).
+type NavDomain = 'curriculum' | 'teaching' | 'platform' | 'umu' | 'criteria' | 'orgOverview' | 'methodist'
 // `group` renders a small section header above the first item of that group
 // — purely a sidebar grouping label, NOT a new access-control axis. УМУ
 // (Учебно-методическое управление) is real-world department framing for
@@ -25,6 +29,7 @@ type NavDomain = 'curriculum' | 'teaching' | 'platform' | 'umu' | 'criteria' | '
 const NAV: { to: string; label: string; end: boolean; domain?: NavDomain; minLevel?: 'view' | 'edit' | 'admin'; group?: string }[] = [
   { to: '/institution',           label: 'Обзор',         end: true, domain: 'orgOverview', minLevel: 'view' },
   { to: '/institution/structure', label: 'Структура',     end: false, domain: 'platform', minLevel: 'admin' },
+  { to: '/institution/methodist', label: 'Кабинет методиста', end: false, domain: 'methodist', minLevel: 'view', group: 'УМУ' },
   { to: '/institution/rpd',       label: 'Мониторинг РПД', end: false, domain: 'umu', minLevel: 'view', group: 'УМУ' },
   { to: '/institution/umc',       label: 'Готовность УМК', end: false, domain: 'umu', minLevel: 'view', group: 'УМУ' },
   { to: '/institution/rpd-approvals', label: 'Согласование РПД', end: false, domain: 'umu', minLevel: 'view', group: 'УМУ' },
@@ -45,7 +50,10 @@ const DOMAIN_LEVEL_RANK: Record<string, number> = { view: 1, edit: 2, admin: 3 }
 /** The teacher's access level for a NAV item's domain, ranked. 0 = no access
  *  (item.domain undefined items are handled separately — admin-only). */
 function domainRank(
-  teacher: { curriculum_access?: string; teaching_access?: string; platform_access?: string; umu_access?: string; criteria_access?: string; org_overview_access?: string } | null,
+  teacher: {
+    curriculum_access?: string; teaching_access?: string; platform_access?: string; umu_access?: string
+    criteria_access?: string; org_overview_access?: string; methodist_access?: string
+  } | null,
   domain?: NavDomain
 ): number {
   if (!domain) return 0
@@ -54,6 +62,7 @@ function domainRank(
     : domain === 'umu' ? teacher?.umu_access
     : domain === 'criteria' ? teacher?.criteria_access
     : domain === 'orgOverview' ? teacher?.org_overview_access
+    : domain === 'methodist' ? teacher?.methodist_access
     : teacher?.platform_access
   return DOMAIN_LEVEL_RANK[value ?? ''] ?? 0
 }

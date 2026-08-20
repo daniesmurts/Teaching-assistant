@@ -1830,6 +1830,147 @@ capital efficiency ("we can absorb 5× users on the current VM").
   new `pages/admin/AdminCapacity.tsx`, `config/planLimits.ts`,
   `docs/scaling.md` (becomes the doc the page renders, not a parallel copy).
 
+### AM. Кабинет методиста — one place for a методист to run every РПД/ОП check · Effort: Phase 0 M, 🟢 SHIPPED (2026-08-19) · Phase 1 M, 🟢 SHIPPED (2026-08-19) · Phase 2 M · Phase 3 M
+
+Prompted by user testing (2026-08-19) with a real методист: the role's grants
+were correct, but every check they needed (РПД competency coverage, «Место
+дисциплины», МТО, overlap) lives inside РПД-студия или РОП-студия, both keyed
+off structures a методист doesn't own. To get anything done they had to jump
+between the two studios and act like a teacher.
+
+**Root cause, not just navigation.** `POST /programs/:id/disciplines/:disciplineId/studio-course`
+([routes/programs.ts](backend/src/routes/programs.ts)) find-or-creates a
+**personal предмет** owned by the caller, seeded from the uploaded РПД, so
+that РПД-студия has something to work off. The draft then persists to
+`syllabus_studio_drafts`, keyed by `(course_id, teacher_id)`
+([db/queries/syllabusStudioDrafts.ts](backend/src/db/queries/syllabusStudioDrafts.ts)).
+Same anchor problem reaches the teacher-side checks — `syllabus-review` and
+`overlap` used to resolve their target text through
+`resolveCourseText(courseId, teacherId)` → `findCourseById(courseId, teacherId)`
+([routes/curriculum.ts](backend/src/routes/curriculum.ts)). A методист owns no
+courses, so checking a whole ОП means accumulating one phantom personal course
+per discipline — burning the plan's `maxCourses` cap mid-audit — and the work
+is invisible to everyone else. Fixing this is what actually ends the
+studio-jumping; a new page on top of the same anchor would just relocate it.
+
+- **Why:** the platform already has every check a методист needs
+  (`reviewDocumentCoverage`, `reviewPlacement`, `reviewMto`, `analyzeProgram`,
+  `analyzeCurriculumOverlap`, `diffWorkingProgrammes`) — none of it is
+  reachable without borrowing a teacher's course ownership. De-anchoring +
+  giving the role one home is pure UX/access work, no new AI service.
+- **Scope decision (2026-08-19):** УМУ-family-scoped.
+  🟢 **МУМЦ gate resolved (2026-08-19):** gating on the `umu` domain outright
+  excluded `Методист УМЦ` (МУМЦ) — Table A gives МУМЦ only `curriculum:edit`,
+  no `umu` grant. Widening МУМЦ's bundle to `umu:view` was rejected: `umu`
+  also gates Мониторинг РПД/Готовность УМК, verified "строго УМУ + РУМЦ" in
+  [docs/ACCESS-MATRIX.md](docs/ACCESS-MATRIX.md) §4 — that would have
+  silently widened those too. Shipped instead: a narrow `methodist_access`
+  flag (`resolveGrantOnUnitTypes(scope, 'curriculum', 'view',
+  METHODIST_UNIT_TYPES)`, `METHODIST_UNIT_TYPES = ['admin_office']` in
+  `services/accessScope.ts`), same pattern as `criteria_access`/
+  `org_overview_access`. Admits УМУ/РУМЦ/МУМЦ (all sit on `admin_office` or
+  institution-root) while excluding ЗК/РОП/РПГ/ДИ/ДЕК (their `curriculum`
+  grants sit on `department`/`program`/`cluster`/`division`) — matches how
+  the кабинет's checks already gate access via `getProgramAccessScope`
+  (`curriculum` domain), so `umu` was never the real dependency. Wired into
+  `routes/auth.ts` (auth payload), `shared/types.ts`, and all three frontend
+  gates that read it: `InstitutionLayout.tsx`'s NAV, `Sidebar.tsx`'s
+  «Организация» link visibility, and `App.tsx`'s `InstitutionRoute` guard —
+  the last one is load-bearing; missing it there would have redirected МУМЦ
+  to `/dashboard` before ever reaching the NAV filter. 2 new tests in
+  `accessScope.test.ts` (admits admin_office, rejects department).
+- **Phase 0 — de-anchor (backend only, no UI change).** 🟡 slice 1 shipped
+  (2026-08-19): `services/methodist/target.ts`'s `resolveProgramDisciplineText`
+  resolves `{programId, disciplineId}` → `{text, declared competencies}` via
+  `findWorkingProgrammeForDiscipline` + the programme's own competency codes,
+  gated on `getProgramAccessScope`/`canReadProgram` (the same read check
+  `/api/institution/programs` already uses — no new access primitive). Wired
+  into `POST /api/curriculum/syllabus-review` as a third target alongside
+  `course_id` and raw `syllabus_text`, so the richer §5–§8 evidence-citation
+  report (the one `CurriculumConformance.tsx` runs, distinct from the
+  programme-level `/review` competency-coverage check Feature K already
+  shipped) is reachable without a personal course. No UI yet — Phase 1 wires
+  a picker to it.
+  🟡 slice 2 shipped (2026-08-19): `resolveProgramDisciplinesText` (batch
+  variant — one programme fetch + access check, then per-discipline text,
+  skipping missing/undocumented disciplines instead of failing the whole
+  request) wired into `POST /api/curriculum/overlap`. Required decoupling
+  `services/curriculumAnalysis.ts`'s `analyzeCurriculumOverlap` from
+  `courseIds`/`findCourseById` entirely — it now takes pre-resolved
+  `{id, name, content}` items, and course-vs-programme resolution moved up
+  into `routes/curriculum.ts`. 5 new tests in `curriculumAnalysis.test.ts`
+  pin the decoupled contract (dedup, per-item skip, preSkipped passthrough).
+  🟢 **Phase 0 SHIPPED (2026-08-19).** ФОС/БРС and `syllabus-draft`
+  (authoring) are **out of scope, permanently, not deferred** — decided
+  2026-08-19: a методист's role is checking/analysing what teachers and РОПы
+  already authored against the standard, not generating or owning artifacts
+  themselves ("they don't really create/generate anything unless they are
+  also a teacher at the same time"). ФОС/БРС stay exactly where they are —
+  teacher-owned, course-anchored, gated by the teacher's own plan tier —
+  and `studio-course` stays in place, marked deprecated only insofar as the
+  РОП path still uses it.
+- **Phase 1 — Кабинет методиста shell + «Проверка РПД» tab.**
+  🟢 slice 1 shipped (2026-08-19): `/institution/methodist`
+  ([InstitutionMethodist.tsx](frontend/src/pages/institution/InstitutionMethodist.tsx)),
+  one `NAV` entry
+  ([pages/institution/InstitutionLayout.tsx](frontend/src/pages/institution/InstitutionLayout.tsx))
+  gated on `methodist_access` (resolved above) — that's the entire auth
+  surface. Programme → discipline picker (sourced from the same
+  `GET /api/institution/programs` scope the РОП Студия already uses) →
+  runs the §5–§8 evidence-citation check via `reviewProgramDisciplineSyllabus`.
+  Extracted `SyllabusReviewReport` out of
+  [CurriculumConformance.tsx](frontend/src/pages/CurriculumConformance.tsx)
+  into
+  [components/curriculum/SyllabusReviewReport.tsx](frontend/src/components/curriculum/SyllabusReviewReport.tsx) —
+  both pages now render the identical report off one component, no
+  duplication.
+  🟢 slice 2 shipped (2026-08-19): the «Проверка дисциплины» tab now runs
+  four checks side by side, each independently selectable —
+  §5–§8 coverage, competency coverage (`reviewDiscipline`), «место в
+  структуре» (`reviewDisciplinePlacement`), and МТО
+  (`reviewDisciplineMto`); the last three never had the course-anchor
+  problem (`routes/programs.ts`'s discipline routes were already
+  programme-anchored), they just weren't reachable from one screen before.
+  New «Пересечение содержания» tab: multi-select disciplines within a
+  programme → `analyzeProgramOverlap`. Two renderer extractions made this
+  possible without duplicating ~470 lines:
+  [components/curriculum/CheckPanels.tsx](frontend/src/components/curriculum/CheckPanels.tsx)
+  (placement/MTO/coverage panels, pulled out of
+  [InstitutionProgramDetail.tsx](frontend/src/pages/institution/InstitutionProgramDetail.tsx) —
+  2588 → 2305 lines) and
+  [components/curriculum/OverlapReport.tsx](frontend/src/components/curriculum/OverlapReport.tsx)
+  (pulled out of [Curriculum.tsx](frontend/src/pages/Curriculum.tsx) — 319 →
+  171 lines); both original pages now import the shared components instead
+  of owning a copy. Verified: both typechecks clean, 803 backend tests pass,
+  `/institution/methodist` and `/curriculum` both load without a console
+  error post-extraction. **Not done yet:** Phase 2's registry/pg-boss runs
+  and Phase 3's cross-programme triage queue + ad-hoc upload target.
+- **Phase 2 — check registry + pg-boss runs.** `services/methodist/checks.ts`:
+  a registry where each entry is a thin adapter onto an existing service
+  (`{scope: 'discipline'|'program', needs: [...], run}`) — «полная экспертиза»
+  costs one registry entry, not one page. `routes/methodist.ts`:
+  `POST /runs`, `GET /runs/:id`, `GET /queue`. Runs go through
+  [services/jobQueue.ts](backend/src/services/jobQueue.ts) (pg-boss) — a full
+  expertise pass is 4–6 LLM calls, too slow for a synchronous request. New
+  additive table `methodist_runs` (target refs + status + pointers into the
+  existing per-check result tables — `program_document_reviews` etc. stay the
+  source of truth, no duplication).
+- **Phase 3 — Очередь tab (cross-programme triage), «Проверка ОП»** (programme
+  analysis + overlap + per-discipline coverage roll-up), ad-hoc file-upload
+  target, exports via the existing `services/programReportPdf.ts` /
+  `services/rpdReportXlsx.ts`.
+- **Touches:** `services/methodist/target.ts` (shipped), `services/methodist/checks.ts`
+  (Phase 2), `routes/methodist.ts` (Phase 2), new `methodist_runs` table
+  (Phase 2 migration), `pages/institution/InstitutionMethodist.tsx` (shipped),
+  `components/curriculum/SyllabusReviewReport.tsx` / `CheckPanels.tsx` /
+  `OverlapReport.tsx` (shipped — renderer extraction), `docs/ACCESS-MATRIX.md`
+  (Table B + §4, МУМЦ resolution — shipped).
+- **Not doing:** no new domain — `methodist_access` (§ above) is a
+  unit-type-narrowed derived flag on the existing `curriculum` domain, same
+  shape as `criteria_access`/`org_overview_access`, not a fifth domain. No
+  docs-site article (no new IT-visible integration surface — internal role
+  tooling only).
+
 ---
 
 ## Build order — locked design (§5–§7)
@@ -1880,4 +2021,6 @@ Keeping these here so they don't get re-proposed.
 
 ## In progress
 
-*(empty — pick from above)*
+- **AM. Кабинет методиста** — Phase 0 and Phase 1 both shipped (shell,
+  МУМЦ access gate, 4-check «Проверка дисциплины» tab, overlap tab). Next:
+  Phase 2 (check registry + pg-boss runs). See full entry above for phasing.
