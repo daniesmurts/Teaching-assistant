@@ -922,44 +922,51 @@ function AdHocReviewTab() {
               ]}
             />
 
-            <div className="flex gap-1 border-b border-border">
-              <button
-                onClick={() => setMode('file')}
-                className={`px-3 py-1.5 -mb-px text-xs font-sans font-medium border-b-2 transition-colors ${
-                  mode === 'file' ? 'border-amber text-ink' : 'border-transparent text-ink-secondary hover:text-ink'
-                }`}
-              >
-                Файл
-              </button>
-              <button
-                onClick={() => setMode('text')}
-                className={`px-3 py-1.5 -mb-px text-xs font-sans font-medium border-b-2 transition-colors ${
-                  mode === 'text' ? 'border-amber text-ink' : 'border-transparent text-ink-secondary hover:text-ink'
-                }`}
-              >
-                Текст
-              </button>
-            </div>
-
-            {mode === 'file' ? (
-              <div>
-                <input
-                  type="file"
-                  accept={ADHOC_ACCEPT}
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                  className="block w-full text-xs font-sans text-ink-secondary file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border file:border-border-mid file:bg-surface file:text-sm file:font-sans file:text-ink file:cursor-pointer hover:file:bg-surface-warm"
-                />
-                <p className="text-xs font-sans text-ink-tertiary mt-1.5">PDF, Word или скан, до 20 МБ</p>
+            <div className="rounded-lg border border-border-mid bg-surface p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Icon name="import" size={18} className="text-amber flex-shrink-0" />
+                <span className="text-sm font-sans font-semibold text-ink">Загрузите РПД для проверки</span>
               </div>
-            ) : (
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="Вставьте текст рабочей программы…"
-                rows={10}
-                className="w-full px-3 py-2 rounded-md border border-border-mid bg-surface text-sm font-sans text-ink focus:outline-none focus:border-border-strong resize-y"
-              />
-            )}
+
+              <div className="flex gap-1 border-b border-border mb-3">
+                <button
+                  onClick={() => setMode('file')}
+                  className={`px-3 py-1.5 -mb-px text-xs font-sans font-medium border-b-2 transition-colors ${
+                    mode === 'file' ? 'border-amber text-ink' : 'border-transparent text-ink-secondary hover:text-ink'
+                  }`}
+                >
+                  Файл
+                </button>
+                <button
+                  onClick={() => setMode('text')}
+                  className={`px-3 py-1.5 -mb-px text-xs font-sans font-medium border-b-2 transition-colors ${
+                    mode === 'text' ? 'border-amber text-ink' : 'border-transparent text-ink-secondary hover:text-ink'
+                  }`}
+                >
+                  Текст
+                </button>
+              </div>
+
+              {mode === 'file' ? (
+                <div>
+                  <input
+                    type="file"
+                    accept={ADHOC_ACCEPT}
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    className="block w-full text-xs font-sans text-ink-secondary file:mr-3 file:px-3.5 file:py-2 file:rounded-md file:border file:border-border-strong file:bg-ink file:text-sm file:font-sans file:font-medium file:text-ink-inverse file:cursor-pointer hover:file:opacity-90 file:transition-opacity"
+                  />
+                  <p className="text-xs font-sans text-ink-tertiary mt-1.5">PDF, Word или скан, до 20 МБ</p>
+                </div>
+              ) : (
+                <textarea
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder="Вставьте текст рабочей программы…"
+                  rows={10}
+                  className="w-full px-3 py-2 rounded-md border border-border-mid bg-surface text-sm font-sans text-ink focus:outline-none focus:border-border-strong resize-y"
+                />
+              )}
+            </div>
 
             <div className="space-y-1">
               {ADHOC_CHECKS.map((key) => (
@@ -976,12 +983,21 @@ function AdHocReviewTab() {
             </div>
 
             {selected.includes('linkage') && (
-              <div className="pt-1 border-t border-border">
-                <label className="text-xs font-sans font-medium text-ink-secondary block mt-3 mb-1.5">
-                  ФОС (необязательно)
-                </label>
+              <div className={`rounded-lg border p-3 ${fosFile ? 'border-success/40 bg-success-bg' : 'border-amber/40 bg-amber-light/40'}`}>
+                <div className="flex items-start gap-2">
+                  <Icon name="file-check" size={16} className={`flex-shrink-0 mt-0.5 ${fosFile ? 'text-success' : 'text-amber'}`} />
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm font-sans font-medium text-ink block">
+                      Есть готовый ФОС? Приложите его
+                    </span>
+                    <p className="text-xs font-sans text-ink-secondary leading-relaxed mt-0.5">
+                      Тогда «связка оценочного средства» проверит его по-настоящему, а не оставит как «не загружен». Необязательно, не сохраняется — только для этой проверки.
+                    </p>
+                  </div>
+                </div>
                 {fosFile ? (
-                  <div className="flex items-center gap-2 text-xs font-sans">
+                  <div className="flex items-center gap-2 text-xs font-sans mt-2.5 pl-6">
+                    <Icon name="file-check" size={13} className="text-success flex-shrink-0" />
                     <span className="text-ink truncate flex-1">{fosFile.name}</span>
                     <button onClick={() => setFosFile(null)} className="text-ink-tertiary hover:text-danger transition-colors flex-shrink-0">Убрать</button>
                   </div>
@@ -990,12 +1006,9 @@ function AdHocReviewTab() {
                     type="file"
                     accept={ADHOC_ACCEPT}
                     onChange={(e) => setFosFile(e.target.files?.[0] ?? null)}
-                    className="block w-full text-xs font-sans text-ink-secondary file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border file:border-border-mid file:bg-surface file:text-sm file:font-sans file:text-ink file:cursor-pointer hover:file:bg-surface-warm"
+                    className="block w-full mt-2.5 pl-6 text-xs font-sans text-ink-secondary file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border file:border-amber/50 file:bg-surface file:text-sm file:font-sans file:font-medium file:text-amber file:cursor-pointer hover:file:bg-amber-light"
                   />
                 )}
-                <p className="text-xs font-sans text-ink-tertiary mt-1.5">
-                  Если у дисциплины уже есть фонд оценочных средств — приложите его, и «связка оценочного средства» проверит его по-настоящему, а не оставит как «не загружен». Не сохраняется — только для этой проверки.
-                </p>
               </div>
             )}
 
