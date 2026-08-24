@@ -44,11 +44,6 @@ export async function getMethodistRun(id: string): Promise<MethodistRun> {
   return res.data
 }
 
-export async function listMethodistRuns(): Promise<MethodistRun[]> {
-  const res = await client.get<MethodistRun[]>('/api/methodist/runs')
-  return res.data
-}
-
 // TODO Feature AM, Phase 3 — cross-programme triage queue. Same shape as
 // api/umcDashboard.ts's getUmcDashboard (reuses the backend aggregation
 // wholesale) but reachable via `methodist_access` — see routes/methodist.ts.

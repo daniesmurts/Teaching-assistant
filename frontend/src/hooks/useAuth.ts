@@ -1,6 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
-import { login, register, logout } from '../api/auth'
+import { login, register } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
 
 // Errors are surfaced inline on the form (see authErrorMessage + mutation.error),
@@ -31,17 +30,4 @@ export function useRegister() {
       window.location.assign('/dashboard')
     },
   })
-}
-
-export function useLogout() {
-  const clearAuth = useAuthStore((s) => s.clearAuth)
-  const navigate = useNavigate()
-  return () => {
-    // Best-effort — local state is cleared and the user is sent to /login
-    // regardless; a failed request here just leaves a stale (still-valid)
-    // cookie, which is a rare edge case, not a security hole.
-    logout().catch(() => {})
-    clearAuth()
-    navigate('/login')
-  }
 }

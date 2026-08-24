@@ -6,11 +6,6 @@ export async function getCourses(): Promise<Course[]> {
   return res.data
 }
 
-export async function getCourse(id: string): Promise<Course> {
-  const res = await client.get<Course>(`/api/courses/${id}`)
-  return res.data
-}
-
 export async function createCourse(data: {
   name: string
   code?: string

@@ -51,14 +51,3 @@ export async function getLatestPlacementReviewsByProgram(programId: string): Pro
   )
   return rows.map(toReview)
 }
-
-export async function getLatestPlacementReviewForDiscipline(disciplineId: string): Promise<ProgramPlacementReview | null> {
-  const { rows } = await pool.query<PlacementReviewRow>(
-    `SELECT * FROM program_placement_reviews
-      WHERE discipline_id = $1
-      ORDER BY created_at DESC
-      LIMIT 1`,
-    [disciplineId]
-  )
-  return rows[0] ? toReview(rows[0]) : null
-}

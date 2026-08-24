@@ -202,22 +202,6 @@ export async function setMarketingEmailsEnabled(teacherId: string, enabled: bool
   )
 }
 
-/** Teachers eligible for a mail-merge broadcast — opted in, verified address
- *  (an unverified address may be a typo or someone else's; sending to it
- *  risks bounces that damage sender reputation), scoped to given plan tiers. */
-export async function findMarketingOptedInTeachers(
-  planTiers: string[]
-): Promise<Array<{ id: string; email: string; name: string | null }>> {
-  const { rows } = await pool.query<{ id: string; email: string; name: string | null }>(
-    `SELECT id, email, name FROM teachers
-     WHERE marketing_emails_enabled = TRUE AND is_active = TRUE
-       AND email_verified_at IS NOT NULL AND plan_tier = ANY($1)
-     ORDER BY email`,
-    [planTiers]
-  )
-  return rows
-}
-
 // ─── Recurring subscription state ─────────────────────────────────────────────
 
 /** Store the saved-card token + plan and enable auto-renewal (after first payment). */

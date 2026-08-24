@@ -46,12 +46,6 @@ export class PlanLimitError extends AppError {
   }
 }
 
-export class AIServiceError extends AppError {
-  constructor(message = 'AI-сервис временно недоступен. Попробуйте ещё раз.') {
-    super(message, 503, 'AI_SERVICE_ERROR')
-  }
-}
-
 export class DocumentProcessingError extends AppError {
   constructor(message: string) {
     super(message, 422, 'DOCUMENT_PROCESSING_ERROR')

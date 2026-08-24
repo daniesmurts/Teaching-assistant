@@ -273,24 +273,3 @@ export async function unshareCriterion(
   return rows[0] ? toCriterion(rows[0]) : null
 }
 
-// ─── Admin / institution ──────────────────────────────────────────────────────
-
-export async function createGlobalTemplate(
-  data: { name: string; description?: string; subject?: CriterionSubject }
-): Promise<Criterion> {
-  const { rows } = await pool.query<CriterionRow>(
-    `INSERT INTO criteria (teacher_id, name, description, subject, is_global_template)
-     VALUES (NULL, $1, $2, $3, TRUE)
-     RETURNING *`,
-    [data.name, data.description ?? null, data.subject ?? 'general']
-  )
-  return toCriterion(rows[0])
-}
-
-export async function deleteGlobalTemplate(id: string): Promise<boolean> {
-  const { rowCount } = await pool.query(
-    `DELETE FROM criteria WHERE id = $1 AND is_global_template = TRUE`,
-    [id]
-  )
-  return (rowCount ?? 0) > 0
-}

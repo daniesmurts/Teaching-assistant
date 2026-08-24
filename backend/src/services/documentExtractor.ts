@@ -203,36 +203,3 @@ export function cleanText(raw: string): string {
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN)
 }
-
-// ─── Assignment token budget — smart truncation keeps intro+body+conclusion ───
-
-const ASSIGNMENT_TOKEN_LIMIT = 8000
-
-export function prepareAssignmentText(text: string): {
-  text: string
-  wasTruncated: boolean
-  originalWordCount: number
-} {
-  const words = text.split(/\s+/).filter(Boolean)
-  const originalWordCount = words.length
-
-  if (estimateTokens(text) <= ASSIGNMENT_TOKEN_LIMIT) {
-    return { text, wasTruncated: false, originalWordCount }
-  }
-
-  const targetWords  = Math.floor((ASSIGNMENT_TOKEN_LIMIT * CHARS_PER_TOKEN) / 5)
-  const introWords   = Math.floor(targetWords * 0.15)
-  const bodyWords    = Math.floor(targetWords * 0.65)
-  const closingWords = Math.floor(targetWords * 0.20)
-
-  const bodyStart = Math.floor(words.length * 0.15)
-  const intro   = words.slice(0, introWords).join(' ')
-  const body    = words.slice(bodyStart, bodyStart + bodyWords).join(' ')
-  const closing = words.slice(-closingWords).join(' ')
-
-  const truncated =
-    `${intro}\n\n[...]\n\n${body}\n\n[...]\n\n${closing}` +
-    `\n\n[Документ сокращён для обработки. Исходный объём: ${originalWordCount} слов.]`
-
-  return { text: truncated, wasTruncated: true, originalWordCount }
-}

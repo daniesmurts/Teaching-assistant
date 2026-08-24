@@ -47,8 +47,6 @@ const PROVIDERS: Record<ProviderName, LLMProvider> = {
   })(),
 }
 
-export const DEEPSEEK = PROVIDERS.deepseek    // exported for callers that need the literal provider (calc mode)
-
 function defaultProviderName(): ProviderName {
   const env = process.env.DEFAULT_LLM_PROVIDER as ProviderName | undefined
   if (env && env in PROVIDERS) return env

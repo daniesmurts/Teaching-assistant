@@ -154,10 +154,6 @@ export async function createRpdGroup(name: string): Promise<RpdDeptGroup> {
   return (await client.post<RpdDeptGroup>('/api/institution/rpd/mapping/groups', { name })).data
 }
 
-export async function deleteRpdGroup(id: string): Promise<void> {
-  await client.delete(`/api/institution/rpd/mapping/groups/${id}`)
-}
-
 export async function assignRpdDepts(groupId: string, deptCodes: string[]): Promise<void> {
   await client.post('/api/institution/rpd/mapping/assign', { groupId, deptCodes })
 }

@@ -34,13 +34,6 @@ export interface ProfstandardWithChildren extends ProfstandardRow {
   otf: ProfstandardOtfRow[]
 }
 
-export async function listProfstandards(): Promise<ProfstandardRow[]> {
-  const { rows } = await pool.query<ProfstandardRow>(
-    `SELECT * FROM profstandards ORDER BY created_at DESC`
-  )
-  return rows
-}
-
 export interface ProfstandardsPageParams {
   page?:   number
   limit?:  number

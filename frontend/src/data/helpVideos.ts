@@ -107,7 +107,3 @@ export const HELP_VIDEOS: HelpVideo[] = [
     vkVideoUrl: null,
   },
 ]
-
-export function findVideo(slug: string): HelpVideo | undefined {
-  return HELP_VIDEOS.find((v) => v.slug === slug)
-}

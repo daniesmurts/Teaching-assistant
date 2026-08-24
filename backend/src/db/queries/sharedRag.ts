@@ -2,14 +2,6 @@ import { pool } from '../connection'
 
 // ─── Institution master toggle ───────────────────────────────────────────────
 
-export async function getInstitutionSharedRag(institutionId: string): Promise<boolean> {
-  const { rows } = await pool.query<{ shared_rag_enabled: boolean }>(
-    `SELECT shared_rag_enabled FROM institutions WHERE id = $1`,
-    [institutionId]
-  )
-  return rows[0]?.shared_rag_enabled ?? false
-}
-
 export async function setInstitutionSharedRag(
   institutionId: string,
   enabled: boolean,

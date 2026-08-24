@@ -14,11 +14,6 @@ export async function getBrsSchemeForCourse(courseId: string): Promise<BrsDraft 
   return res.data
 }
 
-export async function getBrsScheme(id: string): Promise<BrsDraft> {
-  const res = await client.get<BrsDraft>(`/api/brs/${id}`)
-  return res.data
-}
-
 export async function createBrsDraft(courseId: string, draft: BrsDraft): Promise<BrsDraft> {
   const res = await client.post<BrsDraft>('/api/brs', { course_id: courseId, ...draft })
   return res.data
@@ -37,11 +32,6 @@ export async function addBrsManualEntry(schemeId: string, data: {
   note?: string
 }): Promise<void> {
   await client.post(`/api/brs/${schemeId}/manual-entry`, data)
-}
-
-export async function getBrsLedger(courseId: string): Promise<BrsStudentAccrual[]> {
-  const res = await client.get<BrsStudentAccrual[]>(`/api/brs/course/${courseId}/ledger`)
-  return res.data
 }
 
 export async function getBrsStudentLedger(

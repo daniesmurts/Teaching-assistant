@@ -269,9 +269,6 @@ const CLAIM = {
   version:      'https://purl.imsglobal.org/spec/lti/claim/version',
 } as const
 
-export const LTI_DEEP_LINKING_REQUEST  = 'LtiDeepLinkingRequest'
-export const LTI_RESOURCE_LINK_REQUEST = 'LtiResourceLinkRequest'
-
 /**
  * Validates an id_token posted to /api/lti/launch: signature (via the
  * platform's live JWKS), issuer/audience/nonce, deployment_id membership.

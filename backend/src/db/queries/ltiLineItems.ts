@@ -1,13 +1,5 @@
 import { pool } from '../connection'
 
-export interface LtiLineItemRow {
-  id:                       string
-  lti_course_link_id:       string
-  lineitem_url:             string
-  published_assignment_id:  string | null
-  created_at:               Date
-}
-
 /**
  * Records the AGS lineitem URL for a published assignment the first time we
  * see it in a launch's endpoint claim (typically the student's first launch

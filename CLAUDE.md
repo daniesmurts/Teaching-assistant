@@ -59,7 +59,7 @@ ispum/
 │   │   ├── authenticate.ts        ← JWT + SAML, resolves teacher + plan
 │   │   ├── auditLog.ts            ← global mutation logger
 │   │   ├── requireRole.ts         ← role gates
-│   │   ├── requireUnitRole.ts     ← org-tree-based gates
+│   │   ├── requireDomain.ts       ← org-tree/domain gates
 │   │   ├── requireProgramAccess.ts
 │   │   ├── checkPlan.ts           ← plan limit enforcement
 │   │   ├── rateLimits.ts / errorHandler.ts / validate.ts / fileValidation.ts
@@ -179,7 +179,7 @@ Resolves through `org_units` + `org_unit_roles`, not `teachers.role`:
   "any domain" default. This is load-bearing, not stylistic: before Phase 2,
   the subtree-role check matched on `role` alone and a Phase 1 `curriculum`
   grant silently satisfied checks meant for the leadership/`teaching` surface.
-  Every new caller of these primitives (and of `requireUnitRole`) must state
+  Every new caller of these primitives (and of `requireDomain`/`requireDomainOnUnitTypes`) must state
   which domain it's checking, or it risks reintroducing that leak.
 
 ### RAG Flywheel

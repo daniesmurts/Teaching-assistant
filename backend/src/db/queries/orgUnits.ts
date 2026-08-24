@@ -98,16 +98,6 @@ export async function getOrgUnitById(id: string): Promise<OrgUnitRow | null> {
   return rows[0] ?? null
 }
 
-/** The whole tree for an institution, ordered by path so callers can render it
- *  hierarchically without re-sorting. */
-export async function listOrgUnitsForInstitution(institutionId: string): Promise<OrgUnitRow[]> {
-  const { rows } = await pool.query<OrgUnitRow>(
-    'SELECT * FROM org_units WHERE institution_id = $1 ORDER BY path',
-    [institutionId]
-  )
-  return rows
-}
-
 export interface OrgUnitWithCount extends OrgUnitRow {
   member_count: number   // teachers whose primary department sits in this subtree
 }

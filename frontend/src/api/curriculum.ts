@@ -28,17 +28,6 @@ export async function reviewSyllabus(courseId: string): Promise<SyllabusReview> 
   return res.data
 }
 
-// TODO Feature AM — same check, targeted at a programme discipline instead
-// of a teacher's own course (Кабинет методиста).
-export async function reviewProgramDisciplineSyllabus(
-  programId: string, disciplineId: string
-): Promise<SyllabusReview> {
-  const res = await client.post<SyllabusReview>('/api/curriculum/syllabus-review', {
-    program_id: programId, discipline_id: disciplineId,
-  }, { timeout: 120_000 })
-  return res.data
-}
-
 // TODO Feature AM — overlap analysis across disciplines inside a programme
 // a методист has read access to, instead of a teacher's own courses.
 export async function analyzeProgramOverlap(

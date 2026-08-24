@@ -849,7 +849,3 @@ GigaChat планируется как третья опция в следующ
 `,
   },
 ]
-
-export function findArticle(slug: string): HelpArticle | undefined {
-  return HELP_ARTICLES.find((a) => a.slug === slug)
-}

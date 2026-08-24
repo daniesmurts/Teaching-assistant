@@ -64,11 +64,6 @@ export async function getAssignmentCrossUses(id: string): Promise<{
   return res.data
 }
 
-export async function gradeSubmission(data: GradeRequest): Promise<GradeResponse> {
-  const res = await client.post<GradeResponse>('/api/grading/grade', data)
-  return res.data
-}
-
 // ─── Async grade jobs ─────────────────────────────────────────────────────────
 // Grading (calc mode especially) can run for minutes — longer than any HTTP
 // timeout — so the client enqueues a job and polls, same as long reviews.
