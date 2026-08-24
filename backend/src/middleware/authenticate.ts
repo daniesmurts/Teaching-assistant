@@ -3,7 +3,7 @@ import { verifyToken } from '../lib/jwt'
 import { SESSION_COOKIE_NAME } from '../lib/session'
 import { findTeacherRowById, touchLastSeen } from '../db/queries/teachers'
 import { computeEffectiveTier } from '../lib/planTier'
-import { UnauthorizedError, ForbiddenError } from '../errors/AppError'
+import { ForbiddenError } from '../errors/AppError'
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 

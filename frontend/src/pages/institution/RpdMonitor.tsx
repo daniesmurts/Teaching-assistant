@@ -427,7 +427,7 @@ export default function RpdMonitor() {
             <GroupsTable
               overview={overview}
               onDownload={(groupId) => downloadRpdGroup(groupId, overview.snapshot.id)}
-              onReminder={(groupId, name) => downloadRpdReminder(groupId, overview.snapshot.id)
+              onReminder={(groupId, _name) => downloadRpdReminder(groupId, overview.snapshot.id)
                 .catch(() => addToast('Не удалось сформировать напоминание', 'error'))}
               onPreviewReminder={async (groupId) => {
                 try {

@@ -8,7 +8,7 @@ import { yandexImageSearch } from './yandexImages'
 import { webSearch, type SearchResult } from './yandexSearch'
 import { logger } from '../lib/logger'
 import type { CallContext } from './llm/types'
-import { estimateSlideCount, MAX_SLIDE_COUNT } from '../../../shared/types'
+import { estimateSlideCount } from '../../../shared/types'
 import type {
   Presentation,
   PresentationSource,

@@ -30,7 +30,7 @@ import {
   PROGRAM_PRACTICE_LABEL, PROGRAM_PRACTICE_TYPES,
   type ProgramDocument, type ProgramPracticeType, type ProgramDocumentReview, type ProgramDocumentKind,
   type SequencingStructure,
-  type OutcomeDelivery, type ProgramDocumentDiff, type DiffChangeKind,
+  type ProgramDocumentDiff, type DiffChangeKind,
   type ProgramPlacementReview,
   type ProgramMtoReview,
 } from '../../types'

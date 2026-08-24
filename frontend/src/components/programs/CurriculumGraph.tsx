@@ -56,12 +56,6 @@ export default function CurriculumGraph({
   const [contentUnits, setContentUnits] = useState<ProgramContentUnit[] | null>(null)
   const [loadingUnits, setLoadingUnits] = useState(false)
 
-  const disciplineById = useMemo(() => {
-    const m = new Map<string, ProgramDiscipline>()
-    for (const d of program.disciplines) if (d.id) m.set(d.id, d)
-    return m
-  }, [program.disciplines])
-
   // Grid positions — x by semester, y by index within that semester
   // (sorted by sort_order, same ordering the builder tab already uses).
   const { disciplinePositions, maxRowsInSemester } = useMemo(() => {

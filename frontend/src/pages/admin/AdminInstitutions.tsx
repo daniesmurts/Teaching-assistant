@@ -6,7 +6,7 @@ import { useUIStore } from '../../store/uiStore'
 import {
   getInstitutions, createInstitution, updateInstitution, type AdminInstitution,
   getSamlConfig, updateSamlConfig, type SamlConfig,
-  getInstitutionContracts, createInstitutionContract, updateInstitutionContract, deleteInstitutionContract,
+  getInstitutionContracts, createInstitutionContract, deleteInstitutionContract,
   type InstitutionContract,
 } from '../../api/admin'
 

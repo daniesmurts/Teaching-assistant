@@ -23,7 +23,7 @@ const TICK_MS = 60 * 1000   // re-check the grace threshold once a minute while 
 
 export default function NewVersionToast() {
   const {
-    needRefresh: [needRefresh, setNeedRefresh],
+    needRefresh: [needRefresh],
     updateServiceWorker,
   } = useRegisterSW({
     onRegisteredSW(_swUrl, registration) {

@@ -4,7 +4,7 @@ import * as target from './target'
 import * as documentReview from '../documentReview'
 import * as syllabusReview from '../syllabusReview'
 import * as programDocumentReviews from '../../db/queries/programDocumentReviews'
-import { NotFoundError, ValidationError } from '../../errors/AppError'
+import { NotFoundError } from '../../errors/AppError'
 import type { ProgramDetail, ProgramDiscipline } from '../../../../shared/types'
 
 const teacher = { id: 't1', is_platform_admin: false, institution_id: 'inst1' }

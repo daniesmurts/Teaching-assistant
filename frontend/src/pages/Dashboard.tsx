@@ -101,21 +101,6 @@ function SubjectsCard({ courses }: { courses: Array<{ id: string; name: string }
   )
 }
 
-// ─── Delta badge ──────────────────────────────────────────────────────────────
-
-function Delta({ current, previous }: { current: number; previous: number }) {
-  const diff = current - previous
-  if (diff === 0) return null
-  const positive = diff > 0
-  return (
-    <span className={`text-xs font-sans font-medium px-1.5 py-0.5 rounded-sm ${
-      positive ? 'bg-success-bg text-success' : 'bg-danger-bg text-danger'
-    }`}>
-      {positive ? '+' : ''}{diff}
-    </span>
-  )
-}
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {

@@ -134,7 +134,7 @@ describe('POST /api/lti/launch — instructor resource-link happy path', () => {
 
 describe('POST /api/lti/launch — rejections', () => {
   it('LTI_STATE_INVALID for an unknown/expired/replayed state', async () => {
-    const institution = await setupLtiInstitution()
+    await setupLtiInstitution()
     const idToken = await signLaunchToken(instructorClaims({ nonce: 'whatever' }))
     const res = await request(app).post('/api/lti/launch').type('form').send({ id_token: idToken, state: 'no-such-state' })
     expect(res.status).toBe(400)

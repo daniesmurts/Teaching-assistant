@@ -101,7 +101,6 @@ export async function setSlideImage(
   if (!existing || !existing.slides) return null
   if (slideIdx < 0 || slideIdx >= existing.slides.length) return null
 
-  const slide = existing.slides[slideIdx]
   // Every slide type can carry an image now (TODO.md Feature AG Phase 2) —
   // diagram keeps its own body.image_query/image (see shared/types.ts's
   // SlideBase comment), everything else uses the top-level field. Route

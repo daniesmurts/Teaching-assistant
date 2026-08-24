@@ -14,6 +14,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Changed
+- **Dead-code cleanup — Phase 1 (unused imports/locals, zero behavioural change).** Removed 18 unused imports/locals/params surfaced by `tsc --noUnusedLocals --noUnusedParameters` (currently off in both tsconfigs, so these slipped past the normal build): backend — `slide` binding in `db/queries/presentations.ts`, `UnauthorizedError` import in `middleware/authenticate.ts`, unused `institution` binding in `lti.integration.test.ts` (kept the setup call for its side effects), `loginInitUrl` import in `routes/lti.ts`, `failFosDocument`/`failLongReview`/`CHARS_PER_TOKEN` in the FOS/long-review services, `ValidationError` import in `methodist/checks.test.ts`, `MAX_SLIDE_COUNT` import in `services/presentations.ts`, and the unused trailing `teacherId` param on `persistTopology` (→ `_teacherId`); frontend — `setNeedRefresh`, an unused `disciplineById` memo in `CurriculumGraph`, `updateInstitutionContract`/`OutcomeDelivery`/`useMemo` imports, the dead `Delta` badge component in `Dashboard`, a leftover `normText` in `Grading`'s `findHighlight` (superseded by the `norm` walk), and an unused `name` callback param in `RpdMonitor` (→ `_name`). Both workspaces typecheck clean; changed-file tests pass. Follow-ups (dead exports/files, cross-boundary type duplication, enabling `noUnusedLocals` in CI) tracked separately.
+
 ### Added
 - **Two more real-РПД bugs found by user testing on the same day, both fixed.**
 

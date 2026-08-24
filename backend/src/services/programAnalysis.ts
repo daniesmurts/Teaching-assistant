@@ -181,7 +181,7 @@ export async function derivePkFormulationFindings(
 // Never throws — a failure here must not break the analysis report teachers
 // already depend on; the caller logs and moves on.
 export async function persistTopology(
-  program: ProgramDetail, analysis: ProgramAnalysis, analysisId: string, teacherId: string
+  program: ProgramDetail, analysis: ProgramAnalysis, analysisId: string, _teacherId: string
 ): Promise<void> {
   const prereqEdges = analysis.sequencing.edges
     .filter((e): e is PrerequisiteEdge & { from_id: string; to_id: string } => !!e.from_id && !!e.to_id)

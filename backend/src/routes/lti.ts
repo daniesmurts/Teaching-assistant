@@ -8,7 +8,7 @@ import { logger } from '../lib/logger'
 import { AppError, ValidationError, NotFoundError } from '../errors/AppError'
 import { toolPublicJwks } from '../lib/ltiJwks'
 import {
-  loginInitUrl, launchCallbackUrl, createLaunchState, consumeLaunchState,
+  launchCallbackUrl, createLaunchState, consumeLaunchState,
   validateLaunchToken, isInstructorRole, isLearnerRole,
   mintDeepLinkingResponse, type DeepLinkContentItem,
   consumeRegistrationSession, fetchPlatformOpenIdConfiguration, registerWithPlatform,

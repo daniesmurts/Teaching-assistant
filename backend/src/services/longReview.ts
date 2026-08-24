@@ -7,7 +7,6 @@ import {
   setLongReviewProgress,
   setLongReviewSnapshot,
   completeLongReview,
-  failLongReview,
 } from '../db/queries/longReviews'
 import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
@@ -17,7 +16,6 @@ import type { LongReviewResult, ChapterReview, DefenseQuestion, GradeLetter, Cri
 
 // ─── Tuning ────────────────────────────────────────────────────────────────────
 
-const CHARS_PER_TOKEN     = 3.5
 const SECTION_TARGET_CHARS = 17_500   // ~5k tokens per map unit
 const SECTION_MAX_CHARS    = 31_500   // ~9k tokens — split anything larger
 const MAX_SECTIONS         = 24       // cost ceiling on the map phase

@@ -336,7 +336,6 @@ function SubmissionPane({ text, highlight }: { text: string; highlight: string |
 
 export function findHighlight(text: string, quote: string | null): { before: string; match: string; after: string } {
   if (!quote || !text) return { before: text, match: '', after: '' }
-  const normText  = text.toLowerCase().replace(/\s+/g, ' ')
   const normQuote = quote.toLowerCase().replace(/\s+/g, ' ').trim()
   if (normQuote.length < 4) return { before: text, match: '', after: '' }
 
