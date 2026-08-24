@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 
 const DEFAULT_TITLE = 'ИСПУМ — Интеллектуальная Система Проверки и Подготовки Учебных Материалов'
 const DEFAULT_DESCRIPTION =
-  'ИСПУМ — Интеллектуальная Система Проверки и Подготовки Учебных Материалов. Помогает преподавателям проверять студенческие работы с ИИ и готовить лекции.'
+  'ИСПУМ — Интеллектуальная Система Проверки и Подготовки Учебных Материалов. Помогает преподавателям проверять студенческие работы и готовить лекции.'
 
 // No react-helmet in this app — /docs is the first place page-specific
 // <title>/<meta description> actually matters for search ranking, so this

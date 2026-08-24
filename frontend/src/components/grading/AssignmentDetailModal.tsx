@@ -133,7 +133,7 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
               {crossUses && crossUses.count_lifetime > 0 && (
                 <span
                   className="text-[10px] font-sans font-medium bg-success-bg text-success px-1.5 py-0.5 rounded-sm"
-                  title={`Эта работа была использована ИИ как образец при оценке работ коллег ${crossUses.count_lifetime} раз${crossUses.count_30d > 0 ? ` (${crossUses.count_30d} за 30 дней)` : ''}.`}
+                  title={`Эта работа была использована как образец при оценке работ коллег ${crossUses.count_lifetime} раз${crossUses.count_30d > 0 ? ` (${crossUses.count_30d} за 30 дней)` : ''}.`}
                 >
                   ✦ Использовано кафедрой ×{crossUses.count_lifetime}
                 </span>

@@ -4,8 +4,9 @@ import { useLogin } from '../hooks/useAuth'
 import { authErrorMessage, discoverSso } from '../api/auth'
 import Button from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
+import { getApiBaseUrl } from '../lib/runtimeConfig'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+const API_BASE = getApiBaseUrl()
 
 // Two-step login: enter email → we ask the backend whether this domain uses
 // SSO. SAML domains are redirected to their IdP; everyone else sees the

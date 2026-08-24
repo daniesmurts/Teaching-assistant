@@ -275,7 +275,7 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
           <ConfidenceBadge level={result.ai_confidence} ensemble={result.ai_ensemble} size="md" />
           <span className="text-[12.5px] font-sans text-ink-secondary leading-relaxed">
             {result.ai_confidence === 'high'
-              ? 'Варианты модели сошлись на одной оценке — ИИ уверен в результате.'
+              ? 'Варианты модели сошлись на одной оценке — результат надёжен.'
               : 'Между вариантами модели есть небольшой разброс. Просмотрите ключевые моменты перед подтверждением.'}
           </span>
         </div>
@@ -475,7 +475,7 @@ export default function GradingResult({ result, onApproved, onCite, student, sub
                         )}
                         {edited && aiCs && (
                           <span className="text-[10px] font-sans text-ink-tertiary">
-                            ИИ: {aiCs.score}
+                            Было: {aiCs.score}
                           </span>
                         )}
                         <input
@@ -582,7 +582,7 @@ function EditReasonPicker({
       value={value}
       onChange={(e) => onChange(e.target.value as ApprovedEditReason | '')}
       disabled={disabled}
-      title="Опционально: почему вы правите оценку ИИ?"
+      title="Опционально: почему вы правите черновую оценку?"
       className="px-2 py-1 text-xs font-sans text-ink bg-surface border border-border rounded-md hover:border-border-strong"
     >
       <option value="">Причина правки…</option>
@@ -590,7 +590,7 @@ function EditReasonPicker({
       <option value="tone">тон / формулировка</option>
       <option value="criterion_weight">веса критериев</option>
       <option value="scale">шкала оценивания</option>
-      <option value="scope">ИИ отклонился от задания</option>
+      <option value="scope">отклонение от задания</option>
       <option value="other">другое</option>
     </select>
   )
@@ -851,7 +851,7 @@ function VerificationQuestionsPanel({
         <div className="text-xs font-semibold text-info uppercase tracking-wide">Спросить студента</div>
         <span
           className="text-[10px] font-sans text-info/70"
-          title="Не обвинение в использовании ИИ — просто проверка, понимает ли студент свою работу"
+          title="Не обвинение — просто проверка, понимает ли студент свою работу"
         >
           для устной проверки
         </span>

@@ -1,11 +1,12 @@
 import axios from 'axios'
 import type { SubmissionTelemetry } from '../types'
+import { getApiBaseUrl } from '../lib/runtimeConfig'
 
 // Dedicated client for the public student writing surface. Unlike the main
 // `client`, it attaches NO teacher JWT and has NO 401→/login redirect — a
 // student has no account. The per-student token in the URL is the credential.
 const publicClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL ?? '',
+  baseURL: getApiBaseUrl(),
   timeout: 20000,
 })
 

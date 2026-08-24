@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="ИСПУМ" />
-    <meta name="description" content="ИСПУМ — Интеллектуальная Система Проверки и Подготовки Учебных Материалов. Помогает преподавателям проверять студенческие работы с ИИ и готовить лекции — точно, быстро, без VPN в России." />
+    <meta name="description" content="ИСПУМ — Интеллектуальная Система Проверки и Подготовки Учебных Материалов. Помогает преподавателям проверять студенческие работы и готовить лекции — точно, быстро, без VPN в России." />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>ИСПУМ — Интеллектуальная Система Проверки и Подготовки Учебных Материалов</title>
@@ -24,6 +24,12 @@
   <body>
     <noscript><div><img src="https://mc.yandex.ru/watch/109625339" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
     <div id="root"></div>
+    <!-- Runtime deployment config (docs/on-prem-deployment.md §16 Track 2.2)
+         — a plain classic script, so it runs and sets window.__ISPUM_CONFIG__
+         before the module script below evaluates. Lets one built artifact
+         point at a different backend origin per deployment by editing this
+         one static file in place, with no rebuild. -->
+    <script src="/config.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

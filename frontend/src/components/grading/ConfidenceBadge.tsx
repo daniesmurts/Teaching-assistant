@@ -3,7 +3,7 @@ import type { ConfidenceLevel, AiEnsemble } from '../../types'
 // Visual language for the confidence label produced by "thorough" grading.
 // high → green / reassuring; medium → neutral; low → warning ("check this").
 const LEVEL: Record<ConfidenceLevel, { label: string; cls: string; icon: string }> = {
-  high:   { label: 'ИИ уверен',            cls: 'bg-success-bg text-success', icon: '✓' },
+  high:   { label: 'Высокая уверенность',  cls: 'bg-success-bg text-success', icon: '✓' },
   medium: { label: 'Средняя уверенность',  cls: 'bg-amber-light text-amber',  icon: '≈' },
   low:    { label: 'Проверьте внимательно', cls: 'bg-warning-bg text-warning', icon: '⚠' },
 }

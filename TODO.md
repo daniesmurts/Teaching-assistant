@@ -251,6 +251,45 @@ joining the inviting institution.
 - **Touches** — `backend/src/routes/auth.ts`'s `POST /register` handler,
   the response shape consumed by `frontend/src/pages/Register.tsx`.
 
+### 19. Prompts → versioned content packs · Effort: L — on-prem-deployment.md §16 Track 2.3
+
+Sized while doing the rest of Track 2's deal-agnostic slice (2.1
+`DEPLOYMENT_MODE`, 2.2 runtime frontend config, 2.6 onprem fallback
+denial — all shipped 2026-08-17), then deliberately not started in the
+same pass. Prompts, rubric templates, criteria libraries, and FGOS
+reference data are inline across 20+ files in `backend/src/services/`
+(`grading.ts`, `presentations.ts`, `longReview.ts`, `topics.ts`,
+`fosGenerator.ts`, …) — there is no `prompts/` module today.
+
+- **Why** — under a quarterly release train, an on-prem customer's grading
+  quality freezes for three months at a time; a prompt fix that reaches
+  cloud on a Tuesday reaches them in November. Prompt iteration is the
+  fastest improvement loop this product has, and self-managed deployments
+  throttle it to the slowest cadence available unless prompts ship as
+  versioned content independent of code. The plan doc calls this out as
+  worth doing *before* the first on-prem release, not after — retrofitting
+  once a customer is live means their first three months run on frozen
+  prompts, and cloud benefits from the same decoupling (prompt changes stop
+  requiring a deploy).
+- **Why not done alongside 2.1/2.2/2.6** — those three were each a single
+  well-scoped file or a small, contained change, reviewable and testable in
+  one pass. This one touches the actual prompt logic behind grading,
+  presentations, quizzes, ВКР review, and topic generation — the core of
+  what the product does. Rushing a 20+ file refactor of that surface under
+  the same time pressure as three small items risks breaking grading
+  quality in a way that's hard to notice immediately and expensive to trace
+  back. It needs its own design pass: what a "content pack" actually is
+  (versioned how, signed how, pulled from where vs. applied from a file
+  when air-gapped), and a migration plan for the existing inline prompts
+  that doesn't touch all 20+ files in one commit.
+- **Gate** — none; can start whenever there's a dedicated pass for it,
+  same "earlier than instinct suggests" framing as the plan doc gives it.
+  Not blocked on the discovery questionnaire's answers — this one is
+  genuinely deal-agnostic and benefits cloud regardless.
+- **Touches** — new `prompts/` (or `content-packs/`) module; every service
+  file listed above; content-pack pull/apply mechanism (control plane for
+  cloud, file-based for air-gapped, per §16 Track 2.3's own note).
+
 ## Features
 
 ### A. Bulk grading · Effort: L

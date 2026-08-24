@@ -1,12 +1,13 @@
 import axios from 'axios'
 import type { LiveJoinState } from '../types'
+import { getApiBaseUrl } from '../lib/runtimeConfig'
 
 // Dedicated client for the public live-quiz join/answer surface. Unlike the
 // main `client`, it attaches NO teacher JWT and has NO 401→/login redirect —
 // a student has no account. The server-issued participant_token is the
 // credential. Mirrors api/publicWrite.ts exactly.
 const publicClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL ?? '',
+  baseURL: getApiBaseUrl(),
   timeout: 20000,
 })
 

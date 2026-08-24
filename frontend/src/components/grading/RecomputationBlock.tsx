@@ -51,7 +51,7 @@ export default function RecomputationBlock({ items, chapters }: Props) {
         </span>
       </div>
       <p className="text-[11px] font-sans text-ink-tertiary leading-relaxed mb-3">
-        ИИ независимо пересчитал ключевые численные результаты — ниже расхождения с тем, что написано в работе.
+        ИСПУМ независимо пересчитал ключевые численные результаты — ниже расхождения с тем, что написано в работе.
       </p>
       <div className="space-y-3">
         {sorted.map((f, i) => (
@@ -85,7 +85,7 @@ export default function RecomputationBlock({ items, chapters }: Props) {
               </div>
               <div className="bg-success-bg/60 border border-success/15 rounded p-2">
                 <div className="text-[10px] font-sans font-medium text-success uppercase tracking-wider mb-0.5">
-                  Перерасчёт ИИ
+                  Перерасчёт
                 </div>
                 <div className="text-xs font-sans font-medium text-ink tabular-nums">
                   {f.recomputed_value}

@@ -513,7 +513,7 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
               {revisionOf.student_name && <span className="font-normal text-ink-secondary"> · {revisionOf.student_name}</span>}
             </div>
             <div className="text-ink-secondary text-[11.5px] mt-0.5">
-              ИИ сравнит работу с прошлой версией{(revisionOf.approved_grade ?? revisionOf.ai_grade)
+              ИСПУМ сравнит работу с прошлой версией{(revisionOf.approved_grade ?? revisionOf.ai_grade)
                 ? ` (предыдущая оценка: ${revisionOf.approved_grade ?? revisionOf.ai_grade})`
                 : ''} и проверит, учтены ли замечания.
             </div>

@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
+import { getApiBaseUrl } from '../lib/runtimeConfig'
 
 // Per-request opt-out of the global error toast — used by forms that show
 // the error inline instead (login, register, password reset, account delete).
@@ -11,7 +12,7 @@ declare module 'axios' {
 }
 
 const client = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL ?? '',
+  baseURL: getApiBaseUrl(),
   timeout: 120_000, // AI calls can be slow — the reasoning model (calc grading) especially
   // Session lives in an HttpOnly cookie now (not a header we attach) — the
   // browser only sends it cross-origin if the request opts in.
@@ -88,10 +89,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   VALIDATION_ERROR:          'Проверьте введённые данные и попробуйте снова.',
   NOT_FOUND:                 'Запрошенный объект не найден.',
   FORBIDDEN:                 'Недостаточно прав для выполнения этого действия.',
-  AI_SERVICE_ERROR:          'Сервис ИИ временно недоступен. Попробуйте через несколько секунд.',
+  AI_SERVICE_ERROR:          'Сервис проверки временно недоступен. Попробуйте через несколько секунд.',
   DOCUMENT_PROCESSING_ERROR: 'Не удалось обработать документ. Проверьте файл и попробуйте снова.',
   INTERNAL_ERROR:            'Непредвиденная ошибка. Если она повторяется, свяжитесь с поддержкой.',
-  AI_RATE_LIMITED:           'Слишком много запросов к ИИ. Подождите минуту и попробуйте снова.',
+  AI_RATE_LIMITED:           'Слишком много запросов на проверку. Подождите минуту и попробуйте снова.',
   RATE_LIMITED:              'Слишком много запросов. Пожалуйста, подождите.',
 }
 

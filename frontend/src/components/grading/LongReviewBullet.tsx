@@ -64,7 +64,7 @@ export default function LongReviewBullet({ bullet, variant }: Props) {
           {action && (
             <span
               className={`${ACTION_CHIP_CLASS[action]} text-[10px] font-sans font-medium px-1.5 py-0.5 rounded-sm flex-shrink-0 leading-tight`}
-              title={action === 'verify' ? 'ИИ не уверен — стоит уточнить у автора' : 'ИИ нашёл расхождение — нужна проверка'}
+              title={action === 'verify' ? 'Система не уверена — стоит уточнить у автора' : 'Найдено расхождение — нужна проверка'}
             >
               {ACTION_LABEL[action]}
             </span>

@@ -13,7 +13,15 @@
 // DeepSeek, retry once on DeepSeek and log a warning. DeepSeek may itself be
 // self-hosted on RU infrastructure long-term (institution sovereignty stays
 // intact regardless of which provider answered).
+//
+// onprem is the exception (docs/on-prem-deployment.md §3.5/§16 Track 2.6):
+// a silent cross-provider retry is exactly the undocumented data path an
+// on-prem customer's ИБ audit exists to catch — leave one cloud-pointed key
+// in the env and a local inference outage silently ships student text to a
+// provider outside their perimeter. onprem hard-denies the fallback and
+// fails loud instead, for every provider including DeepSeek.
 
+import { config } from '../../lib/config'
 import { logger } from '../../lib/logger'
 import { DeepSeekProvider } from './deepseek'
 import { YandexProvider }   from './yandex'
@@ -166,6 +174,15 @@ async function fallbackOrThrow<T>(
   surface:  string,
 ): Promise<T> {
   if (primary.name === 'deepseek') throw err   // already on the fallback provider
+  if (config.deploymentMode === 'onprem') {
+    logger.error({
+      message:  'LLM provider failed; NOT falling back — onprem denies cross-provider fallback (docs/on-prem-deployment.md §3.5)',
+      surface,
+      primary:  primary.name,
+      error:    (err as Error).message,
+    })
+    throw err
+  }
   logger.warn({
     message:  'LLM provider failed; falling back to DeepSeek',
     surface,
