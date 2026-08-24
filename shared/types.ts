@@ -2305,3 +2305,487 @@ export interface MarketEvidence {
   created_at:        string
   updated_at:        string
 }
+
+// ─── Activation funnel (admin dashboard) ─────────────────────────────────────
+
+export interface FunnelSummary {
+  total_teachers:         number
+  created_course:         number
+  reached_first_grade:    number
+  created_presentation:   number
+  graded_within_24h:      number
+  graded_within_72h:      number
+  graded_within_7d:       number
+  median_hours_to_grade:  number | null
+}
+
+export interface FunnelCohort {
+  week:                  string   // ISO date of the cohort week's Monday
+  signups:               number
+  created_course:        number
+  reached_first_grade:   number
+  median_hours_to_grade: number | null
+}
+
+export interface StalledTeacher {
+  id:              string
+  email:           string
+  name:            string | null
+  created_at:      string
+  last_seen_at:    string | null
+  first_course_at: string | null
+  first_grade_at:  string | null
+}
+
+// ─── Grading — student summaries / trajectories ────────────────────────────────
+
+export interface StudentSummary {
+  student_name:    string
+  student_group:   string | null
+  submissions:     number
+  avg_score:       number | null   // average of approved (fallback ai) score
+  last_submission: string          // ISO
+}
+
+// ─── Audit log (admin) ───────────────────────────────────────────────────────
+
+export interface AuditFilters {
+  institutionId?: string   // optional — omit for all institutions
+  actorTeacherId?: string
+  action?: string          // exact match on the action string
+  from?: string            // ISO date — inclusive lower bound on created_at
+  to?: string              // ISO date — inclusive upper bound on created_at
+  limit?: number
+  offset?: number
+}
+
+// ─── Institution contracts (admin) ───────────────────────────────────────────
+
+export interface InstitutionContract {
+  id:                string
+  institution_id:    string
+  annual_value_rub:  number   // NUMERIC — parsed to a real number by connection.ts's global type parser (OID 1700), not left as a string
+  seats_purchased:   number
+  term_start:        string   // 'YYYY-MM-DD' — explicitly cast to text in every query below; a raw DATE column comes back
+  term_end:          string   // as a JS Date at UTC midnight, one well-known step from a local-timezone display bug
+  notes:             string | null
+  created_by:        string | null
+  created_at:        string
+  updated_at:        string
+}
+
+// ─── Leadership dashboard ────────────────────────────────────────────────────
+
+export interface LeadershipProgramUnitState {
+  unit_id:              string
+  unit_name:            string
+  unit_short_name:      string | null
+  program_id:           string | null
+  program_name:         string | null
+  program_code:         string | null
+  program_level:        string | null
+  has_description_doc:  boolean
+  has_plan_doc:         boolean
+  discipline_count:     number
+  competency_count:     number
+  last_analysis_at:     string | null
+}
+
+// ─── Payments (admin) ────────────────────────────────────────────────────────
+
+export interface PaymentsSummary {
+  revenue_this_month_kopecks: number
+  revenue_30d_kopecks:        number
+  confirmed_30d:              number
+  rejected_30d:               number
+  active_subscribers:         number   // auto-renew on, card on file, plan not expired
+  in_grace:                   number   // renewal failed, still inside grace window
+}
+
+export interface MonthlyRevenue {
+  month:              string   // 'YYYY-MM'
+  revenue_kopecks:    number
+  confirmed_count:    number
+  rejected_count:     number
+}
+
+// ─── Policy memos (Кабинет методиста) ────────────────────────────────────────
+
+export interface PolicyMemo {
+  course_id:      string
+  memo_text:      string
+  based_on_count: number
+  generated_at:   string
+  model_used:     string | null
+}
+
+// ─── Program unit / teacher pickers ──────────────────────────────────────────
+
+// Program units the caller may link a new/edited programme to. Server picks
+// the right set per scope: all program units in the institution for all-rw;
+// the caller's subtree-walked set for specific (РОПы, polygroup heads).
+export interface PickableProgramUnit {
+  id:         string
+  name:       string
+  short_name: string | null
+  type_code:  'program' | 'program_direction'
+  // Programme metadata (migration 055) — prefills the import form when the
+  // admin recorded the ФГОС header on the unit.
+  code:            string | null
+  specialty_name:  string | null
+  education_level: string | null
+  forms_of_study:  string | null
+}
+
+export interface AssignableTeacher {
+  id:    string
+  name:  string | null
+  email: string
+}
+
+// ─── Shared RAG summary ──────────────────────────────────────────────────────
+
+export interface SharedRagSummary {
+  enabled:               boolean
+  shared_courses_n:      number
+  participating_teachers_n: number
+  cross_uses_30d:        number
+  courses: Array<{
+    course_id:        string
+    course_name:      string
+    course_code:      string | null
+    teacher_id:       string
+    teacher_name:     string | null
+    approved_n:       number      // teacher's total approved grades on this course
+    cross_uses_30d:   number      // times this course's grades fed someone else's RAG
+  }>
+}
+
+// ─── Capacity model (admin dashboard) ────────────────────────────────────────
+
+export interface TierDistributionRow {
+  tier: string
+  n:    number
+  mean: number
+  p50:  number
+  p95:  number
+  max:  number
+}
+
+export interface FreeOutlierRow {
+  thresholdUsd: number
+  count:        number
+  total:        number
+}
+
+export interface InstitutionSummaryRow {
+  institutionId:  string
+  name:           string
+  activeSeats:    number
+  seatsPurchased: number | null
+  utilizationPct: number | null
+  costUsd:        number
+  revenueUsd:     number | null
+  marginUsd:      number | null
+  costPerSeatUsd: number
+}
+
+export interface ResourceHeadroom {
+  key:             string
+  label:           string
+  unit:            string
+  current:         number
+  ceiling:         number | null
+  ceilingLabel:    string
+  projectedAtScenario: number | null
+  breaksAtTeachers:    number | null
+  // TODO.md Feature AL Phase 3 — for resources actually bound by
+  // concurrency (db_connections), the mean-based breaksAtTeachers above
+  // understates real risk. This is that number corrected by the empirical
+  // peak-to-mean ratio (services/providerCeilings.ts) — null for resources
+  // where peak concurrency isn't the relevant failure mode (pgvector,
+  // db_size are cumulative totals, not concurrency-bound).
+  breaksAtTeachersPeakAdjusted?: number | null
+  note?:           string
+}
+
+export interface HeadroomResult {
+  activeTeachers:    number
+  scenarioTeachers:  number
+  resources:         ResourceHeadroom[]
+}
+
+export interface CapacityOverview {
+  month:              string
+  availableMonths:    string[]
+  trackingSinceMonth: string | null
+  isTrendReady:       boolean
+  activeTeachers:     number
+  tierDistribution:   TierDistributionRow[]
+  freeOutliers:       FreeOutlierRow[]
+  institutions:        InstitutionSummaryRow[]
+  fixedCostUsd:        number | null
+  variableCostPerTeacherUsd: number | null
+  headroom:            HeadroomResult
+  providerCeilings:    ProviderCeilingsReport   // TODO.md Feature AL Phase 3
+}
+
+// ─── Cohort analytics ────────────────────────────────────────────────────────
+
+export interface GroupBreakdown {
+  group:     string | null
+  count:     number
+  avg_score: number | null
+  histogram: Record<string, number>
+}
+
+export interface MissedCriterion {
+  name:      string
+  avg_score: number
+  count:     number
+}
+
+export interface SlippingStudent {
+  student_name:  string
+  student_group: string | null
+  recent_avg:    number
+  prior_avg:     number
+  delta:         number   // recent - prior, always negative for a "slipping" entry
+}
+
+export interface CohortAnalytics {
+  total_students:      number
+  total_submissions:   number
+  histogram:            Record<string, number>
+  by_group:             GroupBreakdown[]
+  top_missed_criteria:  MissedCriterion[]
+  slipping:             SlippingStudent[]
+}
+
+// ─── Document chat ───────────────────────────────────────────────────────────
+
+export interface ChatTurn {
+  role:    'user' | 'assistant'
+  content: string
+}
+
+export interface DocChatSource {
+  idx:         number
+  document_id: string
+  file_name:   string
+  page_start:  number | null
+  page_end:    number | null
+  excerpt:     string
+}
+
+export interface DocChatResult {
+  answer:   string
+  sources:  DocChatSource[]
+  grounded: boolean   // false = the refusal path fired; answer is fixed text, not model output
+}
+
+// ─── Feedback library ────────────────────────────────────────────────────────
+
+export interface FeedbackHit {
+  assignment_id:        string
+  course_name:          string | null
+  student_label:        string | null     // group only — kept identifiable for the teacher's own context
+  approved_score:       number | null
+  approved_grade:       string | null
+  approved_feedback:    string | null     // typically the most relevant body
+  feedback_excerpt:     string            // first ~240 chars for list display
+  similarity:           number            // pgvector cosine distance (lower = closer)
+  approved_at:          string | null
+}
+
+// ─── Grading response (assignment grade) ─────────────────────────────────────
+
+export interface GradeResponse {
+  assignment_id: string
+  ai_score: number
+  ai_grade: GradeLetter
+  ai_grade_label: string
+  ai_feedback: string
+  ai_criteria_scores: CriterionScore[]
+  ai_strengths: BulletItem[]
+  ai_improvements: BulletItem[]
+  ai_verification_questions: VerificationQuestion[]
+  ai_revision_check: RevisionCheckItem[] | null
+  ai_question_responses: QuestionResponse[] | null
+  criteria_snapshot: CriteriaSnapshotItem[] | null
+  ai_confidence: ConfidenceLevel | null
+  ai_ensemble: AiEnsemble | null
+  ai_calc_verification: CalcStepVerdict[]
+  ai_citation_check: CitationVerdict[]
+  used_examples: number
+  revision_number: number
+  parent_assignment_id: string | null
+}
+
+// ─── Learning loop metrics ───────────────────────────────────────────────────
+
+export interface LearningLoopSummary {
+  style_match: {
+    current_pct:  number | null   // 0–100, null when not enough data
+    previous_pct: number | null
+    delta:        number | null   // current - previous, signed
+    sample_n_30d: number
+  }
+  approved: {
+    lifetime:   number
+    this_month: number
+    delta_vs_last_month: number
+  }
+  used_as_example_30d: number
+  bullets_retention_30d: {
+    pct:        number | null     // 0–100
+    sample_n:   number
+  }
+  kafedra_contribution_30d: number   // 0 when teacher has no institution
+  trend_weekly: Array<{ week: string; mean_delta: number; n: number }>
+}
+
+// ─── LTI roster ──────────────────────────────────────────────────────────────
+
+export interface LtiRosterMember {
+  userId: string
+  name:   string | null
+  email:  string | null
+}
+
+// ─── Provider ceilings (admin dashboard) ─────────────────────────────────────
+
+export interface RateLimitKnee {
+  observed:                          boolean   // did we ever actually hit a 429 in the window?
+  minHourlyVolumeWithRateLimit:       number | null   // smallest hourly call volume where a 429 occurred
+  maxHourlyVolumeWithoutRateLimit:    number | null   // largest hourly call volume that stayed clean
+}
+
+export interface AccountCeiling {
+  account:           string
+  burnRatePerDayUsd: number
+  balanceFailures:   number
+  failureCount:      number
+  lastSuccessAt:      string | null
+  lastFailureAt:      string | null
+  // A recent failure with no success since is the closest historical proxy
+  // for "currently unhealthy" this data supports — real cooldown state
+  // (llm/deepseek.ts's downUntil map) is in-process and per-PM2-worker, not
+  // centrally queryable, so this is evidence, not a live status.
+  possiblyUnhealthy: boolean
+}
+
+export interface ProviderCeilingsReport {
+  windowDays:       number
+  peakToMean:       { ratio: number | null; totalCalls: number; peakHourlyCalls: number }
+  rateLimitKnee:    RateLimitKnee
+  accounts:         AccountCeiling[]
+  // Static risk, not a metric — invariant #9 forces ALL embeddings through
+  // Yandex and llm/yandex.ts has no multi-account pool (unlike DeepSeek,
+  // which got one after a real 402 incident). Surfaced here rather than
+  // buried in a comment because it's exactly the kind of "worth recording
+  // as a risk with no mitigation" item this phase exists to make visible.
+  yandexEmbedSpofNote: string
+}
+
+// ─── РПД monitor overview ────────────────────────────────────────────────────
+
+export interface RpdParseFlag {
+  deptCode: string
+  eduForm:  string
+  eduLevel: string
+  message:  string
+}
+
+export interface RpdTotals {
+  planCount: number
+  rpdDone:   number
+  rpdReview: number
+  rpdDebt:   number
+  rpdPct:    number
+  fosDone:   number
+  fosReview: number
+  fosDebt:   number
+  fosPct:    number
+}
+
+export interface RpdGroupOverview extends RpdTotals {
+  groupId:   string
+  groupName: string
+  deptCount: number
+  deltaRpdDone: number | null
+  deltaRpdDebt: number | null // current - previous; negative means долг shrank (good)
+}
+
+export interface RpdProblemDept {
+  deptCode:  string
+  eduForm:   string
+  eduLevel:  string
+  groupName: string | null
+  planCount: number
+  rpdDebt:   number
+  rpdPct:    number
+  stalled:   boolean // no progress since the previous snapshot
+}
+
+export interface RpdLeaderDept {
+  deptCode:  string
+  eduForm:   string
+  eduLevel:  string
+  groupName: string | null
+  planCount: number
+  rpdDone:   number
+  rpdDebt:   number
+  rpdPct:    number
+  improved:  boolean // rpd_done increased since the previous snapshot
+}
+
+export interface RpdRegressedDept {
+  deptCode:     string
+  eduForm:      string
+  eduLevel:     string
+  groupName:    string | null
+  planCount:    number
+  previousDebt: number
+  currentDebt:  number
+  deltaDebt:    number  // > 0 — долг got worse since the previous snapshot
+  deltaReview:  number  // usually negative here — на проверке drained without becoming сделано
+}
+
+export interface RpdAllDept {
+  deptCode:  string
+  eduForm:   string
+  eduLevel:  string
+  groupName: string | null
+  planCount: number
+  rpdDone:   number
+  rpdReview: number
+  rpdDebt:   number
+  rpdPct:    number
+  fosDone:   number
+  fosReview: number
+  fosDebt:   number
+  fosPct:    number
+  deltaRpdDone: number | null
+}
+
+export interface RpdOverview {
+  snapshot: { id: string; capturedAt: string; periodLabel: string | null; sourceFilename: string | null }
+  previousSnapshot: { id: string; capturedAt: string } | null
+  totals: RpdTotals
+  previousTotals: RpdTotals | null
+  groups: RpdGroupOverview[]
+  ungroupedDeptCodes: string[]
+  problemDepts: RpdProblemDept[]
+  leaderDepts: RpdLeaderDept[]
+  /** Кафедры whose долг got worse since the previous snapshot — usually because
+      на проверке drained (rejected/returned) faster than it converted to сделано.
+      Explains cases where both Сделано and Долг rise in the same period: they're
+      not each other's mirror, на проверке is — this is that regression made visible. */
+  regressedDepts: RpdRegressedDept[]
+  /** Every кафедра/форма/уровень row in the snapshot — problemDepts/leaderDepts are curated
+      top-N views of this same data, capped for the at-a-glance panels; this is the complete list
+      so no department is ever invisible on the platform. */
+  allDepts: RpdAllDept[]
+  timeSeries: Array<{ snapshotId: string; capturedAt: string; planCount: number; rpdDone: number; rpdPct: number }>
+}

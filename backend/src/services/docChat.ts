@@ -2,6 +2,8 @@ import { chat, embed } from './llm/registry'
 import { findRelevantChunksScored, type ScoredChunk } from '../db/queries/chunks'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import type { ChatMessage } from './llm/types'
+import type { ChatTurn, DocChatSource, DocChatResult } from '../../../shared/types'
+export type { ChatTurn } from '../../../shared/types'
 
 // "Спроси документ" (TODO Feature I) — grounded Q&A over a course's uploaded
 // reference materials (ГОСТы, методички, syllabi). The whole point is the
@@ -15,26 +17,6 @@ import type { ChatMessage } from './llm/types'
 //      general knowledge and requires bracket citations [N] tied to the
 //      retrieved excerpts, same citation-marker convention as
 //      services/presentations.ts.
-
-export interface ChatTurn {
-  role:    'user' | 'assistant'
-  content: string
-}
-
-export interface DocChatSource {
-  idx:         number
-  document_id: string
-  file_name:   string
-  page_start:  number | null
-  page_end:    number | null
-  excerpt:     string
-}
-
-export interface DocChatResult {
-  answer:   string
-  sources:  DocChatSource[]
-  grounded: boolean   // false = the refusal path fired; answer is fixed text, not model output
-}
 
 const MAX_SOURCES        = 5
 const SOURCE_EXCERPT_LEN = 600

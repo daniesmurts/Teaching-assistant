@@ -1,4 +1,5 @@
 import { pool } from '../connection'
+import type { LeadershipProgramUnitState } from '../../../../shared/types'
 
 // ─── Row shapes ───────────────────────────────────────────────────────────────
 
@@ -176,21 +177,6 @@ export async function getSubtreeActivity(unitId: string): Promise<LeadershipActi
 }
 
 // ─── Programme-state for a leadership subtree ────────────────────────────────
-
-export interface LeadershipProgramUnitState {
-  unit_id:              string
-  unit_name:            string
-  unit_short_name:      string | null
-  program_id:           string | null
-  program_name:         string | null
-  program_code:         string | null
-  program_level:        string | null
-  has_description_doc:  boolean
-  has_plan_doc:         boolean
-  discipline_count:     number
-  competency_count:     number
-  last_analysis_at:     string | null
-}
 
 /**
  * Every `program` org_unit in the subtree rooted at `unitPath`, with a LEFT

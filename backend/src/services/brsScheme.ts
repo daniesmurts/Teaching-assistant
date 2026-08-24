@@ -1,6 +1,7 @@
 import { chatJSON } from './deepseek'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { validateQuoteAgainstSource } from '../lib/citation'
+import type { BrsGradeThreshold } from '../../../shared/types'
 
 // Feature AE v1 (TODO.md "### AE") — one structured extraction pass over a
 // course's resolved РПД text, pulling out the БРС (балльно-рейтинговая
@@ -28,12 +29,6 @@ export interface BrsDraftCheckpoint {
   max_points: number
   checkpoint_type: 'graded' | 'manual'
   is_verbatim_verified: boolean
-}
-
-export interface BrsGradeThreshold {
-  min_points: number
-  max_points: number
-  grade_label: string
 }
 
 export interface BrsDraft {

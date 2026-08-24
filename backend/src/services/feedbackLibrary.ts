@@ -1,22 +1,11 @@
 import { pool } from '../db/connection'
 import { embed } from './deepseek'
+import type { FeedbackHit } from '../../../shared/types'
 
 // What a single search hit returns. Designed for two consumers:
 //   - the standalone /library page (full list view)
 //   - the inline "похожий прошлый отзыв" hint in the grading form
 // Both want enough text to be useful at a glance without a second round-trip.
-
-export interface FeedbackHit {
-  assignment_id:        string
-  course_name:          string | null
-  student_label:        string | null     // group only — kept identifiable for the teacher's own context
-  approved_score:       number | null
-  approved_grade:       string | null
-  approved_feedback:    string | null     // typically the most relevant body
-  feedback_excerpt:     string            // first ~240 chars for list display
-  similarity:           number            // pgvector cosine distance (lower = closer)
-  approved_at:          string | null
-}
 
 export interface SearchOptions {
   query:    string

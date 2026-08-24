@@ -5,6 +5,8 @@ import type {
   ProgramDocumentDiff, MarketEvidence, SupportedRegion, RpdSubmission, ProgramTopology, ProgramContentUnit,
   ProgramPlacementReview, ProgramMtoReview, PkFormulationFinding, ProfstandardOption,
 } from '../types'
+import type { PickableProgramUnit, AssignableTeacher } from '../../../shared/types'
+export type { AssignableTeacher } from '../../../shared/types'
 
 // Academic programs (учебные планы) — institution-admin feature.
 
@@ -53,22 +55,6 @@ export interface ImportProgramResult {
   program: Program
   imported: { disciplines: number; competencies: number }
   warnings: string[]
-}
-
-// Program units the caller may link a new/edited programme to. Server picks
-// the right set per scope: all program units in the institution for all-rw;
-// the caller's subtree-walked set for specific (РОПы, polygroup heads).
-export interface PickableProgramUnit {
-  id:         string
-  name:       string
-  short_name: string | null
-  type_code:  'program' | 'program_direction'
-  // Programme metadata (migration 055) — prefills the import form when the
-  // admin recorded the ФГОС header on the unit.
-  code:            string | null
-  specialty_name:  string | null
-  education_level: string | null
-  forms_of_study:  string | null
 }
 
 export async function getPickableProgramUnits(): Promise<PickableProgramUnit[]> {
@@ -263,12 +249,6 @@ export async function getMtoReviews(programId: string): Promise<ProgramMtoReview
 }
 
 // ─── РПД approval — РОП side (docs/RPD-WORKFLOW.md phase 4b) ──────────────────
-
-export interface AssignableTeacher {
-  id:    string
-  name:  string | null
-  email: string
-}
 
 /** Lean institution-wide teacher list for the «Ответственный» picker — see
  *  the backend route's comment for why this isn't institution.ts's /teachers. */

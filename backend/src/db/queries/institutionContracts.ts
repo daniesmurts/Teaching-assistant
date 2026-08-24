@@ -1,21 +1,9 @@
 import { pool } from '../connection'
+import type { InstitutionContract } from '../../../../shared/types'
 
 // Manual record of negotiated institution contracts (TODO.md Feature AL
 // Phase 0) — institution revenue doesn't exist anywhere else in the
 // database (payments.ts is teacher-scoped only). See migration 105.
-
-export interface InstitutionContract {
-  id:                string
-  institution_id:    string
-  annual_value_rub:  number   // NUMERIC — parsed to a real number by connection.ts's global type parser (OID 1700), not left as a string
-  seats_purchased:   number
-  term_start:        string   // 'YYYY-MM-DD' — explicitly cast to text in every query below; a raw DATE column comes back
-  term_end:          string   // as a JS Date at UTC midnight, one well-known step from a local-timezone display bug
-  notes:             string | null
-  created_by:        string | null
-  created_at:        string
-  updated_at:        string
-}
 
 export interface CreateInstitutionContractParams {
   institutionId:  string

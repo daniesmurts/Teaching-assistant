@@ -1,5 +1,7 @@
 import client from './client'
 import type { ProvenanceFacts } from '../types'
+import type { LtiRosterMember } from '../../../shared/types'
+export type { LtiRosterMember } from '../../../shared/types'
 
 export type PublishedStatus = 'draft' | 'open' | 'closed'
 export type InviteStatus    = 'invited' | 'writing' | 'submitted'
@@ -66,12 +68,6 @@ export async function deleteInvite(id: string, inviteId: string): Promise<void> 
 }
 
 // ─── Moodle roster import (NRPS) ───────────────────────────────────────────────
-
-export interface LtiRosterMember {
-  userId: string
-  name:   string | null
-  email:  string | null
-}
 
 export type LtiRosterResult =
   | { available: false }

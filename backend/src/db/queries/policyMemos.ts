@@ -1,12 +1,5 @@
 import { pool } from '../connection'
-
-export interface PolicyMemo {
-  course_id:      string
-  memo_text:      string
-  based_on_count: number
-  generated_at:   string
-  model_used:     string | null
-}
+import type { PolicyMemo } from '../../../../shared/types'
 
 interface PolicyMemoRow {
   course_id:      string

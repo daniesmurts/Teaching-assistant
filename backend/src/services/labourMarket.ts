@@ -1,4 +1,6 @@
 import { logger } from '../lib/logger'
+import type { SampleVacancy, ProfessionSnapshot, RegionSnapshot } from '../../../shared/types'
+export type { RegionSnapshot } from '../../../shared/types'
 
 // РОП Студия v0 (TODO.md Feature Z, Phase 0) — vacancy data for the
 // «обоснование актуальности» generator. trudvsem.ru ("Работа в России") is
@@ -118,26 +120,6 @@ export const SUPPORTED_REGIONS: { code: string; name: string }[] = [
   { code: '9000000000000', name: 'Запорожская область' },
   { code: '9900000000000', name: 'Байконур' },
 ]
-
-export interface SampleVacancy {
-  title:    string
-  employer: string
-  salary:   string | null
-  url:      string
-  date:     string
-}
-
-export interface ProfessionSnapshot {
-  term:   string
-  total:  number
-  sample: SampleVacancy[]
-}
-
-export interface RegionSnapshot {
-  region_code:   string
-  region_name:   string
-  by_profession: ProfessionSnapshot[]
-}
 
 export interface VacancySnapshot {
   fetched_at: string   // ISO timestamp — every claim in the generated text traces back to this moment

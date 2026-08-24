@@ -1,4 +1,6 @@
 import client from './client'
+import type { LeadershipProgramUnitState } from '../../../shared/types'
+export type { LeadershipProgramUnitState } from '../../../shared/types'
 
 export interface LeadershipUnit {
   id:                    string
@@ -16,21 +18,6 @@ export interface LeadershipTeacher {
   primary_unit_name: string | null
   grades_30d:        number
   last_active_at:    string | null
-}
-
-export interface LeadershipProgramUnitState {
-  unit_id:              string
-  unit_name:            string
-  unit_short_name:      string | null
-  program_id:           string | null
-  program_name:         string | null
-  program_code:         string | null
-  program_level:        string | null
-  has_description_doc:  boolean
-  has_plan_doc:         boolean
-  discipline_count:     number
-  competency_count:     number
-  last_analysis_at:     string | null
 }
 
 export interface LeadershipOverview {

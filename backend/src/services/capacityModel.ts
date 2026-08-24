@@ -12,18 +12,10 @@ import {
 import { getInstitutionById } from '../db/queries/institutions'
 import { getDatabaseSizeBytes, getActiveConnectionCount, getEmbeddedAssignmentCount } from '../db/queries/capacity'
 import { percentile } from './usageRollup'
-import { getProviderCeilingsReport, type ProviderCeilingsReport } from './providerCeilings'
+import { getProviderCeilingsReport } from './providerCeilings'
+import type { TierDistributionRow, FreeOutlierRow, InstitutionSummaryRow, ResourceHeadroom, HeadroomResult, CapacityOverview } from '../../../shared/types'
 
 // ─── Unit economics ────────────────────────────────────────────────────────
-
-export interface TierDistributionRow {
-  tier: string
-  n:    number
-  mean: number
-  p50:  number
-  p95:  number
-  max:  number
-}
 
 export function computeTierDistribution(rows: UsageRollupRow[]): TierDistributionRow[] {
   const byTier = new Map<string, number[]>()
@@ -49,12 +41,6 @@ export function computeTierDistribution(rows: UsageRollupRow[]): TierDistributio
 
 export const FREE_COST_THRESHOLDS_USD = [1, 3, 5] as const
 
-export interface FreeOutlierRow {
-  thresholdUsd: number
-  count:        number
-  total:        number
-}
-
 export function computeFreeOutliers(rows: UsageRollupRow[]): FreeOutlierRow[] {
   const freeCosts = rows.filter((r) => r.effective_tier === 'free').map((r) => r.cost_usd)
   return FREE_COST_THRESHOLDS_USD.map((thresholdUsd) => ({
@@ -62,18 +48,6 @@ export function computeFreeOutliers(rows: UsageRollupRow[]): FreeOutlierRow[] {
     count: freeCosts.filter((c) => c > thresholdUsd).length,
     total: freeCosts.length,
   }))
-}
-
-export interface InstitutionSummaryRow {
-  institutionId:  string
-  name:           string
-  activeSeats:    number
-  seatsPurchased: number | null
-  utilizationPct: number | null
-  costUsd:        number
-  revenueUsd:     number | null
-  marginUsd:      number | null
-  costPerSeatUsd: number
 }
 
 export async function computeInstitutionSummaries(
@@ -111,25 +85,6 @@ export function getMonthlyInfraCostUsd(): number | null {
 
 // ─── Headroom ───────────────────────────────────────────────────────────────
 
-export interface ResourceHeadroom {
-  key:             string
-  label:           string
-  unit:            string
-  current:         number
-  ceiling:         number | null
-  ceilingLabel:    string
-  projectedAtScenario: number | null
-  breaksAtTeachers:    number | null
-  // TODO.md Feature AL Phase 3 — for resources actually bound by
-  // concurrency (db_connections), the mean-based breaksAtTeachers above
-  // understates real risk. This is that number corrected by the empirical
-  // peak-to-mean ratio (services/providerCeilings.ts) — null for resources
-  // where peak concurrency isn't the relevant failure mode (pgvector,
-  // db_size are cumulative totals, not concurrency-bound).
-  breaksAtTeachersPeakAdjusted?: number | null
-  note?:           string
-}
-
 /**
  * Pure — how many active teachers until `current` (measured at
  * `activeTeachers` today) would hit `ceiling`, assuming linear scaling.
@@ -153,12 +108,6 @@ export function projectAtScenario(current: number, activeTeachers: number, scena
 
 const PGVECTOR_REINDEX_TRIGGER = 50_000   // docs/scaling.md's own number
 const DB_POOL_MAX_CONNECTIONS  = 50       // max=25 × 2 PM2 workers, connection.ts
-
-export interface HeadroomResult {
-  activeTeachers:    number
-  scenarioTeachers:  number
-  resources:         ResourceHeadroom[]
-}
 
 export async function computeHeadroom(activeTeachers: number, scenarioTeachers: number, peakToMeanRatio?: number | null): Promise<HeadroomResult> {
   const [dbSizeBytes, activeConnections, embeddedAssignments] = await Promise.all([
@@ -208,21 +157,6 @@ export async function computeHeadroom(activeTeachers: number, scenarioTeachers: 
 }
 
 // ─── Orchestrator ───────────────────────────────────────────────────────────
-
-export interface CapacityOverview {
-  month:              string
-  availableMonths:    string[]
-  trackingSinceMonth: string | null
-  isTrendReady:       boolean
-  activeTeachers:     number
-  tierDistribution:   TierDistributionRow[]
-  freeOutliers:       FreeOutlierRow[]
-  institutions:        InstitutionSummaryRow[]
-  fixedCostUsd:        number | null
-  variableCostPerTeacherUsd: number | null
-  headroom:            HeadroomResult
-  providerCeilings:    ProviderCeilingsReport   // TODO.md Feature AL Phase 3
-}
 
 export async function getCapacityOverview(month?: string, scenarioTeachers?: number): Promise<CapacityOverview | null> {
   const availableMonths = await listRolledUpMonths()

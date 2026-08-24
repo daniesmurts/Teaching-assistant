@@ -1,5 +1,6 @@
 import { pool } from '../connection'
 import { logger } from '../../lib/logger'
+import type { AuditFilters } from '../../../../shared/types'
 
 export interface AuditRow {
   id:               string
@@ -51,16 +52,6 @@ export async function listAuditByInstitution(institutionId: string, limit = 100)
 }
 
 // ─── Platform-admin cross-institution view ──────────────────────────────────────
-
-export interface AuditFilters {
-  institutionId?: string   // optional — omit for all institutions
-  actorTeacherId?: string
-  action?: string          // exact match on the action string
-  from?: string            // ISO date — inclusive lower bound on created_at
-  to?: string              // ISO date — inclusive upper bound on created_at
-  limit?: number
-  offset?: number
-}
 
 /**
  * Filterable, paginated listing across every institution. Backs the platform

@@ -1,4 +1,5 @@
 import { pool } from '../connection'
+import type { FunnelSummary, FunnelCohort, StalledTeacher } from '../../../../shared/types'
 
 // ─── Activation funnel (derived — no event instrumentation) ──────────────────
 //
@@ -21,17 +22,6 @@ const FIRSTS_CTE = `
   )
 `
 
-export interface FunnelSummary {
-  total_teachers:         number
-  created_course:         number
-  reached_first_grade:    number
-  created_presentation:   number
-  graded_within_24h:      number
-  graded_within_72h:      number
-  graded_within_7d:       number
-  median_hours_to_grade:  number | null
-}
-
 /** Whole-history funnel: how many reach each step, and how fast the aha moment comes. */
 export async function getFunnelSummary(): Promise<FunnelSummary> {
   const { rows } = await pool.query(
@@ -49,14 +39,6 @@ export async function getFunnelSummary(): Promise<FunnelSummary> {
        FROM firsts`
   )
   return rows[0]
-}
-
-export interface FunnelCohort {
-  week:                  string   // ISO date of the cohort week's Monday
-  signups:               number
-  created_course:        number
-  reached_first_grade:   number
-  median_hours_to_grade: number | null
 }
 
 /** Weekly signup cohorts, newest first. */
@@ -77,16 +59,6 @@ export async function getFunnelByWeek(weeks: number): Promise<FunnelCohort[]> {
     [weeks]
   )
   return rows
-}
-
-export interface StalledTeacher {
-  id:              string
-  email:           string
-  name:            string | null
-  created_at:      string
-  last_seen_at:    string | null
-  first_course_at: string | null
-  first_grade_at:  string | null
 }
 
 /**

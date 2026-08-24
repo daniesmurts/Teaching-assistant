@@ -1,4 +1,5 @@
 import { pool } from '../connection'
+import type { SharedRagSummary } from '../../../../shared/types'
 
 // ─── Institution master toggle ───────────────────────────────────────────────
 
@@ -13,22 +14,6 @@ export async function setInstitutionSharedRag(
 }
 
 // ─── Roster + usage ──────────────────────────────────────────────────────────
-
-export interface SharedRagSummary {
-  enabled:               boolean
-  shared_courses_n:      number
-  participating_teachers_n: number
-  cross_uses_30d:        number
-  courses: Array<{
-    course_id:        string
-    course_name:      string
-    course_code:      string | null
-    teacher_id:       string
-    teacher_name:     string | null
-    approved_n:       number      // teacher's total approved grades on this course
-    cross_uses_30d:   number      // times this course's grades fed someone else's RAG
-  }>
-}
 
 export async function getSharedRagSummary(institutionId: string): Promise<SharedRagSummary> {
   // Single round-trip with four parallel queries — totals are tiny.

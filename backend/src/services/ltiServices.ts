@@ -10,7 +10,10 @@ import { getLtiConfig, type LtiConfigRow } from '../db/queries/institutions'
 import { findLtiGradeSyncTarget } from '../db/queries/ltiLineItems'
 import { getServiceAccessToken } from './lti'
 import { AppError } from '../errors/AppError'
-import type { Assignment } from '../../../shared/types'
+import type {
+  Assignment,
+  LtiRosterMember,
+} from '../../../shared/types'
 
 const AGS_SCORE_SCOPE = 'https://purl.imsglobal.org/spec/lti-ags/scope/score'
 const NRPS_SCOPE = 'https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly'
@@ -77,12 +80,6 @@ export async function syncGradeToLtiGradebook(assignment: Assignment): Promise<v
 }
 
 // ─── NRPS roster fetch ─────────────────────────────────────────────────────────
-
-export interface LtiRosterMember {
-  userId: string
-  name:   string | null
-  email:  string | null
-}
 
 /**
  * Fetches the class roster from the platform's NRPS endpoint, filtered to

@@ -1,4 +1,5 @@
 import { pool } from '../connection'
+import type { PaymentsSummary, MonthlyRevenue } from '../../../../shared/types'
 
 export interface PaymentRow {
   id:             string
@@ -141,15 +142,6 @@ export async function listAllPayments(opts: {
   return { rows: list.rows, total: parseInt(count.rows[0].total, 10) }
 }
 
-export interface PaymentsSummary {
-  revenue_this_month_kopecks: number
-  revenue_30d_kopecks:        number
-  confirmed_30d:              number
-  rejected_30d:               number
-  active_subscribers:         number   // auto-renew on, card on file, plan not expired
-  in_grace:                   number   // renewal failed, still inside grace window
-}
-
 export async function getPaymentsSummary(): Promise<PaymentsSummary> {
   const { rows } = await pool.query(
     `SELECT
@@ -172,13 +164,6 @@ export async function getPaymentsSummary(): Promise<PaymentsSummary> {
          WHERE renewal_failed_at IS NOT NULL)::int                  AS in_grace`
   )
   return rows[0]
-}
-
-export interface MonthlyRevenue {
-  month:              string   // 'YYYY-MM'
-  revenue_kopecks:    number
-  confirmed_count:    number
-  rejected_count:     number
 }
 
 export async function getRevenueByMonth(months: number): Promise<MonthlyRevenue[]> {

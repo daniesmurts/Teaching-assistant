@@ -200,19 +200,6 @@ export async function updateSamlConfig(
 // anywhere else (payments.ts is teacher-scoped only), and these are
 // negotiated offline via 44-ФЗ procurement.
 
-export interface InstitutionContract {
-  id:                string
-  institution_id:    string
-  annual_value_rub:  number
-  seats_purchased:   number
-  term_start:        string   // 'YYYY-MM-DD'
-  term_end:          string   // 'YYYY-MM-DD'
-  notes:             string | null
-  created_by:        string | null
-  created_at:        string
-  updated_at:        string
-}
-
 export async function getInstitutionContracts(institutionId: string): Promise<InstitutionContract[]> {
   return (await client.get<InstitutionContract[]>(`/api/admin/institutions/${institutionId}/contracts`)).data
 }
@@ -362,16 +349,6 @@ export interface AuditEntry {
   created_at:       string
 }
 
-export interface AuditFilters {
-  institutionId?: string
-  actorTeacherId?: string
-  action?:         string
-  from?:           string
-  to?:             string
-  limit?:          number
-  offset?:         number
-}
-
 export async function getAudit(
   filters: AuditFilters = {}
 ): Promise<{ rows: AuditEntry[]; total: number }> {
@@ -383,38 +360,9 @@ export async function getAudit(
 
 // ─── Activation funnel ────────────────────────────────────────────────────────
 
-export interface FunnelSummary {
-  total_teachers:        number
-  created_course:        number
-  reached_first_grade:   number
-  created_presentation:  number
-  graded_within_24h:     number
-  graded_within_72h:     number
-  graded_within_7d:      number
-  median_hours_to_grade: number | null
-}
-
-export interface FunnelCohort {
-  week:                  string
-  signups:               number
-  created_course:        number
-  reached_first_grade:   number
-  median_hours_to_grade: number | null
-}
-
 export async function getActivationFunnel(weeks = 12): Promise<{ summary: FunnelSummary; cohorts: FunnelCohort[] }> {
   const res = await client.get<{ summary: FunnelSummary; cohorts: FunnelCohort[] }>('/api/admin/activation/funnel', { params: { weeks } })
   return res.data
-}
-
-export interface StalledTeacher {
-  id:              string
-  email:           string
-  name:            string | null
-  created_at:      string
-  last_seen_at:    string | null
-  first_course_at: string | null
-  first_grade_at:  string | null
 }
 
 export async function getStalledTeachers(limit = 100): Promise<StalledTeacher[]> {
@@ -423,22 +371,6 @@ export async function getStalledTeachers(limit = 100): Promise<StalledTeacher[]>
 }
 
 // ─── Payments / business metrics ──────────────────────────────────────────────
-
-export interface PaymentsSummary {
-  revenue_this_month_kopecks: number
-  revenue_30d_kopecks:        number
-  confirmed_30d:              number
-  rejected_30d:               number
-  active_subscribers:         number
-  in_grace:                   number
-}
-
-export interface MonthlyRevenue {
-  month:           string
-  revenue_kopecks: number
-  confirmed_count: number
-  rejected_count:  number
-}
 
 export async function getPaymentsSummary(months = 12): Promise<{ summary: PaymentsSummary; byMonth: MonthlyRevenue[] }> {
   const res = await client.get<{ summary: PaymentsSummary; byMonth: MonthlyRevenue[] }>('/api/admin/payments/summary', { params: { months } })
@@ -530,6 +462,8 @@ export async function importFgosvoItem(item: { code: string; name: string; level
 // ─── Профстандарт/ОТФ registry (migration 115) ─────────────────────────────
 
 import type { Profstandard, ProfstandardWithChildren, ProfstandardDraft } from '../types'
+import type { FunnelSummary, FunnelCohort, StalledTeacher, AuditFilters, InstitutionContract, PaymentsSummary, MonthlyRevenue, CapacityOverview } from '../../../shared/types'
+export type { InstitutionContract, InstitutionSummaryRow, CapacityOverview } from '../../../shared/types'
 
 export async function getProfstandards(
   params: { page?: number; search?: string } = {}
@@ -566,91 +500,6 @@ export async function importProfstandardByUrl(item: { code: string; name: string
 }
 
 // ─── Capacity + unit economics (TODO.md Feature AL Phase 2) ───────────────────
-
-export interface TierDistributionRow {
-  tier: string
-  n:    number
-  mean: number
-  p50:  number
-  p95:  number
-  max:  number
-}
-
-export interface FreeOutlierRow {
-  thresholdUsd: number
-  count:        number
-  total:        number
-}
-
-export interface InstitutionSummaryRow {
-  institutionId:  string
-  name:           string
-  activeSeats:    number
-  seatsPurchased: number | null
-  utilizationPct: number | null
-  costUsd:        number
-  revenueUsd:     number | null
-  marginUsd:      number | null
-  costPerSeatUsd: number
-}
-
-export interface ResourceHeadroom {
-  key:             string
-  label:           string
-  unit:            string
-  current:         number
-  ceiling:         number | null
-  ceilingLabel:    string
-  projectedAtScenario: number | null
-  breaksAtTeachers:    number | null
-  breaksAtTeachersPeakAdjusted?: number | null
-  note?:           string
-}
-
-export interface HeadroomResult {
-  activeTeachers:   number
-  scenarioTeachers: number
-  resources:        ResourceHeadroom[]
-}
-
-export interface RateLimitKnee {
-  observed:                       boolean
-  minHourlyVolumeWithRateLimit:    number | null
-  maxHourlyVolumeWithoutRateLimit: number | null
-}
-
-export interface AccountCeiling {
-  account:           string
-  burnRatePerDayUsd: number
-  balanceFailures:   number
-  failureCount:      number
-  lastSuccessAt:     string | null
-  lastFailureAt:     string | null
-  possiblyUnhealthy: boolean
-}
-
-export interface ProviderCeilingsReport {
-  windowDays:    number
-  peakToMean:    { ratio: number | null; totalCalls: number; peakHourlyCalls: number }
-  rateLimitKnee: RateLimitKnee
-  accounts:      AccountCeiling[]
-  yandexEmbedSpofNote: string
-}
-
-export interface CapacityOverview {
-  month:              string
-  availableMonths:    string[]
-  trackingSinceMonth: string | null
-  isTrendReady:       boolean
-  activeTeachers:     number
-  tierDistribution:   TierDistributionRow[]
-  freeOutliers:       FreeOutlierRow[]
-  institutions:       InstitutionSummaryRow[]
-  fixedCostUsd:       number | null
-  variableCostPerTeacherUsd: number | null
-  headroom:           HeadroomResult
-  providerCeilings:   ProviderCeilingsReport
-}
 
 export interface CapacityNoData {
   noData:  true

@@ -1,9 +1,10 @@
 import client from './client'
 import type {
-  Assignment, GradeLetter, LongReview, RevisionCheckItem, CriteriaSnapshotItem, CriterionScore,
-  ConfidenceLevel, AiEnsemble, BulletItem, VerificationQuestion, QuestionResponse,
-  ApprovedEditReason, ApprovedRevision, CalcStepVerdict, CitationVerdict,
+  Assignment, GradeLetter, LongReview, CriterionScore, BulletItem,
+  ApprovedEditReason, ApprovedRevision,
 } from '../types'
+import type { StudentSummary, CohortAnalytics, GradeResponse } from '../../../shared/types'
+export type { StudentSummary, GradeResponse } from '../../../shared/types'
 
 export interface GradeRequest {
   submission_text: string
@@ -19,28 +20,6 @@ export interface GradeRequest {
   parent_assignment_id?: string
   thorough?: boolean                         // run the confidence ensemble (Pro+)
   check_citations?: boolean                  // check bibliography against a web search (Pro+, opt-in)
-}
-
-export interface GradeResponse {
-  assignment_id: string
-  ai_score: number
-  ai_grade: GradeLetter
-  ai_grade_label: string
-  ai_feedback: string
-  ai_criteria_scores: CriterionScore[]
-  ai_strengths: BulletItem[]
-  ai_improvements: BulletItem[]
-  ai_verification_questions: VerificationQuestion[]
-  ai_revision_check: RevisionCheckItem[] | null
-  ai_question_responses: QuestionResponse[] | null
-  criteria_snapshot: CriteriaSnapshotItem[] | null
-  ai_confidence: ConfidenceLevel | null
-  ai_ensemble: AiEnsemble | null
-  ai_calc_verification: CalcStepVerdict[]
-  ai_citation_check: CitationVerdict[]
-  used_examples: number
-  revision_number: number
-  parent_assignment_id: string | null
 }
 
 // Fetch a single assignment (used to pre-fill the form when grading a revision)
@@ -160,14 +139,6 @@ export async function getGradingHistory(params?: {
   return res.data
 }
 
-export interface StudentSummary {
-  student_name:    string
-  student_group:   string | null
-  submissions:     number
-  avg_score:       number | null
-  last_submission: string
-}
-
 export async function getStudents(courseId?: string): Promise<StudentSummary[]> {
   const res = await client.get<StudentSummary[]>('/api/grading/students', { params: { course_id: courseId } })
   return res.data
@@ -190,36 +161,6 @@ export async function getStudentTrajectory(params: {
 }): Promise<TrajectoryEntry[]> {
   const res = await client.get<TrajectoryEntry[]>('/api/grading/student-trajectory', { params })
   return res.data
-}
-
-export interface GroupBreakdown {
-  group:     string | null
-  count:     number
-  avg_score: number | null
-  histogram: Record<string, number>
-}
-
-export interface MissedCriterion {
-  name:      string
-  avg_score: number
-  count:     number
-}
-
-export interface SlippingStudent {
-  student_name:  string
-  student_group: string | null
-  recent_avg:    number
-  prior_avg:     number
-  delta:         number
-}
-
-export interface CohortAnalytics {
-  total_students:      number
-  total_submissions:   number
-  histogram:            Record<string, number>
-  by_group:             GroupBreakdown[]
-  top_missed_criteria:  MissedCriterion[]
-  slipping:             SlippingStudent[]
 }
 
 /** Roster-wide grade distribution, per-group breakdown, weakest criteria, and who's slipping — pure aggregation, no AI (Feature C). */

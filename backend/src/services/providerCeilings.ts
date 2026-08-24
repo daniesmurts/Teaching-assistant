@@ -12,6 +12,8 @@
 //      recently unhealthy).
 
 import { getHourlyVolume, getHourlyRateLimitBuckets, getAccountSummaries, type AccountSummary } from '../db/queries/providerCeilings'
+import type { RateLimitKnee, AccountCeiling, ProviderCeilingsReport } from '../../../shared/types'
+export type { ProviderCeilingsReport } from '../../../shared/types'
 
 export const DEFAULT_WINDOW_DAYS = 30
 
@@ -39,12 +41,6 @@ export async function getPeakToMeanRatio(windowDays = DEFAULT_WINDOW_DAYS): Prom
 
 // ─── Rate-limit knee (429) ─────────────────────────────────────────────────
 
-export interface RateLimitKnee {
-  observed:                          boolean   // did we ever actually hit a 429 in the window?
-  minHourlyVolumeWithRateLimit:       number | null   // smallest hourly call volume where a 429 occurred
-  maxHourlyVolumeWithoutRateLimit:    number | null   // largest hourly call volume that stayed clean
-}
-
 /**
  * Pure — the empirical rate-limit ceiling isn't a documented number (DeepSeek
  * doesn't publish one usefully), so it's derived from what actually
@@ -71,20 +67,6 @@ export async function getRateLimitKnee(windowDays = DEFAULT_WINDOW_DAYS): Promis
 
 // ─── Account ceilings — balance + pool depth ───────────────────────────────
 
-export interface AccountCeiling {
-  account:           string
-  burnRatePerDayUsd: number
-  balanceFailures:   number
-  failureCount:      number
-  lastSuccessAt:      string | null
-  lastFailureAt:      string | null
-  // A recent failure with no success since is the closest historical proxy
-  // for "currently unhealthy" this data supports — real cooldown state
-  // (llm/deepseek.ts's downUntil map) is in-process and per-PM2-worker, not
-  // centrally queryable, so this is evidence, not a live status.
-  possiblyUnhealthy: boolean
-}
-
 export function computeAccountCeiling(summary: AccountSummary, windowDays: number): AccountCeiling {
   const burnRatePerDayUsd = windowDays > 0 ? summary.totalCostUsd / windowDays : 0
   const lastFailureAfterSuccess =
@@ -107,19 +89,6 @@ export async function getAccountCeilings(windowDays = DEFAULT_WINDOW_DAYS): Prom
 }
 
 // ─── Orchestrator ───────────────────────────────────────────────────────────
-
-export interface ProviderCeilingsReport {
-  windowDays:       number
-  peakToMean:       { ratio: number | null; totalCalls: number; peakHourlyCalls: number }
-  rateLimitKnee:    RateLimitKnee
-  accounts:         AccountCeiling[]
-  // Static risk, not a metric — invariant #9 forces ALL embeddings through
-  // Yandex and llm/yandex.ts has no multi-account pool (unlike DeepSeek,
-  // which got one after a real 402 incident). Surfaced here rather than
-  // buried in a comment because it's exactly the kind of "worth recording
-  // as a risk with no mitigation" item this phase exists to make visible.
-  yandexEmbedSpofNote: string
-}
 
 export async function getProviderCeilingsReport(windowDays = DEFAULT_WINDOW_DAYS): Promise<ProviderCeilingsReport> {
   const [peakToMean, rateLimitKnee, accounts] = await Promise.all([

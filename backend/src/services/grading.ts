@@ -27,7 +27,22 @@ import { canUseFeature } from '../config/planLimits'
 import { scoreToGrade, GRADES } from '../../../shared/grades'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import { logger } from '../lib/logger'
-import type { Assignment, GradeLetter, CriterionScore, CriteriaSnapshotItem, CriterionLevelDescriptors, BulletItem, BulletSeverity, BulletAction, VerificationQuestion, QuestionResponse, CalcStepVerdict, CitationVerdict } from '../../../shared/types'
+import type {
+  Assignment,
+  GradeLetter,
+  CriterionScore,
+  CriteriaSnapshotItem,
+  CriterionLevelDescriptors,
+  BulletItem,
+  BulletSeverity,
+  BulletAction,
+  VerificationQuestion,
+  QuestionResponse,
+  CalcStepVerdict,
+  CitationVerdict,
+  GradeResponse,
+} from '../../../shared/types'
+export type { GradeResponse } from '../../../shared/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -83,28 +98,6 @@ interface AIGradingResult {
   verification_questions?: Array<string | { question?: string; quote?: string | null; page?: number | null }>
   revision_check?: RevisionCheckItem[]
   question_responses?: Array<{ question?: string; status?: string; note?: string }>
-}
-
-export interface GradeResponse {
-  assignment_id: string
-  ai_score: number
-  ai_grade: GradeLetter
-  ai_grade_label: string
-  ai_feedback: string
-  ai_criteria_scores: CriterionScore[]
-  ai_strengths: BulletItem[]
-  ai_improvements: BulletItem[]
-  ai_verification_questions: VerificationQuestion[]
-  ai_revision_check: RevisionCheckItem[] | null
-  ai_question_responses: QuestionResponse[] | null
-  criteria_snapshot: CriteriaSnapshotItem[] | null
-  ai_confidence: import('../../../shared/types').ConfidenceLevel | null
-  ai_ensemble: import('../../../shared/types').AiEnsemble | null
-  ai_calc_verification: CalcStepVerdict[]
-  ai_citation_check: CitationVerdict[]
-  used_examples: number
-  revision_number: number
-  parent_assignment_id: string | null
 }
 
 // ─── Criteria resolution ──────────────────────────────────────────────────────

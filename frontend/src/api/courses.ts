@@ -1,5 +1,6 @@
 import client from './client'
 import type { Course } from '../types'
+import type { PolicyMemo } from '../../../shared/types'
 
 export async function getCourses(): Promise<Course[]> {
   const res = await client.get<Course[]>('/api/courses')
@@ -34,14 +35,6 @@ export async function updateCourse(
 
 export async function deleteCourse(id: string): Promise<void> {
   await client.delete(`/api/courses/${id}`)
-}
-
-export interface PolicyMemo {
-  course_id:      string
-  memo_text:      string
-  based_on_count: number
-  generated_at:   string
-  model_used:     string | null
 }
 
 export async function getPolicyMemo(courseId: string): Promise<PolicyMemo | null> {

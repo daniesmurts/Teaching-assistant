@@ -1,8 +1,21 @@
 import { pool } from '../connection'
 import type {
-  Assignment, GradeLetter, CriterionScore, RevisionCheckItem, CriteriaSnapshotItem,
-  ConfidenceLevel, AiEnsemble, BulletItem, VerificationQuestion,
-  Handout, QuestionResponse, ApprovedEditReason, ApprovedRevision, CalcStepVerdict, CitationVerdict,
+  Assignment,
+  GradeLetter,
+  CriterionScore,
+  RevisionCheckItem,
+  CriteriaSnapshotItem,
+  ConfidenceLevel,
+  AiEnsemble,
+  BulletItem,
+  VerificationQuestion,
+  Handout,
+  QuestionResponse,
+  ApprovedEditReason,
+  ApprovedRevision,
+  CalcStepVerdict,
+  CitationVerdict,
+  StudentSummary,
 } from '../../../../shared/types'
 
 interface AssignmentRow {
@@ -703,14 +716,6 @@ export async function findAssignmentsForExport(
 }
 
 // ─── Students aggregation (denormalized — grouped by name + group) ────────────
-
-export interface StudentSummary {
-  student_name:    string
-  student_group:   string | null
-  submissions:     number
-  avg_score:       number | null   // average of approved (fallback ai) score
-  last_submission: string          // ISO
-}
 
 export async function findStudentsByTeacher(
   teacherId: string,

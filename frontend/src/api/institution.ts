@@ -119,22 +119,6 @@ export async function setInstitutionModel(provider: LLMProviderName): Promise<In
 
 // ─── Shared RAG (institutional flywheel) ──────────────────────────────────────
 
-export interface SharedRagSummary {
-  enabled:                  boolean
-  shared_courses_n:         number
-  participating_teachers_n: number
-  cross_uses_30d:           number
-  courses: Array<{
-    course_id:        string
-    course_name:      string
-    course_code:      string | null
-    teacher_id:       string
-    teacher_name:     string | null
-    approved_n:       number
-    cross_uses_30d:   number
-  }>
-}
-
 export async function getSharedRag(): Promise<SharedRagSummary> {
   return (await client.get<SharedRagSummary>('/api/institution/shared-rag')).data
 }
@@ -181,6 +165,8 @@ export async function setDocumentDomains(domains: string[]): Promise<string[]> {
 // ─── Shared rubrics ────────────────────────────────────────────────────────────
 
 import type { Rubric, RubricItem } from '../types'
+import type { SharedRagSummary } from '../../../shared/types'
+export type { SharedRagSummary } from '../../../shared/types'
 
 export async function getInstitutionRubrics(): Promise<Array<Rubric & { author_name: string | null }>> {
   return (await client.get<Array<Rubric & { author_name: string | null }>>('/api/institution/rubrics')).data

@@ -1,6 +1,13 @@
 import { pool } from '../connection'
 import type {
-  Program, ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramLevel, ProgramAnalysis,
+  Program,
+  ProgramDetail,
+  ProgramDiscipline,
+  ProgramCompetency,
+  ProgramLevel,
+  ProgramAnalysis,
+  PickableProgramUnit,
+  AssignableTeacher,
 } from '../../../../shared/types'
 
 // Persistence for academic programs (учебные планы). Everything is scoped to an
@@ -460,22 +467,6 @@ export async function getLatestAnalysis(programId: string): Promise<ProgramAnaly
 
 // ── Pickable program units — for the import form and the detail linker ──────
 
-export interface PickableProgramUnit {
-  id:         string
-  name:       string
-  short_name: string | null
-  // Lets the frontend distinguish an ОП/профиль («program») from its parent
-  // Направление подготовки («program_direction») in the picker so the user
-  // knows which level they're linking at.
-  type_code:  'program' | 'program_direction'
-  // Programme metadata (migration 055) — prefills the import form when the
-  // admin recorded the ФГОС header on the unit.
-  code:            string | null
-  specialty_name:  string | null
-  education_level: string | null
-  forms_of_study:  string | null
-}
-
 const PICKABLE_COLS =
   `id, name, short_name, type_code, code, specialty_name, education_level, forms_of_study`
 
@@ -596,12 +587,6 @@ export async function findDisciplinesForResponsibleTeacher(
     has_document:     r.document_uploaded_at !== null,
     document_uploaded_at: r.document_uploaded_at ? r.document_uploaded_at.toISOString() : null,
   }))
-}
-
-export interface AssignableTeacher {
-  id:    string
-  name:  string | null
-  email: string
 }
 
 /**

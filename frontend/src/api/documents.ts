@@ -1,4 +1,6 @@
 import client from './client'
+import type { ChatTurn, DocChatResult } from '../../../shared/types'
+export type { ChatTurn, DocChatSource } from '../../../shared/types'
 
 export type DocumentType   = 'assignment' | 'syllabus' | 'material'
 export type ProcessingStatus = 'pending' | 'extracting' | 'chunking' | 'ready' | 'failed'
@@ -67,26 +69,6 @@ export async function uploadAndWait(
 }
 
 // ─── "Спроси документ" grounded chat (Feature I) ───────────────────────────────
-
-export interface ChatTurn {
-  role:    'user' | 'assistant'
-  content: string
-}
-
-export interface DocChatSource {
-  idx:         number
-  document_id: string
-  file_name:   string
-  page_start:  number | null
-  page_end:    number | null
-  excerpt:     string
-}
-
-export interface DocChatResult {
-  answer:   string
-  sources:  DocChatSource[]
-  grounded: boolean
-}
 
 export async function askDocument(params: {
   course_id: string

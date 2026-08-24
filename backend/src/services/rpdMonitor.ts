@@ -38,13 +38,8 @@ import {
   listDeptGroups, getSnapshotTotalsSeries,
 } from '../db/queries/rpdMonitor'
 import { DocumentProcessingError, NotFoundError } from '../errors/AppError'
-
-export interface RpdParseFlag {
-  deptCode: string
-  eduForm:  string
-  eduLevel: string
-  message:  string
-}
+import type { RpdParseFlag, RpdTotals, RpdGroupOverview, RpdProblemDept, RpdLeaderDept, RpdRegressedDept, RpdAllDept, RpdOverview } from '../../../shared/types'
+export type { RpdOverview } from '../../../shared/types'
 
 export interface RpdParseResult {
   capturedAt:   Date
@@ -361,99 +356,6 @@ function decodeTriplet(s: string, start: number, plan: number): { done: number; 
 }
 
 // ─── Overview / rollups ─────────────────────────────────────────────────────
-
-export interface RpdTotals {
-  planCount: number
-  rpdDone:   number
-  rpdReview: number
-  rpdDebt:   number
-  rpdPct:    number
-  fosDone:   number
-  fosReview: number
-  fosDebt:   number
-  fosPct:    number
-}
-
-export interface RpdGroupOverview extends RpdTotals {
-  groupId:   string
-  groupName: string
-  deptCount: number
-  deltaRpdDone: number | null
-  deltaRpdDebt: number | null // current - previous; negative means долг shrank (good)
-}
-
-export interface RpdProblemDept {
-  deptCode:  string
-  eduForm:   string
-  eduLevel:  string
-  groupName: string | null
-  planCount: number
-  rpdDebt:   number
-  rpdPct:    number
-  stalled:   boolean // no progress since the previous snapshot
-}
-
-export interface RpdLeaderDept {
-  deptCode:  string
-  eduForm:   string
-  eduLevel:  string
-  groupName: string | null
-  planCount: number
-  rpdDone:   number
-  rpdDebt:   number
-  rpdPct:    number
-  improved:  boolean // rpd_done increased since the previous snapshot
-}
-
-export interface RpdRegressedDept {
-  deptCode:     string
-  eduForm:      string
-  eduLevel:     string
-  groupName:    string | null
-  planCount:    number
-  previousDebt: number
-  currentDebt:  number
-  deltaDebt:    number  // > 0 — долг got worse since the previous snapshot
-  deltaReview:  number  // usually negative here — на проверке drained without becoming сделано
-}
-
-export interface RpdAllDept {
-  deptCode:  string
-  eduForm:   string
-  eduLevel:  string
-  groupName: string | null
-  planCount: number
-  rpdDone:   number
-  rpdReview: number
-  rpdDebt:   number
-  rpdPct:    number
-  fosDone:   number
-  fosReview: number
-  fosDebt:   number
-  fosPct:    number
-  deltaRpdDone: number | null
-}
-
-export interface RpdOverview {
-  snapshot: { id: string; capturedAt: string; periodLabel: string | null; sourceFilename: string | null }
-  previousSnapshot: { id: string; capturedAt: string } | null
-  totals: RpdTotals
-  previousTotals: RpdTotals | null
-  groups: RpdGroupOverview[]
-  ungroupedDeptCodes: string[]
-  problemDepts: RpdProblemDept[]
-  leaderDepts: RpdLeaderDept[]
-  /** Кафедры whose долг got worse since the previous snapshot — usually because
-      на проверке drained (rejected/returned) faster than it converted to сделано.
-      Explains cases where both Сделано and Долг rise in the same period: they're
-      not each other's mirror, на проверке is — this is that regression made visible. */
-  regressedDepts: RpdRegressedDept[]
-  /** Every кафедра/форма/уровень row in the snapshot — problemDepts/leaderDepts are curated
-      top-N views of this same data, capped for the at-a-glance panels; this is the complete list
-      so no department is ever invisible on the platform. */
-  allDepts: RpdAllDept[]
-  timeSeries: Array<{ snapshotId: string; capturedAt: string; planCount: number; rpdDone: number; rpdPct: number }>
-}
 
 // Same three tiers as the frontend's status pills/bar chart — shared here so the
 // Excel and Word exports can colour-code by the same thresholds, not just the UI.

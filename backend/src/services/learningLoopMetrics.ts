@@ -1,5 +1,6 @@
 import { pool } from '../db/connection'
 import { getKafedraContribution30d } from '../db/queries/ragRetrievals'
+import type { LearningLoopSummary } from '../../../shared/types'
 
 /**
  * Numbers behind the "ИИ учится у вас" view. Everything here is a single
@@ -20,27 +21,6 @@ import { getKafedraContribution30d } from '../db/queries/ragRetrievals'
  *
  * Chart: 6-month weekly mean |ai_score − approved_score| series.
  */
-
-export interface LearningLoopSummary {
-  style_match: {
-    current_pct:  number | null   // 0–100, null when not enough data
-    previous_pct: number | null
-    delta:        number | null   // current - previous, signed
-    sample_n_30d: number
-  }
-  approved: {
-    lifetime:   number
-    this_month: number
-    delta_vs_last_month: number
-  }
-  used_as_example_30d: number
-  bullets_retention_30d: {
-    pct:        number | null     // 0–100
-    sample_n:   number
-  }
-  kafedra_contribution_30d: number   // 0 when teacher has no institution
-  trend_weekly: Array<{ week: string; mean_delta: number; n: number }>
-}
 
 export async function getLearningLoopSummary(teacherId: string): Promise<LearningLoopSummary> {
   const [style, volume, retention, exampleUses, kafedraContribution, trend] = await Promise.all([

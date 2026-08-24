@@ -1,4 +1,6 @@
 import client from './client'
+import type { RpdParseFlag, RpdOverview } from '../../../shared/types'
+export type { RpdGroupOverview, RpdLeaderDept, RpdRegressedDept, RpdAllDept, RpdOverview } from '../../../shared/types'
 
 export interface RpdSnapshot {
   id:               string
@@ -9,99 +11,6 @@ export interface RpdSnapshot {
   source_filename:  string | null
   created_at:       string
   row_count?:       number
-}
-
-export interface RpdParseFlag {
-  deptCode: string
-  eduForm:  string
-  eduLevel: string
-  message:  string
-}
-
-export interface RpdTotals {
-  planCount: number
-  rpdDone:   number
-  rpdReview: number
-  rpdDebt:   number
-  rpdPct:    number
-  fosDone:   number
-  fosReview: number
-  fosDebt:   number
-  fosPct:    number
-}
-
-export interface RpdGroupOverview extends RpdTotals {
-  groupId:   string
-  groupName: string
-  deptCount: number
-  deltaRpdDone: number | null
-  deltaRpdDebt: number | null
-}
-
-export interface RpdProblemDept {
-  deptCode:  string
-  eduForm:   string
-  eduLevel:  string
-  groupName: string | null
-  planCount: number
-  rpdDebt:   number
-  rpdPct:    number
-  stalled:   boolean
-}
-
-export interface RpdLeaderDept {
-  deptCode:  string
-  eduForm:   string
-  eduLevel:  string
-  groupName: string | null
-  planCount: number
-  rpdDone:   number
-  rpdDebt:   number
-  rpdPct:    number
-  improved:  boolean
-}
-
-export interface RpdRegressedDept {
-  deptCode:     string
-  eduForm:      string
-  eduLevel:     string
-  groupName:    string | null
-  planCount:    number
-  previousDebt: number
-  currentDebt:  number
-  deltaDebt:    number
-  deltaReview:  number
-}
-
-export interface RpdAllDept {
-  deptCode:  string
-  eduForm:   string
-  eduLevel:  string
-  groupName: string | null
-  planCount: number
-  rpdDone:   number
-  rpdReview: number
-  rpdDebt:   number
-  rpdPct:    number
-  fosDone:   number
-  fosReview: number
-  fosDebt:   number
-  fosPct:    number
-  deltaRpdDone: number | null
-}
-
-export interface RpdOverview {
-  snapshot: { id: string; capturedAt: string; periodLabel: string | null; sourceFilename: string | null }
-  previousSnapshot: { id: string; capturedAt: string } | null
-  totals: RpdTotals
-  previousTotals: RpdTotals | null
-  groups: RpdGroupOverview[]
-  ungroupedDeptCodes: string[]
-  problemDepts: RpdProblemDept[]
-  leaderDepts: RpdLeaderDept[]
-  regressedDepts: RpdRegressedDept[]
-  allDepts: RpdAllDept[]
-  timeSeries: Array<{ snapshotId: string; capturedAt: string; planCount: number; rpdDone: number; rpdPct: number }>
 }
 
 export interface RpdDeptGroup {

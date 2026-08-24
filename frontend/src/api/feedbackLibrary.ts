@@ -1,16 +1,5 @@
 import client from './client'
-
-export interface FeedbackHit {
-  assignment_id:     string
-  course_name:       string | null
-  student_label:     string | null
-  approved_score:    number | null
-  approved_grade:    string | null
-  approved_feedback: string | null
-  feedback_excerpt:  string
-  similarity:        number
-  approved_at:       string | null
-}
+import type { FeedbackHit } from '../../../shared/types'
 
 export async function searchFeedbackLibrary(params: {
   q:          string
