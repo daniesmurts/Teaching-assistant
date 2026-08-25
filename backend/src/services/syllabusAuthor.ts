@@ -1,6 +1,7 @@
 import { chatJSON } from './deepseek'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { ValidationError } from '../errors/AppError'
+import { BRS_SEMESTER_MIN, BRS_SEMESTER_MAX } from '../config/brs'
 import type { SyllabusDraft, SyllabusSection } from '../../../shared/types'
 import type { CompetencyInput } from './syllabusReview'
 
@@ -72,9 +73,16 @@ export async function draftSyllabus(p: DraftParams): Promise<SyllabusDraft> {
     `а не три произвольных разных результата. Преподаватель сам выберет или скомпонует нужный вариант при редактировании.\n` +
     `3. "Содержание дисциплины (темы)" — тематический план: разделы и темы с кратким описанием, спроектированные так, чтобы покрыть все компетенции и цели.\n` +
     `4. "Формы текущего контроля и промежуточной аттестации" — конкретные формы (лабораторные, проект, экзамен и т.п.), привязанные к компетенциям.\n` +
-    `Поле "content" — связный текст на русском, можно с переносами строк для перечислений. Ответьте ТОЛЬКО JSON-объектом.`
+    `Поле "content" — связный текст на русском, можно с переносами строк для перечислений.\n\n` +
+    `Дополнительно верните "instruments" — плоский список названий оценочных средств из раздела 4 ` +
+    `(например ["Лабораторная работа", "Контрольная работа", "Экзамен"]). Обязательно включите форму ` +
+    `промежуточной аттестации (экзамен или зачёт). БАЛЛЫ НЕ УКАЗЫВАЙТЕ — их расставит система.\n` +
+    `Ответьте ТОЛЬКО JSON-объектом: {"sections":[...],"instruments":[...]}.`
 
-  const result = await chatJSON<{ sections: { heading?: string; content?: string }[] }>(
+  const result = await chatJSON<{
+    sections: { heading?: string; content?: string }[]
+    instruments?: unknown
+  }>(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
     'содержание РПД',
     { context: { teacherId: p.teacherId, feature: 'presentation' } },   // reuse a logged generation bucket
@@ -88,10 +96,87 @@ export async function draftSyllabus(p: DraftParams): Promise<SyllabusDraft> {
     throw new ValidationError('Не удалось подготовить содержание. Попробуйте уточнить компетенции и цели.')
   }
 
+  // §9 is drafted here rather than asked of the model, because it is the one
+  // section with a hard arithmetic constraint: each semester must total
+  // exactly 60/100. Models do not reliably make columns add up, and a §9 that
+  // misses the total is precisely what blocks a conformant ФОС downstream —
+  // so the model names the instruments and the code assigns the points.
+  const instrumentNames = Array.isArray(result.instruments)
+    ? result.instruments.map((v) => String(v ?? '').trim()).filter(Boolean)
+    : []
+  const brsSection = buildBrsSection(instrumentNames)
+  if (brsSection) sections.push(brsSection)
+
   return { mode: improving ? 'improve' : 'draft', sections, generated_at: new Date().toISOString() }
 }
 
 /** Flatten draft sections into a single text blob — feeds the conformance check. */
 export function draftToText(draft: SyllabusDraft): string {
   return draft.sections.map((s) => `${s.heading}\n${s.content}`).join('\n\n')
+}
+
+
+// ── §9 «Использование рейтинговой системы оценки знаний» ────────────────────
+
+/**
+ * Builds the БРС table from the instruments the draft declared, distributing
+ * BRS_SEMESTER_MIN/MAX across them so the semester totals are exact.
+ *
+ * Промежуточная аттестация (экзамен/зачёт) is weighted at roughly 40% of the
+ * scale, matching the макет's own worked example (экзамен 24/40 of 60/100);
+ * the rest is split evenly across текущий контроль. These are starting
+ * numbers a teacher is expected to adjust — the point is that whatever they
+ * start from already adds up, so §9 is never born non-conformant.
+ */
+export function buildBrsSection(instruments: string[]): SyllabusSection | null {
+  const names = [...new Set(instruments.map((s) => s.trim()).filter(Boolean))]
+  if (names.length === 0) return null
+
+  const finalIdx = names.findIndex((n) => /экзамен|зач[еёе]т/i.test(n))
+  const rows = allocateBrsPoints(names, finalIdx)
+
+  const lines = [
+    'Оценочные средства | Кол-во | Мин. баллов | Макс. баллов',
+    ...rows.map((r) => `${r.name} | 1 | ${r.min} | ${r.max}`),
+    `Итого: |  | ${rows.reduce((n, r) => n + r.min, 0)} | ${rows.reduce((n, r) => n + r.max, 0)}`,
+  ]
+
+  return {
+    heading: 'Использование рейтинговой системы оценки знаний (п.9)',
+    content:
+      'Максимальное и минимальное количество баллов по видам учебной работы описано в «Положении о ' +
+      'балльно-рейтинговой системе оценки знаний студентов» ФГБОУ ВО КНИТУ. Баллы распределены так, ' +
+      `чтобы за семестр набиралось ${BRS_SEMESTER_MIN} минимальных и ${BRS_SEMESTER_MAX} максимальных — ` +
+      'при необходимости перераспределите их между контрольными точками, сохранив итог.\n\n' +
+      lines.join('\n'),
+  }
+}
+
+/** Splits the semester budget across instruments, exactly. Exported for tests. */
+export function allocateBrsPoints(
+  names: string[], finalIdx: number,
+): { name: string; min: number; max: number }[] {
+  const hasFinal = finalIdx >= 0 && names.length > 1
+  // ~40% to промежуточная аттестация when there is one, matching the макет's
+  // экзамен 24/40 against a 60/100 scale.
+  const finalMin = hasFinal ? Math.round(BRS_SEMESTER_MIN * 0.4) : 0
+  const finalMax = hasFinal ? Math.round(BRS_SEMESTER_MAX * 0.4) : 0
+
+  const currentNames = names.filter((_, i) => !(hasFinal && i === finalIdx))
+  const spread = (total: number, n: number): number[] => {
+    if (n <= 0) return []
+    const base = Math.floor(total / n)
+    const rem = total - base * n
+    return Array.from({ length: n }, (_, i) => base + (i < rem ? 1 : 0))
+  }
+  const mins = spread(BRS_SEMESTER_MIN - finalMin, currentNames.length)
+  const maxes = spread(BRS_SEMESTER_MAX - finalMax, currentNames.length)
+
+  let k = 0
+  return names.map((name, i) => {
+    if (hasFinal && i === finalIdx) return { name, min: finalMin, max: finalMax }
+    const row = { name, min: mins[k] ?? 0, max: maxes[k] ?? 0 }
+    k += 1
+    return row
+  })
 }

@@ -5,6 +5,11 @@ import { generateQuiz } from './quizzes'
 import { generateTasks } from './tasks'
 import { generateTickets } from './fosTickets'
 import { checkCoverage, buildPassportRows } from './fosCoverage'
+import { parseAssessmentLinkage } from './assessmentLinkage'
+import {
+  buildScoreTable, buildCatalogue, buildGradingScale, buildCompetencyMap,
+  buildTitlePage, buildInstrumentCriteria, instrumentsFromBrs,
+} from './fosMacketSections'
 import { setFosStatus, setFosProgress, setFosSections, completeFosDocument } from '../db/queries/fosDocuments'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { logger } from '../lib/logger'
@@ -23,12 +28,12 @@ import type { FosSections, FosCriterion, MaterialKind, Quiz, TaskSet } from '../
 // model (program_disciplines.competency_codes) — that indicator-sourced
 // version is the documented v2 follow-up in TODO.md Feature X.
 //
-// Progress is persisted after every step (7 total: extract, quiz, 3x task
-// kinds, tickets, criteria) so a crash mid-run leaves earlier sections
+// Progress is persisted after every step (8 total: extract, quiz, 3x task
+// kinds, tickets, criteria, макет) so a crash mid-run leaves earlier sections
 // intact and editable rather than losing everything — same partial-progress
 // posture as long-review's chapter-by-chapter persistence.
 
-const TOTAL_STEPS = 7
+const TOTAL_STEPS = 8
 const TASK_KINDS: MaterialKind[] = ['assignment', 'case', 'project']
 const MAX_TOPICS_FOR_EXTRACTION = 12000   // chars of syllabus_text considered
 
@@ -128,6 +133,37 @@ export async function runFosGeneration(p: RunFosParams): Promise<void> {
     await setFosSections(p.fosId, sections)
   } catch (err) {
     logger.warn({ message: 'ФОС criteria step failed, continuing without it', fosId: p.fosId, error: (err as Error).message })
+  }
+  await bump()
+
+  // Step 8 — the «Макет ФОС 3++» blocks. Best-effort as a whole: without them
+  // the ФОС is still the useful pile of instruments it was before this
+  // shipped, just not laid out to the макет.
+  //
+  // The перечень оценочных средств is the discipline's OWN §9, parsed with the
+  // same function the linkage check uses, so the generated ФОС and the РПД
+  // carry identical numbers by construction — «перечень оценочных средств
+  // приводиться из п.9 рабочей программы» is satisfied rather than checked.
+  try {
+    const brsItems = course.syllabus_text
+      ? (await parseAssessmentLinkage(p.teacherId, course.syllabus_text)).brs_items
+      : []
+    const instrumentNames = instrumentsFromBrs(brsItems).map((r) => r.name)
+
+    sections = {
+      ...sections,
+      title_page:     buildTitlePage(disciplineName),
+      competency_map: buildCompetencyMap(competencies, topics, instrumentNames),
+      score_table:    buildScoreTable(brsItems),
+      grading_scale:  buildGradingScale(),
+      catalogue:      buildCatalogue(brsItems),
+      instrument_criteria: brsItems.length > 0
+        ? await buildInstrumentCriteria(p.teacherId, disciplineName, brsItems)
+        : [],
+    }
+    await setFosSections(p.fosId, sections)
+  } catch (err) {
+    logger.warn({ message: 'ФОС макет step failed, continuing without it', fosId: p.fosId, error: (err as Error).message })
   }
   await bump()
 

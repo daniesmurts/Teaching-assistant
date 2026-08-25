@@ -84,11 +84,17 @@ describe('runCheck — linkage', () => {
       instruments: [], srs_forms: [], ksr_forms: [], brs_items: [],
     })
     const checkSpy = vi.spyOn(linkage, 'checkAssessmentLinkage')
+    // Stubbed explicitly rather than left to the real parse — the point of the
+    // test is that the ФОС text reaches BOTH the number extraction and the
+    // check, not whatever a stubbed chatJSON happens to return.
+    const numbersSpy = vi.spyOn(linkage, 'parseFosNumbers')
+      .mockResolvedValue({ rows: null, criteria: [] })
 
     const outcome = await runCheck('linkage', { programId: 'prog1', disciplineId: 'disc1' }, teacher)
 
     expect(outcome.status).toBe('ok')
-    expect(checkSpy).toHaveBeenCalledWith(expect.anything(), 'фос текст')
+    expect(numbersSpy).toHaveBeenCalledWith(teacher.id, 'фос текст')
+    expect(checkSpy).toHaveBeenCalledWith(expect.anything(), 'фос текст', { rows: null, criteria: [] })
   })
 
   it('runs with no ФОС text when none was uploaded — does not throw or block the check', async () => {

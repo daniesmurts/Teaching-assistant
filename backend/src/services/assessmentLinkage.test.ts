@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
-import { checkAssessmentLinkage, mentions, parseAssessmentLinkage } from './assessmentLinkage'
-import type { ParsedAssessmentLinkage } from '../../../shared/types'
+import { checkAssessmentLinkage, mentions, parseAssessmentLinkage, checkFosScores } from './assessmentLinkage'
+import type {
+  ParsedAssessmentLinkage, BrsScoreRow, FosScoreRow, FosCriteriaBlock,
+} from '../../../shared/types'
 
 const { chatJSONMock } = vi.hoisted(() => ({ chatJSONMock: vi.fn() }))
 vi.mock('./deepseek', () => ({ chatJSON: chatJSONMock }))
@@ -15,7 +17,7 @@ function parsed(overrides: Partial<ParsedAssessmentLinkage> = {}): ParsedAssessm
     instruments: [{ name: 'Доклад', section: 'Раздел 1' }],
     srs_forms:   ['Подготовка доклада'],
     ksr_forms:   ['Заслушивание доклада'],
-    brs_items:   [{ name: 'Доклад', points: 10 }],
+    brs_items:   [{ name: 'Доклад', semester: null, min_points: null, max_points: 10 }],
     ...overrides,
   }
 }
@@ -51,7 +53,7 @@ describe('checkAssessmentLinkage — broken links', () => {
   })
 
   it('flags a п.9 entry that names the instrument but carries no points', () => {
-    const result = checkAssessmentLinkage(parsed({ brs_items: [{ name: 'Доклад', points: null }] }))
+    const result = checkAssessmentLinkage(parsed({ brs_items: [{ name: 'Доклад', semester: null, min_points: null, max_points: null }] }))
     expect(result.findings).toHaveLength(1)
     expect(result.findings[0].missing).toEqual([])
     expect(result.findings[0].brs_missing_points).toBe(true)
@@ -74,7 +76,7 @@ describe('checkAssessmentLinkage — what must NOT be flagged', () => {
       instruments: [{ name: 'Экзамен', section: 'Раздел 1' }],
       srs_forms:   [],
       ksr_forms:   [],
-      brs_items:   [{ name: 'Экзамен', points: 40 }],
+      brs_items:   [{ name: 'Экзамен', semester: null, min_points: null, max_points: 40 }],
     }))
     expect(result.findings).toEqual([])
   })
@@ -144,7 +146,7 @@ describe('checkAssessmentLinkage — with an uploaded ФОС', () => {
     const result = checkAssessmentLinkage(parsed({
       instruments: [{ name: 'Экзамен', section: null }],
       srs_forms: [], ksr_forms: [],
-      brs_items: [{ name: 'Экзамен', points: 40 }],
+      brs_items: [{ name: 'Экзамен', semester: null, min_points: null, max_points: 40 }],
     }), 'Приложение: билеты к зачёту по разделам 1-5.')
     expect(result.findings[0].missing).toEqual(['fos'])
   })
@@ -206,5 +208,185 @@ describe('parseAssessmentLinkage — §9 must survive truncation on a real-lengt
     const userMessage = chatJSONMock.mock.calls[0][0][1].content as string
     expect(userMessage).toContain('Использование рейтинговой системы')
     expect(userMessage).toContain('Доклад, сообщение')
+  })
+})
+
+// ─── ФОС «Перечень оценочных средств» ↔ п.9 (методист, 2026-08-25) ───────────
+// Numbers taken from the КНИТУ «Макет ФОС 3++» worked example and from the
+// real Иностранный язык РПД she tested with (three semesters, same instrument
+// carrying different points in each).
+
+const row = (name: string, semester: string | null, min: number | null, max: number | null): BrsScoreRow =>
+  ({ name, semester, min_points: min, max_points: max })
+const fosRow = (name: string, semester: string | null, min: number | null, max: number | null): FosScoreRow =>
+  ({ name, semester, count: 1, min_points: min, max_points: max })
+
+// One semester adding up to exactly 60/100, as the положение requires.
+const RPD_SEM1: BrsScoreRow[] = [
+  row('Деловая и/или ролевая игра', '1-й семестр', 8, 15),
+  row('Проект', '1-й семестр', 10, 15),
+  row('Тест', '1-й семестр', 24, 40),
+  row('Доклад, сообщение', '1-й семестр', 18, 30),
+]
+const FOS_SEM1: FosScoreRow[] = RPD_SEM1.map((r) => fosRow(r.name, r.semester, r.min_points, r.max_points))
+
+describe('checkFosScores', () => {
+  it('passes when every instrument and both point columns agree', () => {
+    const result = checkFosScores(RPD_SEM1, FOS_SEM1)
+    expect(result.table_found).toBe(true)
+    expect(result.findings).toEqual([])
+    expect(result.summary).toMatch(/совпадают с п\.9/)
+  })
+
+  it('distinguishes "no score table in the ФОС" from "table found and correct"', () => {
+    const result = checkFosScores(RPD_SEM1, null)
+    expect(result.table_found).toBe(false)
+    expect(result.findings).toEqual([])
+    expect(result.summary).toMatch(/не найдена таблица/)
+  })
+
+  it('flags a max that disagrees with п.9 — the case she reported', () => {
+    const fos = FOS_SEM1.map((r) => r.name === 'Проект' ? { ...r, max_points: 20 } : r)
+    const result = checkFosScores(RPD_SEM1, fos)
+    const f = result.findings.find((x) => x.kind === 'max_mismatch')!
+    expect(f.instrument).toBe('Проект')
+    expect(f.rpd_max).toBe(15)
+    expect(f.fos_max).toBe(20)
+    expect(f.detail).toMatch(/максимальный балл в ФОС — 20/)
+  })
+
+  it('flags a min that disagrees with п.9', () => {
+    const fos = FOS_SEM1.map((r) => r.name === 'Тест' ? { ...r, min_points: 20 } : r)
+    const result = checkFosScores(RPD_SEM1, fos)
+    expect(result.findings.some((f) => f.kind === 'min_mismatch' && f.instrument === 'Тест')).toBe(true)
+  })
+
+  it('flags an instrument п.9 declares but the ФОС omits', () => {
+    const result = checkFosScores(RPD_SEM1, FOS_SEM1.filter((r) => r.name !== 'Доклад, сообщение'))
+    const f = result.findings.find((x) => x.kind === 'missing_in_fos')!
+    expect(f.instrument).toBe('Доклад, сообщение')
+  })
+
+  it('flags an instrument the ФОС budgets points for but п.9 never declared', () => {
+    const fos = [...FOS_SEM1, fosRow('Реферат', '1-й семестр', 6, 10)]
+    const result = checkFosScores(RPD_SEM1, fos)
+    expect(result.findings.some((f) => f.kind === 'missing_in_rpd' && f.instrument === 'Реферат')).toBe(true)
+  })
+
+  it('flags a semester that does not total 60/100', () => {
+    const fos = FOS_SEM1.map((r) => r.name === 'Тест' ? { ...r, min_points: 20, max_points: 35 } : r)
+    const result = checkFosScores(
+      RPD_SEM1.map((r) => r.name === 'Тест' ? { ...r, min_points: 20, max_points: 35 } : r), fos,
+    )
+    const f = result.findings.find((x) => x.kind === 'total_mismatch')!
+    expect(f.fos_min).toBe(56)
+    expect(f.fos_max).toBe(95)
+    expect(f.detail).toMatch(/должна быть 60\/100/)
+  })
+
+  // The bug a naive implementation would have: summing across semesters gives
+  // 180/300 and flags every correct multi-semester РПД.
+  it('applies the 60/100 rule per semester, not across the whole discipline', () => {
+    const rpd = [
+      ...RPD_SEM1,
+      ...RPD_SEM1.map((r) => ({ ...r, semester: '2-й семестр' })),
+      ...RPD_SEM1.map((r) => ({ ...r, semester: '3-й семестр' })),
+    ]
+    const fos = rpd.map((r) => fosRow(r.name, r.semester, r.min_points, r.max_points))
+    expect(checkFosScores(rpd, fos).findings).toEqual([])
+  })
+
+  it('does not match an instrument across a semester boundary', () => {
+    // «Проект» exists in both semesters with DIFFERENT points — comparing the
+    // 1-й семестр row against the 2-й семестр one would report a false mismatch.
+    const rpd = [row('Проект', '1-й семестр', 10, 15), row('Проект', '3-й семестр', 18, 30)]
+    const fos = [fosRow('Проект', '1-й семестр', 10, 15), fosRow('Проект', '3-й семестр', 18, 30)]
+    expect(checkFosScores(rpd, fos).findings.filter((f) => f.kind !== 'total_mismatch')).toEqual([])
+  })
+
+  it('ignores «Итого» rows when matching instruments', () => {
+    const rpd = [...RPD_SEM1, row('Итого:', '1-й семестр', 60, 100)]
+    const fos = [...FOS_SEM1, fosRow('Итого:', '1-й семестр', 60, 100)]
+    const result = checkFosScores(rpd, fos)
+    // The Итого row must not be reported as an instrument, and must not be
+    // double-counted into the semester sum.
+    expect(result.findings).toEqual([])
+  })
+})
+
+// The third arithmetic layer: §9 → перечень ФОС → «Критерии оценки».
+// Numbers from the макет's own worked example — its «Критерии оценки
+// лабораторных работ» table sums to 12/20, exactly its перечень row.
+const crit = (o: Partial<FosCriteriaBlock> = {}): FosCriteriaBlock => ({
+  instrument: 'Лабораторная работа',
+  declared_min: 12, declared_max: 20,
+  component_min: 12, component_max: 20,
+  ...o,
+})
+const LAB_ROW: FosScoreRow[] = [
+  { name: 'Лабораторная работа', semester: null, count: 4, min_points: 12, max_points: 20 },
+  { name: 'Экзамен', semester: null, count: 1, min_points: 48, max_points: 80 },
+]
+const LAB_BRS: BrsScoreRow[] = [
+  { name: 'Лабораторная работа', semester: null, min_points: 12, max_points: 20 },
+  { name: 'Экзамен', semester: null, min_points: 48, max_points: 80 },
+]
+
+describe('checkFosScores — per-instrument criteria sums', () => {
+  it('accepts a block whose parts add up to what it declares, matching the перечень', () => {
+    const result = checkFosScores(LAB_BRS, LAB_ROW, [crit()])
+    expect(result.findings.filter((f) => f.kind.startsWith('criteria_'))).toEqual([])
+  })
+
+  it('flags parts that do not add up to the declared maximum', () => {
+    const result = checkFosScores(LAB_BRS, LAB_ROW, [crit({ component_max: 18 })])
+    const f = result.findings.find((x) => x.kind === 'criteria_sum_mismatch')!
+    expect(f.instrument).toBe('Лабораторная работа')
+    expect(f.detail).toMatch(/заявлен максимум 20 баллов, а составляющие дают в сумме 18/)
+  })
+
+  it('flags parts that do not add up to the declared minimum', () => {
+    const result = checkFosScores(LAB_BRS, LAB_ROW, [crit({ component_min: 10 })])
+    expect(result.findings.some((f) => f.kind === 'criteria_sum_mismatch' && /минимум 12/.test(f.detail))).toBe(true)
+  })
+
+  it('flags a block whose declared total disagrees with its перечень row', () => {
+    const result = checkFosScores(LAB_BRS, LAB_ROW, [crit({ declared_max: 25, component_max: 25 })])
+    const f = result.findings.find((x) => x.kind === 'criteria_table_mismatch')!
+    expect(f.detail).toMatch(/в критериях оценки максимум 25 баллов, а в перечне оценочных средств — 20/)
+  })
+
+  // An un-itemised block is not a sum of zero.
+  it('says nothing when the block was never itemised', () => {
+    const result = checkFosScores(LAB_BRS, LAB_ROW, [crit({ component_min: null, component_max: null })])
+    expect(result.findings.filter((f) => f.kind.startsWith('criteria_'))).toEqual([])
+  })
+
+  it('says nothing when the block declares no total of its own', () => {
+    const result = checkFosScores(LAB_BRS, LAB_ROW, [crit({ declared_min: null, declared_max: null })])
+    expect(result.findings.filter((f) => f.kind.startsWith('criteria_'))).toEqual([])
+  })
+
+  it('ignores a criteria block for an instrument the перечень never lists', () => {
+    const result = checkFosScores(LAB_BRS, LAB_ROW, [crit({ instrument: 'Коллоквиум', declared_max: 99, component_max: 99 })])
+    expect(result.findings.filter((f) => f.kind === 'criteria_table_mismatch')).toEqual([])
+  })
+
+  // A multi-semester instrument has no single total to compare a once-written
+  // criteria block against — checking it would be arbitrary.
+  it('skips the перечень comparison when the instrument scores differently per semester', () => {
+    const rows: FosScoreRow[] = [
+      { name: 'Проект', semester: '1-й семестр', count: 1, min_points: 10, max_points: 15 },
+      { name: 'Проект', semester: '3-й семестр', count: 1, min_points: 18, max_points: 30 },
+    ]
+    const brs: BrsScoreRow[] = rows.map((r) => ({
+      name: r.name, semester: r.semester, min_points: r.min_points, max_points: r.max_points,
+    }))
+    const result = checkFosScores(brs, rows, [crit({ instrument: 'Проект', declared_min: 10, declared_max: 15, component_min: 10, component_max: 15 })])
+    expect(result.findings.filter((f) => f.kind === 'criteria_table_mismatch')).toEqual([])
+  })
+
+  it('carries the criteria blocks through on the result', () => {
+    expect(checkFosScores(LAB_BRS, LAB_ROW, [crit()]).criteria).toHaveLength(1)
   })
 })

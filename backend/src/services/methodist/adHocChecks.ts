@@ -42,7 +42,7 @@
 //     all.
 
 import { reviewSyllabus } from '../syllabusReview'
-import { parseAssessmentLinkage, checkAssessmentLinkage } from '../assessmentLinkage'
+import { parseAssessmentLinkage, checkAssessmentLinkage, parseFosNumbers } from '../assessmentLinkage'
 import { reviewMto } from '../mtoReview'
 import type { ProgramDiscipline } from '../../../../shared/types'
 import type { CheckOutcome } from './checks'
@@ -72,7 +72,10 @@ async function runAdHocSyllabus(teacherId: string, text: string): Promise<CheckO
 
 async function runAdHocLinkage(teacherId: string, text: string, opts: AdHocCheckOptions): Promise<CheckOutcome> {
   const parsed = await parseAssessmentLinkage(teacherId, text)
-  return { key: 'linkage', status: 'ok', result: checkAssessmentLinkage(parsed, opts.fosText) }
+  const fosRows = opts.fosText
+    ? await parseFosNumbers(teacherId, opts.fosText).catch(() => null)
+    : null
+  return { key: 'linkage', status: 'ok', result: checkAssessmentLinkage(parsed, opts.fosText, fosRows) }
 }
 
 async function runAdHocMto(teacherId: string, text: string): Promise<CheckOutcome> {

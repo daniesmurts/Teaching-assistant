@@ -22,7 +22,8 @@ describe('runAdHocCheck — per-check error isolation', () => {
     const outcome = await runAdHocCheck('linkage', 't1', 'x'.repeat(100))
 
     expect(outcome.status).toBe('ok')
-    expect(checkSpy).toHaveBeenCalledWith(expect.anything(), undefined)
+    // Third arg is the parsed ФОС score table — null with no ФОС at all.
+    expect(checkSpy).toHaveBeenCalledWith(expect.anything(), undefined, null)
   })
 
   it('forwards a ФОС uploaded alongside the ad-hoc document — checked for real, just not persisted', async () => {
@@ -31,9 +32,12 @@ describe('runAdHocCheck — per-check error isolation', () => {
     })
     const checkSpy = vi.spyOn(linkage, 'checkAssessmentLinkage')
 
+    const scoreSpy = vi.spyOn(linkage, 'parseFosNumbers').mockResolvedValue({ rows: null, criteria: [] })
+
     await runAdHocCheck('linkage', 't1', 'x'.repeat(100), { fosText: 'текст фос' })
 
-    expect(checkSpy).toHaveBeenCalledWith(expect.anything(), 'текст фос')
+    expect(scoreSpy).toHaveBeenCalledWith('t1', 'текст фос')
+    expect(checkSpy).toHaveBeenCalledWith(expect.anything(), 'текст фос', { rows: null, criteria: [] })
   })
 
   it('runs the mto check with an empty allDisciplines/siblingReviews — no siblings to suggest from', async () => {

@@ -1169,7 +1169,151 @@ export interface ParsedAssessmentLinkage {
   instruments: { name: string; section: string | null }[]   // §4, last column
   srs_forms:   string[]                                     // СРС forms
   ksr_forms:   string[]                                     // КСР forms
-  brs_items:   { name: string; points: number | null }[]    // §9 БРС checkpoints
+  // §9 БРС checkpoints. Carries min AND max because the ФОС макет requires
+  // both («Min, баллов (базовый уровень)» / «Max, баллов (повышенный
+  // уровень)») and sources them from §9 — until 2026-08-25 only the max was
+  // kept, which made that comparison impossible. `semester` matters: a
+  // multi-semester discipline repeats the same instrument with DIFFERENT
+  // points per semester (observed: «Проект» 10/15, 10/15, 18/30), and the
+  // 60/100 total is per semester, not per discipline.
+  brs_items:   BrsScoreRow[]
+}
+
+export interface BrsScoreRow {
+  name:        string
+  semester:    string | null   // e.g. '1-й семестр'; null when §9 isn't split
+  min_points:  number | null
+  max_points:  number | null
+}
+
+// ─── ФОС «Перечень оценочных средств» ↔ §9 ───────────────────────────────────
+// Requested by a методист 2026-08-25: «программа видит похоже только наличие…
+// Хотелось бы, чтобы программа анализировала также правильность оформления в
+// ФОСе по макету… баллы должны брать из п.9 РП». The КНИТУ «Макет ФОС 3++»
+// states the rule itself, directly under the table:
+//   «Примечание: перечень оценочных средств приводиться из п.9 рабочей
+//    программы по дисциплине (модулю)»
+// so this is arithmetic, not judgement: same instruments, same min, same max,
+// and each semester totalling 60/100 (confirmed as a hard КНИТУ invariant).
+
+export interface FosScoreRow {
+  name:        string
+  semester:    string | null
+  count:       number | null   // «Кол-во»
+  min_points:  number | null
+  max_points:  number | null
+}
+
+export type FosScoreFindingKind =
+  | 'missing_in_fos'     // §9 declares it; the ФОС table doesn't list it
+  | 'missing_in_rpd'     // the ФОС table lists it; §9 doesn't
+  | 'min_mismatch'
+  | 'max_mismatch'
+  | 'total_mismatch'     // a semester's Итого isn't 60/100
+  // The third arithmetic layer the макет implies: §9 → перечень ФОС →
+  // «Критерии оценки». The макет's лабораторная criteria table sums to 12/20,
+  // exactly its row in the перечень.
+  | 'criteria_sum_mismatch'    // the block's own components don't add up to what it declares
+  | 'criteria_table_mismatch'  // the block's declared total ≠ its перечень row
+
+// One instrument's «Критерии оценки» block. The макет writes these two ways —
+// as a table (Виды работ | Минимальный балл | Максимальный балл | ИТОГО) and
+// as prose («максимальная оценка за работу составляет 20 баллов… Из них:
+// Презентация работы – мах 3 балла; …») — so extraction is a model's job;
+// only the arithmetic below is done in code.
+export interface FosCriteriaBlock {
+  instrument:     string
+  declared_min:   number | null   // the block's own stated total, when it states one
+  declared_max:   number | null
+  component_min:  number | null   // sum of the itemised parts; null when none were itemised
+  component_max:  number | null
+}
+
+export interface FosScoreFinding {
+  kind:        FosScoreFindingKind
+  instrument:  string | null   // null for a whole-semester total finding
+  semester:    string | null
+  rpd_min:     number | null
+  rpd_max:     number | null
+  fos_min:     number | null
+  fos_max:     number | null
+  detail:          string
+  recommendation:  string
+}
+
+// ─── ФОС ↔ «Макет ФОС 3++»: структурное соответствие ─────────────────────────
+// Second half of the same 2026-08-25 request: «Хотелось бы, чтобы программа
+// анализировала также правильность оформления в ФОСе по макету». The макет
+// prescribes a fixed skeleton, so "does this document have the blocks the
+// макет requires" is a string question, not a judgement — deterministic, like
+// the copy check and unlike the meaning check.
+
+export type FosSectionKey =
+  | 'title_page'            // «ФОНД ОЦЕНОЧНЫХ СРЕДСТВ» титульный лист
+  | 'compiler'              // «Составитель ФОС»
+  | 'department_minutes'    // рассмотрен на заседании кафедры, протокол №
+  | 'approved'              // «УТВЕРЖДЕНО» (Начальник УМЦ / Зав. магистратурой)
+  | 'competency_map'        // перечень компетенций и индикаторов + этапы формирования
+  | 'score_table'           // перечень оценочных средств (Кол-во / Min / Max)
+  | 'grading_scale'         // шкала оценивания (5/4/3/2 × баллы × критерии)
+  | 'instrument_catalogue'  // краткая характеристика оценочных средств
+
+export type FosStructureFindingKind = 'missing_section' | 'missing_criteria'
+
+export interface FosStructureFinding {
+  kind:        FosStructureFindingKind
+  section:     FosSectionKey | null   // set for 'missing_section'
+  instrument:  string | null          // set for 'missing_criteria'
+  detail:          string
+  recommendation:  string
+}
+
+export interface FosStructureCheck {
+  checked:   boolean            // false when no ФОС was attached at all
+  present:   FosSectionKey[]    // sections the document does have
+  findings:  FosStructureFinding[]
+  summary:   string
+}
+
+// ─── §9 БРС readiness — «можно ли из этого п.9 собрать корректный ФОС» ───────
+// The other end of the chain the методист described: a ФОС's перечень is its
+// discipline's §9, so a §9 that is incomplete or doesn't total 60/100 cannot
+// produce a conformant ФОС no matter how the ФОС is written. Checked at
+// authoring time so the teacher sees it before a ФОС is ever generated,
+// rather than a методист finding it months later.
+
+export type BrsReadinessFindingKind =
+  | 'no_scores'          // §9 has no rows at all
+  | 'missing_points'     // a row without a minimum or a maximum
+  | 'min_above_max'      // minimum higher than maximum
+  | 'semester_total'     // a semester doesn't add up to 60/100
+  | 'unknown_instrument' // not in the макет's catalogue — the ФОС can't describe it
+
+export interface BrsReadinessFinding {
+  kind:            BrsReadinessFindingKind
+  severity:        ReviewSeverity
+  instrument:      string | null
+  semester:        string | null
+  detail:          string
+  recommendation:  string
+}
+
+export interface BrsReadinessCheck {
+  checked:   boolean            // false when §9 wasn't present to check
+  ready:     boolean            // no 'error'-severity findings
+  findings:  BrsReadinessFinding[]
+  summary:   string
+}
+
+export interface FosScoreCheck {
+  // False when no ФОС was attached, or its «Перечень оценочных средств» table
+  // could not be found — distinct from "found it and everything matched", the
+  // same distinction fos_available draws for the presence check.
+  table_found: boolean
+  rows:        FosScoreRow[]
+  criteria:    FosCriteriaBlock[]
+  findings:    FosScoreFinding[]
+  summary:     string
 }
 
 export interface AssessmentLinkageFinding {
@@ -1186,6 +1330,14 @@ export interface AssessmentLinkageFinding {
 }
 
 export interface AssessmentLinkageResult {
+  // Numeric ФОС↔§9 reconciliation. Present only when a ФОС was uploaded AND
+  // its score table parsed; absent otherwise.
+  fos_scores?:   FosScoreCheck
+  // Structural conformance of the ФОС to КНИТУ's «Макет ФОС 3++».
+  fos_structure?: FosStructureCheck
+  // Whether §9 itself is in a state a conformant ФОС could be built from —
+  // independent of whether a ФОС exists yet, so it is always present.
+  brs_readiness?: BrsReadinessCheck
   parsed:        ParsedAssessmentLinkage
   // Whether an institution-filed ФОС document was attached to this
   // discipline (via program_documents' 'fos' kind) and actually checked.
@@ -1322,6 +1474,62 @@ export interface FosCriterion {
   scale: FosCriterionScale[]
 }
 
+// ─── ФОС по «Макету ФОС 3++» ─────────────────────────────────────────────────
+// The generator emits the макет's own skeleton, so a generated ФОС satisfies
+// services/fosStructure.ts by construction rather than being checked against
+// it afterwards. Every field below is optional on FosSections: documents
+// generated before this shipped simply don't have them, and the export guards
+// for each.
+
+export interface FosTitlePage {
+  discipline:     string
+  direction:      string | null   // код и наименование направления подготовки
+  profile:        string | null
+  qualification:  string | null
+  faculty:        string | null
+  department:     string | null
+  year:           number
+}
+
+export interface FosCompetencyMapRow {
+  indicator:    string
+  lectures:     string   // темы, на которых индикатор формируется
+  practicals:   string
+  labs:         string
+  coursework:   string
+  instruments:  string
+}
+
+export interface FosGradingScaleRow {
+  digit:            string   // '5'
+  points:           string   // '87 - 100'
+  word:             string   // 'Отлично (зачтено)'
+  criteria_exam:    string
+  criteria_credit:  string
+}
+
+export interface FosCatalogueRow {
+  name:            string
+  description:     string
+  representation:  string   // «Представление оценочного средства в фонде»
+}
+
+export interface FosCriteriaComponent {
+  label:  string
+  min:    number | null
+  max:    number | null
+}
+
+// Points come from §9 РПД and are distributed across the components in code,
+// so the sums the conformance check verifies are exact by construction — the
+// model only supplies the wording of each component.
+export interface FosInstrumentCriteria {
+  instrument:    string
+  components:    FosCriteriaComponent[]
+  declared_min:  number | null
+  declared_max:  number | null
+}
+
 export interface FosSections {
   passport: {
     competencies: string[]
@@ -1332,6 +1540,13 @@ export interface FosSections {
   task_sets: { id: string; kind: MaterialKind }[]   // existing `task_sets` rows — kind kept alongside id so the UI can link to the right generator page (/materials/:kind)
   tickets:      FosTicket[]
   criteria:     FosCriterion[]
+  // Макет blocks. Optional for back-compat with ФОС generated before this.
+  title_page?:           FosTitlePage
+  competency_map?:       FosCompetencyMapRow[]
+  score_table?:          FosScoreRow[]        // sourced from §9 РПД
+  grading_scale?:        FosGradingScaleRow[]
+  catalogue?:            FosCatalogueRow[]
+  instrument_criteria?:  FosInstrumentCriteria[]
 }
 
 export interface FosCoverageReport {

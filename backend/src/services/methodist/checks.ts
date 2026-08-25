@@ -20,7 +20,7 @@ import { reviewDocumentCoverage } from '../documentReview'
 import { reviewPlacement } from '../placementReview'
 import { reviewMto } from '../mtoReview'
 import { reviewSyllabus } from '../syllabusReview'
-import { parseAssessmentLinkage, checkAssessmentLinkage } from '../assessmentLinkage'
+import { parseAssessmentLinkage, checkAssessmentLinkage, parseFosNumbers } from '../assessmentLinkage'
 import { logger } from '../../lib/logger'
 
 export const ALL_CHECK_KEYS = ['syllabus', 'coverage', 'placement', 'mto', 'linkage'] as const
@@ -58,7 +58,17 @@ async function runLinkageCheck(target: CheckTarget, teacher: Teacher): Promise<C
   // of the check; checkAssessmentLinkage treats a null/undefined fosText the
   // same as "none uploaded" (fos_available: false).
   const fos = await findFosForDiscipline(target.programId, target.disciplineId).catch(() => null)
-  return { key: 'linkage', status: 'ok', result: checkAssessmentLinkage(parsed, fos?.extractedText) }
+  // Score-table extraction is best-effort: a ФОС that isn't laid out to the
+  // макет still gets the presence check, it just can't be reconciled by
+  // numbers. checkFosScores reports that as table_found: false rather than as
+  // "everything matched".
+  const fosRows = fos?.extractedText
+    ? await parseFosNumbers(teacher.id, fos.extractedText).catch(() => null)
+    : null
+  return {
+    key: 'linkage', status: 'ok',
+    result: checkAssessmentLinkage(parsed, fos?.extractedText, fosRows),
+  }
 }
 
 async function runCoverageCheck(target: CheckTarget, teacher: Teacher): Promise<CheckOutcome> {

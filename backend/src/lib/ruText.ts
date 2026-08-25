@@ -73,3 +73,45 @@ export function tokenContainment(tokensA: string[], tokensB: string[]): number {
   for (const t of setA) if (setB.has(t)) shared++
   return shared / Math.min(setA.size, setB.size)
 }
+
+// Splits an instrument name on internal synonym separators — «Доклад,
+// сообщение» names ONE assessment genre with two interchangeable words for
+// it (a common РПД convention), not two co-required concepts, and «Деловая
+// и/или ролевая игра» is explicit OR by its own wording. Found in production
+// 2026-08-20: requiring every token of «Доклад, сообщение» together made
+// «Подготовка доклада» fail to match (it has «доклад» but not «сообщение»)
+// even though it is unambiguously preparation for that instrument.
+const SYNONYM_SEPARATOR = /\s*,\s*|\s+и\s*\/\s*или\s+|\s+или\s+|\s*\/\s*/i
+
+function nameAlternatives(name: string): string[] {
+  const parts = name.split(SYNONYM_SEPARATOR).map((s) => s.trim()).filter(Boolean)
+  return parts.length > 0 ? parts : [name]
+}
+
+/**
+ * Is this instrument referenced by that phrase? True when every content stem
+ * of ANY ONE of the instrument's name alternatives appears in the phrase —
+ * «Доклад» matches «Подготовка доклада», «Доклад, сообщение» also matches it
+ * (via its «Доклад» alternative), and «Контрольная работа» matches «Проверка
+ * контрольных работ», while «Доклад» does not match «Лабораторная работа».
+ *
+ * Lives here rather than in services/assessmentLinkage.ts since
+ * services/fosStructure.ts became a second consumer — same reason
+ * tokenContainment moved down here.
+ */
+export function mentions(phrase: string, instrument: string): boolean {
+  const hay = new Set(tokenize(phrase))
+  return nameAlternatives(instrument).some((alt) => {
+    const needle = tokenize(alt)
+    return needle.length > 0 && needle.every((t) => hay.has(t))
+  })
+}
+
+// NOT `\b` — JavaScript word boundaries are ASCII-only, so /(итого)\b/ never
+// matches «Итого:» (Cyrillic 'о' isn't a word char, so there is no boundary
+// before the colon). Anchored to the whole cell instead, which also keeps a
+// real instrument named «Итоговая аттестация» out of the total rows.
+const TOTAL_ROW = /^\s*(итого|всего)\s*:?\s*$/i
+
+/** Is this a table's «Итого»/«Всего» summary row rather than a real entry? */
+export function isTotalRow(name: string): boolean { return TOTAL_ROW.test(name) }

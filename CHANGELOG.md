@@ -15,6 +15,75 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Added
+- **§9 БРС readiness — the last link in the chain, checked at authoring time.** A ФОС's перечень *is* its discipline's §9, so a §9 that is incomplete or doesn't total 60/100 cannot produce a conformant ФОС however carefully the ФОС is written. `services/brsReadiness.ts` answers «можно ли из этого п.9 собрать корректный ФОС» — deterministic (arithmetic and list membership), and it runs whether or not a ФОС exists yet, because the point is to catch it while the teacher is still writing rather than when a методист reviews.
+
+  Blocks on: a row missing its min or max, a min above its max, a semester not totalling 60/100. Warns (never blocks) on an instrument the макет's catalogue doesn't describe — a кафедра may legitimately use one, it just means the ФОС needs a hand-written «краткая характеристика». A semester containing an incomplete row is skipped for the total rule, so one gap yields one finding rather than two.
+
+  **РПД студия didn't produce a §9 at all** — it drafts four sections, none of them the БРС table, so there was nothing to validate. It now drafts one, and drafts it *correct*: the model names the instruments, `allocateBrsPoints` assigns the numbers so each semester totals exactly 60/100, with промежуточная аттестация weighted at the макет's own share (экзамен 24/40 of 60/100). Models don't reliably make columns add up, and a §9 that misses its total is precisely what blocks a conformant ФОС downstream — so the numbers are never the model's to choose. A test reads the drafted table back and runs the readiness check on it.
+
+  **The tests caught a false positive that would have fired on nearly every РПД in the university:** «Экзамен» is absent from the макет's instrument catalogue *by design* — промежуточная аттестация gets an экзаменационный билет there, not a «краткая характеристика» row — so checking it against that list flagged it as unlisted. Экзамен/зачёт are now exempt, and `FINAL_ATTESTATION` moved to `config/brs.ts` so `assessmentLinkage.ts`, which already exempted them from СРС/КСР for the same underlying reason, shares one definition.
+
+  Also: `BRS_SEMESTER_MIN/MAX` moved out of `assessmentLinkage.ts` into `config/brs.ts` — a third consumer appeared, and wiring the readiness check in would otherwise have created another circular import (the second one this feature has produced; the first was `fosStructure`). They are institution POLICY rather than a fact about Russian higher education, so `config/` is where a second institution would override them.
+
+  16 new tests; 934 backend / 61 frontend green, both builds clean.
+
+### Added
+- **The ФОС generator now emits the «Макет ФОС 3++» shape — conformant by construction.** Closes the loop opened by the методист's 2026-08-25 request: instead of generating a pile of instruments and then checking whether it matches the макет, the generator produces the макет's own skeleton, and the checks become regressions for hand-written ФОС.
+
+  The pivot is where the numbers come from. The макет says «перечень оценочных средств приводиться из п.9 рабочей программы», so the generator now parses §9 out of the course's own syllabus **with the same `parseAssessmentLinkage` the linkage check uses**. Same parser, same numbers — the ФОС↔§9 reconciliation has nothing to report because both sides read one source.
+
+  Ingested the макет's two normative tables as reference data (`services/fosMacketReference.ts`): the «Шкала оценивания» (5/4/3/2 with their балл ranges) and the 28-row «Краткая характеристика оценочных средств» catalogue, trimmed per document to the instruments a discipline actually uses. Instruments the макет doesn't list are skipped rather than described from thin air. Deliberately **not** ingested: the per-instrument point breakdowns, which are «например» illustrations each кафедра sets for itself — baking them in would turn one department's example into everyone's requirement.
+
+  **Criteria points are assigned in code, never by the model.** `buildInstrumentCriteria` asks only for the wording — what each part of a mark is awarded for — then `distributePoints` splits §9's min/max across those parts so they sum back exactly. Making numbers add up is the one thing a model is worst at, and those sums are precisely what the conformance check verifies.
+
+  **The claim is tested, not asserted.** `fosExport.test.ts` builds a document, renders the DOCX, reads the text back with mammoth the way `documentExtractor` would, and runs `checkFosStructure` and `checkFosScores` on it — the same checks a методист would. Zero findings, all 8 sections present. Verified non-vacuous by deleting a required section from the export (test goes red) and by breaking `distributePoints` (two tests go red).
+
+  That last check earned its keep immediately: `tsc` caught the test passing the generator's `FosInstrumentCriteria` (itemised components) where `checkFosScores` expects `FosCriteriaBlock` (pre-summed), leaving `component_min/max` undefined — so **the sum rules were being skipped and the assertion passed vacuously**. The test now collapses components the way `parseFosNumbers` would when reading the rendered document back.
+
+  «СОГЛАСОВАНО» is deliberately not printed (the макет includes it only for kafedras writing a ФОС for another kafedra), and institutional fields the generator can't know — факультет, кафедра, направление, профиль — print the макет's own blank rules rather than a guess. Legacy ФОС generated before this still render, with a test pinning it. 918 backend / 61 frontend green.
+
+### Added
+- **Per-instrument «Критерии оценки» sums — the third link in the ФОС chain.** Completes §9 → перечень ФОС → критерии оценки. The макет's own лабораторная criteria table sums to 12/20, exactly its перечень row; two new checks pin that: a block's itemised parts must add up to the total it declares, and that declared total must match its перечень row.
+
+  **Extraction had to go to the model, and the reason is specific.** The макет writes criteria two ways — as a table (Виды работ | Минимальный балл | Максимальный балл | ИТОГО) and as prose («максимальная оценка за работу составляет 20 баллов, минимальная 10. Из них: Презентация работы – мах 3 балла; …») — and the prose interleaves the declared total with its own components. Regex-summing every «мах N баллов» would count the total twice and report a mismatch on a correct document. So the model separates total from components (told explicitly not to include the total among them) and the arithmetic stays in code, same split as the rest of the file.
+
+  Folded into the existing ФОС pass rather than adding a third LLM call — `parseFosScoreTable` became `parseFosNumbers`, returning both the перечень rows and the criteria blocks from one read of the same document.
+
+  Three cases deliberately produce nothing rather than a guess: a block that was never itemised (an empty component list is not a sum of zero), a block that declares no total of its own, and an instrument scored differently per semester — a criteria block is written once, so there is no single перечень total to compare it against. Each has a test.
+
+  The side-by-side numbers box now labels its two columns by finding kind: «п.9 РПД / ФОС» is right for the reconciliation kinds but wrong for the criteria ones, where both numbers come from inside the ФОС («Заявлено в критериях» / «Сумма составляющих»). 10 new tests built on the макет's worked numbers; 908 backend / 61 frontend green.
+
+  **Remaining on ФОС conformance:** making the ФОС generator emit the макет shape, so conformance is true by construction rather than checked after the fact — with РПД студия validating §9 against what the ФОС will later require.
+
+### Added
+- **ФОС structural conformance to «Макет ФОС 3++».** Second half of the 2026-08-25 request — «Хотелось бы, чтобы программа анализировала также правильность оформления в ФОСе по макету». New `services/fosStructure.ts`, deterministic (section presence is a string question — same call as the copy check, opposite of the meaning check, which genuinely needed a model).
+
+  Checks the eight blocks the макет requires — титульный лист, составитель, протокол кафедры, гриф УТВЕРЖДЕНО, перечень компетенций/индикаторов с этапами формирования, перечень оценочных средств, шкала оценивания, краткая характеристика — and, using the §9 parse the linkage check already ran, that **every instrument the РПД budgets points for has a «Критерии оценки» block** in the fund.
+
+  Three deliberate limits, all documented in the file header: it verifies section **presence, not content** (it knows «Шкала оценивания» exists, not whether its thresholds are right); it **never requires СОГЛАСОВАНО**, on the макет's own instruction that only kafedras writing a ФОС for another kafedra include it — requiring it would fire on the normal case; and it treats the макет's point breakdowns as the illustrations they are («например, максимальное количество баллов за деловую игру 20…»), since each кафедра sets its own per положение о БРС.
+
+  **The макет is its own test fixture.** Flattened to text the way `documentExtractor` produces it and checked in as `__fixtures__/fosMacket.txt`, with the positive case asserting КНИТУ's own template passes its own check — if it ever fails, the check is wrong, not the document. That caught two real bugs immediately: `/критери\w* оценки/` never matched a single Cyrillic heading (**`\w` is ASCII-only in JavaScript**, the same trap as `\b` in the «Итого» guard the day before), and the instrument-to-criteria window only looked *backwards* — wrong for «Критерии оценки лабораторных работ», where the heading names its own instrument. Both found by the макет failing itself, not by inspection.
+
+  Also fixed in passing: promoting `checkFosStructure` into `assessmentLinkage.ts` created a **circular import** (`fosStructure` → `assessmentLinkage` → `fosStructure`), which typechecks but can leave undefined bindings at runtime. `mentions`, the synonym splitter and `isTotalRow` moved down to `lib/ruText.ts` — the same promote-on-second-consumer call already made for `tokenContainment` — and `assessmentLinkage.ts` re-exports them so existing importers are untouched. 9 new tests; 899 backend / 61 frontend green.
+
+  **Still open:** the third arithmetic rule the макет implies — per-instrument «Критерии оценки» sub-scores must sum to that instrument's Перечень row (the макет's лабораторная table sums to 12/20, matching its row) — and making the ФОС generator emit the макет shape so conformance is true by construction rather than checked after the fact.
+
+### Added
+- **ФОС «Перечень оценочных средств» ↔ п.9 РПД — the numbers, not just the names (methodist, 2026-08-25).** «программа видит похоже только наличие… Хотелось бы, чтобы программа анализировала также правильность оформления в ФОСе по макету… баллы должны брать из п.9 РП». She attached КНИТУ's «Макет ФОС 3++», which states the rule itself, printed directly under the table: *«Примечание: перечень оценочных средств приводиться из п.9 рабочей программы по дисциплине (модулю)»*. So this is arithmetic, not judgement — extraction goes to the model, reconciliation stays in code, same split as the rest of `assessmentLinkage.ts`.
+
+  Three rules now checked: each instrument's **min and max** must match §9; nothing may appear on one side and not the other; and each semester must total **60/100** (confirmed as a hard КНИТУ БРС invariant — kept as a named constant with a note that a second institution should move it to settings rather than silently inherit КНИТУ's).
+
+  **The blocker was that we were throwing the minimum away.** `brs_items` carried `points` (max only), as did the БРС engine's `BrsCheckpoint` — so the comparison the макет asks for was impossible until §9 parsing captured both columns. `brs_items` is now `BrsScoreRow { name, semester, min_points, max_points }`.
+
+  **Per semester, not per discipline** — the thing that would have made a naive version wrong on every correct multi-semester РПД. Her Иностранный язык document repeats the same instrument with *different* points in each semester («Проект» 10/15, 10/15, 18/30), and 60/100 is a per-semester total; summing across three semesters gives 180/300 and flags everything. Matching never crosses a semester boundary, and there's a test pinning exactly that.
+
+  Bug found while testing: **JavaScript's `\b` is ASCII-only**, so the `/(итого|всего)\b/` guard meant to exclude «Итого» rows never matched — Cyrillic «о» isn't a word character, so there's no boundary before the colon. Anchored to the whole cell instead, which also keeps a real instrument named «Итоговая аттестация» from being mistaken for a total. Caught by a test, not by inspection.
+
+  Renders as its own section with both numbers side by side in tabular figures, so a mismatch is something the reader sees rather than takes on trust. 11 new backend tests built on the макет's worked example and her real document's numbers; 890 backend / 61 frontend green.
+
+  **Not done, deliberately:** structural conformance to the макет (does the ФОС have титульный лист, шкала оценивания, краткая характеристика, per-instrument «Критерии оценки»…) and the third arithmetic rule the макет implies — that each instrument's «Критерии оценки» sub-scores sum to its Перечень row (лаб. criteria table sums to 12/20, matching its row). Also worth knowing: most point breakdowns in the макет are «например» illustrations, not norms — each кафедра sets its own per положение о БРС, so ingesting them as rules would manufacture false findings.
+
+### Added
 - **«Проверка смысла формулировок» — the judged half of the методист's ЗУВ rule.** Her follow-up once the copy check was fixed: «нужна еще проверка смысла, формулировки (то есть того, как формулировка "должен знать" отражает индикатор и есть ли смысловая связь с дисциплиной)». Copy-detection only answers *is this a literal duplicate*; a ЗУВ reworded just past the 0.9 containment threshold can still be generic boilerplate naming nothing this discipline teaches.
 
   New `services/outcomeMeaning.ts` — and **deliberately an LLM pass**, the opposite call from `outcomeFormulation.ts`, for the reason that file's header states from the other side: "is this text a copy of that text" is a measurable string question and belongs in code, while "does this wording convey that requirement's meaning, in terms this discipline actually teaches" is reading comprehension. Faking it with another similarity threshold would just be a worse copy detector. Per ЗУВ line it returns `not_reflected` (conveys no declared indicator) or `weak_link` (conveys it, but generically — the wording would suit any discipline); `ok` produces nothing. Judged against the §5–§8.1 content, so «связь с дисциплиной» is measured against real topics.
