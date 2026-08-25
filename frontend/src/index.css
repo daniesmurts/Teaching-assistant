@@ -100,6 +100,17 @@ body {
 .page-enter    { animation: fadeIn       250ms ease forwards; }
 .result-appear { animation: resultAppear 350ms ease forwards; }
 
+/* Rotating loading quip — opacity-only crossfade (no translate) so a line of
+   text under a spinner doesn't jump around while it cycles. */
+@keyframes quipFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.quip-fade { animation: quipFade 400ms ease forwards; }
+@media (prefers-reduced-motion: reduce) {
+  .quip-fade { animation: none; }
+}
+
 /* Attention ring — an expanding amber halo to draw the eye to a primary CTA
    (e.g. the first-import button on an empty programmes page). Amber-only, no
    resting shadow, so it reads as a pulse of the accent rather than depth. */

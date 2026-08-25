@@ -17,7 +17,7 @@ describe('checkFosStructure — against the real макет', () => {
     const result = checkFosStructure(MACKET)
     expect(result.checked).toBe(true)
     expect(result.findings.filter((f) => f.kind === 'missing_section')).toEqual([])
-    expect(result.present).toHaveLength(8)
+    expect(result.present).toHaveLength(6)
     expect(result.summary).toMatch(/все обязательные/)
   })
 
@@ -70,7 +70,7 @@ describe('checkFosStructure — missing blocks', () => {
   it('reports a document with none of the required blocks', () => {
     const result = checkFosStructure('Произвольный текст без единого раздела макета. '.repeat(10))
     expect(result.present).toEqual([])
-    expect(result.findings).toHaveLength(8)
+    expect(result.findings).toHaveLength(6)
     expect(result.summary).toMatch(/Отклонения от макета/)
   })
 
@@ -80,6 +80,18 @@ describe('checkFosStructure — missing blocks', () => {
   it('never requires СОГЛАСОВАНО, which the макет makes conditional', () => {
     const withoutIt = MACKET.replace(/СОГЛАСОВАНО/g, '')
     const result = checkFosStructure(withoutIt)
+    expect(result.findings.filter((f) => f.kind === 'missing_section')).toEqual([])
+  })
+
+  // Методист feedback 2026-08-25: a кафедра-meeting protocol number and the
+  // УТВЕРЖДЕНО signature are stamped in by a downstream signing workflow,
+  // after this check runs — never present in a ФОС at review time.
+  it('never requires the заседание-кафедры protocol or the УТВЕРЖДЕНО гриф', () => {
+    const withoutBoth = MACKET
+      .replace(/[^\n]*заседании кафедры[^\n]*/gi, '')
+      .replace(/[^\n]*протокол от[^\n]*/gi, '')
+      .replace(/УТВЕРЖДЕНО/g, '')
+    const result = checkFosStructure(withoutBoth)
     expect(result.findings.filter((f) => f.kind === 'missing_section')).toEqual([])
   })
 })

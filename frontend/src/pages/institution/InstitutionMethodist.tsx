@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import FeatureIntro from '../../components/ui/FeatureIntro'
 import Button from '../../components/ui/Button'
@@ -192,6 +192,34 @@ function EmptyState({ icon, text }: { icon: IconName; text: string }) {
       </div>
       <p className="text-sm font-sans text-ink-secondary max-w-xs">{text}</p>
     </div>
+  )
+}
+
+// A check can take up to a minute — long enough for a bare spinner to read
+// as stalled. Cycling through a few dry, in-the-work lines instead gives the
+// wait something to look at without pretending to be funnier than a page
+// about ФГОС conformance should be. First line states what's actually
+// happening; the rest are just company while it runs.
+const LOADING_QUIPS = [
+  'Выполняем выбранные проверки…',
+  'Ищем «Итого», которое на поверку не итого.',
+  'Сверяем, не слишком ли похожа формулировка индикатора на первоисточник.',
+  'Складываем баллы так, чтобы сумма не спорила сама с собой.',
+  'Проверяем, помнит ли ФОС о том, что написано в п.9.',
+  'Сверяем макет с реальностью — реальность обычно короче.',
+  'Убеждаемся, что «до минуты» — не поэтическое преувеличение.',
+]
+
+function LoadingQuips() {
+  const [i, setI] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setI((n) => (n + 1) % LOADING_QUIPS.length), 3500)
+    return () => clearInterval(id)
+  }, [])
+  return (
+    <p key={i} className="quip-fade text-sm font-sans text-ink-secondary mt-3 max-w-xs">
+      {LOADING_QUIPS[i]}
+    </p>
   )
 }
 
@@ -449,7 +477,7 @@ function DisciplineChecksTab({
           {running ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center px-6 py-16">
               <LoadingSpinner size={20} />
-              <p className="text-sm font-sans text-ink-secondary mt-3">Выполняем выбранные проверки…</p>
+              <LoadingQuips />
             </div>
           ) : !hasResults && !hasErrors ? (
             <EmptyState icon="file-check" text="Выберите дисциплину и запустите проверки — результаты появятся здесь." />
@@ -1032,7 +1060,7 @@ function AdHocReviewTab() {
           {reviewMut.isPending ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center px-6 py-16">
               <LoadingSpinner size={20} />
-              <p className="text-sm font-sans text-ink-secondary mt-3">Выполняем выбранные проверки…</p>
+              <LoadingQuips />
             </div>
           ) : outcomes.length === 0 && !runError ? (
             <EmptyState icon="import" text="Загрузите файл или вставьте текст — результаты появятся здесь." />

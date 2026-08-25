@@ -83,7 +83,7 @@ describe('generated ФОС conforms to the макет by construction', () => {
 
     expect(result.checked).toBe(true)
     expect(result.findings).toEqual([])
-    expect(result.present).toHaveLength(8)
+    expect(result.present).toHaveLength(6)
   }, 30_000)
 
   it('emits a перечень whose numbers reconcile with §9 with nothing to report', () => {

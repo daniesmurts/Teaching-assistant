@@ -14,6 +14,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Fixed
+- **ФОС structural check no longer requires two sections a ФОС structurally cannot have yet.** Flagged by the методист testing the new макет conformance check: it reported «Рассмотрение на заседании кафедры» and «Гриф УТВЕРЖДЕНО» as missing on a real ФОС, but both are filled in by a downstream signing workflow — the кафедра meeting that assigns a protocol number, then the УМЦ/зав. магистратурой sign-off — that happens *after* a ФОС is reviewed here, not before. Same false-positive shape СОГЛАСОВАНО was already excluded for, just missed the first time: checking for text that cannot exist yet at authoring time would fire on every ФОС this check is ever run against.
+
+  `services/fosStructure.ts`'s required-section list drops from 8 to 6 (`department_minutes`, `approved` removed from `FosSectionKey`); the export/generator still print the blank-template lines for both, since a кафедра does eventually fill them in outside ИСПУМ — only the *check* stopped requiring them. 1 new regression test, 75 backend tests in the affected files green.
+
 ### Added
 - **§9 БРС readiness — the last link in the chain, checked at authoring time.** A ФОС's перечень *is* its discipline's §9, so a §9 that is incomplete or doesn't total 60/100 cannot produce a conformant ФОС however carefully the ФОС is written. `services/brsReadiness.ts` answers «можно ли из этого п.9 собрать корректный ФОС» — deterministic (arithmetic and list membership), and it runs whether or not a ФОС exists yet, because the point is to catch it while the teacher is still writing rather than when a методист reviews.
 

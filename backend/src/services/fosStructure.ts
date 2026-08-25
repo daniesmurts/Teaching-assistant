@@ -20,6 +20,17 @@ import type {
 // других кафедр». Requiring it would fire on every ФОС written by the kafedra
 // that teaches the discipline — the normal case.
 //
+// «Рассмотрение на заседании кафедры» (протокол №) and the «УТВЕРЖДЕНО» гриф
+// are ALSO not checked, for a related but distinct reason (методист feedback,
+// 2026-08-25): both get filled in by a downstream signing/protocol workflow
+// — the кафедра meeting that assigns a protocol number, then the УМЦ/
+// зав. магистратурой sign-off — that happens AFTER a ФОС is reviewed here,
+// not before. A freshly authored or generated ФОС structurally cannot carry
+// either yet; flagging their absence would fire on every ФОС this check is
+// ever run against, the same false-positive shape СОГЛАСОВАНО already
+// avoids. If ИСПУМ ever ingests that signing step directly, this is where a
+// real (not structural) check on them would belong.
+//
 // Point breakdowns in the макет («например, максимальное количество баллов за
 // деловую (ролевую) игру 20…») are ILLUSTRATIONS, not norms — each кафедра
 // sets its own per положение о БРС — so nothing here treats them as required
@@ -59,16 +70,6 @@ const SECTIONS: SectionSpec[] = [
     key: 'compiler', label: 'Составитель ФОС',
     patterns: [/составитель фос/, /составитель фонда/],
     fix: 'Добавьте на оборотной стороне титульного листа блок «Составитель ФОС» с должностью, подписью и Ф.И.О.',
-  },
-  {
-    key: 'department_minutes', label: 'Рассмотрение на заседании кафедры',
-    patterns: [/заседании кафедры/, /протокол от/],
-    fix: 'Добавьте запись «ФОС рассмотрен и одобрен на заседании кафедры, протокол от … № …» с подписью зав. кафедрой.',
-  },
-  {
-    key: 'approved', label: 'Гриф УТВЕРЖДЕНО',
-    patterns: [/утверждено/],
-    fix: 'Добавьте гриф «УТВЕРЖДЕНО» (начальник УМЦ / зав. магистратурой) по форме макета.',
   },
   {
     key: 'competency_map', label: 'Перечень компетенций и индикаторов с этапами формирования',
