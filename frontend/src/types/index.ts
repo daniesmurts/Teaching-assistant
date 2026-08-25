@@ -90,6 +90,8 @@ export type {
   OutcomeKind,
   OutcomeFormulationFindingKind,
   OutcomeFormulationFinding,
+  OutcomeMeaningFinding,
+  OutcomeMeaningVerdict,
   LinkageSlot,
   ParsedAssessmentLinkage,
   AssessmentLinkageFinding,

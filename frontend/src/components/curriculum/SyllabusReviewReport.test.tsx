@@ -1,7 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, within, cleanup } from '@testing-library/react'
 import SyllabusReviewReport from './SyllabusReviewReport'
-import type { SyllabusReview, SyllabusCoverageItem, OutcomeFormulationFinding } from '../../types'
+import type {
+  SyllabusReview, SyllabusCoverageItem, OutcomeFormulationFinding, OutcomeMeaningFinding,
+} from '../../types'
 
 // The 2026-08-24 report: a copied «должен знать» line showed a clean green
 // «Обеспечена 90%», with the only warning parked in a block further up the
@@ -104,5 +106,79 @@ describe('SyllabusReviewReport — formulation warning on the item card', () => 
   it('omits the standalone block entirely when every finding found its card', () => {
     render(<SyllabusReviewReport result={review()} />)
     expect(screen.queryByText('Формулировки результатов обучения')).toBeNull()
+  })
+})
+
+// #2 (2026-08-24): the judged half. Same inline contract as the copy warning —
+// the caveat has to reach the card that shows the score.
+const GENERIC = 'современные подходы к решению профессиональных задач в отрасли'
+
+function meaning(overrides: Partial<OutcomeMeaningFinding> = {}): OutcomeMeaningFinding {
+  return {
+    verdict: 'weak_link',
+    outcome_kind: 'knowledge',
+    outcome_title: GENERIC,
+    indicator_code: 'ОПК-4.1',
+    indicator_title: INDICATOR,
+    detail: 'Формулировка слишком общая.',
+    recommendation: 'Свяжите её с темами этой дисциплины.',
+    ...overrides,
+  }
+}
+
+describe('SyllabusReviewReport — meaning findings', () => {
+  it('renders the meaning caveat on the card that shows the green score', () => {
+    render(<SyllabusReviewReport result={review({
+      items: [item({ title: GENERIC })],
+      formulation_findings: [],
+      meaning_findings: [meaning()],
+    })} />)
+
+    const card = screen.getByText(GENERIC).closest('div.rounded-lg') as HTMLElement
+    expect(within(card).getByText('Обеспечена')).toBeTruthy()
+    expect(within(card).getByText('Нет связи с дисциплиной')).toBeTruthy()
+    expect(within(card).getByText('Формулировка слишком общая.')).toBeTruthy()
+  })
+
+  it('labels a not_reflected verdict differently from a weak link', () => {
+    render(<SyllabusReviewReport result={review({
+      items: [item({ title: GENERIC })],
+      formulation_findings: [],
+      meaning_findings: [meaning({ verdict: 'not_reflected' })],
+    })} />)
+
+    expect(screen.getByText('Не отражает индикатор')).toBeTruthy()
+    expect(screen.queryByText('Нет связи с дисциплиной')).toBeNull()
+  })
+
+  it('omits the indicator block when the model could match none', () => {
+    render(<SyllabusReviewReport result={review({
+      items: [item({ title: GENERIC })],
+      formulation_findings: [],
+      meaning_findings: [meaning({ indicator_code: null, indicator_title: null })],
+    })} />)
+
+    expect(screen.getByText('Нет связи с дисциплиной')).toBeTruthy()
+    expect(screen.queryByText(INDICATOR)).toBeNull()
+  })
+
+  it('states the duplicate inflation instead of silently adjusting the counts', () => {
+    render(<SyllabusReviewReport result={review({ duplicate_count: 2 })} />)
+    expect(screen.getByText(/2 — дословные повторы уже учтённых/)).toBeTruthy()
+  })
+
+  it('says nothing about duplicates when there are none', () => {
+    render(<SyllabusReviewReport result={review({ duplicate_count: 0 })} />)
+    expect(screen.queryByText(/дословные повторы уже учтённых/)).toBeNull()
+  })
+
+  it('shows a warning when a check did not finish, so silence is not read as all-clear', () => {
+    render(<SyllabusReviewReport result={review({
+      formulation_findings: [],
+      meaning_findings: [],
+      warnings: ['Проверка смысла формулировок не завершилась — повторите проверку.'],
+    })} />)
+
+    expect(screen.getByText(/не завершилась/)).toBeTruthy()
   })
 })

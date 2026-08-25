@@ -78,6 +78,6 @@ export async function reviewAdHoc(
   else if (input.text) form.append('syllabus_text', input.text)
   if (input.fosFile) form.append('fos_file', input.fosFile)
   form.append('checks', checks.join(','))
-  const res = await client.post<{ checks: AdHocCheckOutcome[] }>('/api/methodist/ad-hoc-review', form, { timeout: 120_000 })
+  const res = await client.post<{ checks: AdHocCheckOutcome[] }>('/api/methodist/ad-hoc-review', form, { timeout: 180_000 })
   return res.data.checks
 }

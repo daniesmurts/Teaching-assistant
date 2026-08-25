@@ -1,9 +1,16 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { toItem, reviewSyllabus, type Requirement, type RawScored } from './syllabusReview'
 import type { ContentSection } from '../../../shared/types'
 
 const { chatJSONMock } = vi.hoisted(() => ({ chatJSONMock: vi.fn() }))
 vi.mock('./deepseek', () => ({ chatJSON: chatJSONMock }))
+
+// mockResolvedValueOnce builds a queue, and a review does NOT always make the
+// same number of LLM calls — when every ЗУВ line is a verbatim copy there is
+// nothing left for the meaning pass to judge, so it returns without calling
+// the model at all. Without a reset the unconsumed mock shifts every
+// subsequent test's responses by one.
+beforeEach(() => chatJSONMock.mockReset())
 
 // toItem is the deterministic layer of the РПД conformance check: it validates
 // the model's excerpt quotes against the real section text and enforces the
@@ -147,7 +154,8 @@ describe('reviewSyllabus — formulation findings on a flat-competency РПД', 
   const COPIED_ZUV = 'сущность технологических процессов производства кулинарной продукции для индустрии питания'
 
   // Her document's shape: ОПК-4.1 as a TOP-LEVEL competency, `indicators` empty.
-  function mockParseAndScore(competencies: unknown) {
+  // Three LLM calls per review, in order: parse → score → meaning.
+  function mockParseAndScore(competencies: unknown, meaning: unknown = { items: [] }) {
     chatJSONMock
       .mockResolvedValueOnce({
         goals: [],
@@ -160,6 +168,7 @@ describe('reviewSyllabus — formulation findings on a flat-competency РПД', 
         },
       })
       .mockResolvedValueOnce({ items: [] })
+      .mockResolvedValueOnce(meaning)
   }
 
   it('flags a ЗУВ copied from a competency listed flat at the indicator level', async () => {
@@ -204,9 +213,92 @@ describe('reviewSyllabus — formulation findings on a flat-competency РПД', 
         content: { practicals: 'Тепловая обработка: супы, соусы.' },
       })
       .mockResolvedValueOnce({ items: [] })
+      .mockResolvedValueOnce({ items: [] })
 
     const result = await reviewSyllabus({ teacherId: 't1', syllabusText: 'x'.repeat(200) })
 
     expect(result.formulation_findings).toEqual([])
+  })
+})
+
+// #2, requested 2026-08-24: «нужна еще проверка смысла, формулировки … и есть
+// ли смысловая связь с дисциплиной». Copy-detection cannot answer this — a
+// ЗУВ reworded past the containment threshold still needs reading.
+describe('reviewSyllabus — meaning check and duplicate accounting', () => {
+  const INDICATOR = 'Знает и понимает сущность технологических процессов производства кулинарной продукции для индустрии питания'
+  const COPIED = 'сущность технологических процессов производства кулинарной продукции для индустрии питания'
+  const GENERIC = 'современные подходы и методы решения профессиональных задач в отрасли'
+
+  function mockReview(opts: { outcomes: unknown; meaning?: unknown; meaningRejects?: boolean }) {
+    const chain = chatJSONMock
+      .mockResolvedValueOnce({
+        goals: [],
+        competencies: [{ code: 'ОПК-4.1', title: INDICATOR, indicators: [] }],
+        outcomes: opts.outcomes,
+        technologies: [],
+        content: { practicals: 'Умная кухня: датчики и электронные чек-листы.' },
+      })
+      .mockResolvedValueOnce({ items: [] })
+    if (opts.meaningRejects) chain.mockRejectedValueOnce(new Error('provider unavailable'))
+    else chain.mockResolvedValueOnce(opts.meaning ?? { items: [] })
+  }
+
+  it('surfaces a generic ЗУВ the copy check cannot catch', async () => {
+    mockReview({
+      outcomes: { knowledge: [GENERIC], skills: [], mastery: [] },
+      meaning: { items: [{ ref: 'K0', indicator_code: 'ОПК-4.1', verdict: 'weak_link',
+                           detail: 'Формулировка общая.', recommendation: 'Свяжите с темами дисциплины.' }] },
+    })
+
+    const result = await reviewSyllabus({ teacherId: 't1', syllabusText: 'x'.repeat(200) })
+
+    expect(result.formulation_findings).toEqual([])          // not a copy
+    expect(result.meaning_findings).toHaveLength(1)
+    expect(result.meaning_findings![0].verdict).toBe('weak_link')
+    expect(result.meaning_findings![0].indicator_code).toBe('ОПК-4.1')
+    expect(result.summary).toMatch(/не раскрывает смысл индикатора/)
+  })
+
+  it('does not double-report a line the copy check already flagged', async () => {
+    // The meaning pass must never even be asked about a verbatim copy.
+    mockReview({ outcomes: { knowledge: [COPIED], skills: [], mastery: [] } })
+
+    const result = await reviewSyllabus({ teacherId: 't1', syllabusText: 'x'.repeat(200) })
+
+    expect(result.formulation_findings).toHaveLength(1)
+    expect(result.meaning_findings).toEqual([])
+    // Stronger than "no finding": with nothing left to judge, the model is
+    // never called — no cost, no latency, no chance of a contradictory second
+    // opinion on a line already reported.
+    expect(chatJSONMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('records a warning when the meaning pass fails, rather than reporting silence', async () => {
+    mockReview({ outcomes: { knowledge: [GENERIC], skills: [], mastery: [] }, meaningRejects: true })
+
+    const result = await reviewSyllabus({ teacherId: 't1', syllabusText: 'x'.repeat(200) })
+
+    // The distinction that matters: empty findings + a warning ≠ "all clear".
+    expect(result.meaning_findings).toEqual([])
+    expect(result.warnings).toHaveLength(1)
+    expect(result.warnings![0]).toMatch(/не завершилась/)
+  })
+
+  it('counts a copied ЗУВ as a duplicate and says so in the verdict', async () => {
+    mockReview({ outcomes: { knowledge: [COPIED], skills: [], mastery: [] } })
+
+    const result = await reviewSyllabus({ teacherId: 't1', syllabusText: 'x'.repeat(200) })
+
+    expect(result.duplicate_count).toBe(1)
+    expect(result.summary).toMatch(/фактическое покрытие ниже/)
+  })
+
+  it('reports no duplicates when nothing was copied', async () => {
+    mockReview({ outcomes: { knowledge: [GENERIC], skills: [], mastery: [] } })
+
+    const result = await reviewSyllabus({ teacherId: 't1', syllabusText: 'x'.repeat(200) })
+
+    expect(result.duplicate_count).toBe(0)
+    expect(result.summary).not.toMatch(/фактическое покрытие ниже/)
   })
 })

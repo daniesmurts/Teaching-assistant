@@ -2,9 +2,12 @@ import { chatJSON } from './deepseek'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { ValidationError } from '../errors/AppError'
 import { findCopiedOutcomeFormulations } from './outcomeFormulation'
+import { checkOutcomeMeaning, buildMeaningItems } from './outcomeMeaning'
+import { logger } from '../lib/logger'
 import type {
   SyllabusReview, SyllabusCoverageItem, CoverageStatus, CoverageSource,
   ContentSection, RequirementKind, ParsedSyllabusReport, OutcomeFormulationFinding,
+  OutcomeMeaningFinding,
 } from '../../../shared/types'
 
 // КНИТУ admin feature A2 — «Анализ соответствия РПД». Structure-aware version:
@@ -96,13 +99,52 @@ export async function reviewSyllabus(params: ReviewParams): Promise<SyllabusRevi
     { knowledge: parsed.outcomes.knowledge, skills: parsed.outcomes.skills, mastery: parsed.outcomes.mastery },
   )
 
+  // 6) Formulation MEANING — the half copy-detection can't answer: does the
+  // wording convey the requirement's meaning in terms this discipline
+  // actually teaches? A judgement, so it goes to the model (see
+  // services/outcomeMeaning.ts). Runs only on the lines step 5 didn't already
+  // flag, so a verbatim copy gets one finding rather than two.
+  //
+  // Best-effort, but NOT silently: a failed pass records a warning instead of
+  // masquerading as "checked, nothing wrong". That distinction is the whole
+  // lesson of the 2026-08-24 defect — an empty result that looked like a
+  // clean bill of health.
+  const warnings: string[] = []
+  let meaningFindings: OutcomeMeaningFinding[] = []
+  try {
+    meaningFindings = await checkOutcomeMeaning({
+      teacherId: params.teacherId,
+      items:     buildMeaningItems(parsed.outcomes, formulationFindings),
+      declared:  declaredRequirements,
+      content:   parsed.content,
+    })
+  } catch (err) {
+    logger.warn({ message: 'Outcome meaning check failed', error: (err as Error).message })
+    warnings.push(
+      'Проверка смысла формулировок «Знать/Уметь/Владеть» не завершилась — ' +
+      'по этому пункту результат неизвестен, повторите проверку.'
+    )
+  }
+
+  // A ЗУВ line that copies a requirement already in `items` is the same
+  // requirement scored twice — it inflates the three counts below. Stated
+  // rather than silently subtracted: the counts still sum to the cards on
+  // screen, and the reader is told how many of them are duplicates.
+  const scoredKeys = new Set(items.map((i) => `${i.kind}::${i.title.trim()}`))
+  const duplicateCount = formulationFindings.filter(
+    (f) => scoredKeys.has(`${f.outcome_kind}::${f.outcome_title.trim()}`)
+  ).length
+
   return {
     competencies_source: competenciesProvided ? 'provided' : 'declared',
     goals_source:        goalsProvided ? 'provided' : 'declared',
     parsed: parsedReport(parsed),
     items,
     formulation_findings: formulationFindings,
-    summary: summarise(items, formulationFindings),
+    meaning_findings:     meaningFindings,
+    duplicate_count:      duplicateCount,
+    warnings:             warnings.length > 0 ? warnings : undefined,
+    summary: summarise(items, formulationFindings, meaningFindings, duplicateCount),
     covered: items.filter((i) => i.status === 'covered').length,
     partial: items.filter((i) => i.status === 'partial').length,
     missing: items.filter((i) => i.status === 'missing').length,
@@ -467,7 +509,12 @@ function parsedReport(p: ParsedSyllabus): ParsedSyllabusReport {
 // does deliver them would read as «полностью обеспечивает» — which is the
 // exact false all-clear the методист flagged. Coverage and formulation stay
 // separate facts; the summary just refuses to report one without the other.
-function summarise(items: SyllabusCoverageItem[], findings: OutcomeFormulationFinding[] = []): string {
+function summarise(
+  items: SyllabusCoverageItem[],
+  findings: OutcomeFormulationFinding[] = [],
+  meaning: OutcomeMeaningFinding[] = [],
+  duplicates = 0,
+): string {
   const total   = items.length
   if (total === 0) return 'Нет элементов для оценки.'
   const missing = items.filter((i) => i.status === 'missing').length
@@ -478,13 +525,28 @@ function summarise(items: SyllabusCoverageItem[], findings: OutcomeFormulationFi
       `«Знать/Уметь/Владеть» дословно повторяет индикаторы компетенций — их нужно переформулировать через содержание дисциплины.`
     : ''
 
+  // Stated explicitly, because the three counts above still include these
+  // duplicates: without the sentence the report reads as broader coverage
+  // than the РПД actually declares.
+  const duplicateNote = duplicates > 0
+    ? ` ${duplicates} из подсчитанных требований — ${plural(duplicates, 'дословный повтор', 'дословных повтора', 'дословных повторов')}, ` +
+      `поэтому фактическое покрытие ниже, чем показывают цифры.`
+    : ''
+
+  const meaningNote = meaning.length > 0
+    ? ` Ещё ${meaning.length} ${plural(meaning.length, 'формулировка', 'формулировки', 'формулировок')} ` +
+      `не раскрывает смысл индикатора через содержание этой дисциплины.`
+    : ''
+
+  const extras = `${formulationNote}${duplicateNote}${meaningNote}`
+
   if (missing === 0 && partial === 0) {
-    return `Содержание РПД полностью обеспечивает заявленные требования.${formulationNote}`
+    return `Содержание РПД полностью обеспечивает заявленные требования.${extras}`
   }
   const parts: string[] = []
   if (missing) parts.push(`${missing} не обеспечено`)
   if (partial) parts.push(`${partial} частично`)
-  return `Из ${total} требований: ${parts.join(', ')}. Требуется доработка содержания РПД.${formulationNote}`
+  return `Из ${total} требований: ${parts.join(', ')}. Требуется доработка содержания РПД.${extras}`
 }
 
 function plural(n: number, one: string, few: string, many: string): string {

@@ -2,6 +2,7 @@ import ChallengeButton from '../grading/ChallengeButton'
 import type {
   SyllabusReview, SyllabusCoverageItem, CoverageStatus, ContentSection,
   RequirementKind, ParsedSyllabusReport, OutcomeFormulationFinding, OutcomeKind,
+  OutcomeMeaningFinding,
 } from '../../types'
 
 // Renders a SyllabusReview — the §5-§8 evidence-citation coverage report
@@ -45,6 +46,9 @@ function scoreColor(score: number): string {
 export default function SyllabusReviewReport({ result }: { result: SyllabusReview }) {
   const { items, summary, covered, partial, missing, parsed } = result
   const formulationFindings = result.formulation_findings ?? []
+  const meaningFindings     = result.meaning_findings ?? []
+  const warnings            = result.warnings ?? []
+  const duplicateCount      = result.duplicate_count ?? 0
 
   // Group by requirement kind in canonical order (Цели → Компетенции → ...).
   const byKind = (['goal','competency','indicator','knowledge','skill','mastery','technology'] as RequirementKind[])
@@ -77,6 +81,16 @@ export default function SyllabusReviewReport({ result }: { result: SyllabusRevie
     (f) => !scoredKeys.has(outcomeKey(f.outcome_kind, f.outcome_title)),
   )
 
+  // Meaning findings ride the same card as the copy findings. The two never
+  // land on one item: the meaning pass is only ever asked about lines the
+  // copy check did not already flag.
+  const meaningByOutcome = new Map(
+    meaningFindings.map((m) => [outcomeKey(m.outcome_kind, m.outcome_title), m]),
+  )
+  const orphanMeaning = meaningFindings.filter(
+    (m) => !scoredKeys.has(outcomeKey(m.outcome_kind, m.outcome_title)),
+  )
+
   const sourceNote =
     result.competencies_source === 'declared'
       ? 'Компетенции и цели извлечены из РПД'
@@ -94,8 +108,25 @@ export default function SyllabusReviewReport({ result }: { result: SyllabusRevie
       {/* Verdict */}
       <div className="bg-surface-warm border border-border rounded-lg p-4">
         <p className="text-sm font-sans text-ink leading-relaxed">{summary}</p>
+        {/* The three counts above still include duplicated requirements, so
+            the inflation is stated rather than silently corrected — the
+            numbers keep matching the cards on screen. */}
+        {duplicateCount > 0 && (
+          <p className="text-xs font-sans text-warning leading-relaxed mt-1.5">
+            Из подсчитанных требований {duplicateCount} — дословные повторы уже учтённых, фактическое покрытие ниже.
+          </p>
+        )}
         <p className="text-xs font-sans text-ink-tertiary mt-1.5">{sourceNote}</p>
       </div>
+
+      {/* A check that did not finish must never read as a clean result. */}
+      {warnings.length > 0 && (
+        <div className="bg-warning-bg border border-warning/30 rounded-lg p-3 space-y-1">
+          {warnings.map((w, i) => (
+            <p key={i} className="text-xs font-sans text-ink leading-relaxed">{w}</p>
+          ))}
+        </div>
+      )}
 
       {/* What we parsed */}
       {parsed && <ParsedReport parsed={parsed} />}
@@ -104,6 +135,7 @@ export default function SyllabusReviewReport({ result }: { result: SyllabusRevie
           — every other one renders inline on the item it flags, so the reader
           meets the caveat next to the green score rather than a page away. */}
       {orphanFindings.length > 0 && <FormulationFindings findings={orphanFindings} />}
+      {orphanMeaning.length > 0 && <MeaningFindings findings={orphanMeaning} />}
 
       {/* Findings grouped by kind */}
       {byKind.map(({ kind, items }) => (
@@ -117,6 +149,7 @@ export default function SyllabusReviewReport({ result }: { result: SyllabusRevie
               key={i}
               item={item}
               formulation={findingByOutcome.get(outcomeKey(item.kind, item.title)) ?? null}
+              meaning={meaningByOutcome.get(outcomeKey(item.kind, item.title)) ?? null}
             />
           ))}
         </div>
@@ -188,6 +221,50 @@ function FormulationFindings({ findings }: { findings: OutcomeFormulationFinding
   )
 }
 
+// Overflow view for the judged half, mirroring FormulationFindings above —
+// same reason it exists: a flagged ЗУВ line that fell outside the scored
+// requirement cap has no card to carry its warning inline.
+function MeaningFindings({ findings }: { findings: OutcomeMeaningFinding[] }) {
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2">
+        <h3 className="font-display text-base font-bold text-ink">Смысл формулировок</h3>
+        <span className="text-xs font-sans text-ink-tertiary">({findings.length})</span>
+      </div>
+      <p className="text-xs font-sans text-ink-secondary leading-relaxed">
+        Эти пункты не вошли в разбор по разделам ниже (в РПД слишком много требований), поэтому показаны отдельно.
+      </p>
+      {findings.map((f, i) => (
+        <div key={i} className="bg-surface border border-border border-l-2 border-l-warning rounded-lg p-4">
+          <div className="flex items-center gap-2 flex-wrap mb-2.5">
+            <span className="text-[10px] font-sans font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-sm bg-warning-bg text-warning">
+              {MEANING_CHIP[f.verdict]}
+            </span>
+            <span className="text-[10px] font-sans font-semibold text-ink-tertiary uppercase tracking-wider">
+              {OUTCOME_KIND_LABEL[f.outcome_kind]}
+            </span>
+          </div>
+          <div className="text-sm font-sans text-ink leading-snug">{f.outcome_title}</div>
+          {f.indicator_title && (
+            <div className="mt-1.5">
+              <div className="text-[10px] font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-0.5">
+                {f.indicator_code || 'Индикатор'}
+              </div>
+              <div className="text-xs font-sans text-ink-secondary leading-snug">{f.indicator_title}</div>
+            </div>
+          )}
+          <div className="mt-3 pt-3 border-t border-border space-y-1.5">
+            <p className="text-xs font-sans text-ink-secondary leading-relaxed">{f.detail}</p>
+            <p className="text-xs font-sans text-ink leading-relaxed">
+              <span className="font-medium text-amber">Рекомендация: </span>{f.recommendation}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function ParsedReport({ parsed }: { parsed: ParsedSyllabusReport }) {
   const counts: { label: string; n: number }[] = [
     { label: 'Цели',       n: parsed.goals_count },
@@ -239,7 +316,12 @@ function ParsedReport({ parsed }: { parsed: ParsedSyllabusReport }) {
   )
 }
 
-function CoverageCard({ item, formulation }: {
+const MEANING_CHIP: Record<OutcomeMeaningFinding['verdict'], string> = {
+  weak_link:     'Нет связи с дисциплиной',
+  not_reflected: 'Не отражает индикатор',
+}
+
+function CoverageCard({ item, formulation, meaning }: {
   item: SyllabusCoverageItem
   /** Set when this item's own wording merely restates the requirement it
    *  claims to deliver. Deliberately does NOT alter `item.status`: delivery
@@ -247,12 +329,17 @@ function CoverageCard({ item, formulation }: {
    *  would make covered/partial/missing mean two things at once. It sits
    *  beside the status badge instead, so the green can't be read alone. */
   formulation?: OutcomeFormulationFinding | null
+  /** Same contract, for the judged (not measured) half — see outcomeMeaning.ts.
+   *  Never set on an item that already has `formulation`: the meaning pass is
+   *  only asked about lines the copy check did not flag. */
+  meaning?: OutcomeMeaningFinding | null
 }) {
   const meta = STATUS_META[item.status]
   const kindMeta = KIND_META[item.kind]
   // Indicators visually nested under their parent competency.
   const indent = item.kind === 'indicator'
-  const accent = formulation
+  const flagged = formulation || meaning
+  const accent = flagged
     ? 'border-l-2 border-l-warning'
     : indent ? 'border-l-2 border-l-amber/30' : ''
 
@@ -272,6 +359,14 @@ function CoverageCard({ item, formulation }: {
               className="text-[10px] font-sans font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-sm bg-warning-bg text-warning"
             >
               Повтор формулировки
+            </span>
+          )}
+          {meaning && (
+            <span
+              title="Содержание требование обеспечивает, но сама формулировка не раскрывает индикатор через эту дисциплину"
+              className="text-[10px] font-sans font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-sm bg-warning-bg text-warning"
+            >
+              {MEANING_CHIP[meaning.verdict]}
             </span>
           )}
         </div>
@@ -299,6 +394,23 @@ function CoverageCard({ item, formulation }: {
           </div>
           <p className="text-xs font-sans text-ink leading-relaxed mt-1.5">
             <span className="font-medium text-amber">Рекомендация: </span>{formulation.recommendation}
+          </p>
+        </div>
+      )}
+
+      {meaning && (
+        <div className="mt-2.5 rounded-md bg-warning-bg border border-warning/30 px-3 py-2">
+          <p className="text-xs font-sans text-ink leading-relaxed">{meaning.detail}</p>
+          {meaning.indicator_title && (
+            <div className="mt-1.5">
+              <div className="text-[10px] font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-0.5">
+                {meaning.indicator_code || 'Индикатор'}
+              </div>
+              <div className="text-xs font-sans text-ink-secondary leading-snug">{meaning.indicator_title}</div>
+            </div>
+          )}
+          <p className="text-xs font-sans text-ink leading-relaxed mt-1.5">
+            <span className="font-medium text-amber">Рекомендация: </span>{meaning.recommendation}
           </p>
         </div>
       )}

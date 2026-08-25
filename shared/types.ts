@@ -1124,6 +1124,31 @@ export interface OutcomeFormulationFinding {
   recommendation:  string
 }
 
+// The second half of the same методист's rule, raised 2026-08-24 after the
+// copy check above was fixed: «нужна еще проверка смысла, формулировки — то
+// есть того, как формулировка "должен знать" отражает индикатор и есть ли
+// смысловая связь с дисциплиной». Copy-detection only answers "is this a
+// literal duplicate"; a ЗУВ reworded just enough to clear that threshold can
+// still be generic boilerplate that names no content this discipline
+// actually teaches. That is a judgement, not a string measurement, so unlike
+// OutcomeFormulationFinding this one IS produced by an LLM pass
+// (services/outcomeMeaning.ts). Findings are problems only — an item the
+// model rates 'ok' produces nothing.
+//   'not_reflected' — the ЗУВ does not convey the indicator's meaning at all
+//   'weak_link'     — it conveys it, but generically: nothing ties it to this
+//                     discipline's own content
+export type OutcomeMeaningVerdict = 'not_reflected' | 'weak_link'
+
+export interface OutcomeMeaningFinding {
+  verdict:         OutcomeMeaningVerdict
+  outcome_kind:    OutcomeKind
+  outcome_title:   string
+  indicator_code:  string | null   // which declared requirement it should reflect
+  indicator_title: string | null   // null when the model could match none
+  detail:          string
+  recommendation:  string
+}
+
 // ─── «Связка оценочного средства» — п.4 ↔ СРС ↔ КСР ↔ п.9 ↔ ФОС ──────────────
 // Raised by a методист (2026-08-20): an оценочное средство named in §4's
 // «Оценочные средства» column is a promise the rest of the РПД has to keep —
@@ -1181,6 +1206,19 @@ export interface SyllabusReview {
   // empty on the РПД-студия path (caller-supplied competencies carry no
   // indicators to compare against). The UI guards for both.
   formulation_findings?: OutcomeFormulationFinding[]
+  // Meaning/quality of those same ЗУВ formulations (services/outcomeMeaning.ts).
+  // Optional and best-effort: an empty array means "checked, nothing wrong",
+  // while a non-empty `warnings` means the pass did not complete — the two
+  // must never be conflated, which is exactly the failure mode that made the
+  // copy check look healthy while it silently did nothing.
+  meaning_findings?:     OutcomeMeaningFinding[]
+  // How many scored items are themselves verbatim copies of a requirement
+  // already counted. They inflate covered/partial/missing below, so the
+  // report states the number rather than quietly redefining those three.
+  duplicate_count?:      number
+  // Non-fatal problems during the review (an optional LLM pass that failed).
+  // Same convention as ProgramAnalysis.warnings.
+  warnings?:             string[]
   summary:      string                            // 2–3 sentence overall verdict
   covered:      number
   partial:      number

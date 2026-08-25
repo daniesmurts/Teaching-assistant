@@ -24,7 +24,10 @@ export async function analyzeOverlap(courseIds: string[]): Promise<CurriculumAna
 export async function reviewSyllabus(courseId: string): Promise<SyllabusReview> {
   const res = await client.post<SyllabusReview>('/api/curriculum/syllabus-review', {
     course_id: courseId,
-  }, { timeout: 120_000 })
+    // parse → score → meaning: three sequential LLM passes since the
+    // formulation-meaning check shipped, so this sits with the other
+    // multi-call endpoints at 180s rather than the 120s default.
+  }, { timeout: 180_000 })
   return res.data
 }
 
@@ -54,7 +57,7 @@ export async function reviewSyllabusText(
 ): Promise<SyllabusReview> {
   const res = await client.post<SyllabusReview>('/api/curriculum/syllabus-review', {
     syllabus_text: syllabusText, competencies, goals,
-  }, { timeout: 120_000 })
+  }, { timeout: 180_000 })
   return res.data
 }
 
