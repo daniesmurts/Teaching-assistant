@@ -1,6 +1,9 @@
-import { describe, it, expect } from 'vitest'
-import { toItem, type Requirement, type RawScored } from './syllabusReview'
+import { describe, it, expect, vi } from 'vitest'
+import { toItem, reviewSyllabus, type Requirement, type RawScored } from './syllabusReview'
 import type { ContentSection } from '../../../shared/types'
+
+const { chatJSONMock } = vi.hoisted(() => ({ chatJSONMock: vi.fn() }))
+vi.mock('./deepseek', () => ({ chatJSON: chatJSONMock }))
 
 // toItem is the deterministic layer of the РПД conformance check: it validates
 // the model's excerpt quotes against the real section text and enforces the
@@ -129,5 +132,81 @@ describe('toItem — defensive defaults', () => {
   it('treats an invalid status string as missing', () => {
     const item = toItem(req, raw({ status: 'excellent', sources: [] }), haystacks())
     expect(item.status).toBe('missing')
+  })
+})
+
+// The 2026-08-24 defect, reproduced at the level it actually broke: the pure
+// copy-detector in outcomeFormulation.ts was always correct (its own suite
+// passes on this very ОПК-4.1 pair), so a unit test there could never have
+// caught this. The bug was in what reviewSyllabus FED it — only nested
+// indicators — and a real КНИТУ РПД lists competencies flat at the indicator
+// level, producing an empty indicator array and a silent no-op. The методист
+// re-tested and still saw «Обеспечена 90%» with no formulation warning.
+describe('reviewSyllabus — formulation findings on a flat-competency РПД', () => {
+  const INDICATOR = 'Знает и понимает сущность технологических процессов производства кулинарной продукции для индустрии питания'
+  const COPIED_ZUV = 'сущность технологических процессов производства кулинарной продукции для индустрии питания'
+
+  // Her document's shape: ОПК-4.1 as a TOP-LEVEL competency, `indicators` empty.
+  function mockParseAndScore(competencies: unknown) {
+    chatJSONMock
+      .mockResolvedValueOnce({
+        goals: [],
+        competencies,
+        outcomes: { knowledge: [COPIED_ZUV], skills: [], mastery: [] },
+        technologies: [],
+        content: {
+          practicals: 'Умная кухня: датчики, термометры и электронные чек-листы.',
+          independent: 'Цифровой контроль качества: от входного контроля до сертификации готовой продукции.',
+        },
+      })
+      .mockResolvedValueOnce({ items: [] })
+  }
+
+  it('flags a ЗУВ copied from a competency listed flat at the indicator level', async () => {
+    mockParseAndScore([{ code: 'ОПК-4.1', title: INDICATOR, indicators: [] }])
+
+    const result = await reviewSyllabus({ teacherId: 't1', syllabusText: 'x'.repeat(200) })
+
+    expect(result.formulation_findings).toHaveLength(1)
+    expect(result.formulation_findings![0].indicator_code).toBe('ОПК-4.1')
+    expect(result.formulation_findings![0].similarity).toBe(1)
+    // Named the way a методист would: ОПК-4.1 is an индикатор by its code,
+    // even though this РПД's flat listing made the parser call it a competency.
+    expect(result.formulation_findings![0].detail).toMatch(/повторяет индикатор ОПК-4\.1/)
+    // The verdict line must carry it too — a clean coverage score alone was
+    // exactly the false all-clear that was reported.
+    expect(result.summary).toMatch(/дословно повторя/)
+  })
+
+  it('still flags it when the РПД nests the indicator under a parent competency', async () => {
+    mockParseAndScore([{
+      code: 'ОПК-4',
+      title: 'Способен осуществлять технологический контроль пищевого производства',
+      indicators: [{ code: 'ОПК-4.1', title: INDICATOR }],
+    }])
+
+    const result = await reviewSyllabus({ teacherId: 't1', syllabusText: 'x'.repeat(200) })
+
+    expect(result.formulation_findings).toHaveLength(1)
+    expect(result.formulation_findings![0].indicator_code).toBe('ОПК-4.1')
+  })
+
+  it('leaves a genuine discipline-specific reformulation alone on the same shape', async () => {
+    chatJSONMock
+      .mockResolvedValueOnce({
+        goals: [],
+        competencies: [{ code: 'ОПК-4.1', title: INDICATOR, indicators: [] }],
+        outcomes: {
+          knowledge: ['температурные режимы и стадии тепловой обработки при приготовлении супов и соусов'],
+          skills: [], mastery: [],
+        },
+        technologies: [],
+        content: { practicals: 'Тепловая обработка: супы, соусы.' },
+      })
+      .mockResolvedValueOnce({ items: [] })
+
+    const result = await reviewSyllabus({ teacherId: 't1', syllabusText: 'x'.repeat(200) })
+
+    expect(result.formulation_findings).toEqual([])
   })
 })

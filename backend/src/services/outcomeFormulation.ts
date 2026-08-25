@@ -71,18 +71,35 @@ const OUTCOME_LABEL: Record<OutcomeKind, string> = {
 
 export { normaliseText }
 
-export interface IndicatorInput { code: string; title: string }
 export interface OutcomesInput { knowledge: string[]; skills: string[]; mastery: string[] }
+
+// What a ЗУВ item gets compared against — deliberately NOT nested indicators
+// alone. Found in production 2026-08-24, on the very РПД the методист was
+// re-testing: a real КНИТУ programme lists its competencies FLAT at the
+// indicator level (ОПК-4.1, ОПК-4.3, with no parent «ОПК-4» row carrying its
+// own formulation), so the parser emits them as top-level `competencies` with
+// an EMPTY `indicators` array. The old call site passed only
+// `competencies.flatMap(c => c.indicators)` — an empty list — so this
+// function returned [] on its first line and the copy went unflagged, while
+// the coverage check happily scored the copied ЗУВ «Обеспечена 90%».
+// Callers must pass every declared requirement that carries a formulation,
+// whichever level of the hierarchy it sits at.
+export interface DeclaredRequirementInput {
+  code:   string
+  title:  string
+  /** Wording only ('повторяет индикатор' vs 'повторяет компетенцию'). */
+  level?: 'competency' | 'indicator'
+}
 
 /**
  * Flags every «Знать/Уметь/Владеть» item that merely restates one of the
- * declared competency indicators. Pure — no DB, no LLM, no I/O.
+ * declared competencies or their indicators. Pure — no DB, no LLM, no I/O.
  */
 export function findCopiedOutcomeFormulations(
-  indicators: IndicatorInput[],
+  declared: DeclaredRequirementInput[],
   outcomes: OutcomesInput,
 ): OutcomeFormulationFinding[] {
-  if (indicators.length === 0) return []
+  if (declared.length === 0) return []
 
   const findings: OutcomeFormulationFinding[] = []
   const buckets: { kind: OutcomeKind; items: string[] }[] = [
@@ -95,34 +112,46 @@ export function findCopiedOutcomeFormulations(
     for (const item of items) {
       if (contentTokens(item).length < MIN_CONTENT_TOKENS) continue
 
-      // Best-matching indicator wins — an РПД that copied one indicator into
+      // Best-matching requirement wins — an РПД that copied one indicator into
       // several ЗУВ lines should point at the one it actually came from.
-      let best: { indicator: IndicatorInput; score: number } | null = null
-      for (const indicator of indicators) {
-        if (contentTokens(indicator.title).length < MIN_CONTENT_TOKENS) continue
-        const score = containment(item, indicator.title)
-        if (!best || score > best.score) best = { indicator, score }
+      let best: { target: DeclaredRequirementInput; score: number } | null = null
+      for (const target of declared) {
+        if (contentTokens(target.title).length < MIN_CONTENT_TOKENS) continue
+        const score = containment(item, target.title)
+        if (!best || score > best.score) best = { target, score }
       }
       if (!best || best.score < COPY_CONTAINMENT_THRESHOLD) continue
 
-      const verbatim = normaliseText(best.indicator.title).includes(normaliseText(item))
+      const verbatim = normaliseText(best.target.title).includes(normaliseText(item))
       const label    = OUTCOME_LABEL[kind]
-      const code     = best.indicator.code || null
+      const code     = best.target.code || null
+      // Name the source the way a методист would. The CODE decides, not the
+      // parse position: ФГОС numbers indicators «ОПК-4.1» and competencies
+      // «ОПК-4», and a РПД that lists indicators flat (no parent row) parses
+      // them as top-level competencies — calling ОПК-4.1 «компетенцию» there
+      // would read as wrong to the person the finding is written for.
+      // `level` is only the fallback for a requirement with no code at all.
+      const looksLikeIndicator = code ? /\d+\s*\.\s*\d+/.test(code) : best.target.level !== 'competency'
+      // Russian declension differs by gender, so the noun carries its own
+      // forms rather than being interpolated bare into three sentences.
+      const src = looksLikeIndicator
+        ? { acc: 'индикатор',   nom: 'индикатор',   gen: 'индикатора',  achieved: 'был достигнут'   }
+        : { acc: 'компетенцию', nom: 'компетенция', gen: 'компетенции', achieved: 'была достигнута' }
 
       findings.push({
         kind:            'copied_from_indicator',
         outcome_kind:    kind,
         outcome_title:   item,
         indicator_code:  code,
-        indicator_title: best.indicator.title,
+        indicator_title: best.target.title,
         similarity:      Math.round(best.score * 100) / 100,
         detail: verbatim
-          ? `Формулировка «${label}» дословно повторяет индикатор${code ? ` ${code}` : ''}.`
-          : `Формулировка «${label}» почти дословно повторяет индикатор${code ? ` ${code}` : ''} (совпадение ${Math.round(best.score * 100)}%).`,
+          ? `Формулировка «${label}» дословно повторяет ${src.acc}${code ? ` ${code}` : ''}.`
+          : `Формулировка «${label}» почти дословно повторяет ${src.acc}${code ? ` ${code}` : ''} (совпадение ${Math.round(best.score * 100)}%).`,
         recommendation:
           `Переформулируйте пункт «${label}» через содержание этой дисциплины: что именно студент должен ` +
           `${label === 'Знать' ? 'знать' : label === 'Уметь' ? 'уметь делать' : 'освоить на практике'} ` +
-          `по её темам, чтобы индикатор${code ? ` ${code}` : ''} был достигнут. Смысл индикатора сохраняется, ` +
+          `по её темам, чтобы ${src.nom}${code ? ` ${code}` : ''} ${src.achieved}. Смысл ${src.gen} сохраняется, ` +
           `но формулировка не должна совпадать с ним дословно.`,
       })
     }

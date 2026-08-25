@@ -74,13 +74,25 @@ export async function reviewSyllabus(params: ReviewParams): Promise<SyllabusRevi
   const items = await scoreCoverage(params.teacherId, parsed.content, requirements)
 
   // 5) Formulation quality — is each ЗУВ item a real reformulation of the
-  // indicator through this discipline's content, or just a copy of it?
+  // requirement through this discipline's content, or just a copy of it?
   // Deterministic and independent of the coverage scoring above (see
   // services/outcomeFormulation.ts's header for why it's neither an LLM call
-  // nor a status demotion). Empty on the РПД-студия path: caller-supplied
-  // competencies carry no indicators to compare against.
+  // nor a status demotion).
+  //
+  // Compares against competencies AND their indicators. Passing only
+  // `flatMap(c => c.indicators)` was the 2026-08-24 defect: a РПД that lists
+  // ОПК-4.1/ОПК-4.3 flat (no parent «ОПК-4» row) parses as top-level
+  // competencies with empty indicator arrays, so the check received an empty
+  // list and silently found nothing — on the exact document the методист
+  // reported as still reading «Обеспечена 90%». This also means the
+  // РПД-студия path (caller-supplied competencies, no indicators) is now
+  // covered too, where before it was documented as always-empty.
+  const declaredRequirements = parsed.competencies.flatMap((c) => [
+    { code: c.code, title: c.title, level: 'competency' as const },
+    ...c.indicators.map((i) => ({ code: i.code, title: i.title, level: 'indicator' as const })),
+  ])
   const formulationFindings = findCopiedOutcomeFormulations(
-    parsed.competencies.flatMap((c) => c.indicators),
+    declaredRequirements,
     { knowledge: parsed.outcomes.knowledge, skills: parsed.outcomes.skills, mastery: parsed.outcomes.mastery },
   )
 

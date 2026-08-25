@@ -55,6 +55,28 @@ export default function SyllabusReviewReport({ result }: { result: SyllabusRevie
   const sortItems = (xs: SyllabusCoverageItem[]) =>
     [...xs].sort((a, b) => STATUS_META[a.status].order - STATUS_META[b.status].order || b.score - a.score)
 
+  // A formulation finding belongs ON the ЗУВ card it flags. Reported by a
+  // методист 2026-08-24: her card read a clean green «Обеспечена 90%» while
+  // the only warning sat in a block further up the page, so the score looked
+  // unqualified exactly where she was reading. The finding rides the outcome
+  // item, never the indicator it was copied from — that indicator's wording is
+  // federal text and is not the defect.
+  const outcomeKey = (kind: string, title: string) => `${kind}::${title.trim()}`
+  const findingByOutcome = new Map(
+    formulationFindings.map((f) => [outcomeKey(f.outcome_kind, f.outcome_title), f]),
+  )
+
+  // Findings whose ЗУВ line has no card to sit on. buildRequirements caps the
+  // scored list at MAX_REQUIREMENTS and appends Знать/Уметь/Владеть *after*
+  // competencies and indicators, so on a large РПД the very lines most likely
+  // to be copied are the first to fall outside the cap — parsed and flagged,
+  // but never individually scored. They keep the standalone block; without it
+  // they would disappear entirely once findings render inline.
+  const scoredKeys = new Set(items.map((i) => outcomeKey(i.kind, i.title)))
+  const orphanFindings = formulationFindings.filter(
+    (f) => !scoredKeys.has(outcomeKey(f.outcome_kind, f.outcome_title)),
+  )
+
   const sourceNote =
     result.competencies_source === 'declared'
       ? 'Компетенции и цели извлечены из РПД'
@@ -78,11 +100,10 @@ export default function SyllabusReviewReport({ result }: { result: SyllabusRevie
       {/* What we parsed */}
       {parsed && <ParsedReport parsed={parsed} />}
 
-      {/* Formulation findings — deliberately ABOVE the coverage breakdown.
-          These are the items the coverage scores rate as fully «Обеспечена»
-          while the wording is a copy of the indicator, so they have to be
-          visible before the reader takes those green scores at face value. */}
-      {formulationFindings.length > 0 && <FormulationFindings findings={formulationFindings} />}
+      {/* Only the findings that have no card of their own (see orphanFindings)
+          — every other one renders inline on the item it flags, so the reader
+          meets the caveat next to the green score rather than a page away. */}
+      {orphanFindings.length > 0 && <FormulationFindings findings={orphanFindings} />}
 
       {/* Findings grouped by kind */}
       {byKind.map(({ kind, items }) => (
@@ -91,7 +112,13 @@ export default function SyllabusReviewReport({ result }: { result: SyllabusRevie
             <h3 className="font-display text-base font-bold text-ink">{KIND_META[kind].group}</h3>
             <span className="text-xs font-sans text-ink-tertiary">({items.length})</span>
           </div>
-          {sortItems(items).map((item, i) => <CoverageCard key={i} item={item} />)}
+          {sortItems(items).map((item, i) => (
+            <CoverageCard
+              key={i}
+              item={item}
+              formulation={findingByOutcome.get(outcomeKey(item.kind, item.title)) ?? null}
+            />
+          ))}
         </div>
       ))}
     </div>
@@ -102,11 +129,13 @@ const OUTCOME_KIND_LABEL: Record<OutcomeKind, string> = {
   knowledge: 'Знать', skill: 'Уметь', mastery: 'Владеть',
 }
 
-// «Знать/Уметь/Владеть» lines that merely restate a competency indicator.
-// Both texts are shown in full, one above the other, because the whole point
-// is that the reader can see the duplication for themselves rather than
-// trust a similarity number — same "show the evidence, don't just assert it"
-// contract the coverage citations follow.
+// The overflow view: «Знать/Уметь/Владеть» lines that were flagged but fell
+// outside the scored requirement cap, so they have no card of their own to
+// carry the warning inline (see orphanFindings). Both texts are shown in
+// full, one above the other, because the whole point is that the reader can
+// see the duplication for themselves rather than trust a similarity number —
+// same "show the evidence, don't just assert it" contract the coverage
+// citations follow.
 function FormulationFindings({ findings }: { findings: OutcomeFormulationFinding[] }) {
   return (
     <div className="space-y-2.5">
@@ -117,6 +146,7 @@ function FormulationFindings({ findings }: { findings: OutcomeFormulationFinding
       <p className="text-xs font-sans text-ink-secondary leading-relaxed">
         «Знать/Уметь/Владеть» должны раскрывать смысл индикатора через содержание этой дисциплины.
         Дословное совпадение с индикатором — недоработка, даже если содержание его обеспечивает.
+        Эти пункты не вошли в разбор по разделам ниже (в РПД слишком много требований), поэтому показаны отдельно.
       </p>
       {findings.map((f, i) => (
         <div key={i} className="bg-surface border border-border border-l-2 border-l-warning rounded-lg p-4">
@@ -209,14 +239,25 @@ function ParsedReport({ parsed }: { parsed: ParsedSyllabusReport }) {
   )
 }
 
-function CoverageCard({ item }: { item: SyllabusCoverageItem }) {
+function CoverageCard({ item, formulation }: {
+  item: SyllabusCoverageItem
+  /** Set when this item's own wording merely restates the requirement it
+   *  claims to deliver. Deliberately does NOT alter `item.status`: delivery
+   *  and wording are independent questions, and folding one into the other
+   *  would make covered/partial/missing mean two things at once. It sits
+   *  beside the status badge instead, so the green can't be read alone. */
+  formulation?: OutcomeFormulationFinding | null
+}) {
   const meta = STATUS_META[item.status]
   const kindMeta = KIND_META[item.kind]
   // Indicators visually nested under their parent competency.
   const indent = item.kind === 'indicator'
+  const accent = formulation
+    ? 'border-l-2 border-l-warning'
+    : indent ? 'border-l-2 border-l-amber/30' : ''
 
   return (
-    <div className={`bg-surface border border-border rounded-lg p-4 ${indent ? 'ml-4 border-l-2 border-l-amber/30' : ''}`}>
+    <div className={`bg-surface border border-border rounded-lg p-4 ${indent ? 'ml-4 ' : ''}${accent}`}>
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
           <span className="text-[10px] font-sans font-semibold text-ink-tertiary uppercase tracking-wider flex-shrink-0">
@@ -225,6 +266,14 @@ function CoverageCard({ item }: { item: SyllabusCoverageItem }) {
           <span className={`text-xs font-sans font-medium px-2 py-0.5 rounded-sm ${meta.badge}`}>
             {meta.label}
           </span>
+          {formulation && (
+            <span
+              title="Содержание требование обеспечивает, но сама формулировка скопирована — это отдельная недоработка"
+              className="text-[10px] font-sans font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-sm bg-warning-bg text-warning"
+            >
+              Повтор формулировки
+            </span>
+          )}
         </div>
         <span
           className="text-xs font-mono font-medium tabular-nums flex-shrink-0"
@@ -235,6 +284,24 @@ function CoverageCard({ item }: { item: SyllabusCoverageItem }) {
       </div>
 
       <div className="text-sm font-sans text-ink leading-snug">{item.title}</div>
+
+      {/* Both texts stay visible so the duplication is something the reader
+          sees for themselves, not a similarity number they have to trust —
+          same contract the coverage citations below follow. */}
+      {formulation && (
+        <div className="mt-2.5 rounded-md bg-warning-bg border border-warning/30 px-3 py-2">
+          <p className="text-xs font-sans text-ink leading-relaxed">{formulation.detail}</p>
+          <div className="mt-1.5">
+            <div className="text-[10px] font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-0.5">
+              {formulation.indicator_code || 'Источник формулировки'}
+            </div>
+            <div className="text-xs font-sans text-ink-secondary leading-snug">{formulation.indicator_title}</div>
+          </div>
+          <p className="text-xs font-sans text-ink leading-relaxed mt-1.5">
+            <span className="font-medium text-amber">Рекомендация: </span>{formulation.recommendation}
+          </p>
+        </div>
+      )}
 
       {/* Source chips — where the evidence lives in the РПД content */}
       {item.sources.length > 0 && (
