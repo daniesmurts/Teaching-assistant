@@ -8,6 +8,7 @@ import { useUIStore } from '../../store/uiStore'
 import {
   uploadRpdExport, listRpdSnapshots, getRpdOverview, getRpdMapping,
   createRpdGroup, assignRpdDepts, learnRpdMapping, updateRpdSnapshotDate, deleteRpdSnapshot,
+  renameRpdGroup, deleteRpdGroup,
   downloadRpdMaster, downloadRpdGroup, downloadRpdReminder, getRpdReminderText,
   type RpdOverview, type RpdSnapshot, type RpdDeptGroup, type RpdLeaderDept, type RpdReminderPreview, type RpdAllDept,
   type RpdRegressedDept,
@@ -204,6 +205,26 @@ export default function RpdMonitor() {
     onError: () => addToast('Не удалось распределить кафедры', 'error'),
   })
 
+  const renameGroupMutation = useMutation({
+    mutationFn: ({ groupId, name }: { groupId: string; name: string }) => renameRpdGroup(groupId, name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rpd-mapping'] })
+      queryClient.invalidateQueries({ queryKey: ['rpd-overview'] })
+      addToast('Институт переименован', 'success')
+    },
+    onError: () => addToast('Не удалось переименовать институт', 'error'),
+  })
+
+  const deleteGroupMutation = useMutation({
+    mutationFn: (groupId: string) => deleteRpdGroup(groupId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rpd-mapping'] })
+      queryClient.invalidateQueries({ queryKey: ['rpd-overview'] })
+      addToast('Институт удалён', 'success')
+    },
+    onError: () => addToast('Не удалось удалить институт', 'error'),
+  })
+
   function toggleUnmapped(code: string) {
     setSelectedUnmapped((prev) => {
       const next = new Set(prev)
@@ -381,6 +402,14 @@ export default function RpdMonitor() {
               </div>
             </CardBody>
           </Card>
+        )}
+
+        {groups.length > 0 && (
+          <GroupsManager
+            groups={groups}
+            onRename={(groupId, name) => renameGroupMutation.mutate({ groupId, name })}
+            onDelete={(groupId) => deleteGroupMutation.mutate(groupId)}
+          />
         )}
 
         {!overview && !overviewLoading && (
@@ -1109,6 +1138,42 @@ function SnapshotHistory({ snapshots, onSelect, onEditDate, onDelete }: {
                 Удалить
               </button>
             </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+function GroupsManager({ groups, onRename, onDelete }: {
+  groups: RpdDeptGroup[]
+  onRename: (groupId: string, name: string) => void
+  onDelete: (groupId: string) => void
+}) {
+  return (
+    <Card className="mb-6">
+      <CardHeader>
+        <h2 className="font-sans font-semibold text-sm text-ink">Институты</h2>
+      </CardHeader>
+      <div className="divide-y divide-border">
+        {groups.map((g) => (
+          <div key={g.id} className="px-4 py-2.5 flex items-center justify-between gap-3 text-sm font-sans">
+            <input
+              defaultValue={g.name}
+              onBlur={(e) => {
+                const name = e.target.value.trim()
+                if (name && name !== g.name) onRename(g.id, name)
+                else e.target.value = g.name
+              }}
+              className="flex-1 min-w-0 bg-transparent border border-transparent hover:border-border focus:border-border-mid rounded px-1.5 py-1 text-ink"
+            />
+            <span className="text-xs text-ink-tertiary whitespace-nowrap">{g.dept_codes.length} каф.</span>
+            <button
+              onClick={() => { if (confirm(`Удалить институт «${g.name}»? Его кафедры станут нераспределёнными.`)) onDelete(g.id) }}
+              className="text-xs font-sans text-danger hover:underline whitespace-nowrap"
+            >
+              Удалить
+            </button>
           </div>
         ))}
       </div>

@@ -67,6 +67,14 @@ export async function assignRpdDepts(groupId: string, deptCodes: string[]): Prom
   await client.post('/api/institution/rpd/mapping/assign', { groupId, deptCodes })
 }
 
+export async function renameRpdGroup(groupId: string, name: string): Promise<RpdDeptGroup> {
+  return (await client.patch<RpdDeptGroup>(`/api/institution/rpd/mapping/groups/${groupId}`, { name })).data
+}
+
+export async function deleteRpdGroup(groupId: string): Promise<void> {
+  await client.delete(`/api/institution/rpd/mapping/groups/${groupId}`)
+}
+
 export async function learnRpdMapping(file: File): Promise<string[]> {
   const formData = new FormData()
   formData.append('file', file)

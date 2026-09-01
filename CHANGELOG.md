@@ -14,6 +14,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Added
+- **Rename/delete an институт group in Мониторинг РПД.** The backend already had `PATCH`/`DELETE /api/institution/rpd/mapping/groups/:id`, but no frontend ever called them — a mistyped institute name (e.g. a typo made while grouping кафедры by hand) had no self-service fix. Added a "Институты" list to `RpdMonitor.tsx` with inline rename and delete (delete cascades via `rpd_dept_group_members.group_id ON DELETE CASCADE`, so the group's кафедры fall back to "без института" rather than being orphaned).
+
 ### Fixed
 - **ФОС structural check no longer requires two sections a ФОС structurally cannot have yet.** Flagged by the методист testing the new макет conformance check: it reported «Рассмотрение на заседании кафедры» and «Гриф УТВЕРЖДЕНО» as missing on a real ФОС, but both are filled in by a downstream signing workflow — the кафедра meeting that assigns a protocol number, then the УМЦ/зав. магистратурой sign-off — that happens *after* a ФОС is reviewed here, not before. Same false-positive shape СОГЛАСОВАНО was already excluded for, just missed the first time: checking for text that cannot exist yet at authoring time would fire on every ФОС this check is ever run against.
 
