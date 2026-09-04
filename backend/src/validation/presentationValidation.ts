@@ -71,6 +71,12 @@ export const generatePresentationRules = [
   // an older cached frontend bundle that doesn't send the field would
   // otherwise land in a gate it has no UI for, so the route reads it as
   // "false only when explicitly false" and the client sends it explicitly.
+  // Тематический план link (TODO.md "### AO" Phase 3). Resolved owner-scoped
+  // server-side; an id that doesn't resolve just means "no тема", not an error.
+  body('lecture_topic_id')
+    .optional({ nullable: true, checkFalsy: true })
+    .isUUID().withMessage('Неверный идентификатор темы'),
+
   body('review_outline')
     .optional({ nullable: true })
     .isBoolean().withMessage('Неверное значение режима предварительного плана'),

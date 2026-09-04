@@ -4,12 +4,17 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import Button from '../ui/Button'
 import Icon from '../ui/Icon'
 import Select from '../ui/Select'
-import { createQuizFromPresentation, getPresentationQuizzes } from '../../api/presentations'
+import {
+  createQuizFromPresentation, getPresentationQuizzes,
+  downloadPresentationHandout, createAssignmentFromPresentation,
+} from '../../api/presentations'
 import { createLiveSession } from '../../api/liveSessions'
 import { useUIStore } from '../../store/uiStore'
 import type { Quiz, QuizLevel, LiveSessionMode } from '../../types'
 
-// Лекция → тест → аудитория (TODO.md "### AO" Phase 3).
+// What a teacher does with a finished lecture (TODO.md "### AO" Phase 3).
+//
+// Лекция → тест → аудитория, лекция → раздатка, лекция → письменная работа.
 //
 // The deck, the test and the live QR session were three features that never
 // touched: a teacher generated a lecture, then re-described the same material
@@ -61,6 +66,19 @@ export default function DeckQuizPanel({ presentationId }: { presentationId: stri
           : (res?.data?.error ?? 'Не удалось создать тест'),
         'error',
       )
+    },
+  })
+
+  // Discussion slides are already a question bank written for this lecture, so
+  // this is a rendering, not a generation — no model call, no wait. The draft
+  // lands in the existing published-assignment flow, which is where deadlines
+  // and the student roster live.
+  const assignmentMut = useMutation({
+    mutationFn: () => createAssignmentFromPresentation(presentationId),
+    onSuccess: (a) => navigate(`/published/${a.id}`),
+    onError: (err: unknown) => {
+      const data = (err as { response?: { data?: { error?: string } } }).response?.data
+      addToast(data?.error ?? 'Не удалось создать задание', 'error')
     },
   })
 
@@ -140,6 +158,32 @@ export default function DeckQuizPanel({ presentationId }: { presentationId: stri
           По этой лекции уже создано тестов: {existing.length}. Запускается самый свежий.
         </div>
       )}
+
+      {/* The other two things a finished lecture turns into. Secondary to the
+          in-hall check, but the same idea: the deck is the source, not a
+          dead end. */}
+      <div className="mt-3 pt-3 border-t border-border flex items-center gap-4 flex-wrap">
+        <button
+          onClick={() => void downloadPresentationHandout(presentationId)}
+          className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors"
+        >
+          Раздатка для студентов (PDF)
+        </button>
+        <button
+          onClick={() => void downloadPresentationHandout(presentationId, false)}
+          className="text-xs font-sans text-ink-tertiary hover:text-amber transition-colors"
+          title="Заголовки и содержание слайдов без конспекта — чтобы студенты писали сами"
+        >
+          …без конспекта
+        </button>
+        <button
+          onClick={() => assignmentMut.mutate()}
+          disabled={assignmentMut.isPending}
+          className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors disabled:opacity-40"
+        >
+          {assignmentMut.isPending ? 'Создаём…' : 'Письменная работа по вопросам лекции'}
+        </button>
+      </div>
     </div>
   )
 }

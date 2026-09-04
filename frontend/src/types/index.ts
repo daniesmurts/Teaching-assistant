@@ -62,6 +62,7 @@ export type {
   Slide,
   SlideType,
   PresentationOutlineSlide,
+  LectureTopic,
   SlideImage,
   ImageCandidate,
   TitleSlide,

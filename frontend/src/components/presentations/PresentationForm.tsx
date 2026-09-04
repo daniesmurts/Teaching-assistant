@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, FormEvent, KeyboardEvent } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Button from '../ui/Button'
 import { Input } from '../ui/Input'
-import { getCourses } from '../../api/courses'
+import { getCourses, getLecturePlan, extractLecturePlan } from '../../api/courses'
 import NoCourseHint from '../onboarding/NoCourseHint'
 import {
   startPresentationJob, getPresentationJob, confirmPresentationOutline,
@@ -12,7 +12,7 @@ import OutlineEditor from './OutlineEditor'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
 import { MAX_SLIDE_COUNT, estimateSlideCount } from '../../types'
-import type { PresentationDepth, PresentationOutlineSlide } from '../../types'
+import type { LectureTopic, PresentationDepth, PresentationOutlineSlide } from '../../types'
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -60,6 +60,8 @@ export default function PresentationForm({ onResult }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { can } = usePlan()
+  const qc = useQueryClient()
+  const addToast = useUIStore((s) => s.addToast)
   const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
 
   // Generation is asynchronous: enqueue + poll (services/presentationJobWorker.ts
@@ -70,6 +72,41 @@ export default function PresentationForm({ onResult }: Props) {
   useEffect(() => () => { cancelled.current = true }, [])
 
   const { data: courses = [] } = useQuery({ queryKey: ['courses'], queryFn: getCourses })
+
+  // Тематический план of the selected course (TODO.md "### AO" Phase 3) — the
+  // list to pick a lecture from instead of retyping its topic and number. Only
+  // fetched once a course is chosen; a course whose РПД was never parsed just
+  // returns an empty plan and the form behaves exactly as it did before.
+  const { data: lecturePlan = [] } = useQuery({
+    queryKey: ['lecture-plan', form.course_id],
+    queryFn: () => getLecturePlan(form.course_id),
+    enabled: Boolean(form.course_id),
+  })
+
+  const [topicId, setTopicId] = useState('')
+
+  const extractPlanMut = useMutation({
+    mutationFn: () => extractLecturePlan(form.course_id),
+    onSuccess: (topics) => {
+      qc.setQueryData(['lecture-plan', form.course_id], topics)
+      addToast(`Тематический план разобран: ${topics.length} тем`, 'success')
+    },
+    onError: (err: unknown) => addToast(errMsg(err, 'Не удалось разобрать тематический план'), 'error'),
+  })
+
+  // Picking a тема fills the topic and the lecture number, but never
+  // overwrites a topic the teacher has already typed — they may be wording it
+  // differently from the programme on purpose.
+  function pickTopic(id: string) {
+    setTopicId(id)
+    const topic = lecturePlan.find((t: LectureTopic) => t.id === id)
+    if (!topic) return
+    setForm((f) => ({
+      ...f,
+      topic:          f.topic.trim() ? f.topic : topic.title,
+      lecture_number: f.lecture_number || String(topic.position),
+    }))
+  }
 
   const set = (field: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -132,6 +169,7 @@ export default function PresentationForm({ onResult }: Props) {
         strict_source:    strictSource && Boolean(sourceText.trim()),
         depth,
         review_outline:   reviewOutline,
+        lecture_topic_id: topicId || undefined,
       })
       await pollJob(job.id)
     } catch (err: unknown) {
@@ -256,6 +294,44 @@ export default function PresentationForm({ onResult }: Props) {
           placeholder="1"
         />
       </div>
+
+      {/* Тематический план — shown only when a course is selected. The РПД
+          already lists these lectures in order; retyping them per deck is the
+          thing this removes. */}
+      {form.course_id && (
+        <div className="bg-surface-warm border border-border rounded-md px-3 py-2.5">
+          {lecturePlan.length > 0 ? (
+            <>
+              <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">
+                Тема из рабочей программы
+              </label>
+              <select className={selectClass} value={topicId} onChange={(e) => pickTopic(e.target.value)}>
+                <option value="">Своя тема (не из плана)</option>
+                {lecturePlan.map((t: LectureTopic) => (
+                  <option key={t.id} value={t.id}>{t.position}. {t.title}</option>
+                ))}
+              </select>
+              <p className="text-[11px] font-sans text-ink-tertiary mt-1">
+                Лекция свяжется с темой программы, а её содержание из РПД станет заданием для генерации.
+              </p>
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-[11px] font-sans text-ink-secondary max-w-[52ch]">
+                Можно взять темы лекций прямо из рабочей программы предмета — тогда не придётся
+                вводить тему и номер лекции вручную.
+              </p>
+              <Button
+                type="button" size="sm" variant="secondary"
+                loading={extractPlanMut.isPending}
+                onClick={() => extractPlanMut.mutate()}
+              >
+                Разобрать РПД
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Row 3 — duration + slide count */}
       <div className="grid grid-cols-2 gap-3">

@@ -2293,7 +2293,7 @@ ship them as one thing.
 - **Depends on:** P (org tree — shipped) for scoping; AG's presentation
   image pipeline (shipped) for the Phase 2 insertion point.
 
-### AO. Презентации — from vending machine to workspace · Effort: Phase 0 S–M, 🟢 SHIPPED (2026-09-04) · Phase 1 M, 🟢 SHIPPED (2026-09-04) · Phase 2 M, Phase 3 M–L (🟡 дек → тест SHIPPED 2026-09-05, three links remain), Phase 4 M (phased, independently shippable)
+### AO. Презентации — from vending machine to workspace · Effort: Phase 0 S–M, 🟢 SHIPPED (2026-09-04) · Phase 1 M, 🟢 SHIPPED (2026-09-04) · Phase 2 M, Phase 3 M–L, 🟢 SHIPPED (2026-09-05), Phase 4 M (phased, independently shippable)
 
 Presentations are one of the features teachers actually use daily (FEATURES.md,
 GA since AG). AG fixed *generation quality* — outline+expansion, real notes
@@ -2383,8 +2383,8 @@ of this entry:
   «Готово» on the deck before anything becomes an example). Add the
   edit/regenerate rates to `presentationEvalHarness.ts`'s summary so the
   offline harness and live usage report the same axis.
-- **Phase 3 — wire the deck into the platform instead of leaving it a
-  leaf.** In rough order of value:
+- **Phase 3 (shipped, 2026-09-05) — wire the deck into the platform instead
+  of leaving it a leaf.** In rough order of value:
   - **Дек → тест → аудитория.** 🟢 SHIPPED (2026-09-05).
     `POST /api/presentations/:id/quiz` builds the test from the deck's slides
     *and speaker notes*, framed in the prompt as a lecture just delivered
@@ -2398,16 +2398,36 @@ of this entry:
     test for the deck and only *says* when there are others (no picker); no
     "regenerate the test after editing slides" prompt, so a deck edited after
     its test was made keeps the stale test until the teacher makes a new one.
-  - **Дек → раздатка.** Student-facing PDF (slides + notes rendered as
-    prose). `renderSlidesAsText` already exists; `programReportPdf.ts` is
-    the precedent for the PDF side.
-  - **Дек ← РПД / тематический план.** Topic and lecture number should be
-    *picked from the course's тематический план*, not typed —
-    `previousTopics` is currently just strings pulled from prior
-    generations. A deck that knows which тема and which компетенция/индикатор
-    it serves becomes УМК evidence (AM, X) rather than a loose file.
-  - **Дек → published assignment.** `discussion` slides are already a
-    question bank; Q's publish flow is already built.
+  - **Дек → раздатка.** 🟢 SHIPPED (2026-09-05).
+    `GET /:id/handout.pdf` (`services/presentationHandoutPdf.ts`, pdfkit),
+    `?notes=0` for a write-on skeleton. No LLM call — the notes are already
+    prose. Diagram images deliberately not embedded (greyscale printing).
+    Formulas and inline `$…$` flattened via the PPTX exporter's
+    `latexToPlainText`, then through a substitution map for glyphs the
+    vendored PT fonts lack — **without it every lowercase Greek letter
+    printed as a tofu box**, found by rendering the PDF and looking at it.
+    **Not done:** vendoring a Greek-capable font (the substitution map is a
+    stopgap — "rho" where the formula wants ρ); no cover page options, no
+    2-up slide-thumbnail layout.
+  - **Дек ← РПД / тематический план.** 🟢 SHIPPED (2026-09-05).
+    Migration 121's `course_lecture_topics` + `presentations.lecture_topic_id`;
+    `services/lecturePlan.ts` extracts the plan from `syllabus_text` or the
+    latest ready syllabus/material document, on demand and cached;
+    `GET/PUT /api/courses/:id/lecture-plan` and `.../extract`. The form offers
+    the тема (filling topic + lecture number without overwriting what was
+    typed) and feeds the РПД's own wording into the outline prompt.
+    **Not done:** no UI to edit the plan itself (the PUT exists, nothing calls
+    it — a wrong тема has to be re-extracted or worked around); no
+    компетенция/индикатор link yet, which is the other half of what would make
+    a deck full УМК evidence; nothing surfaces "which темы of this course have
+    a lecture built" — the obvious next screen, and the one AM's Кабинет
+    методиста would actually consume.
+  - **Дек → published assignment.** 🟢 SHIPPED (2026-09-05).
+    `POST /:id/assignment` renders `discussion` slides into a draft published
+    assignment — no LLM call, `expected_angles` withheld. **Not done:** the
+    deck doesn't record that an assignment came from it (no back-link the way
+    `quizzes.presentation_id` gives one), so a second click makes a second
+    draft.
 - **Phase 4 — fidelity + institutional finish.** Independent of the above,
   ordered by how often each one gets raised:
   - **Import existing PPTX.** Every prospective teacher has 40 old lecture

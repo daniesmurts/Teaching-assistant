@@ -13,11 +13,15 @@ import {
 } from '../validation/presentationValidation'
 import {
   generatePresentation, getSlideImageQuery, normaliseEditedOutline, normaliseEditedSlide,
-  regenerateSlide, applySlideMove, renderSlidesAsText, renderSlidesForQuiz, type GenerateParams,
+  regenerateSlide, applySlideMove, renderSlidesAsText, renderSlidesForQuiz,
+  buildAssignmentFromDeck, type GenerateParams,
 } from '../services/presentations'
+import { createPublishedAssignment } from '../db/queries/publishedAssignments'
 import { generateQuiz, assertQuizQuota } from '../services/quizzes'
 import { findQuizzesByPresentation } from '../db/queries/quizzes'
 import { generatePresentationPptx } from '../services/presentationExport'
+import { generatePresentationHandoutPdf } from '../services/presentationHandoutPdf'
+import { findTeacherById } from '../db/queries/teachers'
 import { extractText } from '../services/documentExtractor'
 import { yandexImageSearch } from '../services/yandexImages'
 import { PRESENTATION_JOB_QUEUE, type PresentationJobPayload } from '../services/presentationJobWorker'
@@ -34,12 +38,16 @@ import {
   recordSlideEvent, findSlideEventsForPresentation,
 } from '../db/queries/presentationSlideEvents'
 import type { Presentation, Slide } from '../../../shared/types'
-import { MAX_SLIDE_COUNT, type SlideImage } from '../../../shared/types'
+import { MAX_SLIDE_COUNT, type LectureTopic, type SlideImage } from '../../../shared/types'
+import { findLectureTopicById } from '../db/queries/lectureTopics'
 
 const router = Router()
 router.use(authenticate)
 
-function buildGenerateParams(req: { teacher: { id: string; plan_tier: string; institution_id: string | null }; body: unknown }): GenerateParams {
+function buildGenerateParams(
+  req: { teacher: { id: string; plan_tier: string; institution_id: string | null }; body: unknown },
+  lectureTopic?: LectureTopic | null,
+): GenerateParams {
   const {
     course_id, lecture_number, topic, duration_minutes,
     learning_goals, audience_level, style, slide_count_target, source_text, strict_source, depth,
@@ -55,8 +63,12 @@ function buildGenerateParams(req: { teacher: { id: string; plan_tier: string; in
     teacherId:        req.teacher.id,
     institutionId:    req.teacher.institution_id ?? undefined,
     courseId:         course_id,
-    lectureNumber:    lecture_number,
-    topic,
+    // A тема picked from the тематический план supplies both the topic text
+    // and the lecture number, but neither overrides what the teacher typed:
+    // they may be building lecture 4 out of order, or wording the title
+    // differently from the programme.
+    lectureNumber:    lecture_number ?? lectureTopic?.position,
+    topic:            topic?.trim() || lectureTopic?.title || topic,
     durationMinutes:  Number(duration_minutes),
     learningGoals:    learning_goals ?? [],
     audienceLevel:    audience_level,
@@ -68,7 +80,18 @@ function buildGenerateParams(req: { teacher: { id: string; plan_tier: string; in
     // thorough/checkCitations gating — a free-tier teacher who somehow
     // submits depth=deep just gets the standard depth instead of an error.
     depth: depth === 'deep' && canUseFeature(req.teacher.plan_tier, 'presentationDeepMode') ? 'deep' : 'standard',
+    lectureTopicId:          lectureTopic?.id,
+    lectureTopicDescription: lectureTopic?.description ?? undefined,
   }
+}
+
+// Resolves the тематический план тема the request names, if any. Owner-scoped
+// like everything else here — an id from another teacher's course simply
+// doesn't resolve, and generation proceeds on the typed topic.
+async function resolveLectureTopic(req: { teacher: { id: string }; body: unknown }): Promise<LectureTopic | null> {
+  const id = (req.body as { lecture_topic_id?: unknown })?.lecture_topic_id
+  if (typeof id !== 'string' || !id) return null
+  return findLectureTopicById(id, req.teacher.id)
 }
 
 // POST /api/presentations/generate-jobs — async generation (the current
@@ -85,7 +108,7 @@ router.post(
   checkMonthlyLimit('presentationsPerMonth'),
   validate(generatePresentationRules),
   asyncHandler(async (req, res) => {
-    const params = buildGenerateParams(req)
+    const params = buildGenerateParams(req, await resolveLectureTopic(req))
 
     // Outline approval gate (TODO.md "### AO" Phase 0) — opt-out, not
     // opt-in: reviewing the plan is the better default (it's where a wrong
@@ -173,7 +196,7 @@ router.post(
   checkMonthlyLimit('presentationsPerMonth'),
   validate(generatePresentationRules),
   asyncHandler(async (req, res) => {
-    const result = await generatePresentation(buildGenerateParams(req))
+    const result = await generatePresentation(buildGenerateParams(req, await resolveLectureTopic(req)))
     res.status(201).json(result)
   })
 )
@@ -464,6 +487,38 @@ router.post('/:id/slides/move',
   })
 )
 
+// GET /api/presentations/:id/handout.pdf — раздатка, the student-facing
+// companion to the deck (TODO.md "### AO" Phase 3). The PPTX is what the
+// teacher projects; this is what students take away. `notes=0` drops the
+// speaker notes, turning it from a ready конспект into a skeleton to take
+// notes on during the lecture.
+//
+// Not gated behind pptxExport: that gate exists because a native .pptx is the
+// editable artefact a teacher would otherwise rebuild by hand. A handout is
+// for the students, and putting the thing that reaches the whole group behind
+// the paid tier would be a strange place to draw the line.
+router.get('/:id/handout.pdf',
+  asyncHandler(async (req, res) => {
+    const presentation = await findPresentationById(req.params.id, req.teacher.id)
+    if (!presentation) throw new NotFoundError('Презентация')
+    if (!presentation.slides || presentation.slides.length === 0) {
+      throw new ValidationError('Эта презентация сохранена в старом текстовом формате — раздатку по ней собрать нельзя.')
+    }
+
+    const teacher = await findTeacherById(req.teacher.id)
+    const pdf = await generatePresentationHandoutPdf(presentation, {
+      includeNotes: req.query.notes !== '0',
+      lecturer:     teacher?.name ?? null,
+    })
+
+    const fname = `${presentation.topic.slice(0, 60).replace(/[^\p{L}\p{N}\s-]/gu, '').trim() || 'Раздатка'}.pdf`
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', `attachment; filename="handout.pdf"; filename*=UTF-8''${encodeURIComponent(fname)}`)
+    res.setHeader('Content-Length', pdf.length)
+    res.end(pdf)
+  })
+)
+
 // POST /api/presentations/:id/quiz — «Проверить усвоение»: a test generated
 // from this lecture's own slides and speaker notes (TODO.md "### AO" Phase 3).
 //
@@ -500,6 +555,35 @@ router.post('/:id/quiz',
     })
 
     res.status(201).json(quiz)
+  })
+)
+
+// POST /api/presentations/:id/assignment — turns the deck's discussion slides
+// into a published written assignment (TODO.md "### AO" Phase 3). No LLM call:
+// the questions were already written for this lecture, so this is a rendering.
+// Creates the assignment in its draft state and hands back the id — the
+// teacher continues on the existing PublishedAssignmentDetail page to add
+// students, set a deadline and publish, which is where all of that already
+// lives.
+router.post('/:id/assignment',
+  asyncHandler(async (req, res) => {
+    const presentation = await findPresentationById(req.params.id, req.teacher.id)
+    if (!presentation) throw new NotFoundError('Презентация')
+
+    const draft = buildAssignmentFromDeck(presentation)
+    if (!draft) {
+      throw new ValidationError(
+        'В этой лекции нет слайдов с вопросами для обсуждения — добавьте слайд типа «Обсуждение» или создайте задание вручную.'
+      )
+    }
+
+    const assignment = await createPublishedAssignment({
+      teacherId:    req.teacher.id,
+      courseId:     presentation.course_id ?? null,
+      title:        draft.title,
+      instructions: draft.instructions,
+    })
+    res.status(201).json(assignment)
   })
 )
 

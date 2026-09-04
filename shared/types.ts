@@ -731,6 +731,19 @@ export type SlideType =
   | 'discussion'
   | 'summary'
 
+// Тематический план of a course (migration 121, TODO.md "### AO" Phase 3) —
+// the lecture list extracted from the programme, which a teacher picks from
+// instead of retyping a topic and its number for every deck.
+export interface LectureTopic {
+  id:          string
+  course_id:   string
+  position:    number            // 1-based; doubles as the suggested lecture number
+  title:       string
+  description: string | null     // the РПД's own wording for what the тема covers
+  source:      'syllabus' | 'manual'
+  created_at:  string
+}
+
 // One slide's worth of plan, produced by the outline pass and consumed by
 // the expansion pass (services/presentations.ts). Lives here rather than in
 // the service because the outline approval gate (TODO.md "### AO" Phase 0)
@@ -881,6 +894,10 @@ export interface Presentation {
   // with the join, so freshly-created rows don't need it populated).
   course_name: string | null
   lecture_number: number | null
+  // Which тема of the course's тематический план this lecture covers, when it
+  // was started from the plan (migration 121). Nulled — not deleted — if the
+  // plan is later re-extracted, so a deck outlives the plan it came from.
+  lecture_topic_id: string | null
   topic: string
   duration_minutes: number | null
   audience_level: string | null

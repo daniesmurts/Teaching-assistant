@@ -4,6 +4,9 @@ import type {
   Presentation, PresentationSource, PresentationDepth, PresentationOutlineSlide,
   Quiz, QuizLevel, Slide, SlideType, SlideImage, ImageCandidate,
 } from '../types'
+// The published-assignment shape is declared by its own API module rather than
+// in shared types, so it's imported from there.
+import type { PublishedAssignment } from './publishedAssignments'
 
 export interface GenerateRequest {
   topic: string
@@ -19,6 +22,10 @@ export interface GenerateRequest {
   // model supplementing it from its own knowledge. Ignored without source_text.
   strict_source?: boolean
   depth?: PresentationDepth
+  // Тема of the course's тематический план this lecture covers (TODO.md
+  // "### AO" Phase 3) — supplies the topic wording and the lecture number,
+  // and links the finished deck back to the programme.
+  lecture_topic_id?: string
   // Show the plan before writing the deck (TODO.md "### AO" Phase 0). Sent
   // explicitly — the backend reads a missing field as `true`, so an older
   // cached bundle can't land in a gate it has no UI for.
@@ -229,5 +236,18 @@ export async function createQuizFromPresentation(
 
 export async function getPresentationQuizzes(presentationId: string): Promise<Quiz[]> {
   const res = await client.get<Quiz[]>(`/api/presentations/${presentationId}/quizzes`)
+  return res.data
+}
+
+// ─── Дек → раздатка / письменная работа (TODO.md "### AO" Phase 3) ──────────
+
+/** Student-facing PDF. `includeNotes: false` gives a skeleton to write on. */
+export async function downloadPresentationHandout(id: string, includeNotes = true): Promise<void> {
+  await downloadCsv(`/api/presentations/${id}/handout.pdf${includeNotes ? '' : '?notes=0'}`)
+}
+
+/** Turns the deck's discussion slides into a draft published assignment. */
+export async function createAssignmentFromPresentation(id: string): Promise<PublishedAssignment> {
+  const res = await client.post<PublishedAssignment>(`/api/presentations/${id}/assignment`)
   return res.data
 }

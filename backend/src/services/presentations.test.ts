@@ -5,7 +5,7 @@ vi.mock('./yandexImages', () => ({ yandexImageSearch: vi.fn() }))
 import {
   filterCitations, outlineMaxTokens, expansionBatchMaxTokens,
   normaliseOutline, normaliseEditedOutline, OUTLINE_TITLE_MAX_CHARS, OUTLINE_BRIEF_MAX_CHARS,
-  renderSlidesForQuiz, createSourcePool, chunkArray,
+  renderSlidesForQuiz, buildAssignmentFromDeck, createSourcePool, chunkArray,
   getSlideImageQuery, withSlideImage, autoFillImages,
   shouldUseWebGrounding, isStrictSource, OUTLINE_MAX_OUTPUT_TOKENS,
 } from './presentations'
@@ -13,7 +13,9 @@ import {
   estimateSlideCount, MAX_SLIDE_COUNT, MIN_SLIDE_COUNT,
 } from '../../../shared/types'
 import { yandexImageSearch } from './yandexImages'
-import type { PresentationSource, Slide, DiagramSlide, ConceptSlide, ImageCandidate } from '../../../shared/types'
+import type {
+  Presentation, PresentationSource, Slide, DiagramSlide, ConceptSlide, ImageCandidate,
+} from '../../../shared/types'
 import type { RelevantChunk } from '../db/queries/chunks'
 
 const SOURCES: PresentationSource[] = [
@@ -490,5 +492,46 @@ describe('renderSlidesForQuiz', () => {
     })) as unknown as Slide[]
     expect(renderSlidesForQuiz(long).length).toBeLessThanOrEqual(20_000)
     expect(renderSlidesForQuiz(long, 500).length).toBeLessThanOrEqual(500)
+  })
+})
+
+// ─── buildAssignmentFromDeck (TODO.md "### AO" Phase 3) ─────────────────────
+
+describe('buildAssignmentFromDeck', () => {
+  const deckWith = (slides: unknown[]) => ({
+    id: 'p1', topic: 'Кавитация', lecture_number: 4, course_id: null, slides,
+  } as unknown as Presentation)
+
+  const discussion = {
+    type: 'discussion', title: 'Обсуждение', notes: '', citations: [],
+    body: {
+      question: 'Когда кавитация полезна? [1]',
+      prompts: ['Приведите пример', 'Что ограничивает?'],
+      expected_angles: ['ультразвуковая очистка', 'эрозия рабочего колеса'],
+    },
+  }
+
+  it('turns discussion slides into numbered questions with their prompts', () => {
+    const out = buildAssignmentFromDeck(deckWith([discussion]))!
+    expect(out.title).toBe('Кавитация — письменная работа')
+    expect(out.instructions).toContain('лекции 4')
+    expect(out.instructions).toContain('1. Когда кавитация полезна?')
+    expect(out.instructions).toContain('— Приведите пример')
+  })
+
+  it('withholds expected_angles — handing students the shape of the answer defeats the question', () => {
+    const out = buildAssignmentFromDeck(deckWith([discussion]))!
+    expect(out.instructions).not.toContain('ультразвуковая очистка')
+    expect(out.instructions).not.toContain('эрозия')
+  })
+
+  it('strips citation markers, which point at a popover no student can open', () => {
+    expect(buildAssignmentFromDeck(deckWith([discussion]))!.instructions).not.toContain('[1]')
+  })
+
+  it('returns null when the deck has no discussion slides', () => {
+    const bullets = { type: 'bullets', title: 'Т', notes: '', citations: [], body: { items: ['x'] } }
+    expect(buildAssignmentFromDeck(deckWith([bullets]))).toBeNull()
+    expect(buildAssignmentFromDeck(deckWith([]))).toBeNull()
   })
 })

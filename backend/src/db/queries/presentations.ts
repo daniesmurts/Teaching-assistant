@@ -27,6 +27,7 @@ interface PresentationRow {
   sources: PresentationSource[] | null
   source_text: string | null
   strict_source: boolean | null
+  lecture_topic_id: string | null
   created_at: Date
 }
 
@@ -46,6 +47,7 @@ function toPresentation(row: PresentationRow): Presentation {
     slides: row.slides,
     generated_content: row.generated_content,
     sources: row.sources,
+    lecture_topic_id: row.lecture_topic_id ?? null,
     created_at: row.created_at.toISOString(),
   }
 }
@@ -68,13 +70,14 @@ export async function createPresentation(data: {
   // conspectus wasn't kept could only be "regenerated" from invented material.
   sourceText?: string
   strictSource?: boolean
+  lectureTopicId?: string
 }): Promise<Presentation> {
   const { rows } = await pool.query<PresentationRow>(
     `INSERT INTO presentations
        (teacher_id, course_id, lecture_number, topic, duration_minutes,
         audience_level, learning_goals, style, slide_count_target,
-        generated_content, slides, sources, source_text, strict_source)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        generated_content, slides, sources, source_text, strict_source, lecture_topic_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
      RETURNING *`,
     [
       data.teacherId,
@@ -91,6 +94,7 @@ export async function createPresentation(data: {
       data.sources && data.sources.length > 0 ? JSON.stringify(data.sources) : null,
       data.sourceText ?? null,
       Boolean(data.strictSource),
+      data.lectureTopicId ?? null,
     ]
   )
   return toPresentation(rows[0])

@@ -10,6 +10,9 @@ import {
 } from '../db/queries/courses'
 import { getPolicyMemo } from '../db/queries/policyMemos'
 import { generatePolicyMemo } from '../services/policyMemo'
+import { findLectureTopics, replaceLectureTopics } from '../db/queries/lectureTopics'
+import { extractLecturePlan } from '../services/lecturePlan'
+import { aiLimiter } from '../middleware/rateLimits'
 
 const router = Router()
 router.use(authenticate)
@@ -70,6 +73,53 @@ router.post('/:id/policy-memo/regenerate', checkFeatureAccess('ragFlywheel'), as
   if (!course) throw new NotFoundError('Предмет')
   await generatePolicyMemo(req.params.id, req.teacher.id)
   res.json(await getPolicyMemo(req.params.id))
+}))
+
+// ─── Тематический план (TODO.md "### AO" Phase 3) ───────────────────────────
+//
+// The lecture list of a course, read out of its РПД once and then owned by the
+// teacher — what the presentation form offers instead of asking them to retype
+// a topic and its number for every deck.
+
+router.get('/:id/lecture-plan', asyncHandler(async (req, res) => {
+  const course = await findCourseById(req.params.id, req.teacher.id)
+  if (!course) throw new NotFoundError('Предмет')
+  res.json(await findLectureTopics(req.params.id, req.teacher.id))
+}))
+
+// Extraction is one LLM call over the programme text, run on demand rather
+// than per generation: the programme is long and the plan changes about once a
+// year, so re-reading it for every deck would pay repeatedly for an answer
+// that doesn't move.
+router.post('/:id/lecture-plan/extract', aiLimiter, asyncHandler(async (req, res) => {
+  const course = await findCourseById(req.params.id, req.teacher.id)
+  if (!course) throw new NotFoundError('Предмет')
+  res.json(await extractLecturePlan({
+    courseId:      req.params.id,
+    teacherId:     req.teacher.id,
+    institutionId: req.teacher.institution_id ?? undefined,
+  }))
+}))
+
+// Wholesale replace — the plan is edited as a list (add, remove, reorder,
+// retype), so a per-row PATCH would make the client reconcile positions the
+// server is going to renumber anyway.
+router.put('/:id/lecture-plan', asyncHandler(async (req, res) => {
+  const course = await findCourseById(req.params.id, req.teacher.id)
+  if (!course) throw new NotFoundError('Предмет')
+
+  const raw = Array.isArray(req.body?.topics) ? req.body.topics : []
+  const topics = raw
+    .map((t: unknown) => {
+      const o = (t && typeof t === 'object' ? t : {}) as Record<string, unknown>
+      const title = typeof o.title === 'string' ? o.title.trim() : ''
+      const description = typeof o.description === 'string' ? o.description.trim() : ''
+      return { title: title.slice(0, 200), description: description.slice(0, 600) || null, source: 'manual' as const }
+    })
+    .filter((t: { title: string }) => t.title.length > 0)
+    .slice(0, 60)
+
+  res.json(await replaceLectureTopics(req.params.id, req.teacher.id, topics))
 }))
 
 export default router

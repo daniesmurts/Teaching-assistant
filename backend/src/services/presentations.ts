@@ -52,6 +52,13 @@ export interface GenerateParams {
   // over a finished lecture. Meaningless (and ignored) without sourceText.
   strictSource?: boolean
   depth?: PresentationDepth   // 'standard' (default) or 'deep' (Pro+ — see planLimits.ts's presentationDeepMode)
+  // Тематический план link (TODO.md "### AO" Phase 3, migration 121). The
+  // deck records which тема of the РПД it covers — that link is what makes it
+  // УМК evidence rather than a loose file — and the programme's own wording
+  // for the тема goes into the outline prompt, so the plan follows the
+  // programme instead of the model's idea of the topic.
+  lectureTopicId?:          string
+  lectureTopicDescription?: string
 }
 
 export interface GenerateResult {
@@ -286,6 +293,7 @@ export async function expandPresentation(params: GenerateParams, plan: Presentat
     // the deck was written with (migration 119).
     sourceText:       params.sourceText,
     strictSource:     isStrictSource(params),
+    lectureTopicId:   params.lectureTopicId,
   })
 
   // Usage is billed here, not at plan time: an outline the teacher abandons
@@ -599,6 +607,13 @@ function buildOutlinePrompt(
   lines.push(`## Параметры лекции`)
   if (params.lectureNumber) lines.push(`Номер лекции: ${params.lectureNumber}`)
   lines.push(`Тема: ${params.topic}`)
+  // The РПД's own description of the тема — a harder constraint than the topic
+  // string, and the reason a deck built this way covers what the programme
+  // says it covers.
+  if (params.lectureTopicDescription) {
+    lines.push(`Содержание темы по рабочей программе (лекция должна раскрыть именно это):`)
+    lines.push(sanitiseForPrompt(params.lectureTopicDescription))
+  }
   lines.push(`Продолжительность: ${params.durationMinutes} минут`)
   if (params.audienceLevel) lines.push(`Аудитория: ${params.audienceLevel}`)
   if (params.style)         lines.push(`Стиль подачи: ${styleLabel(params.style)}`)
@@ -1349,6 +1364,7 @@ export function paramsFromPresentation(
     slideCountTarget: presentation.slide_count_target ?? undefined,
     sourceText:       inputs?.source_text ?? undefined,
     strictSource:     Boolean(inputs?.strict_source),
+    lectureTopicId:   presentation.lecture_topic_id ?? undefined,
   }
 }
 
@@ -1495,4 +1511,46 @@ const IMAGE_MARKER_LINE = /^\s*\[(?:Изображение|Подобрать и
 export function renderSlidesForQuiz(slides: Slide[], maxChars = 20_000): string {
   const text = renderSlidesAsText(slides).replace(IMAGE_MARKER_LINE, '').replace(/\n{3,}/g, '\n\n')
   return text.length > maxChars ? text.slice(0, maxChars).trimEnd() : text
+}
+
+// ─── Дек → письменное задание (TODO.md "### AO" Phase 3) ────────────────────
+
+/**
+ * Assembles the deck's discussion slides into assignment instructions.
+ *
+ * `discussion` slides are already a question bank the model wrote for this
+ * lecture — a provocative question, sub-questions, and the directions an
+ * answer might take. Turning them into a written assignment needs no LLM
+ * call at all: it's a rendering, not a generation. `expected_angles` are
+ * deliberately left out — they are the teacher's steer for running the
+ * discussion in the hall, and handing students the shape of the expected
+ * answer defeats the point of asking.
+ *
+ * Returns null when the deck has no discussion slides, so the caller can say
+ * so rather than publishing an assignment with no questions in it.
+ */
+export function buildAssignmentFromDeck(presentation: Presentation): { title: string; instructions: string } | null {
+  const discussions = (presentation.slides ?? []).filter((s): s is Extract<Slide, { type: 'discussion' }> => s.type === 'discussion')
+  if (discussions.length === 0) return null
+
+  const strip = (text: string): string => text.replace(/\[\d+(?:\s*,\s*\d+)*\]/g, '').replace(/\s{2,}/g, ' ').trim()
+
+  const lines: string[] = []
+  const lecture = presentation.lecture_number ? `лекции ${presentation.lecture_number}` : 'лекции'
+  lines.push(`Письменная работа по материалу ${lecture} «${presentation.topic}».`)
+  lines.push('')
+
+  discussions.forEach((slide, i) => {
+    const question = strip(slide.body.question) || strip(slide.title)
+    lines.push(`${i + 1}. ${question}`)
+    slide.body.prompts.map(strip).filter(Boolean).forEach((p) => lines.push(`   — ${p}`))
+    lines.push('')
+  })
+
+  lines.push('Ответ обоснуйте, опираясь на материал лекции.')
+
+  return {
+    title: `${presentation.topic} — письменная работа`,
+    instructions: lines.join('\n').trim(),
+  }
 }
