@@ -33,6 +33,7 @@ const NAV: { to: string; label: string; end: boolean; domain?: NavDomain; minLev
   { to: '/institution/rpd',       label: 'Мониторинг РПД', end: false, domain: 'umu', minLevel: 'view', group: 'УМУ' },
   { to: '/institution/umc',       label: 'Готовность УМК', end: false, domain: 'umu', minLevel: 'view', group: 'УМУ' },
   { to: '/institution/rpd-approvals', label: 'Согласование РПД', end: false, domain: 'umu', minLevel: 'view', group: 'УМУ' },
+  { to: '/institution/library',   label: 'Библиотека кафедры', end: false, domain: 'umu', minLevel: 'view', group: 'УМУ' },
   { to: '/institution/usage',     label: 'Использование', end: false, domain: 'orgOverview', minLevel: 'view' },
   { to: '/institution/teachers', label: 'Преподаватели', end: false, domain: 'orgOverview', minLevel: 'view' },
   { to: '/institution/rubrics',  label: 'Критерии',      end: false, domain: 'criteria', minLevel: 'view' },

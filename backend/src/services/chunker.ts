@@ -1,4 +1,5 @@
 export type ChunkType = 'overview' | 'schedule' | 'assessment' | 'reading_list' | 'general'
+export type DocumentVisibilityScope = 'course' | 'unit' | 'institution' | 'platform'
 
 export interface DocumentChunk {
   documentId:    string
@@ -9,6 +10,13 @@ export interface DocumentChunk {
   tokenEstimate: number
   pageStart:     number | null
   pageEnd:       number | null
+  // Feature AN Phase 0 — stamped from the parent document's current scope at
+  // chunk-creation time (see services/documents.ts's processDocument).
+  // Optional so every other caller of chunkDocument/createChunk (and every
+  // existing test fixture) keeps compiling unchanged; createChunk defaults
+  // to 'course'/null when omitted, reproducing today's behaviour exactly.
+  visibilityScope?: DocumentVisibilityScope
+  scopeUnitId?:      string | null
 }
 
 // A chunk before it's stamped with the (documentId, courseId) it belongs to
@@ -87,14 +95,21 @@ export function splitTextIntoChunks(text: string): TextChunk[] {
 
 /**
  * Course-document convenience wrapper around splitTextIntoChunks() — stamps
- * (documentId, courseId) onto each chunk for documents.ts's RAG path.
+ * (documentId, courseId) onto each chunk for documents.ts's RAG path, plus
+ * the document's current visibility scope (Feature AN Phase 0) so retrieval
+ * never needs to join back to documents just to filter by it.
  */
 export function chunkDocument(
   text: string,
   documentId: string,
-  courseId: string
+  courseId: string,
+  scope?: { visibilityScope: DocumentVisibilityScope; scopeUnitId: string | null }
 ): DocumentChunk[] {
-  return splitTextIntoChunks(text).map((c) => ({ ...c, documentId, courseId }))
+  return splitTextIntoChunks(text).map((c) => ({
+    ...c, documentId, courseId,
+    visibilityScope: scope?.visibilityScope,
+    scopeUnitId:     scope?.scopeUnitId,
+  }))
 }
 
 function makeChunk(

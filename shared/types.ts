@@ -666,6 +666,30 @@ export type PresentationStyle =
   | 'case_study'
   | 'discussion_based'
 
+// Feature AN (TODO.md "### AN") — the scope ladder a document's RAG
+// visibility can be promoted along, and the provenance attestation required
+// above 'course'. 'platform' is a real stored value (curated ИСПУМ content)
+// but is never reachable through the promotion endpoint — see
+// routes/documents.ts.
+export type DocumentVisibilityScope = 'course' | 'unit' | 'institution' | 'platform'
+export type DocumentProvenance = 'own_work' | 'open_licence' | 'institution_owned' | 'unknown'
+
+// One row in "Библиотека кафедры" (GET /api/institution/library).
+export interface LibraryDocumentEntry {
+  id:               string
+  file_name:        string
+  teacher_id:       string
+  teacher_name:     string | null
+  course_id:        string | null
+  course_name:      string | null
+  document_type:    'assignment' | 'syllabus' | 'material'
+  visibility_scope: DocumentVisibilityScope
+  scope_unit_id:    string | null
+  provenance:       DocumentProvenance
+  created_at:       string
+  reuse_count:       number
+}
+
 // One citation surfaced next to a slide. The model emits inline [N] markers
 // in bullets/notes; this list resolves N → the original document, the chunk
 // the bullet was grounded in, and (when paginated) the page range. The
@@ -678,6 +702,11 @@ export interface PresentationSource {
   page_end:    number | null
   excerpt:     string              // first ~280 chars of the chunk, for the popover
   chunk_type:  string | null
+  // Feature AN Phase 0 — where the source document was pooled from, so the
+  // popover can attribute a pooled hit (e.g. «Материалы кафедры») instead of
+  // implying it was the teacher's own upload. Optional/undefined for any
+  // source produced before this field existed (older stored citations).
+  source_scope?: 'course' | 'unit' | 'institution' | 'platform'
 }
 
 // ─── Typed slides (new format) ────────────────────────────────────────────────

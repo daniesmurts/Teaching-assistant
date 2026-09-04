@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { cleanText, estimateTokens } from './documentExtractor'
+import { cleanText, estimateTokens, extractPdfFigures } from './documentExtractor'
 
 // Scanned-PDF OCR fallback: mocks pdf-parse's `PDFParse` class shape
 // (`.getText()` → `{text, total}`, `.destroy()`) and yandexVisionOCR, so the
 // dynamic `import('pdf-parse')` inside extractText() resolves to this stub.
 // vi.hoisted is required (not plain top-level consts) since vi.mock factories
 // are hoisted above imports and can't close over ordinary module-scope vars.
-const { getTextMock, destroyMock, yandexVisionOCRMock } = vi.hoisted(() => ({
-  getTextMock: vi.fn(), destroyMock: vi.fn(), yandexVisionOCRMock: vi.fn(),
+const { getTextMock, destroyMock, yandexVisionOCRMock, rasterizePdfPagesMock } = vi.hoisted(() => ({
+  getTextMock: vi.fn(), destroyMock: vi.fn(), yandexVisionOCRMock: vi.fn(), rasterizePdfPagesMock: vi.fn(),
 }))
 vi.mock('pdf-parse', () => ({
   // A regular function, not an arrow function — `new PDFParse(...)` needs a
@@ -18,7 +18,7 @@ vi.mock('pdf-parse', () => ({
     return { getText: getTextMock, destroy: destroyMock }
   }),
 }))
-vi.mock('./yandexVision', () => ({ yandexVisionOCR: yandexVisionOCRMock }))
+vi.mock('./yandexVision', () => ({ yandexVisionOCR: yandexVisionOCRMock, rasterizePdfPages: rasterizePdfPagesMock }))
 
 describe('cleanText', () => {
   it('normalizes Windows line endings', () => {
@@ -178,6 +178,49 @@ describe('extractText — image-only .docx OCR fallback', () => {
 
     expect(result.method).toBe('docx')
     expect(result.text).toBe('Лекция 3')
+  })
+})
+
+describe('extractPdfFigures — Feature AN Phase 2', () => {
+  beforeEach(() => { yandexVisionOCRMock.mockClear(); rasterizePdfPagesMock.mockClear() })
+
+  it('picks only text-sparse pages as figure candidates and OCRs just those', async () => {
+    const realProse = 'Настоящий текст страницы с большим количеством содержательных слов подряд без всякого обращения к оптическому распознаванию символов совсем. '.repeat(3)
+    // 3 pages: prose, sparse (a чертёж page — just a couple of labels), prose
+    const fullText = [realProse, 'Вал 01 ГОСТ', realProse].join('\f')
+    rasterizePdfPagesMock.mockResolvedValueOnce([Buffer.from('page0'), Buffer.from('page1'), Buffer.from('page2')])
+    yandexVisionOCRMock.mockResolvedValueOnce('Вал 01 ГОСТ 2.317-2011')
+
+    const figures = await extractPdfFigures(Buffer.from('stub pdf'), fullText)
+
+    expect(figures).toHaveLength(1)
+    expect(figures[0].sourcePageIndex).toBe(1)
+    expect(figures[0].ocrText).toBe('Вал 01 ГОСТ 2.317-2011')
+    expect(yandexVisionOCRMock).toHaveBeenCalledOnce()
+    expect(yandexVisionOCRMock).toHaveBeenCalledWith(Buffer.from('page1'), 'image/png', undefined)
+  })
+
+  it('returns nothing when every page has a real text layer', async () => {
+    const realProse = 'Настоящий текст страницы с большим количеством содержательных слов подряд без всякого обращения к оптическому распознаванию символов совсем. '.repeat(3)
+    const fullText = [realProse, realProse].join('\f')
+
+    const figures = await extractPdfFigures(Buffer.from('stub pdf'), fullText)
+
+    expect(figures).toHaveLength(0)
+    expect(rasterizePdfPagesMock).not.toHaveBeenCalled()
+  })
+
+  it('skips extraction entirely past the page-count cap (cost bound)', async () => {
+    const fullText = Array.from({ length: 81 }, () => 'x').join('\f')  // 81 sparse pages
+    const figures = await extractPdfFigures(Buffer.from('stub pdf'), fullText)
+    expect(figures).toHaveLength(0)
+    expect(rasterizePdfPagesMock).not.toHaveBeenCalled()
+  })
+
+  it('degrades to no figures when the rasterizer is unavailable', async () => {
+    rasterizePdfPagesMock.mockResolvedValueOnce(null)
+    const figures = await extractPdfFigures(Buffer.from('stub pdf'), 'Вал 01')
+    expect(figures).toHaveLength(0)
   })
 })
 

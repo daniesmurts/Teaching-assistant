@@ -11,6 +11,7 @@ import { uploadAndWait } from '../api/documents'
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import ShareRagToggle from '../components/courses/ShareRagToggle'
+import CourseMaterials from '../components/courses/CourseMaterials'
 import PolicyMemoPanel from '../components/courses/PolicyMemoPanel'
 import { usePlan } from '../hooks/usePlan'
 import type { Course } from '../types'
@@ -208,6 +209,16 @@ export default function Courses() {
                   />
                 )}
               </div>
+
+              {/* Materials — методички, чертежи, конспекты. Only once the
+                  course exists (needs a real courseId); a new, unsaved
+                  course has nothing to attach materials to yet. */}
+              {editing && (
+                <div>
+                  <CourseMaterials courseId={editing.id} />
+                </div>
+              )}
+
               <div className="flex gap-2 pt-1">
                 <Button type="submit" loading={busy}>{editing ? 'Сохранить' : 'Создать предмет'}</Button>
                 <Button type="button" variant="secondary" onClick={close}>Отмена</Button>

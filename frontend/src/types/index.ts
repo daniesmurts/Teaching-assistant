@@ -218,6 +218,9 @@ export type {
   BrsDraft,
   BrsCheckpointAccrual,
   BrsStudentAccrual,
+  DocumentVisibilityScope,
+  DocumentProvenance,
+  LibraryDocumentEntry,
 } from '../../../shared/types'
 
 export {

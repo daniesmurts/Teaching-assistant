@@ -213,6 +213,7 @@ describe('createSourcePool', () => {
     return {
       document_id: 'd1', file_name: 'syllabus.pdf', chunk_index: 0,
       chunk_type: 'overview', text: 'full chunk text here', page_start: 1, page_end: 1,
+      source_scope: 'course',
       ...overrides,
     }
   }
@@ -306,7 +307,7 @@ describe('withSlideImage', () => {
 describe('autoFillImages', () => {
   it('fills the top-ranked candidate for slides that have a query', async () => {
     vi.mocked(yandexImageSearch).mockResolvedValue([imageCandidate({ source_host: 'winner.com' })])
-    const [out] = await autoFillImages([conceptSlide({ image_query: 'деталь чертёж' })])
+    const [out] = await autoFillImages([conceptSlide({ image_query: 'деталь чертёж' })], null)
     expect(out.image?.source_host).toBe('winner.com')
     expect(out.image?.query).toBe('деталь чертёж')
   })
@@ -314,26 +315,26 @@ describe('autoFillImages', () => {
   it('leaves slides without a query untouched (no search call)', async () => {
     const search = vi.mocked(yandexImageSearch)
     search.mockClear()
-    const [out] = await autoFillImages([conceptSlide()])
+    const [out] = await autoFillImages([conceptSlide()], null)
     expect(out.image).toBeUndefined()
     expect(search).not.toHaveBeenCalled()
   })
 
   it('leaves the image empty when search finds nothing, without throwing', async () => {
     vi.mocked(yandexImageSearch).mockResolvedValue([])
-    const [out] = await autoFillImages([conceptSlide({ image_query: 'ничего не найдётся' })])
+    const [out] = await autoFillImages([conceptSlide({ image_query: 'ничего не найдётся' })], null)
     expect(out.image).toBeUndefined()
   })
 
   it('degrades silently on a search failure — best-effort, same as RAG retrieval', async () => {
     vi.mocked(yandexImageSearch).mockRejectedValue(new Error('network down'))
-    const [out] = await autoFillImages([conceptSlide({ image_query: 'x' })])
+    const [out] = await autoFillImages([conceptSlide({ image_query: 'x' })], null)
     expect(out.image).toBeUndefined()
   })
 
   it('fills diagram slides too (previously always left null at generation)', async () => {
     vi.mocked(yandexImageSearch).mockResolvedValue([imageCandidate()])
-    const [out] = await autoFillImages([diagramSlide()]) as [DiagramSlide]
+    const [out] = await autoFillImages([diagramSlide()], null) as [DiagramSlide]
     expect(out.body.image).not.toBeNull()
   })
 })

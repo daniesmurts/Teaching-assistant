@@ -117,6 +117,9 @@
 | Мониторинг РПД — чтение | `GET /institution/rpd` | 🔧 `umu:view` | Institution |
 | Мониторинг РПД — загрузка/письма | `POST /institution/rpd/*` | 🔧 `umu:edit` | Institution |
 | Готовность УМК | `/institution/umc` | `umu:view` | Institution |
+| Библиотека кафедры — чтение | `GET /institution/library` | 🔧 `umu:view` | — |
+| Библиотека кафедры — продвижение до `unit` | `PATCH /documents/:id/scope` (unit) | 🔧 `umu:edit` на целевую единицу | — |
+| Библиотека кафедры — продвижение до `institution` | `PATCH /documents/:id/scope` (institution) | 🔧 `umu:edit` на корневую единицу | Institution (`documentLibraryInstitution`) |
 | Использование | `/institution/usage` | `teaching:view`+тип `{governance,division,department}` | — |
 | Преподаватели — чтение | `/institution/teachers` | `teaching:view`+тип `{governance,division,department}` | — |
 | Преподаватели — приглашение/деактивация | — | только корневой админ | — |

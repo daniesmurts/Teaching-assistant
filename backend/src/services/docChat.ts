@@ -1,5 +1,7 @@
 import { chat, embed } from './llm/registry'
 import { findRelevantChunksScored, type ScoredChunk } from '../db/queries/chunks'
+import { logDocumentRetrievals } from '../db/queries/ragDocumentUses'
+import { resolveRagRetrievalScope } from './ragScope'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import type { ChatMessage } from './llm/types'
 import type { ChatTurn, DocChatSource, DocChatResult } from '../../../shared/types'
@@ -82,7 +84,9 @@ export async function askDocument(params: {
   const context = { teacherId: params.teacherId, institutionId: params.institutionId, feature: 'grading' as const }
 
   const vector = await embed(question, context)
-  const chunks = await findRelevantChunksScored(params.courseId, vector, MAX_SOURCES)
+  const scope = await resolveRagRetrievalScope(params.courseId)
+  const chunks = await findRelevantChunksScored(scope, vector, MAX_SOURCES)
+  logDocumentRetrievals(chunks, scope.courseId, params.teacherId).catch(() => null)
 
   const bestMatch = chunks[0]
   if (!bestMatch || bestMatch.distance > UNGROUNDED_DISTANCE) {

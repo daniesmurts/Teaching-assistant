@@ -4,7 +4,7 @@ import { calculateDeepSeekCost } from '../../config/planLimits'
 import { logger } from '../../lib/logger'
 import { sendTelegramAlert } from '../../lib/telegramAlert'
 import type {
-  CallContext, ChatMessage, ChatOptions, LLMProvider, ProviderCapabilities,
+  CallContext, ChatMessage, ChatOptions, LLMProvider, ProviderCapabilities, VisionContentPart,
 } from './types'
 
 // BASE_URL is environment-configurable so we can later point at our own
@@ -22,6 +22,20 @@ const DEFAULT_BASE_URL = 'https://api.deepseek.com'
 // self-hosted weights, without a redeploy.
 const FLASH_MODEL = () => process.env.DEEPSEEK_MODEL_FLASH?.trim() || 'deepseek-v4-flash'
 const PRO_MODEL   = () => process.env.DEEPSEEK_MODEL_PRO?.trim()   || 'deepseek-v4-pro'
+
+// Vision captioning (Feature AN Phase 2 follow-up, TODO.md "### AN").
+// deepseek-v4-flash-vision-exp is DeepSeek's own "-exp" (experimental)
+// endpoint — a separate model from FLASH, released 2026-08-21, billed at
+// FLASH's per-token rate with images counted as up to 384 input tokens each
+// (api-docs.deepseek.com/guides/vision). Gated behind an explicit env
+// opt-in rather than auto-enabled like the rest of this codebase's
+// best-effort calls: it costs real money per figure AND the vendor itself
+// labels it experimental (shape/availability could change), so a deliberate
+// per-environment switch beats a silent default-on.
+const VISION_MODEL = () => process.env.DEEPSEEK_MODEL_VISION?.trim() || 'deepseek-v4-flash-vision-exp'
+export function isVisionEnabled(): boolean {
+  return process.env.DEEPSEEK_VISION_ENABLED === 'true'
+}
 
 const CAPABILITIES: ProviderCapabilities = {
   strictJsonMode:  true,
@@ -292,6 +306,111 @@ export class DeepSeekProvider implements LLMProvider {
         }).catch(() => null)
       }
       logger.warn({ message: 'DeepSeek call failed', feature: opts.context?.feature, model, account: account.label, errorCode })
+      throw err
+    }
+  }
+
+  // Feature AN Phase 2 follow-up (TODO.md "### AN") — captions a figure
+  // image via deepseek-v4-flash-vision-exp. Deliberately NOT part of the
+  // LLMProvider interface (same "always this provider, no per-institution
+  // routing" shape as embed() always being Yandex) — see types.ts's
+  // VisionContentPart doc comment for why it's a standalone method instead
+  // of widening ChatMessage.content.
+  //
+  // Never throws — returns null on any failure (disabled, no accounts, every
+  // account exhausted, malformed response). This is a best-effort quality
+  // enhancement over figureCaptioning.ts's OCR+text fallback, not a
+  // must-succeed call; the caller degrades to that fallback on null.
+  async captionImage(
+    imageBuffer: Buffer,
+    mimeType:    string,
+    promptText:  string,
+    context?:    CallContext,
+  ): Promise<{ caption: string; labels: string[] } | null> {
+    if (!isVisionEnabled()) return null
+    const accounts = resolveAccounts()
+    if (accounts.length === 0) return null
+
+    const ordered = orderAccounts(accounts)
+    let lastErr: unknown
+
+    for (let i = 0; i < ordered.length; i++) {
+      const account = ordered[i]
+      try {
+        const result = await this.attemptCaptionImage(account, imageBuffer, mimeType, promptText, context)
+        if (i > 0) notifyFallback(ordered[i - 1].label, account.label, describeError(lastErr))
+        downUntil.delete(account.label)
+        return result
+      } catch (err) {
+        lastErr = err
+        if (!isRetryable(err)) break
+        downUntil.set(account.label, Date.now() + COOLDOWN_MS)
+        logger.warn({ message: 'DeepSeek vision attempt failed, trying next account', account: account.label, error: describeError(err), remaining: ordered.length - i - 1 })
+      }
+    }
+    logger.warn({ message: 'DeepSeek vision captioning failed on every account — falling back', error: describeError(lastErr) })
+    return null
+  }
+
+  private async attemptCaptionImage(
+    account:     DeepSeekAccount,
+    imageBuffer: Buffer,
+    mimeType:    string,
+    promptText:  string,
+    context?:    CallContext,
+  ): Promise<{ caption: string; labels: string[] }> {
+    const start = Date.now()
+    const model = VISION_MODEL()
+    const content: VisionContentPart[] = [
+      { type: 'text', text: promptText },
+      { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBuffer.toString('base64')}`, detail: 'auto' } },
+    ]
+
+    try {
+      const response = await axios.post(
+        `${account.baseUrl}/chat/completions`,
+        {
+          model,
+          messages: [{ role: 'user', content }],
+          response_format: { type: 'json_object' },
+          temperature: 0.1,
+          max_tokens: 300,
+        },
+        {
+          headers: { Authorization: `Bearer ${account.apiKey}`, 'Content-Type': 'application/json' },
+          timeout: 45_000,
+        }
+      )
+
+      const usage        = response.data.usage as { prompt_tokens: number; completion_tokens: number } | undefined
+      const inputTokens  = usage?.prompt_tokens     ?? 0
+      const outputTokens = usage?.completion_tokens ?? 0
+      const raw          = response.data.choices?.[0]?.message?.content as string | undefined
+
+      if (context) {
+        const costUsd = calculateDeepSeekCost(inputTokens, outputTokens, 'deepseek-v4-flash')
+        createUsageLog({
+          ...context, model: `deepseek:${model}`, inputTokens, outputTokens, costUsd,
+          costNative: costUsd, currency: 'USD', account: account.label,
+          durationMs: Date.now() - start, success: true,
+        }).catch((e) => logger.warn({ message: 'Failed to write usage log', error: e.message }))
+      }
+
+      if (!raw) return { caption: '', labels: [] }
+      const parsed = JSON.parse(extractJSON(raw)) as { caption?: unknown; labels?: unknown }
+      return {
+        caption: typeof parsed.caption === 'string' ? parsed.caption.trim() : '',
+        labels:  Array.isArray(parsed.labels) ? parsed.labels.filter((l): l is string => typeof l === 'string') : [],
+      }
+    } catch (err) {
+      const errorCode = axios.isAxiosError(err) ? `HTTP_${err.response?.status ?? 0}` : 'UNKNOWN'
+      if (context) {
+        createUsageLog({
+          ...context, model: `deepseek:${model}`, inputTokens: 0, outputTokens: 0, costUsd: 0,
+          currency: 'USD', account: account.label, durationMs: Date.now() - start, success: false, errorCode,
+        }).catch(() => null)
+      }
+      logger.warn({ message: 'DeepSeek vision call failed', feature: context?.feature, model, account: account.label, errorCode })
       throw err
     }
   }

@@ -24,6 +24,7 @@ import { findTeacherByEmail, findTeacherById } from '../db/queries/teachers'
 import { findCriteriaByInstitution, createCriterion, findCriteriaByIds, shareCriterion } from '../db/queries/criteria'
 import { findRubricsByInstitution, createInstitutionRubric, shareRubric } from '../db/queries/rubrics'
 import { getSharedRagSummary, setInstitutionSharedRag } from '../db/queries/sharedRag'
+import { listLibraryDocuments } from '../db/queries/documents'
 import {
   getStrategyDocumentByInstitution, deleteStrategyDocument,
 } from '../db/queries/institutionStrategyDoc'
@@ -392,6 +393,17 @@ router.get('/audit', asyncHandler(async (req, res) => {
 
 router.get('/shared-rag', asyncHandler(async (req, res) => {
   res.json(await getSharedRagSummary(institutionId(req)))
+}))
+
+// ─── Кафедральная библиотека (Feature AN, TODO.md "### AN") ──────────────────
+// Lists documents promoted to 'unit'/'institution' RAG scope (routes/documents.ts's
+// PATCH /:id/scope), with reuse counts (Phase 3). Domain 'umu' — filing/УМК
+// compliance already lives there (see CLAUDE.md §7.10), not 'curriculum'; a
+// Заведующий кафедрой authoring criteria shouldn't automatically see this.
+
+router.get('/library', requireDomain('umu', 'view'), asyncHandler(async (req, res) => {
+  const prefixes = await resolveTeachingPrefixes(req)
+  res.json(await listLibraryDocuments(institutionId(req), prefixes))
 }))
 
 // ─── Strategy document (Feature Z Plane-2 pilot) ──────────────────────────────

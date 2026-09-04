@@ -1,6 +1,8 @@
 import { chatJSON, embed } from './deepseek'
 import { findCourseById } from '../db/queries/courses'
 import { findRelevantChunks, type RelevantChunk } from '../db/queries/chunks'
+import { logDocumentRetrievals } from '../db/queries/ragDocumentUses'
+import { resolveRagRetrievalScope } from './ragScope'
 import { createQuiz } from '../db/queries/quizzes'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { logger } from '../lib/logger'
@@ -88,8 +90,10 @@ export async function generateQuiz(params: GenerateQuizParams): Promise<Generate
 
 async function retrieveSources(params: GenerateQuizParams): Promise<PresentationSource[]> {
   try {
+    const scope = await resolveRagRetrievalScope(params.courseId!)
     const vector = await embed(params.topic, { teacherId: params.teacherId, feature: 'embedding' })
-    const chunks = await findRelevantChunks(params.courseId!, vector, MAX_SOURCES)
+    const chunks = await findRelevantChunks(scope, vector, MAX_SOURCES)
+    logDocumentRetrievals(chunks, scope.courseId, params.teacherId).catch(() => null)
     return chunks.map((c, i) => toSource(c, i + 1))
   } catch (err) {
     logger.warn({ message: '[RAG quiz] could not retrieve sources', error: (err as Error).message })
@@ -109,6 +113,7 @@ function toSource(c: RelevantChunk, idx: number): PresentationSource {
     page_end:    c.page_end,
     excerpt,
     chunk_type:  c.chunk_type ?? null,
+    source_scope: c.source_scope,
   }
 }
 

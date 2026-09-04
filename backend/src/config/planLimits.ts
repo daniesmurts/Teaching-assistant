@@ -34,6 +34,7 @@ export const PLAN_LIMITS = {
     pptxExport:            false,   // Feature D — real PowerPoint export
     umcDashboard:          false,   // Feature V — УМЦ readiness dashboard, Institution only
     presentationDeepMode:  false,   // Feature AG Phase 1 — "углублённая" presentation depth
+    documentLibraryInstitution: false,   // Feature AN — promote a document to institution-wide RAG scope, Institution only
     liveSessionsPerMonth:  1,
     monthlySpendCapUsd:    3,
   },
@@ -69,6 +70,7 @@ export const PLAN_LIMITS = {
     pptxExport:            true,   // Feature D — real PowerPoint export
     umcDashboard:          false,  // Feature V — Institution only, same tier as rpdMonitor
     presentationDeepMode:  true,   // Feature AG Phase 1 — "углублённая" presentation depth
+    documentLibraryInstitution: false,   // Feature AN — Institution only, same tier as rpdMonitor/umcDashboard
     liveSessionsPerMonth:  Infinity,
     monthlySpendCapUsd:    30,
   },
@@ -104,6 +106,7 @@ export const PLAN_LIMITS = {
     pptxExport:            true,   // Feature D — real PowerPoint export
     umcDashboard:          true,   // Feature V — УМЦ readiness dashboard
     presentationDeepMode:  true,   // Feature AG Phase 1 — "углублённая" presentation depth
+    documentLibraryInstitution: true,   // Feature AN — promote a document to institution-wide RAG scope
     liveSessionsPerMonth:  Infinity,
     monthlySpendCapUsd:    150,
   },

@@ -1,5 +1,5 @@
 import client from './client'
-import type { ChatTurn, DocChatResult } from '../../../shared/types'
+import type { ChatTurn, DocChatResult, DocumentVisibilityScope, DocumentProvenance } from '../../../shared/types'
 export type { ChatTurn, DocChatSource } from '../../../shared/types'
 
 export type DocumentType   = 'assignment' | 'syllabus' | 'material'
@@ -14,6 +14,10 @@ export interface DocumentStatus {
   tokenEstimate: number | null
   pageCount:     number | null
   chunkCount?:   number
+  // Feature AN — present once processing reaches at least 'chunking'
+  visibilityScope?: DocumentVisibilityScope
+  scopeUnitId?:     string | null
+  provenance?:      DocumentProvenance
 }
 
 export async function uploadDocument(
@@ -37,6 +41,28 @@ export async function uploadDocument(
 export async function getDocumentStatus(id: string): Promise<DocumentStatus> {
   const res = await client.get<DocumentStatus>(`/api/documents/${id}/status`)
   return res.data
+}
+
+// A row from GET /api/documents?course_id=&document_type= — the teacher's
+// own uploads for a course (components/courses/CourseMaterials.tsx).
+export interface MaterialListItem {
+  id:               string
+  fileName:         string
+  status:           ProcessingStatus
+  documentType:     DocumentType
+  visibilityScope:  DocumentVisibilityScope
+  scopeUnitId:      string | null
+  provenance:       DocumentProvenance
+  createdAt:        string
+}
+
+export async function listDocuments(courseId: string, documentType: DocumentType): Promise<MaterialListItem[]> {
+  const res = await client.get<MaterialListItem[]>('/api/documents', { params: { course_id: courseId, document_type: documentType } })
+  return res.data
+}
+
+export async function deleteDocument(id: string): Promise<void> {
+  await client.delete(`/api/documents/${id}`)
 }
 
 /**

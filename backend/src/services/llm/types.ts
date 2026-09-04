@@ -17,6 +17,21 @@ export interface ChatMessage {
   content: string
 }
 
+// Feature AN Phase 2 follow-up (TODO.md "### AN") — vision captioning.
+// Deliberately NOT folded into ChatMessage.content (kept string-only there):
+// only DeepSeek's experimental deepseek-v4-flash-vision-exp model
+// (api-docs.deepseek.com/guides/vision, confirmed 2026-09) accepts this
+// shape — yandex.ts builds its own `{role, text}` request straight off
+// `m.content` as a string, and widening the shared type would force every
+// provider file to defensively handle a case none of them can actually
+// serve. See services/llm/deepseek.ts's captionImage — a standalone method
+// outside the LLMProvider interface, same "always this one provider,
+// never a per-institution routing choice" shape as embed() always being
+// Yandex regardless of chat provider.
+export type VisionContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'low' | 'high' | 'original' | 'auto' } }
+
 export type Feature = 'grading' | 'presentation' | 'feedback_email' | 'embedding' | 'criteria_assist' | 'rpd_reminder' | 'document_extraction'
 
 export interface CallContext {

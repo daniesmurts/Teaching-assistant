@@ -2154,6 +2154,147 @@ studio-jumping; a new page on top of the same anchor would just relocate it.
 
 ---
 
+### AN. Кафедральная библиотека — teacher-contributed materials + figure library as RAG scope · Effort: Phase 0 S–M, Phase 1 M, Phase 2 M–L, Phase 3 S · 🟢 SHIPPED (2026-09-04)
+
+**Status:** All four phases shipped. Phase 2 covers both `.docx` embedded
+images (`documentExtractor.ts`'s `extractDocxFigures`) and PDF — rasterizing
+text-sparse pages (`extractPdfFigures`, reusing `yandexVision.ts`'s
+`rasterizePdfPages`, now exported), since most real separately-scanned
+чертежи/схемы arrive as PDF rather than embedded in a .docx. Figure
+captioning tries true VLM image understanding first — `services/llm/deepseek.ts`'s
+`captionImage()`, DeepSeek's experimental `deepseek-v4-flash-vision-exp`
+model, gated behind `DEEPSEEK_VISION_ENABLED` (default off) — falling back to
+the original OCR + text `chatJSON` path on any failure or when disabled. See
+CHANGELOG.md [Unreleased] for the full writeup of both the figure library and
+the vision follow-up.
+
+
+Origin: mechanical-engineering courses expose a hard ceiling on what the
+models know. For детали машин / начертательная геометрия / ЕСКД-governed
+disciplines the model either lacks the specific information or doesn't have
+enough of it, while the teachers of those courses have been accumulating
+drawings, конспекты and worked examples for decades. The proposal: let
+(some) teachers contribute that corpus so generated content is *correct*
+and fits the Russian curriculum instead of being reconstructed from an
+anglophone prior.
+
+**The idea splits in two, and bundling them is the main design risk:**
+
+- **(a) The text gap** — ГОСТ/ЕСКД conventions, кафедра methodology, Russian
+  terminology the model gets subtly wrong. This is ordinary RAG and the
+  machinery is already shipped end-to-end (`documents` →
+  `services/documentExtractor.ts` → `services/chunker.ts` →
+  `document_chunks` pgvector → `db/queries/chunks.ts`'s
+  `findRelevantChunks`, consumed by `services/presentations.ts`,
+  `services/quizzes.ts`, `services/docChat.ts` with verbatim-validated
+  citations). Nothing new to build for ingestion.
+- **(b) The drawing gap** — the one actually named, and RAG-over-text cannot
+  solve it. A chunk of a чертёж is OCR noise. Today an embedded drawing is
+  flattened by `ocrDocxImages` and the geometry is lost; presentations then
+  illustrate themselves via `yandexImageSearch` against the open web, which
+  is precisely where correct Russian engineering figures aren't. This needs
+  a **retrievable figure library**: images kept as assets, VLM-captioned,
+  embedded *by caption*, offered to the slide generator ahead of web image
+  search.
+
+(b) is the differentiated feature; (a) is its enabler. Sequence them, don't
+ship them as one thing.
+
+- **The real gap is scope, not ingestion.** `findRelevantChunks` retrieves
+  `WHERE course_id = $1` — document RAG never crosses a course boundary.
+  Meanwhile grading RAG *already* has an institution pool
+  (`institutions.shared_rag_enabled` + `courses.share_rag_with_institution`
+  + `rag_institution_uses`, Rule 7). The pooling primitive exists on the
+  assignments axis and is simply missing on the documents axis. Most of
+  this feature is: **give `document_chunks` the scope ladder `assignments`
+  already has.**
+- **"Approval process" = the org tree, not a moderation queue.** Feature P's
+  domain grants (§7.10) already express exactly this. Scope is a ladder
+  anchored to `org_units`, and promotion is a field change by someone who
+  already holds the grant:
+
+  | Tier | Who promotes | Status today |
+  |---|---|---|
+  | `course` | teacher | already the (implicit) behaviour |
+  | `unit` (кафедра/факультет subtree) | `edit` on that unit, domain `umu` | **where the value is** |
+  | `institution` | root admin, gated on existing `shared_rag_enabled` | toggle already modelled |
+  | `platform` | ИСПУМ editorial only | see copyright below |
+
+  No new permissions concept and no review UI to start. Build a queue only
+  once there is a backlog to queue — same posture as U's marketplace.
+- **Copyright is the blocking constraint, not a footnote.**
+  `documentExtractor.ts` already carries the comment "a screenshot-built
+  conspectus is typically one image per textbook page" — scanned учебники
+  are demonstrably already being uploaded. One teacher's scan on their own
+  course is fine; pooling it across an institution is redistribution, and
+  ГОСТ texts are separately licensed through Росстандарт and not
+  redistributable at all. Therefore, non-negotiable from the first commit
+  (retrofitting provenance is the §5.1.2 mistake all over again):
+  - promotion above `course` requires a per-document provenance attestation
+    — `own_work` / `open_licence` / `institution_owned` / `unknown` —
+    stored and surfaced at retrieval time next to the existing `file_name`
+    citation;
+  - `unknown` may be shared **within** the institution (internal use,
+    defensible) and never platform-wide;
+  - **the `platform` tier is curated-only** — licensed or authored by
+    ИСПУМ, never user-upload. Conveniently the same tier where one bad
+    contribution would poison every customer, so the legal and quality
+    incentives point the same way.
+- **Contribution incentive is attribution, not payment.** "Why would I hand
+  over twenty years of materials" is answered by reuse visibility ("ваш
+  чертёж использован 34 раза на кафедре"), which falls out of Phase 0's
+  tracking table for free. No ratings, no karma, no contributor
+  marketplace — reuse count is the honest metric and the only one that
+  can't be gamed into noise at this scale.
+
+**Phases**
+
+- **Phase 0 — scope ladder.** Migration 116 (expand-only, Rule 12):
+  `documents.visibility_scope` (default `'course'`), `documents.scope_unit_id`,
+  `documents.provenance`. Defaults reproduce today's behaviour exactly.
+  Widen `findRelevantChunks` / `findRelevantChunksScored` to take a resolved
+  scope set instead of a bare `course_id`, built from the caller's org path
+  the way `routes/institution.ts`'s `resolveTeachingPrefixes` does — and
+  with the same root-anchored-grant caveat (CLAUDE.md §7). Add
+  `rag_document_uses` mirroring `rag_institution_uses`.
+- **Phase 1 — contribution surface.** «Библиотека кафедры»: upload as
+  `document_type = 'material'`, choose scope, attest provenance. Promotion
+  gated on `requireDomain('umu', 'edit')` for the target unit. Plan-gate the
+  `institution` tier through `canUseFeature` (Rule 4) — a concrete
+  institution-plan selling point.
+- **Phase 2 — figure library (the differentiated one).** New
+  `document_figures`: `document_id`, page/index, object-storage key
+  (`services/objectStorage.ts`), VLM-generated Russian caption including
+  recognised обозначения, `caption_embedding vector(1536)` via Yandex
+  (Rule 9), scope inherited from the parent document. Extract during
+  ingestion from PDF page regions and `word/media/*` — both already reached
+  by `documentExtractor.ts`. Then in `services/presentations.ts` prefer a
+  library figure over `yandexImageSearch` when the scored match clears a
+  threshold. This is the change that makes a generated deck on детали машин
+  stop looking like a stock-photo collage.
+- **Phase 3 — reuse signal.** Per-document and per-figure reuse counts
+  surfaced to the contributing teacher and to the кафедра. Data already
+  collected in Phase 0.
+
+- **Touches (projected):** migration 116 (+ a later one for
+  `document_figures`), `db/queries/chunks.ts`, `db/queries/documents.ts`,
+  new `db/queries/documentFigures.ts`, `services/documentExtractor.ts`,
+  `services/chunker.ts`, `services/presentations.ts`, `services/quizzes.ts`,
+  `services/docChat.ts`, `services/accessScope.ts`,
+  `middleware/requireDomain.ts` callers, `routes/documents.ts`,
+  `routes/presentations.ts`, `config/planLimits.ts`, a new
+  `pages/institution/` library page, `docs/ACCESS-MATRIX.md`.
+- **Not doing:** open platform-wide upload, a contributor marketplace, and
+  per-item peer review — all three presume contribution volume that doesn't
+  exist yet, and the first two carry the copyright exposure without the
+  institutional containment that makes the `unit`/`institution` tiers
+  defensible. No new domain either: this is `umu` (filing/УМК compliance
+  already lives there), not `curriculum`.
+- **Depends on:** P (org tree — shipped) for scoping; AG's presentation
+  image pipeline (shipped) for the Phase 2 insertion point.
+
+---
+
 ## Build order — locked design (§5–§7)
 
 The §5–§7 design is locked (2026-06-27). Full institutional path is the build

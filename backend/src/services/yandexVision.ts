@@ -178,7 +178,11 @@ interface PdfToImgShape {
   pdf(dataUrl: string, opts?: { scale?: number }): Promise<AsyncIterable<Buffer>>
 }
 
-async function rasterizePdfPages(fileBuffer: Buffer): Promise<Buffer[] | null> {
+// Exported for Feature AN Phase 2 (documentExtractor.ts's extractPdfFigures)
+// — reuses this exact rasterization path (and its child-process corruption
+// workaround, see the comment below) to pull page images for the figure
+// library, not just for OCR.
+export async function rasterizePdfPages(fileBuffer: Buffer): Promise<Buffer[] | null> {
   // Run in a fresh child process — proven necessary, not just defensive.
   // Reproduced live in production (2026-07-23): if pdf-parse's getText() has
   // run anywhere earlier in this process (documentExtractor.ts always tries

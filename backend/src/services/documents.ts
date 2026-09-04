@@ -1,16 +1,20 @@
 import { uploadObject } from './objectStorage'
-import { extractText, estimateTokens } from './documentExtractor'
+import { extractText, extractDocxFigures, extractPdfFigures, estimateTokens } from './documentExtractor'
 import { chunkDocument } from './chunker'
 import { embed } from './deepseek'
+import { captionFigure, embedFigureCaption } from './figureCaptioning'
 import {
   createDocument, getDocumentById, setDocumentStatus,
   setDocumentFailed, updateDocumentExtraction,
   type DocumentRow, type DocumentType,
 } from '../db/queries/documents'
 import { createChunk, deleteChunksForOtherSyllabusDocuments } from '../db/queries/chunks'
+import { createFigure } from '../db/queries/documentFigures'
 import { setCourseSyllabusText } from '../db/queries/courses'
 import { logger } from '../lib/logger'
 import type { CallContext } from './llm/types'
+
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
 function fileTypeFromMime(mime: string): string {
   if (mime === 'application/pdf') return 'pdf'
@@ -92,7 +96,10 @@ async function processDocument(
           logger.warn({ message: 'Could not set course syllabus_text', documentId, error: (err as Error).message })
         )
       }
-      const chunks = chunkDocument(text, documentId, doc.course_id)
+      const chunks = chunkDocument(text, documentId, doc.course_id, {
+        visibilityScope: doc.visibility_scope,
+        scopeUnitId:     doc.scope_unit_id,
+      })
       let createdCount = 0
       for (const chunk of chunks) {
         try {
@@ -119,6 +126,19 @@ async function processDocument(
           logger.info({ message: 'Cleared superseded syllabus chunks', documentId, courseId: doc.course_id, deletedChunks: deleted })
         }
       }
+
+      // Feature AN Phase 2 — persist embedded drawings/scanned pages as
+      // retrievable figures instead of only OCRing-and-discarding them.
+      // Material docs only (a чертёж belongs in a "материалы" upload, not a
+      // syllabus). .docx scans embedded images; PDF rasterizes text-sparse
+      // pages (documentExtractor.ts's extractPdfFigures) — most real
+      // separately-scanned чертежи arrive as PDF, so this is the more
+      // load-bearing of the two paths in practice.
+      if (documentType === 'material' && (mimeType === DOCX_MIME || mimeType === 'application/pdf')) {
+        await extractAndStoreFigures(documentId, doc, fileBuffer, mimeType, text, context).catch((err) =>
+          logger.warn({ message: 'Figure extraction failed', documentId, error: (err as Error).message })
+        )
+      }
     }
   }
 
@@ -127,4 +147,55 @@ async function processDocument(
 
 function sanitiseName(name: string): string {
   return name.replace(/[^\w.\-]/g, '_').slice(0, 120)
+}
+
+/**
+ * Feature AN Phase 2 — extracts embedded drawings (.docx) or scanned/
+ * drawing-heavy pages (PDF) from a material, captions each (see
+ * figureCaptioning.ts's OCR+chatJSON approach — no multimodal chat provider
+ * exists in this codebase), and persists them. Best-effort per figure: one
+ * bad image never aborts the rest, and this whole step never fails document
+ * processing (the caller already wraps it in .catch()).
+ */
+async function extractAndStoreFigures(
+  documentId: string,
+  doc: DocumentRow,
+  fileBuffer: Buffer,
+  mimeType: string,
+  fullText: string,
+  context: CallContext,
+): Promise<void> {
+  const figures = mimeType === 'application/pdf'
+    ? await extractPdfFigures(fileBuffer, fullText, context)
+    : await extractDocxFigures(fileBuffer, context)
+  if (figures.length === 0) return
+
+  const textPages = fullText.split('\f')
+
+  for (const figure of figures) {
+    try {
+      // Prefer the figure's own source page's text (PDF) over a crude
+      // whole-document slice (.docx has no page concept to key off) — a
+      // page-scoped чертёж's neighbouring prose is a much sharper caption
+      // signal than the start of a possibly long document.
+      const surroundingText = figure.sourcePageIndex !== undefined
+        ? (textPages[figure.sourcePageIndex] ?? '').slice(0, 2000)
+        : fullText.slice(0, 2000)
+      const caption = await captionFigure(figure.ocrText, surroundingText, context, { buffer: figure.buffer, mime: figure.mime })
+      const embedding = await embedFigureCaption(caption, figure.ocrText, context)
+      if (!embedding) continue // nothing usable to retrieve by — skip rather than store an unfindable figure
+
+      const ext = figure.mime.split('/').pop() ?? 'png'
+      const storagePath = `figures/${documentId}/${figure.index}.${ext}`
+      await uploadObject(figure.buffer, storagePath, figure.mime)
+
+      await createFigure({
+        documentId, figureIndex: figure.index, storagePath, mimeType: figure.mime,
+        ocrText: figure.ocrText, caption: caption.caption, embedding,
+        visibilityScope: doc.visibility_scope, scopeUnitId: doc.scope_unit_id,
+      })
+    } catch (err) {
+      logger.warn({ message: 'Could not store figure', documentId, figureIndex: figure.index, error: (err as Error).message })
+    }
+  }
 }

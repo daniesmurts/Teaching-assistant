@@ -33,8 +33,14 @@ import type {
   CallContext, ChatMessage, ChatOptions, LLMProvider, ProviderName,
 } from './types'
 
+// Kept as a concrete-typed reference alongside its entry in PROVIDERS below —
+// captionImage() isn't part of the LLMProvider interface (see
+// types.ts's VisionContentPart doc comment), so it needs the concrete class,
+// not the interface-typed map value.
+const deepSeekProvider = new DeepSeekProvider()
+
 const PROVIDERS: Record<ProviderName, LLMProvider> = {
-  deepseek: new DeepSeekProvider(),
+  deepseek: deepSeekProvider,
   yandex:   new YandexProvider(),
   qwen:     new QwenProvider(),
   // gigachat is Phase 4 v2 — stub raises if anyone tries to use it.
@@ -159,6 +165,20 @@ export async function chatJSON<T>(
 export function embed(text: string, ctx?: CallContext): Promise<number[]> {
   // Always Yandex — never falls back, embeddings can't change provider safely.
   return PROVIDERS.yandex.embed(text, ctx)
+}
+
+// Feature AN Phase 2 follow-up — always DeepSeek, same "one provider, no
+// institution routing" shape as embed() always being Yandex: it's currently
+// the only provider with a vision-capable model. Never throws (see
+// DeepSeekProvider.captionImage's own doc comment) — returns null on any
+// failure, including simply being disabled (DEEPSEEK_VISION_ENABLED unset).
+export function captionImage(
+  imageBuffer: Buffer,
+  mimeType:    string,
+  promptText:  string,
+  ctx?:        CallContext,
+): Promise<{ caption: string; labels: string[] } | null> {
+  return deepSeekProvider.captionImage(imageBuffer, mimeType, promptText, ctx)
 }
 
 // Silent fallback — when the institution-chosen provider fails and it isn't

@@ -2,6 +2,9 @@ import { chatJSON, embed } from './deepseek'
 import { findCourseById } from '../db/queries/courses'
 import { findPresentationsByTeacher, createPresentation } from '../db/queries/presentations'
 import { findRelevantChunks, hasAnyChunksForCourse, type RelevantChunk } from '../db/queries/chunks'
+import { logDocumentRetrievals } from '../db/queries/ragDocumentUses'
+import { resolveRagRetrievalScope, type RagRetrievalScope } from './ragScope'
+import { findRelevantFigures, type RelevantFigure } from '../db/queries/documentFigures'
 import { incrementUsage } from '../db/queries/usageCounters'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { yandexImageSearch } from './yandexImages'
@@ -111,7 +114,8 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
   // topics.ts's existing webSearch usage — NOT formally citable like RAG
   // chunks are, since we can't verbatim-verify a web snippet the way
   // validateCitation does for uploaded documents.
-  const courseHasChunks = params.courseId ? await hasAnyChunksForCourse(params.courseId) : false
+  const ragScope = params.courseId ? await resolveRagRetrievalScope(params.courseId) : null
+  const courseHasChunks = ragScope ? await hasAnyChunksForCourse(ragScope) : false
   const webGrounding = shouldUseWebGrounding(Boolean(params.sourceText), Boolean(params.courseId), courseHasChunks)
     ? await fetchWebGrounding(params.topic, context)
     : []
@@ -159,9 +163,9 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
   const batches = chunkArray(outline, EXPANSION_BATCH_SIZE)
 
   const expandedBatches = await mapWithConcurrency(batches, EXPANSION_CONCURRENCY, async (batch) => {
-    const batchSources = (params.sourceText || !params.courseId)
+    const batchSources = (params.sourceText || !params.courseId || !ragScope)
       ? []
-      : await retrieveForBatch(params, batch, pool)
+      : await retrieveForBatch(params, ragScope, batch, pool)
 
     const expansionSystemPrompt =
       `Вы опытный преподаватель, пишущий полный текст слайдов и сценарий ` +
@@ -187,7 +191,7 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
   })
 
   const slidesWithoutImages = expandedBatches.flat()
-  const slides  = await autoFillImages(slidesWithoutImages, context)
+  const slides  = await autoFillImages(slidesWithoutImages, ragScope, context)
   const sources = pool.all()
 
   // Union of structured citations and inline [N] markers found in slide
@@ -270,6 +274,7 @@ export function createSourcePool(): SourcePool {
 
 async function retrieveForBatch(
   params: GenerateParams,
+  scope: RagRetrievalScope,
   batch: OutlineSlideSpec[],
   pool: SourcePool,
 ): Promise<PresentationSource[]> {
@@ -280,7 +285,8 @@ async function retrieveForBatch(
     ].filter(Boolean).join(' · ')
 
     const vector = await embed(query, { teacherId: params.teacherId, feature: 'embedding' })
-    const chunks = await findRelevantChunks(params.courseId!, vector, MAX_SOURCES_PER_BATCH)
+    const chunks = await findRelevantChunks(scope, vector, MAX_SOURCES_PER_BATCH)
+    logDocumentRetrievals(chunks, scope.courseId, params.teacherId).catch(() => null)
     return pool.ingest(chunks)
   } catch (err) {
     logger.warn({ message: '[RAG presentations] could not retrieve sources for batch', error: (err as Error).message })
@@ -300,6 +306,7 @@ function toSource(c: RelevantChunk, idx: number): PresentationSource {
     page_end:    c.page_end,
     excerpt,
     chunk_type:  c.chunk_type ?? null,
+    source_scope: c.source_scope,
   }
 }
 
@@ -335,7 +342,37 @@ function toSlideImage(c: ImageCandidate, query: string): SlideImage {
   }
 }
 
-export async function autoFillImages(slides: Slide[], context?: CallContext): Promise<Slide[]> {
+// Feature AN Phase 2 — a кафедра-library figure clearing this threshold is
+// preferred over a web image search result. Starting heuristic (cosine
+// distance, 0 = identical) — same "revisit against real usage" posture as
+// docChat.ts's UNGROUNDED_DISTANCE. Higher than that constant's 0.35: a
+// slide image is decorative/illustrative where docChat's citation is
+// load-bearing, so a looser match is an acceptable trade for a materially
+// more relevant (and correctly Russian/ГОСТ-styled) figure over a generic
+// web photo.
+const FIGURE_MATCH_DISTANCE = 0.25
+
+function toSlideImageFromFigure(f: RelevantFigure, query: string): SlideImage {
+  return {
+    url: `/api/documents/figures/${f.id}/image`,
+    source_url: `/api/documents/figures/${f.id}/image`,
+    thumbnail: `/api/documents/figures/${f.id}/image`,
+    width: f.width, height: f.height, source_host: 'Библиотека кафедры', query,
+  }
+}
+
+async function findFigureForQuery(query: string, scope: RagRetrievalScope, context?: CallContext): Promise<RelevantFigure | null> {
+  try {
+    const vector = await embed(query, { teacherId: context?.teacherId ?? '', feature: 'embedding' })
+    const hits = await findRelevantFigures(scope, vector, 1)
+    return hits[0] && hits[0].distance <= FIGURE_MATCH_DISTANCE ? hits[0] : null
+  } catch (err) {
+    logger.warn({ message: '[auto-image] figure lookup failed', query, error: (err as Error).message })
+    return null
+  }
+}
+
+export async function autoFillImages(slides: Slide[], ragScope: RagRetrievalScope | null, context?: CallContext): Promise<Slide[]> {
   const candidates = slides
     .map((slide, index) => ({ index, query: getSlideImageQuery(slide).trim() }))
     .filter((c) => c.query.length > 0)
@@ -345,6 +382,10 @@ export async function autoFillImages(slides: Slide[], context?: CallContext): Pr
 
   const picks = await mapWithConcurrency(candidates, IMAGE_SEARCH_CONCURRENCY, async ({ index, query }) => {
     try {
+      if (ragScope) {
+        const figureHit = await findFigureForQuery(query, ragScope, context)
+        if (figureHit) return { index, image: toSlideImageFromFigure(figureHit, query) }
+      }
       const results = await yandexImageSearch(query, 3, context)
       return results[0] ? { index, image: toSlideImage(results[0], query) } : null
     } catch (err) {

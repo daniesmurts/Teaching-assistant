@@ -271,4 +271,117 @@ describe('DeepSeekProvider — multi-account fallback', () => {
       expect(result).toBe('hello')
     })
   })
+
+  // Feature AN Phase 2 follow-up (TODO.md "### AN") — deepseek-v4-flash-vision-exp
+  // figure captioning. Never throws (a best-effort enhancement over
+  // figureCaptioning.ts's OCR+text fallback), and is off by default —
+  // covers both properties plus reuse of the same multi-account/cost-log
+  // machinery chat() already has.
+  describe('captionImage (Feature AN vision)', () => {
+    const visionResponse = (caption = 'Вал редуктора', labels: string[] = ['01']) => ({
+      data: {
+        choices: [{ message: { content: JSON.stringify({ caption, labels }) } }],
+        usage: { prompt_tokens: 400, completion_tokens: 20 },
+      },
+    })
+
+    beforeEach(() => { delete process.env.DEEPSEEK_VISION_ENABLED })
+    afterEach(() => { delete process.env.DEEPSEEK_VISION_ENABLED })
+
+    it('returns null without calling the API when disabled (default)', async () => {
+      setAccounts(1)
+      const result = await new DeepSeekProvider().captionImage(Buffer.from('img'), 'image/png', 'describe')
+      expect(result).toBeNull()
+      expect(postMock).not.toHaveBeenCalled()
+    })
+
+    it('returns the parsed caption/labels when enabled and the call succeeds', async () => {
+      process.env.DEEPSEEK_VISION_ENABLED = 'true'
+      setAccounts(1)
+      postMock.mockResolvedValueOnce(visionResponse('Вал редуктора', ['01', 'ГОСТ 2.317']))
+
+      const result = await new DeepSeekProvider().captionImage(Buffer.from('img'), 'image/png', 'describe')
+
+      expect(result).toEqual({ caption: 'Вал редуктора', labels: ['01', 'ГОСТ 2.317'] })
+      expect(postMock).toHaveBeenCalledOnce()
+      const [url, body] = postMock.mock.calls[0]
+      expect(url).toContain('/chat/completions')
+      expect(body.model).toBe('deepseek-v4-flash-vision-exp')
+      expect(body.messages[0].content[1]).toMatchObject({ type: 'image_url' })
+      expect(body.messages[0].content[1].image_url.url).toContain('data:image/png;base64,')
+    })
+
+    it('sends the base64 image and prompt text as separate content parts', async () => {
+      process.env.DEEPSEEK_VISION_ENABLED = 'true'
+      setAccounts(1)
+      postMock.mockResolvedValueOnce(visionResponse())
+
+      await new DeepSeekProvider().captionImage(Buffer.from('img-bytes'), 'image/jpeg', 'опишите изображение')
+
+      const body = postMock.mock.calls[0][1]
+      expect(body.messages[0].content[0]).toEqual({ type: 'text', text: 'опишите изображение' })
+      expect(body.messages[0].content[1].image_url.url).toBe(`data:image/jpeg;base64,${Buffer.from('img-bytes').toString('base64')}`)
+    })
+
+    it('falls back across accounts on a retryable failure, same as chat()', async () => {
+      process.env.DEEPSEEK_VISION_ENABLED = 'true'
+      setAccounts(2)
+      postMock.mockRejectedValueOnce(axiosError(402))
+      postMock.mockResolvedValueOnce(visionResponse('from account 2'))
+
+      const result = await new DeepSeekProvider().captionImage(Buffer.from('img'), 'image/png', 'describe')
+
+      expect(result?.caption).toBe('from account 2')
+      expect(postMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('returns null (never throws) when every account fails', async () => {
+      process.env.DEEPSEEK_VISION_ENABLED = 'true'
+      setAccounts(2)
+      postMock.mockRejectedValueOnce(axiosError(402))
+      postMock.mockRejectedValueOnce(axiosError(503))
+
+      const result = await new DeepSeekProvider().captionImage(Buffer.from('img'), 'image/png', 'describe')
+      expect(result).toBeNull()
+    })
+
+    it('returns null on a non-retryable failure without trying another account', async () => {
+      process.env.DEEPSEEK_VISION_ENABLED = 'true'
+      setAccounts(2)
+      postMock.mockRejectedValueOnce(axiosError(400))
+
+      const result = await new DeepSeekProvider().captionImage(Buffer.from('img'), 'image/png', 'describe')
+
+      expect(result).toBeNull()
+      expect(postMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('logs usage at deepseek-v4-flash pricing (billed rate for vision), not a separate rate', async () => {
+      process.env.DEEPSEEK_VISION_ENABLED = 'true'
+      setAccounts(1)
+      postMock.mockResolvedValueOnce(visionResponse())
+
+      await new DeepSeekProvider().captionImage(
+        Buffer.from('img'), 'image/png', 'describe',
+        { teacherId: 't1', feature: 'document_extraction' }
+      )
+
+      expect(createUsageLogMock).toHaveBeenCalledOnce()
+      const logged = createUsageLogMock.mock.calls[0][0]
+      expect(logged).toMatchObject({
+        model: 'deepseek:deepseek-v4-flash-vision-exp', inputTokens: 400, outputTokens: 20,
+        currency: 'USD', success: true,
+      })
+      expect(logged.costUsd).toBeGreaterThan(0)
+    })
+
+    it('degrades gracefully when the response content is not valid JSON', async () => {
+      process.env.DEEPSEEK_VISION_ENABLED = 'true'
+      setAccounts(1)
+      postMock.mockResolvedValueOnce({ data: { choices: [{ message: { content: 'not json' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } } })
+
+      const result = await new DeepSeekProvider().captionImage(Buffer.from('img'), 'image/png', 'describe')
+      expect(result).toBeNull()
+    })
+  })
 })
