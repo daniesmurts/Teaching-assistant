@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { isAxiosError } from 'axios'
 import { joinSession, getJoinState, submitAnswer, advanceSelf } from '../api/liveJoin'
 import type { LiveJoinState } from '../types'
 
@@ -11,14 +12,38 @@ import type { LiveJoinState } from '../types'
 const POLL_INTERVAL_MS = 2000
 const MAX_POLLS = 2700   // ~90 minutes at 2s
 
+// A dropped packet, a timeout, or a transient 5xx/429 on venue/mobile wifi is
+// common, not exceptional (this is what a live classroom's connectivity
+// actually looks like) — one such blip must not permanently kill the poll
+// loop. Only a 404 (session or participant genuinely gone) is treated as
+// terminal; everything else retries with backoff, capped so a truly dead
+// backend still surfaces an error instead of polling silently forever.
+const MAX_CONSECUTIVE_FAILURES = 6
+const RETRY_BACKOFF_MS = [1000, 2000, 4000, 8000, 8000, 8000]
+
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+function isNotFound(err: unknown): boolean {
+  return isAxiosError(err) && err.response?.status === 404
+}
+
 const OPTION_LABELS = ['А', 'Б', 'В', 'Г']
+
+function tokenStorageKey(code: string): string {
+  return `live-join-token-${code}`
+}
 
 export default function LiveJoin() {
   const { code } = useParams<{ code: string }>()
   const [nickname, setNickname] = useState('')
-  const [token, setToken] = useState<string | null>(null)
+  const [token, setToken] = useState<string | null>(() => {
+    // Resume rather than rejoin-as-a-new-participant after an accidental
+    // reload (flaky wifi dropping the page, not just individual requests) —
+    // losing a student's in-progress score to a reload was its own source
+    // of "it broke" reports, independent of the polling fix below.
+    if (!code) return null
+    try { return sessionStorage.getItem(tokenStorageKey(code)) } catch { return null }
+  })
   const [state, setState] = useState<LiveJoinState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [answering, setAnswering] = useState(false)
@@ -29,11 +54,20 @@ export default function LiveJoin() {
   async function join() {
     if (!code || !nickname.trim()) return
     setError(null)
-    try {
-      const result = await joinSession(code, nickname.trim())
-      setToken(result.participant_token)
-    } catch {
-      setError('Не удалось присоединиться — проверьте код')
+    // A 429/5xx/timeout on the very first request is exactly as likely as on
+    // any later one (same flaky venue wifi) — a couple of quick retries
+    // before showing "check the code" avoids blaming the code for a blip.
+    for (let attempt = 0; attempt <= 2; attempt++) {
+      try {
+        const result = await joinSession(code, nickname.trim())
+        try { sessionStorage.setItem(tokenStorageKey(code), result.participant_token) } catch { /* private mode etc — fine, just no resume-after-reload */ }
+        setToken(result.participant_token)
+        return
+      } catch (err) {
+        if (isNotFound(err)) { setError('Сессия не найдена — проверьте код'); return }
+        if (attempt < 2) { await delay(1000 * (attempt + 1)); continue }
+        setError('Не удалось присоединиться — проверьте подключение к интернету и попробуйте ещё раз')
+      }
     }
   }
 
@@ -41,15 +75,33 @@ export default function LiveJoin() {
     if (!token || !code) return
     cancelled.current = false
     let attempt = 0
+    let consecutiveFailures = 0
     async function poll() {
       if (cancelled.current || attempt >= MAX_POLLS) return
       attempt += 1
       try {
         const latest = await getJoinState(code!, token!)
         if (cancelled.current) return
+        consecutiveFailures = 0
+        setError(null)
         setState(latest)
-      } catch {
-        if (!cancelled.current) setError('Сессия недоступна')
+      } catch (err) {
+        if (cancelled.current) return
+        if (isNotFound(err)) {
+          // Genuinely gone (not a blip) — clear the stored token so a later
+          // revisit of this URL prompts a fresh join instead of resuming a
+          // dead one forever.
+          try { sessionStorage.removeItem(tokenStorageKey(code!)) } catch { /* ignore */ }
+          setError('Сессия недоступна')
+          return
+        }
+        consecutiveFailures += 1
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+          setError('Проблема с подключением — попробуйте обновить страницу')
+          return
+        }
+        await delay(RETRY_BACKOFF_MS[Math.min(consecutiveFailures - 1, RETRY_BACKOFF_MS.length - 1)])
+        poll()
         return
       }
       await delay(POLL_INTERVAL_MS)

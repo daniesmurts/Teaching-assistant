@@ -201,7 +201,7 @@ function RosterView({
       {finished && (
         <div className="flex flex-col items-center gap-4">
           <SaveToJournalPanel sessionId={session.id} quiz={quiz} participants={participants} />
-          <Button onClick={onExit} size="md" className="text-lg px-8 py-3">
+          <Button variant="secondary" onClick={onExit} size="md" className="text-lg px-8 py-3">
             К тестам
           </Button>
         </div>
@@ -325,7 +325,7 @@ function FinishedView({ session, quiz, onExit }: { session: LiveSession; quiz: Q
 
       <SaveToJournalPanel sessionId={session.id} quiz={quiz} participants={session.participants ?? []} />
 
-      <Button onClick={onExit} size="md" className="mx-auto text-lg px-8 py-3">
+      <Button variant="secondary" onClick={onExit} size="md" className="mx-auto text-lg px-8 py-3">
         К тестам
       </Button>
     </div>
@@ -397,7 +397,7 @@ function SaveToJournalPanel({
 
   if (!open) {
     return (
-      <Button variant="secondary" onClick={() => setOpen(true)} size="md" className="text-lg px-8 py-3">
+      <Button onClick={() => setOpen(true)} size="md" className="text-lg px-8 py-3">
         Сохранить в журнал
       </Button>
     )
