@@ -7,9 +7,13 @@ import SlideContent from '../components/presentations/SlideContent'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import { tagColorClasses } from '../lib/tagColor'
-import { getPresentations, deletePresentation, type GenerateResponse } from '../api/presentations'
+import {
+  getPresentations, deletePresentation, updateSlide, regenerateSlide, deleteSlide,
+  insertSlide, moveSlide, type GenerateResponse,
+} from '../api/presentations'
 import { useUIStore } from '../store/uiStore'
 import type { Presentation, Slide } from '../types'
+import type { SlideEditActions } from '../components/presentations/SlideContent'
 
 // ─── History list ─────────────────────────────────────────────────────────────
 
@@ -99,8 +103,48 @@ export default function Presentations() {
     setLocalSlides(result?.slides ?? openHistory?.slides ?? null)
   }, [result, openHistory])
 
+  // ── Slide-level editing (TODO.md "### AO" Phase 1) ────────────────────────
+  //
+  // Every mutation returns the whole updated presentation, so the viewer
+  // re-renders from what was actually stored rather than from a locally
+  // patched guess. One in-flight mutation at a time (`slideBusy`) — these are
+  // whole-array writes, and two overlapping ones would race on the same deck.
+  const [slideBusy, setSlideBusy] = useState(false)
+
+  async function runSlideAction(action: () => Promise<Presentation>, failure: string) {
+    if (slideBusy) return
+    setSlideBusy(true)
+    try {
+      const updated = await action()
+      setLocalSlides(updated.slides ?? [])
+      // Keep the open history row in step, so closing and reopening the deck
+      // doesn't snap back to the pre-edit version.
+      setOpenHistory((h) => (h && h.id === updated.id ? updated : h))
+      qc.invalidateQueries({ queryKey: ['presentations'] })
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { error?: string } } }).response?.data?.error
+      addToast(message ?? failure, 'error')
+    } finally {
+      setSlideBusy(false)
+    }
+  }
+
   const displayPresentationId =
     result?.presentation_id ?? openHistory?.id ?? ''
+
+  const slideEdit: SlideEditActions = {
+    busy: slideBusy,
+    onSave: (idx, slide) =>
+      void runSlideAction(() => updateSlide(displayPresentationId, idx, slide), 'Не удалось сохранить слайд'),
+    onRegenerate: (idx, instruction) =>
+      void runSlideAction(() => regenerateSlide(displayPresentationId, idx, instruction || undefined), 'Не удалось переписать слайд'),
+    onDelete: (idx) =>
+      void runSlideAction(() => deleteSlide(displayPresentationId, idx), 'Не удалось удалить слайд'),
+    onMove: (idx, to) =>
+      void runSlideAction(() => moveSlide(displayPresentationId, idx, to), 'Не удалось переместить слайд'),
+    onInsert: (afterIdx) =>
+      void runSlideAction(() => insertSlide(displayPresentationId, afterIdx, 'bullets', 'Новый слайд'), 'Не удалось добавить слайд'),
+  }
   const displaySlides   = localSlides
   const displayContent  = result?.generated_content ?? openHistory?.generated_content ?? null
   const displaySources  = result?.sources ?? openHistory?.sources ?? []
@@ -194,6 +238,7 @@ export default function Presentations() {
                 sources={displaySources}
                 presentationId={displayPresentationId}
                 onSlidesChange={setLocalSlides}
+                edit={slideEdit}
               />
             </div>
           )}

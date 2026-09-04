@@ -8,8 +8,10 @@ import SlideImagePicker from './SlideImagePicker'
 import { slidesToText, legacySlidesToText } from './slideText'
 import { slidesToHtml, legacySlidesToHtml } from './slideHtml'
 import { copyRich } from './clipboard'
+import Button from '../ui/Button'
 import CopyAllButton from '../ui/CopyAllButton'
 import LoadingSpinner from '../ui/LoadingSpinner'
+import SlideEditor from './SlideEditor'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
 import { downloadPresentationPptx } from '../../api/presentations'
@@ -460,12 +462,33 @@ interface TypedSlideCardProps {
   onCite:         (s: PresentationSource) => void
   presentationId: string
   onImageChange:  (slideIdx: number, image: SlideImage | null) => void
+  // Slide-level editing (TODO.md "### AO" Phase 1). Absent when the deck has
+  // no id to write to (a result rendered before it was persisted, or the
+  // legacy path), in which case the card stays read-only as it always was.
+  edit?:          SlideEditActions
+  isFirst:        boolean
+  isLast:         boolean
+}
+
+export interface SlideEditActions {
+  busy:         boolean
+  onSave:       (slideIdx: number, slide: Slide) => void
+  onRegenerate: (slideIdx: number, instruction: string) => void
+  onDelete:     (slideIdx: number) => void
+  onMove:       (slideIdx: number, to: number) => void
+  // Appends an empty slide. Empty on purpose: the teacher types into it or
+  // hits «Переписать», which writes it from its type + title the same way
+  // every other slide was written.
+  onInsert:     (afterIdx: number) => void
 }
 
 function TypedSlideCard({
   slide, slideIdx, slideNumber, sources, onCite, presentationId, onImageChange,
+  edit, isFirst, isLast,
 }: TypedSlideCardProps) {
   const [copied, setCopied] = useState(false)
+  const [mode, setMode] = useState<'view' | 'edit' | 'regenerate'>('view')
+  const [instruction, setInstruction] = useState('')
   function copy() {
     const html = slidesToHtml([slide], slideNumber)
     const text = slidesToText([slide], slideNumber)
@@ -492,13 +515,74 @@ function TypedSlideCard({
             </h3>
           )}
         </div>
-        <button
-          onClick={copy}
-          className="ml-3 text-xs font-sans text-ink-secondary hover:text-amber transition-colors flex-shrink-0"
-        >
-          {copied ? '✓ Скопировано' : 'Копировать'}
-        </button>
+        <div className="flex items-center gap-2.5 flex-shrink-0 ml-3">
+          {edit && (
+            <>
+              <SlideAction label="Выше"  disabled={isFirst || edit.busy} onClick={() => edit.onMove(slideIdx, slideIdx - 1)}>↑</SlideAction>
+              <SlideAction label="Ниже"  disabled={isLast  || edit.busy} onClick={() => edit.onMove(slideIdx, slideIdx + 1)}>↓</SlideAction>
+              <button
+                onClick={() => setMode(mode === 'edit' ? 'view' : 'edit')}
+                disabled={edit.busy}
+                className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors disabled:opacity-40"
+              >
+                {mode === 'edit' ? 'Закрыть' : 'Изменить'}
+              </button>
+              <button
+                onClick={() => setMode(mode === 'regenerate' ? 'view' : 'regenerate')}
+                disabled={edit.busy}
+                className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors disabled:opacity-40"
+              >
+                Переписать
+              </button>
+              <button
+                onClick={() => edit.onDelete(slideIdx)}
+                disabled={edit.busy}
+                className="text-xs font-sans text-ink-tertiary hover:text-danger transition-colors disabled:opacity-40"
+              >
+                Удалить
+              </button>
+            </>
+          )}
+          <button
+            onClick={copy}
+            className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors"
+          >
+            {copied ? '✓ Скопировано' : 'Копировать'}
+          </button>
+        </div>
       </div>
+
+      {edit && mode === 'regenerate' && (
+        <div className="p-4 bg-surface-warm border-b border-border space-y-2">
+          <label className="block text-[11px] font-sans font-medium text-ink-secondary">
+            Что поправить? Можно оставить пустым — тогда слайд просто перепишется заново.
+          </label>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 px-2.5 py-1.5 text-sm font-sans text-ink bg-surface border border-border rounded-md focus:outline-none focus:border-border-strong"
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              placeholder="Короче, и добавь пример с реальными числами"
+              maxLength={500}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); edit.onRegenerate(slideIdx, instruction.trim()) }
+              }}
+            />
+            <Button size="sm" loading={edit.busy} onClick={() => edit.onRegenerate(slideIdx, instruction.trim())}>
+              Переписать
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {edit && mode === 'edit' && (
+        <SlideEditor
+          slide={slide}
+          saving={edit.busy}
+          onCancel={() => setMode('view')}
+          onSave={(edited) => { edit.onSave(slideIdx, edited); setMode('view') }}
+        />
+      )}
 
       <div className="grid grid-cols-[3fr_2fr]">
         <div className="border-r border-border">
@@ -600,6 +684,22 @@ function renderBody(args: RenderBodyArgs): React.ReactNode {
   }
 
   return body
+}
+
+function SlideAction({
+  children, label, onClick, disabled,
+}: { children: React.ReactNode; label: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className="w-5 h-5 flex items-center justify-center rounded-sm text-sm leading-none text-ink-tertiary hover:text-ink hover:bg-surface-warm transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+    >
+      {children}
+    </button>
+  )
 }
 
 function slideTypeLabel(type: Slide['type']): string {
@@ -714,13 +814,16 @@ interface Props {
   slides?:          Slide[] | null
   presentationId?:  string
   onSlidesChange?:  (slides: Slide[]) => void
+  // Slide-level editing (TODO.md "### AO" Phase 1). Passed by the page, which
+  // owns the API calls; without it the viewer is read-only exactly as before.
+  edit?:            SlideEditActions
   // Or: pass `content` (legacy text-DSL fallback).
   content?:         string
   sources?:         PresentationSource[] | null
 }
 
 export default function SlideContent({
-  slides, presentationId, onSlidesChange, content, sources,
+  slides, presentationId, onSlidesChange, content, sources, edit,
 }: Props) {
   const [openSource, setOpenSource] = useState<PresentationSource | null>(null)
   const sourceList = sources ?? []
@@ -790,6 +893,9 @@ export default function SlideContent({
               onCite={setOpenSource}
               presentationId={presentationId ?? ''}
               onImageChange={handleImageChange}
+              edit={presentationId ? edit : undefined}
+              isFirst={i === 0}
+              isLast={i === slides!.length - 1}
             />
           ))
         : legacySlides.map((s) => (
@@ -801,6 +907,17 @@ export default function SlideContent({
             />
           ))
       }
+
+      {useTyped && presentationId && edit && (
+        <button
+          type="button"
+          onClick={() => edit.onInsert(slides!.length - 1)}
+          disabled={edit.busy}
+          className="w-full py-2.5 mb-4 text-xs font-sans text-ink-secondary border border-dashed border-border rounded-lg hover:text-amber hover:border-amber transition-colors disabled:opacity-40"
+        >
+          + Добавить слайд в конец
+        </button>
+      )}
 
       {sourceList.length > 0 && (
         <div className="mt-6 bg-surface border border-border rounded-lg p-4">

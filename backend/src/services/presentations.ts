@@ -282,6 +282,10 @@ export async function expandPresentation(params: GenerateParams, plan: Presentat
     generatedContent,
     slides,
     sources:          usedSources,
+    // Kept so one slide can later be regenerated under the same grounding
+    // the deck was written with (migration 119).
+    sourceText:       params.sourceText,
+    strictSource:     isStrictSource(params),
   })
 
   // Usage is billed here, not at plan time: an outline the teacher abandons
@@ -747,6 +751,7 @@ function buildExpansionPrompt(
   sources: PresentationSource[],
   fullTextByIdx: Map<number, string>,
   webGrounding: SearchResult[] = [],
+  instruction?: string,
 ): string {
   const lines: string[] = []
 
@@ -775,6 +780,16 @@ function buildExpansionPrompt(
       lines.push(sanitiseForPrompt(fullTextByIdx.get(s.idx) ?? s.excerpt))
       lines.push('')
     })
+  }
+
+  // Teacher's free-text steer on a single-slide regenerate («короче»,
+  // «добавь пример с числами»). Sanitised like every other user-supplied
+  // string entering a prompt (CLAUDE.md invariant 1), and placed *after* the
+  // source material so it reads as a note on the task, not as material.
+  if (instruction) {
+    lines.push(`## Замечание преподавателя к этому слайду (обязательно учесть)`)
+    lines.push(sanitiseForPrompt(instruction))
+    lines.push('')
   }
 
   lines.push(`## План слайдов для написания (${batch.length})`)
@@ -1157,7 +1172,7 @@ function cleanArray(v: unknown, validIdx: Set<number>, citedAcc: Set<number>): s
 // Keeps a plain-text fallback alive so teachers can still "Скопировать всё"
 // and dump the lecture into anywhere. Not parsed back — just for humans.
 
-function renderSlidesAsText(slides: Slide[]): string {
+export function renderSlidesAsText(slides: Slide[]): string {
   return slides
     .map((s, i) => renderSlideAsText(s, i + 1))
     .join('\n---\n')
@@ -1295,3 +1310,166 @@ function styleLabel(style: string): string {
 // Re-export so existing imports keep working even though we removed the old
 // citation-filter approach (citations now live structurally on each slide).
 export type { Presentation }
+
+// ─── Per-slide editing + regeneration (TODO.md "### AO" Phase 1) ────────────
+//
+// A deck used to be immutable once written: the only way to fix one bad slide
+// was to regenerate all of them (rerolling every slide the teacher liked) or
+// to leave for PowerPoint. These are the two writes that change that — an
+// edited slide coming back from the teacher, and one slide rewritten by the
+// model — plus the params reconstruction both depend on.
+
+/**
+ * Rebuilds the GenerateParams a deck was written under, so a regenerated
+ * slide is written the same way its neighbours were.
+ *
+ * Decks created before migration 119 have no stored conspectus: `sourceText`
+ * comes back undefined and the slide is regenerated from the course's RAG
+ * material and topic instead. That's a real (if narrow) behaviour difference
+ * on old decks, and it's the safe direction — `isStrictSource` is false
+ * without a conspectus, so strict mode can't silently degrade into "invent
+ * freely" on a deck whose whole point was not inventing anything.
+ */
+export function paramsFromPresentation(
+  presentation: Presentation,
+  inputs: { source_text: string | null; strict_source: boolean } | null,
+  teacherId: string,
+  institutionId?: string,
+): GenerateParams {
+  return {
+    teacherId,
+    institutionId,
+    courseId:         presentation.course_id ?? undefined,
+    lectureNumber:    presentation.lecture_number ?? undefined,
+    topic:            presentation.topic,
+    durationMinutes:  presentation.duration_minutes ?? 60,
+    learningGoals:    presentation.learning_goals ?? [],
+    audienceLevel:    presentation.audience_level ?? undefined,
+    style:            presentation.style ?? undefined,
+    slideCountTarget: presentation.slide_count_target ?? undefined,
+    sourceText:       inputs?.source_text ?? undefined,
+    strictSource:     Boolean(inputs?.strict_source),
+  }
+}
+
+/**
+ * Coerces one teacher-edited slide through the same boundary the model's
+ * output goes through, so hand-edited content can't put a shape into the
+ * `slides` array that the renderers and the PPTX exporter don't expect.
+ *
+ * Citations are validated against the deck's existing sources, exactly as at
+ * generation: a teacher typing "[7]" into a deck with three sources gets the
+ * marker stripped rather than a dangling reference.
+ */
+export function normaliseEditedSlide(raw: unknown, sources: PresentationSource[]): Slide | null {
+  const validIdx = new Set(sources.map((s) => s.idx))
+  const [slide] = normaliseSlides([raw], validIdx)
+  return slide ?? null
+}
+
+/**
+ * Rewrites a single slide in place. Cheap enough to run inline on the request
+ * (one LLM call plus at most one retrieval — the deck-wide generation is what
+ * needed a job queue), and it deliberately reuses the whole-deck expansion
+ * prompt with a batch of one, so a regenerated slide is written by the same
+ * instructions as its neighbours rather than a parallel prompt that drifts.
+ *
+ * The slide's type and title come from the existing slide, not the model: the
+ * teacher asked to rewrite this slide, not to replace it with a different
+ * one. `instruction` is their optional steer on how.
+ */
+export async function regenerateSlide(args: {
+  presentation: Presentation
+  slideIdx:     number
+  inputs:       { source_text: string | null; strict_source: boolean } | null
+  teacherId:    string
+  institutionId?: string
+  instruction?: string
+}): Promise<Slide | null> {
+  const { presentation, slideIdx, instruction } = args
+  const slides = presentation.slides ?? []
+  const current = slides[slideIdx]
+  if (!current) return null
+
+  const params  = paramsFromPresentation(presentation, args.inputs, args.teacherId, args.institutionId)
+  const depth   = resolveDepth(params)
+  const context = callContextFor(params)
+
+  const spec: OutlineSlideSpec = {
+    type:  current.type,
+    title: current.title,
+    // The slide's own current content is the brief: without it the model is
+    // rewriting from the title alone and tends to drift onto a neighbouring
+    // subject. With it, "перепиши короче" stays about this slide.
+    brief: briefFromSlide(current, instruction),
+  }
+
+  const pool = createSourcePool()
+  const ragScope = params.courseId ? await resolveRagRetrievalScope(params.courseId) : null
+  const batchSources = (params.sourceText || !ragScope)
+    ? []
+    : await retrieveForBatch(params, ragScope, [spec], pool)
+
+  const systemPrompt =
+    `Вы опытный преподаватель, переписывающий один слайд лекции по замечанию ` +
+    `коллеги. Тип и заголовок слайда менять нельзя. ` +
+    strictClauseFor(params) +
+    `Пишите на русском языке. Отвечайте строго в формате JSON.`
+
+  const raw = await chatJSON<{ slides: unknown[] }>(
+    [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: buildExpansionPrompt([spec], params, depth, batchSources, pool.fullText, [], instruction) },
+    ],
+    'slides',
+    { context, maxTokens: expansionBatchMaxTokens(1, depth) }
+  )
+
+  const validIdx = new Set(batchSources.map((s) => s.idx))
+  const [rewritten] = normaliseSlides(raw?.slides, validIdx)
+  if (!rewritten) return null
+
+  // A rewrite of the text is not a request to lose the picture the teacher
+  // picked — carry it over unless the model produced one of its own.
+  const existingImage = current.type === 'diagram' ? current.body.image : current.image
+  return (existingImage && !hasSlideImage(rewritten))
+    ? withSlideImage(rewritten, existingImage)
+    : rewritten
+}
+
+// Renders the slide's current content as the brief for its own rewrite. Not a
+// user-facing string — it only ever goes into the prompt.
+//
+// The input is a JSONB blob read back from the database. Everything written
+// through coerceSlide/normaliseEditedSlide is well-formed, but the renderer
+// walks body fields by slide type and a row that predates a type's current
+// shape (or was edited outside the app) would throw mid-render — turning a
+// "rewrite this slide" click into a 500. Falling back to the title alone
+// gives a thinner rewrite, which is a far better failure than none.
+function briefFromSlide(slide: Slide, instruction?: string): string {
+  let body: string
+  try {
+    body = renderSlidesAsText([slide]).trim()
+  } catch (err) {
+    logger.warn({ message: '[regenerate] could not render slide as brief', type: slide.type, error: (err as Error).message })
+    body = slide.title
+  }
+  return instruction
+    ? `Текущее содержание слайда:\n${body}`
+    : `Текущее содержание слайда (перепишите его лучше, сохранив тему):\n${body}`
+}
+
+/**
+ * Applies a structural change to the deck and returns the array to persist.
+ * Kept pure (and exported) because the index arithmetic — not the SQL — is
+ * where these operations actually go wrong.
+ */
+export function applySlideMove(slides: Slide[], from: number, to: number): Slide[] | null {
+  if (from < 0 || from >= slides.length) return null
+  if (to   < 0 || to   >= slides.length) return null
+  if (from === to) return slides
+  const next = [...slides]
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+  return next
+}

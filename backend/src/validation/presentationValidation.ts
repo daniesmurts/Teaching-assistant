@@ -97,3 +97,32 @@ export const confirmOutlineRules = [
     .isLength({ max: OUTLINE_BRIEF_MAX_CHARS })
     .withMessage(`Описание слайда слишком длинное (макс. ${OUTLINE_BRIEF_MAX_CHARS} символов)`),
 ]
+
+// ─── Per-slide editing (TODO.md "### AO" Phase 1) ───────────────────────────
+
+// The teacher's steer on a rewrite. Capped because it lands in the prompt
+// (sanitised there — CLAUDE.md invariant 1); a paragraph is a remark, a novel
+// is someone using the field as a content channel.
+export const REGENERATE_INSTRUCTION_MAX_CHARS = 500
+
+export const regenerateSlideRules = [
+  body('instruction')
+    .optional({ nullable: true, checkFalsy: true })
+    .isString().withMessage('Некорректное замечание')
+    .isLength({ max: REGENERATE_INSTRUCTION_MAX_CHARS })
+    .withMessage(`Замечание слишком длинное (макс. ${REGENERATE_INSTRUCTION_MAX_CHARS} символов)`),
+]
+
+export const insertSlideRules = [
+  body('after_index')
+    .isInt({ min: -1 }).withMessage('Некорректная позиция слайда'),
+
+  body('type')
+    .isIn(['title', 'bullets', 'concept', 'formula', 'comparison', 'diagram', 'discussion', 'summary'])
+    .withMessage('Неверный тип слайда'),
+
+  body('title')
+    .optional({ nullable: true })
+    .isString().withMessage('Некорректный заголовок')
+    .isLength({ max: 300 }).withMessage('Заголовок слайда слишком длинный'),
+]

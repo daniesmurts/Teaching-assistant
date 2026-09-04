@@ -25,6 +25,8 @@ interface PresentationRow {
   slides: Slide[] | null
   generated_content: string | null
   sources: PresentationSource[] | null
+  source_text: string | null
+  strict_source: boolean | null
   created_at: Date
 }
 
@@ -61,13 +63,18 @@ export async function createPresentation(data: {
   generatedContent: string
   slides?: Slide[]
   sources?: PresentationSource[]
+  // Persisted so regenerating a single slide can rebuild the same params the
+  // deck was written under (migration 119) — a strict-conspectus deck whose
+  // conspectus wasn't kept could only be "regenerated" from invented material.
+  sourceText?: string
+  strictSource?: boolean
 }): Promise<Presentation> {
   const { rows } = await pool.query<PresentationRow>(
     `INSERT INTO presentations
        (teacher_id, course_id, lecture_number, topic, duration_minutes,
         audience_level, learning_goals, style, slide_count_target,
-        generated_content, slides, sources)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        generated_content, slides, sources, source_text, strict_source)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      RETURNING *`,
     [
       data.teacherId,
@@ -82,9 +89,55 @@ export async function createPresentation(data: {
       data.generatedContent,
       data.slides && data.slides.length > 0 ? JSON.stringify(data.slides) : null,
       data.sources && data.sources.length > 0 ? JSON.stringify(data.sources) : null,
+      data.sourceText ?? null,
+      Boolean(data.strictSource),
     ]
   )
   return toPresentation(rows[0])
+}
+
+// The generation params a deck was written under, for regenerating one slide
+// (services/presentations.ts's regenerateSlide). Separate from
+// findPresentationById because the conspectus is bulky and nothing else needs
+// it — the public Presentation shape deliberately doesn't carry it.
+export async function findPresentationGenerationInputs(
+  id: string,
+  teacherId: string,
+): Promise<{ source_text: string | null; strict_source: boolean } | null> {
+  const { rows } = await pool.query<{ source_text: string | null; strict_source: boolean | null }>(
+    `SELECT source_text, strict_source FROM presentations WHERE id = $1 AND teacher_id = $2`,
+    [id, teacherId]
+  )
+  if (!rows[0]) return null
+  return { source_text: rows[0].source_text, strict_source: Boolean(rows[0].strict_source) }
+}
+
+/**
+ * Replaces the whole slide array (and the text rendering derived from it) —
+ * the single write behind every Phase 1 mutation: edit, regenerate, delete,
+ * insert, reorder. One presentation has exactly one writer (its owner, in one
+ * browser tab), so a whole-array overwrite is fine here for the same reason
+ * setSlideImage has always done it.
+ *
+ * `generatedContent` is passed in rather than recomputed here: rendering
+ * slides as text lives in services/presentations.ts, and a query module that
+ * reached into a service to keep a derived column in sync would invert the
+ * dependency every other query file respects.
+ */
+export async function replaceSlides(
+  id: string,
+  teacherId: string,
+  slides: Slide[],
+  generatedContent: string,
+): Promise<Presentation | null> {
+  const { rows } = await pool.query<PresentationRow>(
+    `UPDATE presentations
+        SET slides = $1, generated_content = $2
+      WHERE id = $3 AND teacher_id = $4
+      RETURNING *`,
+    [JSON.stringify(slides), generatedContent, id, teacherId]
+  )
+  return rows[0] ? toPresentation(rows[0]) : null
 }
 
 // Replace a single slide's image (used by the picker UI). Returns the updated

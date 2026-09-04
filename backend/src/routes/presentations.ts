@@ -7,9 +7,12 @@ import { asyncHandler } from '../lib/asyncHandler'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
 import { canUseFeature } from '../config/planLimits'
-import { generatePresentationRules, confirmOutlineRules } from '../validation/presentationValidation'
 import {
-  generatePresentation, getSlideImageQuery, normaliseEditedOutline, type GenerateParams,
+  generatePresentationRules, confirmOutlineRules, regenerateSlideRules, insertSlideRules,
+} from '../validation/presentationValidation'
+import {
+  generatePresentation, getSlideImageQuery, normaliseEditedOutline, normaliseEditedSlide,
+  regenerateSlide, applySlideMove, renderSlidesAsText, type GenerateParams,
 } from '../services/presentations'
 import { generatePresentationPptx } from '../services/presentationExport'
 import { extractText } from '../services/documentExtractor'
@@ -22,8 +25,13 @@ import {
 } from '../db/queries/presentationJobs'
 import {
   findPresentationsByTeacher, findPresentationById, deletePresentation, setSlideImage,
+  replaceSlides, findPresentationGenerationInputs,
 } from '../db/queries/presentations'
-import type { SlideImage } from '../../../shared/types'
+import {
+  recordSlideEvent, findSlideEventsForPresentation,
+} from '../db/queries/presentationSlideEvents'
+import type { Presentation, Slide } from '../../../shared/types'
+import { MAX_SLIDE_COUNT, type SlideImage } from '../../../shared/types'
 
 const router = Router()
 router.use(authenticate)
@@ -294,13 +302,35 @@ router.post('/:id/slides/:idx/images',
   })
 )
 
-// PATCH /api/presentations/:id/slides/:idx — sets or clears the image on any
-// slide (TODO.md Feature AG Phase 2 — setSlideImage picks the right storage
-// location per slide type). Body: { image: SlideImage | null }.
+// PATCH /api/presentations/:id/slides/:idx — writes one slide. Two bodies,
+// distinguished by which key is present:
+//   { image: SlideImage | null }  — the picker (TODO.md Feature AG Phase 2)
+//   { slide: Slide }              — a teacher-edited slide (Phase 1)
+// Kept as one route because both are "replace part of slide N": splitting
+// them would mean two paths racing on the same array with no shared guard.
 router.patch('/:id/slides/:idx',
   asyncHandler(async (req, res) => {
     const idx = Number(req.params.idx)
     if (!Number.isInteger(idx) || idx < 0) throw new NotFoundError('Слайд')
+
+    if (req.body && 'slide' in req.body) {
+      const { presentation, slides } = await loadDeck(req.params.id, req.teacher.id, idx)
+
+      // Same coercion boundary the model's own output crosses — a hand-typed
+      // body must not be able to introduce a shape the renderers and the
+      // PPTX exporter don't handle.
+      const edited = normaliseEditedSlide(req.body.slide, presentation.sources ?? [])
+      if (!edited) throw new ValidationError('Некорректные данные слайда')
+
+      const next = slides.map((s, i) => (i === idx ? edited : s))
+      const updated = await persistSlides(presentation, next)
+      recordSlideEvent({
+        presentationId: presentation.id, teacherId: req.teacher.id,
+        event: 'edited', slideIndex: idx, slide: edited,
+      })
+      res.json(updated)
+      return
+    }
 
     // Hand-validate the inbound image shape rather than trusting whatever the
     // picker happens to send. Anything missing → 400.
@@ -314,6 +344,159 @@ router.patch('/:id/slides/:idx',
     res.json(updated)
   })
 )
+
+// POST /api/presentations/:id/slides/:idx/regenerate — rewrites one slide,
+// optionally steered by a free-text remark. Runs inline rather than through
+// pg-boss: it's a single LLM call (plus at most one retrieval), which is the
+// same order of work as any other synchronous AI route here — the job queue
+// exists for the ~20-call whole-deck generation.
+//
+// No checkMonthlyLimit: the quota counts decks, not edits. A teacher polishing
+// one deck they already paid for isn't starting a new one, and aiLimiter is
+// what bounds the call rate.
+router.post('/:id/slides/:idx/regenerate',
+  aiLimiter,
+  validate(regenerateSlideRules),
+  asyncHandler(async (req, res) => {
+    const idx = Number(req.params.idx)
+    const { presentation, slides } = await loadDeck(req.params.id, req.teacher.id, idx)
+
+    const instruction = typeof req.body?.instruction === 'string' ? req.body.instruction.trim() : ''
+    const inputs = await findPresentationGenerationInputs(presentation.id, req.teacher.id)
+
+    const rewritten = await regenerateSlide({
+      presentation,
+      slideIdx:      idx,
+      inputs,
+      teacherId:     req.teacher.id,
+      institutionId: req.teacher.institution_id ?? undefined,
+      instruction:   instruction || undefined,
+    })
+    if (!rewritten) throw new ValidationError('Не удалось переписать слайд — попробуйте ещё раз')
+
+    const updated = await persistSlides(presentation, slides.map((s, i) => (i === idx ? rewritten : s)))
+    recordSlideEvent({
+      presentationId: presentation.id, teacherId: req.teacher.id,
+      event: 'regenerated', slideIndex: idx, slide: rewritten,
+      instruction: instruction || null,
+    })
+    res.json(updated)
+  })
+)
+
+// DELETE /api/presentations/:id/slides/:idx
+router.delete('/:id/slides/:idx',
+  asyncHandler(async (req, res) => {
+    const idx = Number(req.params.idx)
+    const { presentation, slides } = await loadDeck(req.params.id, req.teacher.id, idx)
+    if (slides.length <= 1) throw new ValidationError('В презентации должен остаться хотя бы один слайд')
+
+    // Logged before the write so the breadcrumb carries what was deleted —
+    // after it, the slide is gone and only its index would survive.
+    recordSlideEvent({
+      presentationId: presentation.id, teacherId: req.teacher.id,
+      event: 'deleted', slideIndex: idx, slide: slides[idx],
+    })
+    res.json(await persistSlides(presentation, slides.filter((_, i) => i !== idx)))
+  })
+)
+
+// POST /api/presentations/:id/slides — inserts an empty slide after
+// `after_index` (-1 for the very start). Empty on purpose: the teacher either
+// types into it or hits «Переписать», which fills it from its type + title
+// the same way every other slide was written.
+router.post('/:id/slides',
+  validate(insertSlideRules),
+  asyncHandler(async (req, res) => {
+    const presentation = await findPresentationById(req.params.id, req.teacher.id)
+    if (!presentation?.slides) throw new NotFoundError('Презентация')
+    const slides = presentation.slides
+    if (slides.length >= MAX_SLIDE_COUNT) {
+      throw new ValidationError(`В презентации не может быть больше ${MAX_SLIDE_COUNT} слайдов`)
+    }
+
+    const after = Number(req.body?.after_index)
+    if (!Number.isInteger(after) || after < -1 || after >= slides.length) {
+      throw new ValidationError('Некорректная позиция слайда')
+    }
+
+    const blank = normaliseEditedSlide(
+      { type: req.body?.type, title: req.body?.title, notes: '', body: {} },
+      presentation.sources ?? [],
+    )
+    if (!blank) throw new ValidationError('Не удалось создать слайд')
+
+    const at = after + 1
+    const next = [...slides.slice(0, at), blank, ...slides.slice(at)]
+    const updated = await persistSlides(presentation, next)
+    recordSlideEvent({
+      presentationId: presentation.id, teacherId: req.teacher.id,
+      event: 'inserted', slideIndex: at, slide: blank,
+    })
+    res.status(201).json(updated)
+  })
+)
+
+// POST /api/presentations/:id/slides/move — { from, to }. A move, not a whole
+// reordered array: the client sends the one thing that changed, so two
+// reorders can't silently overwrite each other's other moves.
+router.post('/:id/slides/move',
+  asyncHandler(async (req, res) => {
+    const presentation = await findPresentationById(req.params.id, req.teacher.id)
+    if (!presentation?.slides) throw new NotFoundError('Презентация')
+
+    const from = Number(req.body?.from)
+    const to   = Number(req.body?.to)
+    if (!Number.isInteger(from) || !Number.isInteger(to)) throw new ValidationError('Некорректная позиция слайда')
+
+    const next = applySlideMove(presentation.slides, from, to)
+    if (!next) throw new ValidationError('Некорректная позиция слайда')
+
+    const updated = await persistSlides(presentation, next)
+    recordSlideEvent({
+      presentationId: presentation.id, teacherId: req.teacher.id,
+      event: 'reordered', slideIndex: to, slide: presentation.slides[from],
+    })
+    res.json(updated)
+  })
+)
+
+// GET /api/presentations/:id/slide-events — which slides this teacher has
+// touched, for the «изменён»/«переписан» marks in the viewer.
+router.get('/:id/slide-events',
+  asyncHandler(async (req, res) => {
+    const presentation = await findPresentationById(req.params.id, req.teacher.id)
+    if (!presentation) throw new NotFoundError('Презентация')
+    res.json(await findSlideEventsForPresentation(presentation.id, req.teacher.id))
+  })
+)
+
+// ─── Slide-mutation helpers ─────────────────────────────────────────────────
+
+async function loadDeck(
+  id: string, teacherId: string, idx: number,
+): Promise<{ presentation: Presentation; slides: Slide[] }> {
+  const presentation = await findPresentationById(id, teacherId)
+  if (!presentation) throw new NotFoundError('Презентация')
+  const slides = presentation.slides ?? []
+  // A legacy text-DSL deck has no `slides` array to edit — the viewer renders
+  // those from parsed text and offers no edit controls, so reaching here means
+  // a hand-made request, not a UI path.
+  if (slides.length === 0) throw new ValidationError('Эта презентация сохранена в старом формате и не поддерживает правку слайдов')
+  if (!Number.isInteger(idx) || idx < 0 || idx >= slides.length) throw new NotFoundError('Слайд')
+  return { presentation, slides }
+}
+
+// `generated_content` is derived from the slides (it backs copy-all and the
+// legacy text renderer), so every structural write refreshes it — otherwise
+// the copied text drifts away from the deck on screen.
+async function persistSlides(presentation: Presentation, slides: Slide[]): Promise<Presentation> {
+  const updated = await replaceSlides(
+    presentation.id, presentation.teacher_id, slides, renderSlidesAsText(slides),
+  )
+  if (!updated) throw new NotFoundError('Презентация')
+  return updated
+}
 
 function parseSlideImage(input: unknown): SlideImage | null {
   if (input === null || input === undefined) return null

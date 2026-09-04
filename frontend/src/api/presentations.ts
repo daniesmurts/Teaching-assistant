@@ -2,7 +2,7 @@ import client from './client'
 import { downloadCsv } from './download'
 import type {
   Presentation, PresentationSource, PresentationDepth, PresentationOutlineSlide,
-  Slide, SlideImage, ImageCandidate,
+  Slide, SlideType, SlideImage, ImageCandidate,
 } from '../types'
 
 export interface GenerateRequest {
@@ -149,6 +149,62 @@ export async function setSlideImage(
   const res = await client.patch<Presentation>(
     `/api/presentations/${presentationId}/slides/${slideIdx}`,
     { image },
+  )
+  return res.data
+}
+
+// ─── Per-slide editing (TODO.md "### AO" Phase 1) ───────────────────────────
+//
+// Every one of these returns the whole updated presentation, so the viewer
+// re-renders from one source of truth instead of patching its own copy and
+// hoping it matches what was stored.
+
+export async function updateSlide(
+  presentationId: string,
+  slideIdx: number,
+  slide: Slide,
+): Promise<Presentation> {
+  const res = await client.patch<Presentation>(
+    `/api/presentations/${presentationId}/slides/${slideIdx}`,
+    { slide },
+  )
+  return res.data
+}
+
+export async function regenerateSlide(
+  presentationId: string,
+  slideIdx: number,
+  instruction?: string,
+): Promise<Presentation> {
+  const res = await client.post<Presentation>(
+    `/api/presentations/${presentationId}/slides/${slideIdx}/regenerate`,
+    instruction ? { instruction } : {},
+  )
+  return res.data
+}
+
+export async function deleteSlide(presentationId: string, slideIdx: number): Promise<Presentation> {
+  const res = await client.delete<Presentation>(`/api/presentations/${presentationId}/slides/${slideIdx}`)
+  return res.data
+}
+
+export async function insertSlide(
+  presentationId: string,
+  afterIndex: number,
+  type: SlideType,
+  title: string,
+): Promise<Presentation> {
+  const res = await client.post<Presentation>(
+    `/api/presentations/${presentationId}/slides`,
+    { after_index: afterIndex, type, title },
+  )
+  return res.data
+}
+
+export async function moveSlide(presentationId: string, from: number, to: number): Promise<Presentation> {
+  const res = await client.post<Presentation>(
+    `/api/presentations/${presentationId}/slides/move`,
+    { from, to },
   )
   return res.data
 }

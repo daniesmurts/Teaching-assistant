@@ -2293,7 +2293,7 @@ ship them as one thing.
 - **Depends on:** P (org tree — shipped) for scoping; AG's presentation
   image pipeline (shipped) for the Phase 2 insertion point.
 
-### AO. Презентации — from vending machine to workspace · Effort: Phase 0 S–M, 🟢 SHIPPED (2026-09-04) · Phase 1 M, Phase 2 M, Phase 3 M–L, Phase 4 M (phased, independently shippable)
+### AO. Презентации — from vending machine to workspace · Effort: Phase 0 S–M, 🟢 SHIPPED (2026-09-04) · Phase 1 M, 🟢 SHIPPED (2026-09-04) · Phase 2 M, Phase 3 M–L, Phase 4 M (phased, independently shippable)
 
 Presentations are one of the features teachers actually use daily (FEATURES.md,
 GA since AG). AG fixed *generation quality* — outline+expansion, real notes
@@ -2348,7 +2348,7 @@ of this entry:
   starting the form again), and the deck-level structure editing stops at the
   gate — once expansion runs, the slides are as immutable as they were before
   (that's Phase 1).
-- **Phase 1 — per-slide edit + regenerate.** Widen
+- **Phase 1 (shipped, 2026-09-04) — per-slide edit + regenerate.** Widen
   `PATCH .../slides/:idx` to accept `{ title, body, notes }` (validated per
   slide type, same `coerceSlide` boundary the generator already goes
   through), and add `POST .../slides/:idx/regenerate` taking an optional
@@ -2358,6 +2358,23 @@ of this entry:
   rounds it out. **This is also the instrumentation**: log per-slide
   `edited` / `regenerated` / `deleted` / `kept_verbatim`, which is the first
   real quality metric this feature has ever had.
+  **As built:** `PATCH /slides/:idx` widened with a `{ slide }` body beside
+  the existing `{ image }`, plus `POST /slides/:idx/regenerate`,
+  `DELETE /slides/:idx`, `POST /slides`, `POST /slides/move`; edits cross the
+  same `coerceSlide` boundary as model output (`normaliseEditedSlide`);
+  regeneration reuses the deck-wide expansion prompt with a batch of one and
+  keeps the slide's type, title and picked image; migration 119 persists
+  `source_text`/`strict_source` so a rewrite is grounded the way the deck was;
+  `presentation_slide_events` records edit/regenerate/delete/insert/reorder
+  fire-and-forget. `SlideEditor.tsx` is one form per slide type. See CHANGELOG.
+  **Not done here:** `kept_verbatim` is derived (a slide index with no event),
+  not stored — recording it would mean a row per slide per deck to say nothing
+  happened, and the deck-level «Готово» that would make it meaningful is
+  Phase 2's, not this one's. No undo/version history on an edit: the previous
+  text is gone once saved. Insert adds an *empty* slide (type + placeholder
+  title) rather than generating one in place — «Переписать» fills it, which
+  is one extra click. Decks generated before migration 119 regenerate without
+  their conspectus.
 - **Phase 2 — close the flywheel.** Feed Phase 1's kept-verbatim slides back
   as few-shot examples scoped to course → кафедра (same scope-gate posture
   as `ragScope.ts`, same "teacher approval is what makes it a training
