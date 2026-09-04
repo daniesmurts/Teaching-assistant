@@ -2406,9 +2406,13 @@ of this entry:
     `latexToPlainText`, then through a substitution map for glyphs the
     vendored PT fonts lack — **without it every lowercase Greek letter
     printed as a tofu box**, found by rendering the PDF and looking at it.
-    **Not done:** vendoring a Greek-capable font (the substitution map is a
-    stopgap — "rho" where the formula wants ρ); no cover page options, no
-    2-up slide-thumbnail layout.
+    The substitution stopgap was replaced the same day: DejaVu Sans/Serif are
+    vendored in `assets/fonts` (with licence + README) and `faceFor()` swaps to
+    the DejaVu face of the same weight for any paragraph PT can't set. Neither
+    family alone sufficed — PT has the operators and no Greek, Noto the
+    reverse. **Not done:** no cover page options, no 2-up slide-thumbnail
+    layout; `programReportPdf.ts`/`fosReportPdf.ts` still use PT alone (no
+    formulas there today, but the same rule is one line if that changes).
   - **Дек ← РПД / тематический план.** 🟢 SHIPPED (2026-09-05).
     Migration 121's `course_lecture_topics` + `presentations.lecture_topic_id`;
     `services/lecturePlan.ts` extracts the plan from `syllabus_text` or the

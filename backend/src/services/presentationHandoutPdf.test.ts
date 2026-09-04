@@ -1,26 +1,38 @@
 import { describe, it, expect } from 'vitest'
-import { printable, generatePresentationHandoutPdf } from './presentationHandoutPdf'
+import { faceFor, generatePresentationHandoutPdf } from './presentationHandoutPdf'
 import type { Presentation, Slide } from '../../../shared/types'
 
 // The failure this file exists for: pdfkit draws a glyph the font lacks as a
-// tofu box, silently. The vendored PT Sans/PT Serif have no lowercase Greek,
-// so a hydraulics formula would print as boxes and nobody would find out until
-// a student was holding the paper.
+// tofu box, silently. The vendored PT faces have no lowercase Greek, so a
+// hydraulics formula printed as boxes and nobody would have found out until a
+// student was holding the paper. DejaVu (assets/fonts/README.md) is the
+// fallback; faceFor is the rule that reaches for it.
 
-describe('printable', () => {
-  it('substitutes Greek the vendored fonts cannot draw', () => {
-    expect(printable('ρ g Q H')).toBe('rho g Q H')
-    expect(printable('η = P₂/P₁')).toBe('eta = P₂/P₁')
-    expect(printable('Σ и Δ')).toBe('Sigma и Δ')   // Δ is present in the fonts, Σ is not
+describe('faceFor', () => {
+  it('reaches for DejaVu when the text carries Greek PT cannot draw', () => {
+    expect(faceFor('sansB', 'P = ρ g Q H')).toBe('sansBX')
+    expect(faceFor('serifR', 'КПД η растёт')).toBe('serifRX')
   })
 
-  it('leaves Cyrillic, Latin and the glyphs the fonts do have alone', () => {
-    expect(printable('Плотность μ и π при 20 °С — 998 кг/м³'))
-      .toBe('Плотность μ и π при 20 °С — 998 кг/м³')
+  it('reaches for it on arrows and operators too', () => {
+    expect(faceFor('sans', '∇p → 0')).toBe('sansX')
   })
 
-  it('handles the two non-Greek gaps', () => {
-    expect(printable('∇p → 0')).toBe('nablap -> 0')
+  it('keeps the house face for ordinary Russian prose', () => {
+    expect(faceFor('serifR', 'Плотность воды при 20 °С — 998 кг/м³')).toBe('serifR')
+    expect(faceFor('sansB', 'Образование паровых пузырьков')).toBe('sansB')
+  })
+
+  it('does not swap on sub/superscripts, which PT draws and formulas are full of', () => {
+    // Triggering on these would set every formula in the fallback face, for
+    // nothing — latexToPlainText emits them constantly.
+    expect(faceFor('sansB', 'NPSH = (p₁ - p₂)/2')).toBe('sansB')
+    expect(faceFor('sansB', 'S = a²')).toBe('sansB')
+  })
+
+  it('maps each weight to its own counterpart, so the swap keeps the weight', () => {
+    expect(faceFor('serif', 'Δ и ρ')).toBe('serifX')
+    expect(faceFor('sans', 'ρ')).toBe('sansX')
   })
 })
 

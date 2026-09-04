@@ -31,6 +31,44 @@ const FONTS = {
   serifR: path.join(FONT_DIR, 'PTSerif-Regular.ttf'),
   sans:   path.join(FONT_DIR, 'PTSans-Regular.ttf'),
   sansB:  path.join(FONT_DIR, 'PTSans-Bold.ttf'),
+  // Same four weights in DejaVu, used only for a paragraph PT cannot draw —
+  // see assets/fonts/README.md. Registered up front rather than lazily: a
+  // pdfkit font must exist before the first text() that names it, and the
+  // whole point is that we don't know which paragraph will need it.
+  serifX:  path.join(FONT_DIR, 'DejaVuSerif-Bold.ttf'),
+  serifRX: path.join(FONT_DIR, 'DejaVuSerif.ttf'),
+  sansX:   path.join(FONT_DIR, 'DejaVuSans.ttf'),
+  sansBX:  path.join(FONT_DIR, 'DejaVuSans-Bold.ttf'),
+}
+
+type FontName = 'serif' | 'serifR' | 'sans' | 'sansB'
+
+// The DejaVu face of the same weight, for text PT can't set.
+const FALLBACK: Record<FontName, keyof typeof FONTS> = {
+  serif:  'serifX',
+  serifR: 'serifRX',
+  sans:   'sansX',
+  sansB:  'sansBX',
+}
+
+// Characters the vendored PT faces lack, as ranges rather than a list: Greek
+// (U+0370–U+03FF), arrows (U+2190–U+21FF) and mathematical operators
+// (U+2200–U+22FF). PT does have a few of these — ∑ ∫ ∂ ≈ ≤ ≥ ∞ — so a
+// paragraph containing one swaps to DejaVu unnecessarily; that is a texture
+// change nobody will notice, where the alternative is a tofu box somebody
+// will. Sub/superscript digits (U+2070–U+209F) are deliberately NOT here:
+// latexToPlainText emits them constantly and PT draws them fine, so
+// triggering on them would set every formula in the fallback face.
+const NEEDS_FALLBACK = /[\u0370-\u03FF\u2190-\u21FF\u2200-\u22FF]/
+
+/**
+ * Which face to actually draw `text` in. Exported for testing: the failure it
+ * prevents is silent — pdfkit renders a missing glyph as a box and reports
+ * nothing, so nothing but a rule like this (or a human looking at the PDF)
+ * catches it.
+ */
+export function faceFor(font: FontName, text: string): keyof typeof FONTS {
+  return NEEDS_FALLBACK.test(text) ? FALLBACK[font] : font
 }
 
 export interface HandoutOptions {
@@ -45,49 +83,18 @@ export interface HandoutOptions {
 // invites `$Q$`, `$\eta$`), and printed raw it reads as broken markup.
 const INLINE_MATH = /\$([^$\n]{1,200})\$/g
 
-// What the vendored PT Sans / PT Serif cannot draw. Verified against the four
-// .ttf files in assets/fonts: they carry Cyrillic and Latin, and of the
-// characters latexToPlainText emits they have Delta, Omega, mu and pi plus
-// most operators — but no other Greek, no nabla and no arrow. pdfkit draws a
-// missing glyph as a tofu box, so a density symbol would silently become a
-// black square in every hydraulics formula on the page. Substituting the name
-// keeps the formula readable — and it is what the LaTeX source said in the
-// first place (\rho).
-//
-// The real fix is a Greek-capable font in assets/fonts; this map is what keeps
-// handouts correct until there is one.
-const UNPRINTABLE: Record<string, string> = {
-  'α': 'alpha', 'β': 'beta', 'γ': 'gamma', 'ε': 'epsilon',
-  'ζ': 'zeta', 'η': 'eta', 'θ': 'theta', 'ι': 'iota',
-  'κ': 'kappa', 'λ': 'lambda', 'ν': 'nu', 'ξ': 'xi',
-  'ο': 'o', 'ρ': 'rho', 'σ': 'sigma', 'τ': 'tau',
-  'υ': 'upsilon', 'φ': 'phi', 'χ': 'chi', 'ψ': 'psi', 'ω': 'omega',
-  'Α': 'A', 'Β': 'B', 'Γ': 'Gamma', 'Ε': 'E', 'Ζ': 'Z',
-  'Η': 'H', 'Θ': 'Theta', 'Ι': 'I', 'Κ': 'K', 'Λ': 'Lambda',
-  'Μ': 'M', 'Ν': 'N', 'Ξ': 'Xi', 'Ο': 'O', 'Π': 'Pi',
-  'Ρ': 'P', 'Σ': 'Sigma', 'Τ': 'T', 'Υ': 'Y', 'Φ': 'Phi',
-  'Χ': 'X', 'Ψ': 'Psi',
-  '∇': 'nabla', '→': '->',
-}
-
-export function printable(text: string): string {
-  return text.replace(/[Α-ω∇→]/g, (ch) => UNPRINTABLE[ch] ?? ch)
-}
-
 // Citation markers are a web-viewer affordance (they open a source popover
 // nothing in a PDF can open) and read as noise on paper — same treatment
 // presentationExport.ts's cleanForSlide gives them. Removing "[1]" from
 // "…насыщения [1]." leaves "…насыщения ." — so the space before the
 // punctuation goes with it, or every cited sentence ends with a floating dot.
 function clean(text: string): string {
-  return printable(
-    text
-      .replace(/\[\d+(?:\s*,\s*\d+)*\]/g, '')
-      .replace(INLINE_MATH, (_, math: string) => latexToPlainText(math))
-      .replace(/\s+([,.;:!?)])/g, '$1')
-      .replace(/\s{2,}/g, ' ')
-      .trim()
-  )
+  return text
+    .replace(/\[\d+(?:\s*,\s*\d+)*\]/g, '')
+    .replace(INLINE_MATH, (_, math: string) => latexToPlainText(math))
+    .replace(/\s+([,.;:!?)])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
 }
 
 export async function generatePresentationHandoutPdf(
@@ -104,10 +111,7 @@ export async function generatePresentationHandoutPdf(
       info: { Title: `${presentation.topic} — раздаточный материал`, Author: 'ИСПУМ' },
     })
 
-    doc.registerFont('serif',  FONTS.serif)
-    doc.registerFont('serifR', FONTS.serifR)
-    doc.registerFont('sans',   FONTS.sans)
-    doc.registerFont('sansB',  FONTS.sansB)
+    for (const [name, file] of Object.entries(FONTS)) doc.registerFont(name, file)
 
     const chunks: Buffer[] = []
     doc.on('data', (c: Buffer) => chunks.push(c))
@@ -122,13 +126,15 @@ export async function generatePresentationHandoutPdf(
     const ensure = (h: number) => { if (y + h > bottom) { doc.addPage(); y = M } }
 
     const text = (
-      s: string, font: 'serif' | 'serifR' | 'sans' | 'sansB', size: number, color: string,
+      s: string, font: FontName, size: number, color: string,
       opts: { indent?: number; gap?: number; align?: 'left' | 'center' } = {},
     ) => {
       if (!s) return
       const x = M + (opts.indent ?? 0)
       const w = CW - (opts.indent ?? 0)
-      doc.font(font).fontSize(size).fillColor(color)
+      // Face chosen per paragraph, after the text is final — measuring with
+      // one font and drawing with another would mis-paginate.
+      doc.font(faceFor(font, s)).fontSize(size).fillColor(color)
       const h = doc.heightOfString(s, { width: w, align: opts.align, lineGap: opts.gap ?? 1.5 })
       ensure(h)
       doc.text(s, x, y, { width: w, align: opts.align, lineGap: opts.gap ?? 1.5 })
@@ -215,7 +221,7 @@ export async function generatePresentationHandoutPdf(
           // that's a heavier dependency than a handout warrants, and images
           // don't survive greyscale printing as well as text does.
           slide.body.formulas.forEach((f) => {
-            text(printable(latexToPlainText(f.latex)), 'sansB', 11, C.ink, { indent: 12 })
+            text(latexToPlainText(f.latex), 'sansB', 11, C.ink, { indent: 12 })
             if (f.caption) text(clean(f.caption), 'sans', 9.5, C.ink3, { indent: 12 })
             y += 3
           })
