@@ -491,7 +491,12 @@ export type GradeJobStatus = 'pending' | 'processing' | 'ready' | 'failed'
 
 // Async presentation generation jobs (presentation_jobs table) — same
 // enqueue-and-poll shape as grade jobs; see presentation_jobs migration.
-export type PresentationJobStatus = 'pending' | 'processing' | 'ready' | 'failed'
+//
+// 'outline_ready' is the optional approval gate (TODO.md "### AO" Phase 0):
+// the job pauses after the cheap outline pass and waits for the teacher to
+// confirm (or edit) the plan before the expensive expansion runs. A job
+// started with review_outline=false never enters it.
+export type PresentationJobStatus = 'pending' | 'processing' | 'outline_ready' | 'ready' | 'failed'
 
 // Strengths/gaps shape evolved from plain string[] (Tier-0) to BulletItem[]
 // (Tier-1, with verbatim quotes from the section). Older rows still carry
@@ -725,6 +730,20 @@ export type SlideType =
   | 'diagram'
   | 'discussion'
   | 'summary'
+
+// One slide's worth of plan, produced by the outline pass and consumed by
+// the expansion pass (services/presentations.ts). Lives here rather than in
+// the service because the outline approval gate (TODO.md "### AO" Phase 0)
+// puts it on the wire: the teacher edits this shape before expansion runs.
+//
+// `brief` is a technical brief for the expansion pass, not prose — "виды
+// насосов: объёмные vs динамические, критерий выбора", not "рассказать про
+// насосы".
+export interface PresentationOutlineSlide {
+  type:  SlideType
+  title: string
+  brief: string
+}
 
 // Controls how much material generation asks the model for per slide —
 // notes word-count target and RAG source count. 'deep' is Pro+ gated

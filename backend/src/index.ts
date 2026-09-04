@@ -22,7 +22,7 @@ import { startJobQueue, stopJobQueue } from './services/jobQueue'
 import { registerLongReviewWorker } from './services/longReviewWorker'
 import { registerGradeJobWorker } from './services/gradeJobWorker'
 import { registerFosWorker } from './services/fosWorker'
-import { registerPresentationJobWorker } from './services/presentationJobWorker'
+import { registerPresentationJobWorker, startPresentationOutlineSweeper } from './services/presentationJobWorker'
 import { registerMethodistRunWorker } from './services/methodist/runWorker'
 import { startResourceSampler } from './services/resourceSampler'
 import { startUsageRollupScheduler } from './services/usageRollup'
@@ -53,6 +53,7 @@ async function main(): Promise<void> {
     startActivationDigestScheduler()  // weekly Telegram activation summary
     startResourceSampler()            // ~60s in-process capacity sampler
     startUsageRollupScheduler()       // recompute usage/institution rollups every 6h
+    startPresentationOutlineSweeper() // hourly: expire presentation plans nobody confirmed
     startControlPlaneAgent()          // 15-min signed telemetry heartbeat (docs/on-prem-deployment.md §16 Track 1.6)
   })
 }

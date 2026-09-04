@@ -2293,6 +2293,150 @@ ship them as one thing.
 - **Depends on:** P (org tree — shipped) for scoping; AG's presentation
   image pipeline (shipped) for the Phase 2 insertion point.
 
+### AO. Презентации — from vending machine to workspace · Effort: Phase 0 S–M, 🟢 SHIPPED (2026-09-04) · Phase 1 M, Phase 2 M, Phase 3 M–L, Phase 4 M (phased, independently shippable)
+
+Presentations are one of the features teachers actually use daily (FEATURES.md,
+GA since AG). AG fixed *generation quality* — outline+expansion, real notes
+depth, auto-images, web grounding, PPTX. What it did not fix is that a deck is
+**write-once and then it leaves**: the only mutation endpoint is
+`PATCH /api/presentations/:id/slides/:idx`, and it only sets an image
+(`routes/presentations.ts`). A teacher who dislikes slide 7 has exactly two
+options — regenerate the whole deck (new job, new spend, minutes of wait, and
+every slide they *liked* gets rerolled), or download the PPTX and fix it in
+PowerPoint, at which point the deck permanently forks out of ИСПУМ and every
+downstream feature we could ever build on it is dead.
+
+Two consequences follow from that single fact, and they're the actual subject
+of this entry:
+
+1. **No edit loop** → the teacher receives a verdict instead of authoring a
+   lecture, and the only escape hatch is the exit.
+2. **No usage signal** → grading has the RAG flywheel (approve → embed →
+   retrieve next time, CLAUDE.md invariant); presentations learn *nothing*
+   from being used. `presentationEvalHarness.ts` scores `avgNotesWordCount`,
+   `bulletsShare`, `imageCoverageAmongEligible`, `citedSlideShare` — all
+   structural proxies, all offline, none of them "was this slide any good".
+   The signal we're missing (*which slides did teachers edit, regenerate or
+   delete*) is a **byproduct of Phase 1**, not separate work.
+
+- **Phase 0 (shipped, 2026-09-04) — outline approval gate. Highest leverage
+  per line of code in this entry.** The outline pass is cheap and fast; expansion is ~20 LLM
+  calls behind a 2.5s poll loop showing a spinner
+  (`PresentationForm.tsx`'s `pollJob`). Split the job in two: return the
+  outline at ~10s, render it as an editable list (title / type / order,
+  add + delete row), expand on «Продолжить». `normaliseOutline` already
+  returns exactly the object the UI needs, and `OutlineSlideSpec` is already
+  a clean public type. Buys three things at once — structural errors get
+  fixed *before* we pay for 20 expansions (real spend reduction, see AL's
+  cost ledger), perceived latency collapses from minutes to seconds, and the
+  teacher gets authorship over the deck's shape. Needs a second job state
+  (`outline_ready` → awaiting-confirmation → `expanding`) in
+  `presentation_jobs` + `presentationJobWorker.ts`, with a TTL sweep for
+  outlines nobody confirms. Keep a «Сразу генерировать» escape for teachers
+  who don't want the extra click.
+  **As built:** `planPresentation()`/`expandPresentation()` split in
+  `services/presentations.ts` (composed by `generatePresentation`, so the
+  legacy sync route and the eval harness are untouched), a `stage`
+  discriminator on the worker payload, `outline_ready` status + `params` /
+  `outline` / `web_grounding` / `outline_ready_at` columns (migration 118),
+  `OutlineEditor.tsx`, and an hourly `scheduleWithLease` sweep that expires
+  24h-old plans and clears the stored conspectus with them. Grounding is
+  captured once and replayed; RAG scope is re-resolved at expansion. Usage is
+  billed in `expandPresentation`, not at plan time — an abandoned outline
+  produced no deck. See CHANGELOG for full detail. **Not done here:** no
+  «сгенерировать заново только план» button (regenerating the plan means
+  starting the form again), and the deck-level structure editing stops at the
+  gate — once expansion runs, the slides are as immutable as they were before
+  (that's Phase 1).
+- **Phase 1 — per-slide edit + regenerate.** Widen
+  `PATCH .../slides/:idx` to accept `{ title, body, notes }` (validated per
+  slide type, same `coerceSlide` boundary the generator already goes
+  through), and add `POST .../slides/:idx/regenerate` taking an optional
+  free-text instruction («короче», «добавь пример с числами», «это не по
+  теме»). Expansion is already batch-scoped — a batch of one is nearly free
+  and reuses `buildExpansionPrompt` unchanged. Insert / delete / reorder
+  rounds it out. **This is also the instrumentation**: log per-slide
+  `edited` / `regenerated` / `deleted` / `kept_verbatim`, which is the first
+  real quality metric this feature has ever had.
+- **Phase 2 — close the flywheel.** Feed Phase 1's kept-verbatim slides back
+  as few-shot examples scoped to course → кафедра (same scope-gate posture
+  as `ragScope.ts`, same "teacher approval is what makes it a training
+  signal" rule as grading — invariant 3 applies unchanged: an *unedited*
+  slide is a weaker signal than an approved grade, so require an explicit
+  «Готово» on the deck before anything becomes an example). Add the
+  edit/regenerate rates to `presentationEvalHarness.ts`'s summary so the
+  offline harness and live usage report the same axis.
+- **Phase 3 — wire the deck into the platform instead of leaving it a
+  leaf.** In rough order of value:
+  - **Дек → тест → аудитория.** Generate a quiz from the deck's own slides
+    (`services/quizzes.ts`) and launch it in-hall via Y's live QR mode. That
+    closes a complete lecture loop — материал → лекция → проверка усвоения →
+    журнал — that nothing else in the RU market ships end to end.
+  - **Дек → раздатка.** Student-facing PDF (slides + notes rendered as
+    prose). `renderSlidesAsText` already exists; `programReportPdf.ts` is
+    the precedent for the PDF side.
+  - **Дек ← РПД / тематический план.** Topic and lecture number should be
+    *picked from the course's тематический план*, not typed —
+    `previousTopics` is currently just strings pulled from prior
+    generations. A deck that knows which тема and which компетенция/индикатор
+    it serves becomes УМК evidence (AM, X) rather than a loose file.
+  - **Дек → published assignment.** `discussion` slides are already a
+    question bank; Q's publish flow is already built.
+- **Phase 4 — fidelity + institutional finish.** Independent of the above,
+  ordered by how often each one gets raised:
+  - **Import existing PPTX.** Every prospective teacher has 40 old lecture
+    decks. "Upload yours — ИСПУМ writes the speaker notes / fixes the
+    structure / builds the test" is a far lower-friction first action than
+    "describe a lecture from scratch", and `documentExtractor.ts` already
+    does most of the parsing work. This is an **adoption** lever, probably
+    the largest single one available in this feature, not a quality one.
+  - **Institution branding.** `presentationExport.ts` hardcodes one palette
+    (`const C`). Титульный лист, logo, кафедра naming — cheap to build,
+    impossible to argue with in a B2B demo, belongs next to the existing
+    institution settings surface.
+  - **Formulas export as PNG** via `formulaRenderer.ts` — readable, but not
+    editable in PowerPoint. Emitting OMML makes them native equation
+    objects; `ommlToLatex.ts` already exists for the inbound direction.
+  - **The viewer isn't a slide.** `SlideContent.tsx` renders doc-shaped
+    cards, so nothing warns that a body which fits the card overflows a
+    10×5.63in slide. A 16:9 preview (or a fit check at generation) prevents
+    the "looked fine, broke on the projector" failure — the one failure mode
+    that costs a teacher credibility in front of a room.
+  - **`diagram` slides hunt for a photo.** Generating an SVG/Mermaid
+    schematic from the brief beats top-1 image search for process/flow
+    content and sidesteps the licensing question a web image on a university
+    projector quietly raises. (Carried forward from AG Phase 2's deferred
+    list, still not done.)
+  - **Auto-image takes `results[0]` only** (`autoFillImages`). Persisting
+    the 3 top candidates for a one-click inline swap removes the most common
+    manual step. AG Phase 2 dropped this as unnecessary because the picker
+    re-searches on demand; that reasoning holds only while opening the picker
+    is rare, which per-slide editing changes.
+  - **Free tier has `presentationHistory: false`** (`planLimits.ts`) — free
+    users lose their decks. That's a churn mechanism, not a paywall; gate
+    depth and PPTX, keep the history.
+  - **No кафедра deck bank.** AN built кафедральная библиотека for
+    documents; a методист curating a shared deck bank is the same pattern
+    on the same scope machinery, and feeds AM's Кабинет методиста directly.
+- **Why:** the generator is mature; the *workflow around it* is not. Phases
+  0–2 convert a shipped, actively-used feature from a vending machine into a
+  workspace, and pay for themselves twice — less wasted expansion spend, and
+  the first genuine quality signal this feature has ever produced. Phase 3 is
+  what makes the deck the centre of the lecture rather than a step before it.
+  If only three things get built: **Phase 0, Phase 1, and Phase 3's
+  дек → live-quiz link.**
+- **Touches:** `services/presentations.ts`, `services/presentationJobWorker.ts`,
+  `services/presentationExport.ts`, `services/presentationEvalHarness.ts`,
+  `routes/presentations.ts`, `validation/presentationValidation.ts`,
+  `db/queries/presentations.ts` (+ migration: job outline state, per-slide
+  edit events), `shared/types.ts`, `PresentationForm.tsx`,
+  `SlideContent.tsx`, `config/planLimits.ts`.
+- **Depends on:** AG (shipped) for the outline/expansion split Phase 0 gates
+  on and the image pipeline Phase 4 extends; Y (shipped) for the live-quiz
+  link; AN (shipped) for the кафедра-scope machinery a deck bank would reuse;
+  AL's cost ledger (shipped) to verify Phase 0's spend reduction is real
+  rather than assumed.
+
 ---
 
 ## Build order — locked design (§5–§7)

@@ -5,12 +5,14 @@ import { Input } from '../ui/Input'
 import { getCourses } from '../../api/courses'
 import NoCourseHint from '../onboarding/NoCourseHint'
 import {
-  startPresentationJob, getPresentationJob, extractPresentationSourceText, type GenerateResponse,
+  startPresentationJob, getPresentationJob, confirmPresentationOutline,
+  extractPresentationSourceText, type GenerateResponse,
 } from '../../api/presentations'
+import OutlineEditor from './OutlineEditor'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
 import { MAX_SLIDE_COUNT, estimateSlideCount } from '../../types'
-import type { PresentationDepth } from '../../types'
+import type { PresentationDepth, PresentationOutlineSlide } from '../../types'
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -44,8 +46,15 @@ export default function PresentationForm({ onResult }: Props) {
   const [sourceText, setSourceText] = useState('')
   const [strictSource, setStrictSource] = useState(false)
   const [depth, setDepth]     = useState<PresentationDepth>('standard')
+  const [reviewOutline, setReviewOutline] = useState(true)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
+
+  // Outline approval gate (TODO.md "### AO" Phase 0). While `outline` is set
+  // the form is replaced by the plan editor; `pendingJobId` is the job that
+  // plan belongs to, waiting for a «Написать слайды» that resumes polling.
+  const [outline, setOutline] = useState<PresentationOutlineSlide[] | null>(null)
+  const [pendingJobId, setPendingJobId] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -109,6 +118,7 @@ export default function PresentationForm({ onResult }: Props) {
     setError('')
     try {
       cancelled.current = false
+      setOutline(null)
       const job = await startPresentationJob({
         topic:            form.topic,
         duration_minutes: Number(form.duration_minutes) || 60,
@@ -121,6 +131,7 @@ export default function PresentationForm({ onResult }: Props) {
         source_text:      sourceText.trim() || undefined,
         strict_source:    strictSource && Boolean(sourceText.trim()),
         depth,
+        review_outline:   reviewOutline,
       })
       await pollJob(job.id)
     } catch (err: unknown) {
@@ -129,16 +140,26 @@ export default function PresentationForm({ onResult }: Props) {
     }
   }
 
-  // Up to 10 minutes at 2.5s/poll — generous headroom over a single-call
-  // deck today, room to grow into Phase 1's multi-call outline+expansion
-  // without needing to touch this loop.
+  // ~10 minutes of headroom per phase. The first polls run fast because the
+  // outline stage lands in seconds (one LLM call) — at a flat 2.5s the
+  // approval gate would spend most of its wait on a plan that was already
+  // sitting there. Expansion takes minutes, so the cadence relaxes after.
+  const FAST_POLLS = 20
   async function pollJob(jobId: string) {
     try {
       for (let i = 0; i < 240 && !cancelled.current; i++) {
-        await delay(2500)
+        await delay(i < FAST_POLLS ? 1200 : 2500)
         const job = await getPresentationJob(jobId)
         if (job.status === 'ready' && job.result) {
           onResult(job.result)
+          return
+        }
+        // Approval gate — the plan is ready and the job is parked until the
+        // teacher confirms it. Leaving the loop here is the point: nothing
+        // else runs server-side until confirmOutline() enqueues expansion.
+        if (job.status === 'outline_ready' && job.outline) {
+          setOutline(job.outline)
+          setPendingJobId(job.id)
           return
         }
         if (job.status === 'failed') {
@@ -153,6 +174,28 @@ export default function PresentationForm({ onResult }: Props) {
     }
   }
 
+  async function handleConfirmOutline(edited: PresentationOutlineSlide[]) {
+    setLoading(true)
+    setError('')
+    try {
+      cancelled.current = false
+      await confirmPresentationOutline(pendingJobId, edited)
+      setOutline(null)
+      await pollJob(pendingJobId)
+    } catch (err: unknown) {
+      setError(errMsg(err, 'Не удалось подтвердить план'))
+      setLoading(false)
+    }
+  }
+
+  function handleCancelOutline() {
+    cancelled.current = true
+    setOutline(null)
+    setPendingJobId('')
+    setLoading(false)
+    setError('')
+  }
+
   // Shown in the slide-count placeholder so "Авто" isn't a black box — the
   // teacher can see what the duration implies before deciding to override it.
   // Uses the same shared estimateSlideCount() the generator does, so the
@@ -165,6 +208,21 @@ export default function PresentationForm({ onResult }: Props) {
   const selectClass =
     'w-full px-3 py-2 text-sm font-sans text-ink bg-surface border border-border rounded-md ' +
     'focus:outline-none focus:border-border-strong'
+
+  // The plan replaces the form rather than sitting under it: the parameters
+  // that produced this outline are already spent, and editing them now would
+  // silently not apply to the deck about to be written.
+  if (outline) {
+    return (
+      <OutlineEditor
+        outline={outline}
+        onConfirm={handleConfirmOutline}
+        onCancel={handleCancelOutline}
+        confirming={loading}
+        error={error || undefined}
+      />
+    )
+  }
 
   return (
     <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-lg p-5 space-y-4">
@@ -375,12 +433,30 @@ export default function PresentationForm({ onResult }: Props) {
         )}
       </div>
 
+      {/* Approval gate opt-out. On by default: the plan is where a wrong
+          structure costs seconds to fix instead of a full regeneration. */}
+      <label className="flex items-start gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          className="mt-0.5 accent-amber"
+          checked={reviewOutline}
+          onChange={(e) => setReviewOutline(e.target.checked)}
+        />
+        <span className="text-[11px] font-sans text-ink-secondary leading-snug">
+          Показать план лекции перед генерацией
+          <span className="block text-ink-tertiary">
+            План появляется за несколько секунд — порядок, тип и состав слайдов можно
+            поменять до того, как ИСПУМ напишет текст и заметки.
+          </span>
+        </span>
+      </label>
+
       {error && (
         <div className="px-3 py-2 bg-danger-bg text-danger text-xs font-sans rounded-md">{error}</div>
       )}
 
       <Button type="submit" loading={loading} className="w-full">
-        Создать презентацию
+        {reviewOutline ? 'Построить план лекции' : 'Создать презентацию'}
       </Button>
     </form>
   )

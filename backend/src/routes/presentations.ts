@@ -7,15 +7,18 @@ import { asyncHandler } from '../lib/asyncHandler'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
 import { canUseFeature } from '../config/planLimits'
-import { generatePresentationRules } from '../validation/presentationValidation'
-import { generatePresentation, getSlideImageQuery, type GenerateParams } from '../services/presentations'
+import { generatePresentationRules, confirmOutlineRules } from '../validation/presentationValidation'
+import {
+  generatePresentation, getSlideImageQuery, normaliseEditedOutline, type GenerateParams,
+} from '../services/presentations'
 import { generatePresentationPptx } from '../services/presentationExport'
 import { extractText } from '../services/documentExtractor'
 import { yandexImageSearch } from '../services/yandexImages'
 import { PRESENTATION_JOB_QUEUE, type PresentationJobPayload } from '../services/presentationJobWorker'
 import { getJobQueue } from '../services/jobQueue'
 import {
-  createPresentationJob, getPresentationJobById,
+  createPresentationJob, getPresentationJobById, confirmPresentationJobOutline,
+  type PresentationJobRow,
 } from '../db/queries/presentationJobs'
 import {
   findPresentationsByTeacher, findPresentationById, deletePresentation, setSlideImage,
@@ -62,7 +65,9 @@ function buildGenerateParams(req: { teacher: { id: string; plan_tier: string; in
 // per-slide expansion) and nothing should hold an HTTP socket open for that
 // long at volume — same reasoning as grading's /grade-jobs. Plan gates and
 // quota are checked here; the pg-boss worker (presentationJobWorker.ts) runs
-// generatePresentation(), and the client polls GET /generate-jobs/:id.
+// the generation itself, and the client polls GET /generate-jobs/:id. With
+// the outline gate on (the default), that worker stops after the plan and
+// the client resumes via POST /generate-jobs/:id/outline below.
 router.post(
   '/generate-jobs',
   aiLimiter,
@@ -71,18 +76,54 @@ router.post(
   asyncHandler(async (req, res) => {
     const params = buildGenerateParams(req)
 
-    const job = await createPresentationJob(req.teacher.id)
-    const payload: PresentationJobPayload = { jobId: job.id, params }
+    // Outline approval gate (TODO.md "### AO" Phase 0) — opt-out, not
+    // opt-in: reviewing the plan is the better default (it's where a wrong
+    // structure is cheap to fix), but a teacher who trusts the generator
+    // shouldn't be made to click through a step they don't want.
+    const stage = req.body?.review_outline === false ? 'full' : 'outline'
+
+    const job = await createPresentationJob(req.teacher.id, params)
+    const payload: PresentationJobPayload = { jobId: job.id, params, stage }
     await getJobQueue().send(PRESENTATION_JOB_QUEUE, payload)
 
-    res.status(202).json({
-      id:              job.id,
-      status:          job.status,
-      presentation_id: null,
-      result:          null,
-      error_message:   null,
-      created_at:      job.created_at,
-    })
+    res.status(202).json(toJobResponse(job))
+  })
+)
+
+// POST /api/presentations/generate-jobs/:id/outline — teacher confirms (or
+// replaces) the proposed plan, which enqueues the expensive half. No
+// checkMonthlyLimit here: this is the second half of a generation whose
+// quota was already checked at enqueue, and usage is billed once, when the
+// deck is actually created (services/presentations.ts's expandPresentation).
+router.post(
+  '/generate-jobs/:id/outline',
+  aiLimiter,
+  validate(confirmOutlineRules),
+  asyncHandler(async (req, res) => {
+    const job = await getPresentationJobById(req.params.id, req.teacher.id)
+    if (!job) throw new NotFoundError('Генерация')
+    if (job.status !== 'outline_ready') {
+      throw new ValidationError(
+        job.status === 'failed'
+          ? (job.error_message ?? 'Эта генерация уже завершилась ошибкой')
+          : 'Этот план уже подтверждён'
+      )
+    }
+    if (!job.params) throw new ValidationError('Параметры генерации утеряны — создайте презентацию заново')
+
+    const outline = normaliseEditedOutline(req.body?.outline)
+    if (!outline) throw new ValidationError('План пуст — оставьте хотя бы один слайд с заголовком')
+
+    // Conditional UPDATE, not a read-then-write: two «Продолжить» clicks
+    // racing would otherwise enqueue two expansions of one job — two decks,
+    // two bills.
+    const claimed = await confirmPresentationJobOutline(job.id, req.teacher.id, outline)
+    if (!claimed) throw new ValidationError('Этот план уже подтверждён')
+
+    const payload: PresentationJobPayload = { jobId: job.id, params: job.params, stage: 'expand' }
+    await getJobQueue().send(PRESENTATION_JOB_QUEUE, payload)
+
+    res.status(202).json(toJobResponse({ ...job, status: 'processing', outline }))
   })
 )
 
@@ -93,16 +134,24 @@ router.get(
   asyncHandler(async (req, res) => {
     const job = await getPresentationJobById(req.params.id, req.teacher.id)
     if (!job) throw new NotFoundError('Генерация')
-    res.json({
-      id:              job.id,
-      status:          job.status,
-      presentation_id: job.presentation_id,
-      result:          job.result,
-      error_message:   job.error_message,
-      created_at:      job.created_at,
-    })
+    res.json(toJobResponse(job))
   })
 )
+
+// `params` and `web_grounding` are deliberately not exposed — internal
+// generation state, and params is a verbatim copy of what the client already
+// sent.
+function toJobResponse(job: PresentationJobRow) {
+  return {
+    id:              job.id,
+    status:          job.status,
+    presentation_id: job.presentation_id,
+    result:          job.result,
+    outline:         job.outline,
+    error_message:   job.error_message,
+    created_at:      job.created_at,
+  }
+}
 
 // POST /api/presentations/generate — legacy synchronous path. Kept only so
 // cached frontend bundles from before the async rollout keep working; the

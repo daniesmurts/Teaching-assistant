@@ -11,11 +11,12 @@ import { yandexImageSearch } from './yandexImages'
 import { webSearch, type SearchResult } from './yandexSearch'
 import { logger } from '../lib/logger'
 import type { CallContext } from './llm/types'
-import { estimateSlideCount } from '../../../shared/types'
+import { estimateSlideCount, MAX_SLIDE_COUNT } from '../../../shared/types'
 import type {
   Presentation,
   PresentationSource,
   PresentationDepth,
+  PresentationOutlineSlide,
   Slide,
   SlideType,
   SlideImage,
@@ -84,14 +85,62 @@ const IMAGE_SEARCH_CONCURRENCY = 3    // parallel Yandex Images calls
 const MAX_AUTO_IMAGES          = 20   // ceiling on a very large deck — remaining slides keep a manually-searchable empty slot, same UX as before this feature
 
 // ─── Generate ─────────────────────────────────────────────────────────────────
+//
+// Generation is two halves, split at exactly the cheap/expensive boundary:
+// planPresentation() is one LLM call that decides structure, expandPresentation()
+// is ~one call per five slides plus RAG retrieval and image search.
+//
+// They run back-to-back in generatePresentation() (the legacy sync route and
+// the eval harness still call that), or with the teacher's approval in
+// between: the outline gate (TODO.md "### AO" Phase 0) has the job worker run
+// planPresentation, hand the plan back for editing, and call
+// expandPresentation only once the teacher confirms — so a wrong structure
+// gets fixed before we pay for ~20 expansions, not after.
 
-export async function generatePresentation(params: GenerateParams): Promise<GenerateResult> {
-  const depth: PresentationDepth = params.depth === 'deep' ? 'deep' : 'standard'
-  // variant (TODO.md Feature AL Phase 0) tags every LLM/search/image call
-  // this generation makes as standard vs. deep — lets the cost ledger
-  // answer "is deep mode priced right" instead of folding it into one
-  // undifferentiated 'presentation' bucket.
-  const context: CallContext = { teacherId: params.teacherId, institutionId: params.institutionId, feature: 'presentation', variant: depth }
+export interface PresentationPlan {
+  outline:      OutlineSlideSpec[]
+  // Captured during the plan pass and replayed into expansion, so pausing
+  // for approval doesn't cost a second web-search call.
+  webGrounding: SearchResult[]
+  slideTarget:  number
+}
+
+function resolveDepth(params: GenerateParams): PresentationDepth {
+  return params.depth === 'deep' ? 'deep' : 'standard'
+}
+
+// variant (TODO.md Feature AL Phase 0) tags every LLM/search/image call
+// this generation makes as standard vs. deep — lets the cost ledger
+// answer "is deep mode priced right" instead of folding it into one
+// undifferentiated 'presentation' bucket.
+function callContextFor(params: GenerateParams): CallContext {
+  return {
+    teacherId:     params.teacherId,
+    institutionId: params.institutionId,
+    feature:       'presentation',
+    variant:       resolveDepth(params),
+  }
+}
+
+// Reinforced in the system role as well as the user prompt: strict mode is
+// a hard constraint on the whole task, not one instruction among many.
+// Shared by both passes so the plan can't promise slides the writer is then
+// forbidden to fill.
+function strictClauseFor(params: GenerateParams): string {
+  return isStrictSource(params)
+    ? `Преподаватель передал собственный конспект и просил построить презентацию ` +
+      `ТОЛЬКО по нему. Вы структурируете чужой материал, а не пишете свой: ничего ` +
+      `не добавляйте от себя и не дополняйте материал из своих знаний. `
+    : ''
+}
+
+/**
+ * Cheap, structure-only half: decides slide count/order/type and a one-line
+ * brief per slide. No RAG, no full-length writing, no DB writes — a plan the
+ * teacher can be shown and can edit before anything expensive happens.
+ */
+export async function planPresentation(params: GenerateParams): Promise<PresentationPlan> {
+  const context = callContextFor(params)
 
   const course = params.courseId
     ? await findCourseById(params.courseId, params.teacherId)
@@ -120,21 +169,11 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
     ? await fetchWebGrounding(params.topic, context)
     : []
 
-  // ── Outline pass — cheap, structure-only. Decides slide count/order/type
-  // and a one-line brief per slide; no RAG, no full-length writing yet. ────
-  // Reinforced in the system role as well as the user prompt: strict mode is
-  // a hard constraint on the whole task, not one instruction among many.
-  const strictClause = isStrictSource(params)
-    ? `Преподаватель передал собственный конспект и просил построить презентацию ` +
-      `ТОЛЬКО по нему. Вы структурируете чужой материал, а не пишете свой: ничего ` +
-      `не добавляйте от себя и не дополняйте материал из своих знаний. `
-    : ''
-
   const outlineSystemPrompt =
     `Вы опытный разработчик учебных программ и методист. ` +
     `Вы строите план лекции: порядок слайдов, их тип и краткое техническое ` +
     `задание по содержанию для каждого — сам текст слайдов напишет другой автор. ` +
-    strictClause +
+    strictClauseFor(params) +
     `Вы выбираете подходящий тип слайда под содержание: определение → concept, формула → formula, ` +
     `сравнение → comparison, схема/оборудование → diagram, вопрос для обсуждения → discussion. ` +
     `Длинные перечни маркеров — последний выбор, не первый. ` +
@@ -151,7 +190,31 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
       maxTokens: outlineMaxTokens(slideTarget),
     }
   )
-  const outline = normaliseOutline(outlineRaw?.outline, slideTarget)
+
+  return {
+    outline: normaliseOutline(outlineRaw?.outline, slideTarget),
+    webGrounding,
+    slideTarget,
+  }
+}
+
+/**
+ * Expensive half: writes every slide from the (possibly teacher-edited) plan,
+ * fills images, and persists the deck. `plan.outline` is trusted to be
+ * normalised — normaliseOutline() at the plan boundary for a model-produced
+ * one, normalisePresentationOutline() at the route boundary for a
+ * teacher-edited one.
+ */
+export async function expandPresentation(params: GenerateParams, plan: PresentationPlan): Promise<GenerateResult> {
+  const depth   = resolveDepth(params)
+  const context = callContextFor(params)
+  const { outline, webGrounding, slideTarget } = plan
+
+  // Re-resolved rather than carried in the plan: it's a cheap DB read, and a
+  // scope that changed between approval and expansion (a course's RAG
+  // sharing toggled, say) should be honoured as it is now, not as it was
+  // when the outline was drawn.
+  const ragScope = params.courseId ? await resolveRagRetrievalScope(params.courseId) : null
 
   // ── Expansion pass — parallel batches, each with its own RAG retrieval
   // and its own full token budget (this is what actually fixes the
@@ -171,7 +234,7 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
       `Вы опытный преподаватель, пишущий полный текст слайдов и сценарий ` +
       `выступления по уже готовому плану лекции — тип и заголовок каждого ` +
       `слайда уже определены, менять их нельзя. ` +
-      strictClause +
+      strictClauseFor(params) +
       `Пишите на русском языке. Отвечайте строго в формате JSON.`
 
     const raw = await chatJSON<{ slides: unknown[] }>(
@@ -221,6 +284,11 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
     sources:          usedSources,
   })
 
+  // Usage is billed here, not at plan time: an outline the teacher abandons
+  // at the approval gate produced no deck and must not count against their
+  // monthly quota. The quota *check* still happens up front at enqueue
+  // (routes/presentations.ts), and aiLimiter bounds how many outlines a
+  // teacher can burn without ever confirming one.
   incrementUsage(params.teacherId, 'presentation').catch(() => null)
 
   return {
@@ -229,6 +297,11 @@ export async function generatePresentation(params: GenerateParams): Promise<Gene
     generated_content: generatedContent,
     sources:           usedSources,
   }
+}
+
+/** Both halves back-to-back — no approval gate. */
+export async function generatePresentation(params: GenerateParams): Promise<GenerateResult> {
+  return expandPresentation(params, await planPresentation(params))
 }
 
 // ─── RAG retrieval ───────────────────────────────────────────────────────────
@@ -462,11 +535,11 @@ const STRICT_SOURCE_RULES = `
 // technical brief for the expansion pass, not prose — "виды насосов:
 // объёмные vs динамические, критерий выбора", not "рассказать про насосы".
 
-export interface OutlineSlideSpec {
-  type:  SlideType
-  title: string
-  brief: string
-}
+// The shape itself now lives in shared/types.ts — the outline approval gate
+// (TODO.md "### AO" Phase 0) puts it on the wire for the teacher to edit, so
+// the frontend needs it too. Alias kept so every existing import here and in
+// the tests keeps reading naturally.
+export type OutlineSlideSpec = PresentationOutlineSlide
 
 // Renders web-search results as background orientation, not citable
 // evidence — there's nothing to verbatim-verify a snippet against the way
@@ -598,6 +671,44 @@ export function normaliseOutline(raw: unknown, slideTarget: number): OutlineSlid
   out[out.length - 1] = { ...out[out.length - 1], type: 'summary' }
   return out
 }
+
+/**
+ * Normalises a *teacher-edited* outline arriving from the approval gate
+ * (TODO.md "### AO" Phase 0). Deliberately gentler than normaliseOutline():
+ * that one repairs a model's output, including forcing the deck to open on
+ * `title` and close on `summary`. A teacher who deleted the title slide or
+ * ended on a discussion meant it, so structure is left alone here — only
+ * junk is rejected (unknown types, blank titles, an oversized array).
+ *
+ * Returns null when nothing usable survives, so the route can 400 rather
+ * than enqueue an expansion of an empty deck.
+ */
+export function normaliseEditedOutline(raw: unknown): OutlineSlideSpec[] | null {
+  if (!Array.isArray(raw)) return null
+
+  const out: OutlineSlideSpec[] = []
+  for (const entry of raw.slice(0, MAX_SLIDE_COUNT)) {
+    const o = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>
+    const title = typeof o.title === 'string' ? o.title.trim() : ''
+    if (!title) continue   // a row the teacher blanked out is a row they meant to drop
+    const type = typeof o.type === 'string' && (KNOWN_TYPES as string[]).includes(o.type)
+      ? (o.type as SlideType)
+      : 'bullets'
+    out.push({
+      type,
+      title: title.slice(0, OUTLINE_TITLE_MAX_CHARS),
+      brief: (typeof o.brief === 'string' ? o.brief.trim() : '').slice(0, OUTLINE_BRIEF_MAX_CHARS),
+    })
+  }
+
+  return out.length > 0 ? out : null
+}
+
+// Field ceilings for a teacher-edited outline. These are prompt-safety
+// limits, not UI hints: every title and brief is interpolated into the
+// expansion prompt, so an unbounded field is an unbounded token bill.
+export const OUTLINE_TITLE_MAX_CHARS = 200
+export const OUTLINE_BRIEF_MAX_CHARS = 600
 
 export function chunkArray<T>(items: T[], size: number): T[][] {
   const out: T[][] = []

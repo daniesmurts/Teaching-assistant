@@ -4,7 +4,8 @@ vi.mock('./yandexImages', () => ({ yandexImageSearch: vi.fn() }))
 
 import {
   filterCitations, outlineMaxTokens, expansionBatchMaxTokens,
-  normaliseOutline, createSourcePool, chunkArray,
+  normaliseOutline, normaliseEditedOutline, OUTLINE_TITLE_MAX_CHARS, OUTLINE_BRIEF_MAX_CHARS,
+  createSourcePool, chunkArray,
   getSlideImageQuery, withSlideImage, autoFillImages,
   shouldUseWebGrounding, isStrictSource, OUTLINE_MAX_OUTPUT_TOKENS,
 } from './presentations'
@@ -388,5 +389,70 @@ describe('isStrictSource', () => {
     const params = { strictSource: true, sourceText: 'Мой конспект.' }
     expect(isStrictSource(params)).toBe(true)
     expect(shouldUseWebGrounding(Boolean(params.sourceText), true, true)).toBe(false)
+  })
+})
+
+// ─── normaliseEditedOutline (TODO.md "### AO" Phase 0) ──────────────────────
+//
+// The teacher-edited counterpart of normaliseOutline. The distinction that
+// matters: this one must NOT repair structure — a teacher who deleted the
+// title slide meant to.
+
+describe('normaliseEditedOutline', () => {
+  it('keeps a teacher-edited order and types verbatim', () => {
+    const edited = [
+      { type: 'concept', title: 'Понятие', brief: 'определение' },
+      { type: 'formula', title: 'Формула', brief: '' },
+    ]
+    expect(normaliseEditedOutline(edited)).toEqual(edited)
+  })
+
+  it('does not force a title first or a summary last, unlike normaliseOutline', () => {
+    const edited = [
+      { type: 'concept',    title: 'Понятие',   brief: '' },
+      { type: 'discussion', title: 'Обсуждение', brief: '' },
+    ]
+    const out = normaliseEditedOutline(edited)!
+    expect(out[0].type).toBe('concept')
+    expect(out[out.length - 1].type).toBe('discussion')
+
+    // Same input through the model-repair path *is* restructured — this is
+    // the behavioural difference the two functions exist for.
+    const repaired = normaliseOutline(edited, 2)
+    expect(repaired[0].type).toBe('title')
+    expect(repaired[repaired.length - 1].type).toBe('summary')
+  })
+
+  it('drops rows the teacher blanked out', () => {
+    const out = normaliseEditedOutline([
+      { type: 'bullets', title: 'Оставить', brief: '' },
+      { type: 'bullets', title: '   ',      brief: 'осиротевшее описание' },
+    ])
+    expect(out).toEqual([{ type: 'bullets', title: 'Оставить', brief: '' }])
+  })
+
+  it('coerces an unknown type to bullets rather than rejecting the row', () => {
+    const out = normaliseEditedOutline([{ type: 'wat', title: 'Слайд', brief: '' }])
+    expect(out).toEqual([{ type: 'bullets', title: 'Слайд', brief: '' }])
+  })
+
+  it('truncates oversized fields — every one lands in the expansion prompt', () => {
+    const out = normaliseEditedOutline([
+      { type: 'bullets', title: 'т'.repeat(500), brief: 'б'.repeat(2000) },
+    ])!
+    expect(out[0].title.length).toBe(OUTLINE_TITLE_MAX_CHARS)
+    expect(out[0].brief.length).toBe(OUTLINE_BRIEF_MAX_CHARS)
+  })
+
+  it('caps the array at MAX_SLIDE_COUNT', () => {
+    const many = Array.from({ length: MAX_SLIDE_COUNT + 20 }, (_, i) => ({ type: 'bullets', title: `С${i}`, brief: '' }))
+    expect(normaliseEditedOutline(many)!.length).toBe(MAX_SLIDE_COUNT)
+  })
+
+  it('returns null when nothing usable survives, so the route can 400', () => {
+    expect(normaliseEditedOutline([])).toBeNull()
+    expect(normaliseEditedOutline([{ type: 'bullets', title: '', brief: 'x' }])).toBeNull()
+    expect(normaliseEditedOutline('не массив')).toBeNull()
+    expect(normaliseEditedOutline(null)).toBeNull()
   })
 })

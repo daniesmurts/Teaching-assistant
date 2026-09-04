@@ -7,18 +7,33 @@
 // row the client polls.
 
 import type PgBoss from 'pg-boss'
-import { generatePresentation, type GenerateParams } from './presentations'
+import {
+  generatePresentation, planPresentation, expandPresentation, type GenerateParams,
+} from './presentations'
 import {
   getPresentationJobByIdUnscoped, setPresentationJobProcessing,
-  completePresentationJob, failPresentationJob,
+  setPresentationJobOutlineReady, completePresentationJob, failPresentationJob,
+  expireStalePresentationOutlines,
 } from '../db/queries/presentationJobs'
+import { scheduleWithLease } from './schedulerLease'
 import { logger } from '../lib/logger'
 
 export const PRESENTATION_JOB_QUEUE = 'presentation-job'
 
+// Which half of generation this message runs (TODO.md "### AO" Phase 0):
+//   'full'    — plan + expand back-to-back, the pre-gate behaviour, still the
+//               path when the teacher opts out of reviewing the plan.
+//   'outline' — plan only, then park the job at 'outline_ready'.
+//   'expand'  — write the deck from the outline stored on the job row.
+// A single queue with a stage discriminator rather than two queues: the
+// concurrency ceiling that matters is "decks generating at once", and two
+// queues would each need their own share of it.
+export type PresentationJobStage = 'full' | 'outline' | 'expand'
+
 export interface PresentationJobPayload {
   jobId:  string          // presentation_jobs row id (NOT the pg-boss job id)
   params: GenerateParams  // fully resolved at enqueue time (plan gates already applied)
+  stage?: PresentationJobStage   // absent on messages enqueued before the gate shipped — treated as 'full'
 }
 
 // Retry policy mirrors grade_jobs: one retry, short backoff. generatePresentation
@@ -58,22 +73,50 @@ export async function registerPresentationJobWorker(boss: PgBoss): Promise<void>
       PRESENTATION_JOB_QUEUE,
       { includeMetadata: true },
       async ([job]) => {
-        const { jobId, params } = job.data
+        const { jobId, params, stage = 'full' } = job.data
         const isLastAttempt = job.retryCount >= job.retryLimit
         try {
           // Idempotency guard for the requeue-after-crash path: if a previous
           // attempt already completed the row, don't generate — and bill —
-          // again.
+          // again. 'outline_ready' is terminal for the same reason on the
+          // outline stage: the plan is already sitting with the teacher, and
+          // a retry would silently replace it with a different one.
           const existing = await getPresentationJobByIdUnscoped(jobId)
           if (!existing || existing.status === 'ready') return
+          if (stage === 'outline' && existing.status === 'outline_ready') return
 
           await setPresentationJobProcessing(jobId)
+
+          if (stage === 'outline') {
+            const plan = await planPresentation(params)
+            await setPresentationJobOutlineReady(jobId, plan.outline, plan.webGrounding)
+            return
+          }
+
+          if (stage === 'expand') {
+            // The outline is read from the row, not the message: it's the
+            // teacher's edited version, written by the confirm route after
+            // this job's payload was built.
+            const outline = existing.outline
+            if (!outline || outline.length === 0) {
+              throw new Error('Подтверждённый план не найден')
+            }
+            const result = await expandPresentation(params, {
+              outline,
+              webGrounding: existing.web_grounding ?? [],
+              slideTarget:  params.slideCountTarget ?? outline.length,
+            })
+            await completePresentationJob(jobId, result)
+            return
+          }
+
           const result = await generatePresentation(params)
           await completePresentationJob(jobId, result)
         } catch (err) {
           logger.error({
             message:     'Presentation job failed',
             jobId,
+            stage,
             attempt:     job.retryCount + 1,
             maxAttempts: job.retryLimit + 1,
             error:       (err as Error).message,
@@ -89,4 +132,30 @@ export async function registerPresentationJobWorker(boss: PgBoss): Promise<void>
       }
     )
   }
+}
+
+// ─── Stale-outline sweep ────────────────────────────────────────────────────
+//
+// A teacher who closes the tab at the approval gate leaves the job parked at
+// 'outline_ready' forever, holding their conspectus in `params`. This expires
+// those drafts (and clears the stored text with them). Runs through the
+// scheduler lease (CLAUDE.md invariant 11) so exactly one instance sweeps,
+// whatever the deployment model.
+//
+// 24h rather than something tight: an outline abandoned over lunch should
+// still be there after lunch, and there is nothing expensive about a parked
+// row — no LLM call is in flight, no quota is consumed.
+const OUTLINE_TTL_HOURS = 24
+
+export function startPresentationOutlineSweeper(): void {
+  scheduleWithLease(
+    'presentation_outline_sweep',
+    { intervalMs: 60 * 60 * 1000, leaseMs: 50 * 60_000, firstRunDelayMs: 3 * 60_000 },
+    async () => {
+      const expired = await expireStalePresentationOutlines(OUTLINE_TTL_HOURS)
+      if (expired > 0) {
+        logger.info({ message: 'Expired unconfirmed presentation outlines', count: expired, ttlHours: OUTLINE_TTL_HOURS })
+      }
+    }
+  )
 }

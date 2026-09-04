@@ -1,5 +1,6 @@
 import { body } from 'express-validator'
 import { MAX_SLIDE_COUNT } from '../../../shared/types'
+import { OUTLINE_BRIEF_MAX_CHARS, OUTLINE_TITLE_MAX_CHARS } from '../services/presentations'
 
 export const generatePresentationRules = [
   body('topic')
@@ -65,4 +66,34 @@ export const generatePresentationRules = [
   body('strict_source')
     .optional({ nullable: true })
     .isBoolean().withMessage('Неверное значение режима «строго по конспекту»'),
+
+  // Outline approval gate (TODO.md "### AO" Phase 0). Absent means true —
+  // an older cached frontend bundle that doesn't send the field would
+  // otherwise land in a gate it has no UI for, so the route reads it as
+  // "false only when explicitly false" and the client sends it explicitly.
+  body('review_outline')
+    .optional({ nullable: true })
+    .isBoolean().withMessage('Неверное значение режима предварительного плана'),
+]
+
+// Confirming an edited plan. Shape only — normaliseEditedOutline() in
+// services/presentations.ts does the trimming, unknown-type coercion and
+// blank-row dropping, so these rules exist to reject what a normaliser
+// shouldn't quietly repair: a missing array, or one long enough to be an
+// attack rather than a lecture.
+export const confirmOutlineRules = [
+  body('outline')
+    .isArray({ min: 1, max: MAX_SLIDE_COUNT })
+    .withMessage(`План должен содержать от 1 до ${MAX_SLIDE_COUNT} слайдов`),
+
+  body('outline.*.title')
+    .isString().withMessage('Заголовок слайда обязателен')
+    .isLength({ max: OUTLINE_TITLE_MAX_CHARS })
+    .withMessage(`Заголовок слайда слишком длинный (макс. ${OUTLINE_TITLE_MAX_CHARS} символов)`),
+
+  body('outline.*.brief')
+    .optional({ nullable: true })
+    .isString().withMessage('Неверное описание слайда')
+    .isLength({ max: OUTLINE_BRIEF_MAX_CHARS })
+    .withMessage(`Описание слайда слишком длинное (макс. ${OUTLINE_BRIEF_MAX_CHARS} символов)`),
 ]

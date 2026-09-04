@@ -61,6 +61,7 @@ export type {
   PresentationDepth,
   Slide,
   SlideType,
+  PresentationOutlineSlide,
   SlideImage,
   ImageCandidate,
   TitleSlide,

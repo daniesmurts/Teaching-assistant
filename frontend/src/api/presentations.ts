@@ -1,7 +1,8 @@
 import client from './client'
 import { downloadCsv } from './download'
 import type {
-  Presentation, PresentationSource, PresentationDepth, Slide, SlideImage, ImageCandidate,
+  Presentation, PresentationSource, PresentationDepth, PresentationOutlineSlide,
+  Slide, SlideImage, ImageCandidate,
 } from '../types'
 
 export interface GenerateRequest {
@@ -18,6 +19,10 @@ export interface GenerateRequest {
   // model supplementing it from its own knowledge. Ignored without source_text.
   strict_source?: boolean
   depth?: PresentationDepth
+  // Show the plan before writing the deck (TODO.md "### AO" Phase 0). Sent
+  // explicitly — the backend reads a missing field as `true`, so an older
+  // cached bundle can't land in a gate it has no UI for.
+  review_outline?: boolean
 }
 
 export interface GenerateResponse {
@@ -59,13 +64,16 @@ export async function extractPresentationSourceText(file: File): Promise<Extract
 // Generation can chain multiple LLM calls and outlive any HTTP timeout, so
 // the client enqueues a job and polls — same pattern as grading's grade-jobs.
 
-export type PresentationJobStatus = 'pending' | 'processing' | 'ready' | 'failed'
+export type PresentationJobStatus = 'pending' | 'processing' | 'outline_ready' | 'ready' | 'failed'
 
 export interface PresentationJob {
   id:              string
   status:          PresentationJobStatus
   presentation_id: string | null
   result:          GenerateResponse | null
+  // Populated at 'outline_ready' (and kept afterwards) — the plan the
+  // teacher is being asked to confirm.
+  outline:         PresentationOutlineSlide[] | null
   error_message:   string | null
   created_at:      string
 }
@@ -77,6 +85,19 @@ export async function startPresentationJob(data: GenerateRequest): Promise<Prese
 
 export async function getPresentationJob(id: string): Promise<PresentationJob> {
   const res = await client.get<PresentationJob>(`/api/presentations/generate-jobs/${id}`)
+  return res.data
+}
+
+// Confirms the plan (as edited) and starts the expensive half. The job then
+// continues through 'processing' → 'ready' on the same poll loop.
+export async function confirmPresentationOutline(
+  jobId: string,
+  outline: PresentationOutlineSlide[],
+): Promise<PresentationJob> {
+  const res = await client.post<PresentationJob>(
+    `/api/presentations/generate-jobs/${jobId}/outline`,
+    { outline },
+  )
   return res.data
 }
 
