@@ -1473,3 +1473,26 @@ export function applySlideMove(slides: Slide[], from: number, to: number): Slide
   next.splice(to, 0, moved)
   return next
 }
+
+// ─── Deck → тест (TODO.md "### AO" Phase 3) ─────────────────────────────────
+
+// A slide's image placeholder is a production note to the teacher
+// («[Подобрать изображение: «схема насоса»]»), not lecture content — left in,
+// it invites questions about pictures that were never on screen.
+const IMAGE_MARKER_LINE = /^\s*\[(?:Изображение|Подобрать изображение):.*\]\s*$/gm
+
+/**
+ * Renders a deck as the source material for a test on it. Speaker notes are
+ * included on purpose — they carry the worked examples and the typical
+ * misconceptions the expansion prompt asks for, which is exactly what a
+ * comprehension check should be built from, and they are what the students
+ * actually heard.
+ *
+ * Truncated to the same ceiling as a pasted conspectus: past it the quiz
+ * prompt is being fed more than it can use, and a 60-slide deck with deep
+ * notes clears 20k characters easily.
+ */
+export function renderSlidesForQuiz(slides: Slide[], maxChars = 20_000): string {
+  const text = renderSlidesAsText(slides).replace(IMAGE_MARKER_LINE, '').replace(/\n{3,}/g, '\n\n')
+  return text.length > maxChars ? text.slice(0, maxChars).trimEnd() : text
+}

@@ -3,12 +3,11 @@ import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { aiLimiter } from '../middleware/rateLimits'
 import { asyncHandler } from '../lib/asyncHandler'
-import { NotFoundError, PlanLimitError } from '../errors/AppError'
+import { NotFoundError } from '../errors/AppError'
 import { generateQuizRules } from '../validation/quizValidation'
-import { getLimits, type PlanTier } from '../config/planLimits'
-import { generateQuiz } from '../services/quizzes'
+import { generateQuiz, assertQuizQuota } from '../services/quizzes'
 import {
-  findQuizzesByTeacher, findQuizById, deleteQuiz, countQuizzesThisMonth,
+  findQuizzesByTeacher, findQuizById, deleteQuiz,
 } from '../db/queries/quizzes'
 import type { QuizLevel } from '../../../shared/types'
 
@@ -21,16 +20,7 @@ router.post(
   aiLimiter,
   validate(generateQuizRules),
   asyncHandler(async (req, res) => {
-    const limit = getLimits(req.teacher.plan_tier as PlanTier).quizzesPerMonth
-    if (limit !== Infinity) {
-      const used = await countQuizzesThisMonth(req.teacher.id)
-      if (used >= limit) {
-        throw new PlanLimitError(
-          `Достигнут месячный лимит генерации тестов (${limit}). Перейдите на Pro для безлимита.`,
-          'PLAN_LIMIT_REACHED'
-        )
-      }
-    }
+    await assertQuizQuota(req.teacher.id, req.teacher.plan_tier)
 
     const { topic, question_count, course_id, level, source_text } = req.body as {
       topic:          string

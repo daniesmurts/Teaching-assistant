@@ -2,7 +2,7 @@ import client from './client'
 import { downloadCsv } from './download'
 import type {
   Presentation, PresentationSource, PresentationDepth, PresentationOutlineSlide,
-  Slide, SlideType, SlideImage, ImageCandidate,
+  Quiz, QuizLevel, Slide, SlideType, SlideImage, ImageCandidate,
 } from '../types'
 
 export interface GenerateRequest {
@@ -206,5 +206,28 @@ export async function moveSlide(presentationId: string, from: number, to: number
     `/api/presentations/${presentationId}/slides/move`,
     { from, to },
   )
+  return res.data
+}
+
+// ─── Дек → тест (TODO.md "### AO" Phase 3) ──────────────────────────────────
+//
+// «Проверить усвоение»: a test built from this lecture's own slides and
+// speaker notes. What comes back is an ordinary quiz, so the existing
+// «Запустить в аудитории» (Feature Y) runs it with no further plumbing.
+
+export async function createQuizFromPresentation(
+  presentationId: string,
+  questionCount = 8,
+  level?: QuizLevel,
+): Promise<Quiz> {
+  const res = await client.post<Quiz>(
+    `/api/presentations/${presentationId}/quiz`,
+    { question_count: questionCount, level },
+  )
+  return res.data
+}
+
+export async function getPresentationQuizzes(presentationId: string): Promise<Quiz[]> {
+  const res = await client.get<Quiz[]>(`/api/presentations/${presentationId}/quizzes`)
   return res.data
 }

@@ -4,6 +4,7 @@ import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import PresentationForm from '../components/presentations/PresentationForm'
 import SlideContent from '../components/presentations/SlideContent'
+import DeckQuizPanel from '../components/presentations/DeckQuizPanel'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import { tagColorClasses } from '../lib/tagColor'
@@ -232,6 +233,15 @@ export default function Presentations() {
                   {displayTitle}
                 </div>
               )}
+              {/* Лекция → тест → аудитория (TODO.md "### AO" Phase 3). Above
+                  the slides: the check on the lecture is the next thing the
+                  teacher does with it, not a footnote after 30 cards. Only for
+                  a persisted deck with typed slides — a legacy text row has
+                  nothing to build questions from. */}
+              {displayPresentationId && displaySlides && displaySlides.length > 0 && (
+                <DeckQuizPanel presentationId={displayPresentationId} />
+              )}
+
               <SlideContent
                 slides={displaySlides}
                 content={displayContent ?? undefined}

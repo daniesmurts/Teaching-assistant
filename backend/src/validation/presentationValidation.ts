@@ -126,3 +126,17 @@ export const insertSlideRules = [
     .isString().withMessage('Некорректный заголовок')
     .isLength({ max: 300 }).withMessage('Заголовок слайда слишком длинный'),
 ]
+
+// «Проверить усвоение» — a test generated from a deck (TODO.md "### AO"
+// Phase 3). Same bounds as the Тесты form's own rules, since it produces the
+// same kind of quiz row; the default of 8 is a lecture-sized check rather
+// than the form's 10.
+export const deckQuizRules = [
+  body('question_count')
+    .optional({ nullable: true })
+    .isInt({ min: 5, max: 20 }).withMessage('Количество вопросов: от 5 до 20'),
+
+  body('level')
+    .optional({ nullable: true, checkFalsy: true })
+    .isIn(['recall', 'understanding', 'application']).withMessage('Неверный уровень'),
+]

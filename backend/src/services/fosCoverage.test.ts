@@ -34,7 +34,7 @@ describe('checkCoverage', () => {
 
   it('finds coverage in quiz questions', () => {
     const quiz: Quiz = {
-      id: '1', teacher_id: 't', course_id: null, course_name: null, topic: 'x', level: null, question_count: 1,
+      id: '1', teacher_id: 't', course_id: null, course_name: null, presentation_id: null, topic: 'x', level: null, question_count: 1,
       questions: [{ question: 'Что такое электромагнетизм?', options: ['a', 'b', 'c', 'd'], correct_index: 0, explanation: '', citations: [] }],
       sources: null, created_at: '',
     }
@@ -84,7 +84,7 @@ describe('checkCoverage', () => {
 describe('buildPassportRows', () => {
   it('lists which instrument types reference each topic', () => {
     const quiz: Quiz = {
-      id: '1', teacher_id: 't', course_id: null, course_name: null, topic: 'x', level: null, question_count: 1,
+      id: '1', teacher_id: 't', course_id: null, course_name: null, presentation_id: null, topic: 'x', level: null, question_count: 1,
       questions: [{ question: 'Что такое гидравлика?', options: ['a', 'b', 'c', 'd'], correct_index: 0, explanation: '', citations: [] }],
       sources: null, created_at: '',
     }

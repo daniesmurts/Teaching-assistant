@@ -3,7 +3,9 @@ import { findCourseById } from '../db/queries/courses'
 import { findRelevantChunks, type RelevantChunk } from '../db/queries/chunks'
 import { logDocumentRetrievals } from '../db/queries/ragDocumentUses'
 import { resolveRagRetrievalScope } from './ragScope'
-import { createQuiz } from '../db/queries/quizzes'
+import { createQuiz, countQuizzesThisMonth } from '../db/queries/quizzes'
+import { getLimits, type PlanTier } from '../config/planLimits'
+import { PlanLimitError } from '../errors/AppError'
 import { sanitiseForPrompt } from '../lib/promptSanitiser'
 import { logger } from '../lib/logger'
 import type { Quiz, QuizQuestion, QuizLevel, PresentationSource } from '../../../shared/types'
@@ -17,6 +19,12 @@ export interface GenerateQuizParams {
   questionCount: number             // 5–20, clamped server-side
   level?:        QuizLevel
   sourceText?:   string             // pasted lecture notes — takes priority over RAG retrieval
+  // Set when the source text is a generated lecture deck («Проверить
+  // усвоение», TODO.md "### AO" Phase 3). Two effects: the quiz row records
+  // which lecture it came from, and the prompt frames the material as a
+  // lecture that has just been delivered rather than as reference notes —
+  // the questions should check what was said in the hall.
+  presentationId?: string
 }
 
 export interface GenerateQuizResult {
@@ -73,6 +81,7 @@ export async function generateQuiz(params: GenerateQuizParams): Promise<Generate
   const quiz = await createQuiz({
     teacherId:     params.teacherId,
     courseId:      params.courseId,
+    presentationId: params.presentationId,
     topic:         params.topic,
     level:         params.level,
     questionCount: questions.length,
@@ -203,7 +212,14 @@ function buildPrompt(
   }
 
   if (params.sourceText) {
-    lines.push(`## Конспект лекции (составляйте вопросы строго по этому материалу)`)
+    // A deck is material the students have just sat through, slide by slide,
+    // with the speaker notes as what was actually said — so the test is a
+    // check on that lecture, not a general quiz on the topic. Saying so
+    // keeps the questions inside what was covered instead of drifting to
+    // whatever else the topic contains.
+    lines.push(params.presentationId
+      ? `## Материал прочитанной лекции — слайды и заметки докладчика\nСоставляйте вопросы строго по этому материалу: студенты только что прослушали именно эту лекцию. Не спрашивайте о том, чего в ней не было.`
+      : `## Конспект лекции (составляйте вопросы строго по этому материалу)`)
     lines.push(sanitiseForPrompt(params.sourceText))
     lines.push('')
   }
@@ -275,4 +291,24 @@ function levelLabel(level: QuizLevel): string {
     understanding: 'понимание (объяснение, сравнение)',
     application:   'применение (использование в задачах)',
   }[level]
+}
+
+// ─── Monthly quota ───────────────────────────────────────────────────────────
+//
+// Quiz usage is COUNT(*) over the quizzes table rather than a counter row, so
+// the check is a query, not a middleware read. Shared by the Тесты form and by
+// «Проверить усвоение» on a lecture deck — a test generated from a deck is
+// still a test, and routing around the Тесты page must not route around its
+// limit.
+
+export async function assertQuizQuota(teacherId: string, planTier: string): Promise<void> {
+  const limit = getLimits(planTier as PlanTier).quizzesPerMonth
+  if (limit === Infinity) return
+  const used = await countQuizzesThisMonth(teacherId)
+  if (used >= limit) {
+    throw new PlanLimitError(
+      `Достигнут месячный лимит генерации тестов (${limit}). Перейдите на Pro для безлимита.`,
+      'PLAN_LIMIT_REACHED'
+    )
+  }
 }

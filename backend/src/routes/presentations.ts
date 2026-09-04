@@ -9,11 +9,14 @@ import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
 import { canUseFeature } from '../config/planLimits'
 import {
   generatePresentationRules, confirmOutlineRules, regenerateSlideRules, insertSlideRules,
+  deckQuizRules,
 } from '../validation/presentationValidation'
 import {
   generatePresentation, getSlideImageQuery, normaliseEditedOutline, normaliseEditedSlide,
-  regenerateSlide, applySlideMove, renderSlidesAsText, type GenerateParams,
+  regenerateSlide, applySlideMove, renderSlidesAsText, renderSlidesForQuiz, type GenerateParams,
 } from '../services/presentations'
+import { generateQuiz, assertQuizQuota } from '../services/quizzes'
+import { findQuizzesByPresentation } from '../db/queries/quizzes'
 import { generatePresentationPptx } from '../services/presentationExport'
 import { extractText } from '../services/documentExtractor'
 import { yandexImageSearch } from '../services/yandexImages'
@@ -458,6 +461,55 @@ router.post('/:id/slides/move',
       event: 'reordered', slideIndex: to, slide: presentation.slides[from],
     })
     res.json(updated)
+  })
+)
+
+// POST /api/presentations/:id/quiz — «Проверить усвоение»: a test generated
+// from this lecture's own slides and speaker notes (TODO.md "### AO" Phase 3).
+//
+// The deck, the test and the in-hall live session existed as three features
+// that never touched: a teacher generated a lecture, then re-described the
+// same material by hand on the Тесты page. This is the link — and because the
+// quiz it produces is an ordinary quiz row, «Запустить в аудитории» (Feature
+// Y) works on it with no further plumbing.
+//
+// Quota is the *quiz* quota, deliberately: a test generated from a deck is
+// still a test, and reaching it from another page must not route around the
+// limit the Тесты form enforces.
+router.post('/:id/quiz',
+  aiLimiter,
+  validate(deckQuizRules),
+  asyncHandler(async (req, res) => {
+    const presentation = await findPresentationById(req.params.id, req.teacher.id)
+    if (!presentation) throw new NotFoundError('Презентация')
+    const slides = presentation.slides ?? []
+    if (slides.length === 0) {
+      throw new ValidationError('Эта презентация сохранена в старом формате — создайте тест на странице «Тесты»')
+    }
+
+    await assertQuizQuota(req.teacher.id, req.teacher.plan_tier)
+
+    const { quiz } = await generateQuiz({
+      teacherId:      req.teacher.id,
+      courseId:       presentation.course_id ?? undefined,
+      presentationId: presentation.id,
+      topic:          presentation.topic,
+      questionCount:  Number(req.body?.question_count ?? 8),
+      level:          req.body?.level || undefined,
+      sourceText:     renderSlidesForQuiz(slides),
+    })
+
+    res.status(201).json(quiz)
+  })
+)
+
+// GET /api/presentations/:id/quizzes — tests already generated from this deck,
+// so the view can offer to run one instead of silently making a second copy.
+router.get('/:id/quizzes',
+  asyncHandler(async (req, res) => {
+    const presentation = await findPresentationById(req.params.id, req.teacher.id)
+    if (!presentation) throw new NotFoundError('Презентация')
+    res.json(await findQuizzesByPresentation(presentation.id, req.teacher.id))
   })
 )
 

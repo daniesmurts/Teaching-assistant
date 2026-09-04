@@ -5,7 +5,7 @@ vi.mock('./yandexImages', () => ({ yandexImageSearch: vi.fn() }))
 import {
   filterCitations, outlineMaxTokens, expansionBatchMaxTokens,
   normaliseOutline, normaliseEditedOutline, OUTLINE_TITLE_MAX_CHARS, OUTLINE_BRIEF_MAX_CHARS,
-  createSourcePool, chunkArray,
+  renderSlidesForQuiz, createSourcePool, chunkArray,
   getSlideImageQuery, withSlideImage, autoFillImages,
   shouldUseWebGrounding, isStrictSource, OUTLINE_MAX_OUTPUT_TOKENS,
 } from './presentations'
@@ -454,5 +454,41 @@ describe('normaliseEditedOutline', () => {
     expect(normaliseEditedOutline([{ type: 'bullets', title: '', brief: 'x' }])).toBeNull()
     expect(normaliseEditedOutline('не массив')).toBeNull()
     expect(normaliseEditedOutline(null)).toBeNull()
+  })
+})
+
+// ─── renderSlidesForQuiz (TODO.md "### AO" Phase 3) ─────────────────────────
+
+describe('renderSlidesForQuiz', () => {
+  const deck = [
+    {
+      type: 'concept', title: 'Кавитация', notes: 'Про кавитацию говорим так: пример с насосом на 3 атм.',
+      citations: [], body: { definition: 'Образование пузырьков', supporting: ['падение давления'] },
+    },
+    {
+      type: 'diagram', title: 'Схема насоса', notes: 'Показываем разрез.', citations: [],
+      body: { image_query: 'разрез центробежного насоса', caption: 'Разрез', points: ['рабочее колесо'], image: null },
+    },
+  ] as unknown as Slide[]
+
+  it('keeps speaker notes — they are what the students actually heard', () => {
+    const text = renderSlidesForQuiz(deck)
+    expect(text).toContain('Про кавитацию говорим так')
+    expect(text).toContain('пример с насосом на 3 атм')
+  })
+
+  it('strips image placeholders, which are production notes and not lecture content', () => {
+    const text = renderSlidesForQuiz(deck)
+    expect(text).not.toContain('Подобрать изображение')
+    expect(text).not.toContain('разрез центробежного насоса')
+    expect(text).toContain('Схема насоса')   // the slide itself survives
+  })
+
+  it('truncates to the ceiling the quiz prompt can actually use', () => {
+    const long = Array.from({ length: 40 }, (_, i) => ({
+      type: 'bullets', title: `Слайд ${i}`, notes: 'слово '.repeat(400), citations: [], body: { items: ['тезис'] },
+    })) as unknown as Slide[]
+    expect(renderSlidesForQuiz(long).length).toBeLessThanOrEqual(20_000)
+    expect(renderSlidesForQuiz(long, 500).length).toBeLessThanOrEqual(500)
   })
 })

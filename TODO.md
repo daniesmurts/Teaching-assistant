@@ -2293,7 +2293,7 @@ ship them as one thing.
 - **Depends on:** P (org tree — shipped) for scoping; AG's presentation
   image pipeline (shipped) for the Phase 2 insertion point.
 
-### AO. Презентации — from vending machine to workspace · Effort: Phase 0 S–M, 🟢 SHIPPED (2026-09-04) · Phase 1 M, 🟢 SHIPPED (2026-09-04) · Phase 2 M, Phase 3 M–L, Phase 4 M (phased, independently shippable)
+### AO. Презентации — from vending machine to workspace · Effort: Phase 0 S–M, 🟢 SHIPPED (2026-09-04) · Phase 1 M, 🟢 SHIPPED (2026-09-04) · Phase 2 M, Phase 3 M–L (🟡 дек → тест SHIPPED 2026-09-05, three links remain), Phase 4 M (phased, independently shippable)
 
 Presentations are one of the features teachers actually use daily (FEATURES.md,
 GA since AG). AG fixed *generation quality* — outline+expansion, real notes
@@ -2385,10 +2385,19 @@ of this entry:
   offline harness and live usage report the same axis.
 - **Phase 3 — wire the deck into the platform instead of leaving it a
   leaf.** In rough order of value:
-  - **Дек → тест → аудитория.** Generate a quiz from the deck's own slides
-    (`services/quizzes.ts`) and launch it in-hall via Y's live QR mode. That
-    closes a complete lecture loop — материал → лекция → проверка усвоения →
-    журнал — that nothing else in the RU market ships end to end.
+  - **Дек → тест → аудитория.** 🟢 SHIPPED (2026-09-05).
+    `POST /api/presentations/:id/quiz` builds the test from the deck's slides
+    *and speaker notes*, framed in the prompt as a lecture just delivered
+    (questions stay inside what was covered); RAG is skipped since the deck is
+    the material; image placeholders stripped. Migration 120's
+    `quizzes.presentation_id` is `ON DELETE SET NULL` so deleting a deck can't
+    take a gradebook-linked test with it. Quiz quota shared via
+    `assertQuizQuota()` — a test from a deck is still a test.
+    `DeckQuizPanel.tsx` sits above the slides with count + Bloom level and the
+    Тесты page's pacing toggle. **Not done:** the panel launches the newest
+    test for the deck and only *says* when there are others (no picker); no
+    "regenerate the test after editing slides" prompt, so a deck edited after
+    its test was made keeps the stale test until the teacher makes a new one.
   - **Дек → раздатка.** Student-facing PDF (slides + notes rendered as
     prose). `renderSlidesAsText` already exists; `programReportPdf.ts` is
     the precedent for the PDF side.

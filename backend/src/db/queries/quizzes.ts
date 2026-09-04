@@ -8,6 +8,7 @@ interface QuizRow {
   // Only present when the query joins courses (findQuizzesByTeacher /
   // findQuizById) — absent on plain `RETURNING *` rows from createQuiz.
   course_name?:   string | null
+  presentation_id: string | null
   topic:          string
   level:          string | null
   question_count: number
@@ -22,6 +23,7 @@ function toQuiz(row: QuizRow): Quiz {
     teacher_id:     row.teacher_id,
     course_id:      row.course_id,
     course_name:    row.course_name ?? null,
+    presentation_id: row.presentation_id ?? null,
     topic:          row.topic,
     level:          row.level as QuizLevel | null,
     question_count: row.question_count,
@@ -34,6 +36,7 @@ function toQuiz(row: QuizRow): Quiz {
 export async function createQuiz(data: {
   teacherId:     string
   courseId?:     string
+  presentationId?: string
   topic:         string
   level?:        QuizLevel
   questionCount: number
@@ -42,12 +45,13 @@ export async function createQuiz(data: {
 }): Promise<Quiz> {
   const { rows } = await pool.query<QuizRow>(
     `INSERT INTO quizzes
-       (teacher_id, course_id, topic, level, question_count, questions, sources)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
+       (teacher_id, course_id, presentation_id, topic, level, question_count, questions, sources)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
      RETURNING *`,
     [
       data.teacherId,
       data.courseId ?? null,
+      data.presentationId ?? null,
       data.topic,
       data.level ?? null,
       data.questionCount,
@@ -112,4 +116,24 @@ export async function deleteQuiz(id: string, teacherId: string): Promise<boolean
     [id, teacherId]
   )
   return (rowCount ?? 0) > 0
+}
+
+/**
+ * Tests generated from one lecture deck, newest first. Lets the presentation
+ * view show what already exists instead of offering to generate a second copy
+ * of a test the teacher made a minute ago.
+ */
+export async function findQuizzesByPresentation(
+  presentationId: string,
+  teacherId: string,
+): Promise<Quiz[]> {
+  const { rows } = await pool.query<QuizRow>(
+    `SELECT q.*, c.name AS course_name
+       FROM quizzes q
+       LEFT JOIN courses c ON c.id = q.course_id
+      WHERE q.presentation_id = $1 AND q.teacher_id = $2
+      ORDER BY q.created_at DESC`,
+    [presentationId, teacherId]
+  )
+  return rows.map(toQuiz)
 }

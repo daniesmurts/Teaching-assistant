@@ -951,6 +951,10 @@ export interface Quiz {
   teacher_id:     string
   course_id:      string | null
   course_name:    string | null
+  // The lecture deck this test was generated from, when it came from
+  // «Проверить усвоение» (TODO.md "### AO" Phase 3) rather than the Тесты
+  // form. Nulled — not deleted — if that deck is later removed (migration 120).
+  presentation_id: string | null
   topic:          string
   level:          QuizLevel | null
   question_count: number
