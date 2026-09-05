@@ -138,6 +138,38 @@ export async function addInvite(
 }
 
 /**
+ * Adds a whole group at once (TODO.md "### AO" follow-up). One statement, not
+ * a loop of addInvite calls: a teacher pasting a group of 30 would otherwise
+ * fire 30 round trips, and a failure halfway would leave the roster half
+ * built with no signal about where it stopped.
+ *
+ * Each invite still gets its own token from generateInviteToken() — the
+ * per-student link is what makes a submission attributable (§5.1), so there is
+ * deliberately no shared "one link for the group" path anywhere in this file.
+ */
+export async function addInvitesBulk(
+  publishedAssignmentId: string,
+  names: string[],
+): Promise<AssignmentInviteRow[]> {
+  if (names.length === 0) return []
+
+  const values: string[] = []
+  const params: unknown[] = [publishedAssignmentId]
+  names.forEach((name) => {
+    params.push(name, generateInviteToken())
+    values.push(`($1, $${params.length - 1}, $${params.length})`)
+  })
+
+  const { rows } = await pool.query<AssignmentInviteRow>(
+    `INSERT INTO assignment_invites (published_assignment_id, student_name, token)
+     VALUES ${values.join(', ')}
+     RETURNING id, published_assignment_id, student_name, student_email, token, status, submitted_at, created_at`,
+    params
+  )
+  return rows
+}
+
+/**
  * LTI student launch — find or create the invite for this (published
  * assignment, LMS student) pair. Idempotent so re-launching the same Moodle
  * activity (closed tab, re-opened) lands on the same in-progress draft

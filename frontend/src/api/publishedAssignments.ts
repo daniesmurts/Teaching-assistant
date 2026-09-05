@@ -56,6 +56,15 @@ export async function updatePublishedAssignment(
   return (await client.patch<PublishedAssignment>(`/api/published-assignments/${id}`, patch)).data
 }
 
+// Adds a whole group at once — one request, one personal link per student.
+// Adding them one at a time was the only path, which for a 30-person group
+// meant 30 rounds of type-name-click before a single link existed.
+export async function addInvitesBulk(id: string, names: string[]): Promise<{ invites: AssignmentInvite[] }> {
+  return (await client.post<{ invites: AssignmentInvite[] }>(
+    `/api/published-assignments/${id}/invites/bulk`, { names },
+  )).data
+}
+
 export async function addInvite(
   id: string,
   input: { student_name?: string | null; student_email?: string | null }

@@ -76,16 +76,27 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] },
             },
           },
-          {
-            // API calls — network first, fall back to cache
-            urlPattern: /^http.*\/api\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 5 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
+          // API responses are deliberately NOT cached by the service worker.
+          //
+          // There used to be a NetworkFirst rule here for /api/* with a 5-minute
+          // expiry, and it caused a reported bug (2026-09-05): a teacher
+          // published a Задание, the detail page went green, and the list kept
+          // showing «Черновик» for several minutes. NetworkFirst falls back to
+          // the cached copy on any network hiccup, so a single slow or failed
+          // request served a stale list — and 5 minutes is exactly how long the
+          // symptom lasted.
+          //
+          // The worse half is privacy. Workbox keys entries by URL alone: it
+          // does not vary on the Authorization header, and these responses carry
+          // student names, submitted work and grades. Cached to disk, they
+          // outlive logout and are readable by the next person to use the
+          // device — for a 152-ФЗ-resident product handling student PII, that
+          // is not a trade worth making for offline convenience the app never
+          // offered anyway (every authenticated screen needs a live API).
+          //
+          // React Query already provides the in-memory caching that actually
+          // helps here (staleTime, invalidation on mutation) — with the crucial
+          // difference that it is per-session and cleared on logout.
         ],
       },
     }),

@@ -3,13 +3,14 @@ import { authenticate } from '../middleware/authenticate'
 import { checkFeatureAccess } from '../middleware/checkPlan'
 import { validate } from '../middleware/validate'
 import { asyncHandler } from '../lib/asyncHandler'
+import { normaliseInviteNames } from '../lib/inviteNames'
 import { NotFoundError, ValidationError } from '../errors/AppError'
 import {
-  createPublishedAssignmentRules, updatePublishedAssignmentRules, addInviteRules,
+  createPublishedAssignmentRules, updatePublishedAssignmentRules, addInviteRules, addInvitesBulkRules,
 } from '../validation/publishedAssignmentValidation'
 import {
   createPublishedAssignment, getPublishedAssignment, listPublishedAssignments,
-  updatePublishedAssignment, addInvite, listInvites, deleteInvite,
+  updatePublishedAssignment, addInvite, addInvitesBulk, listInvites, deleteInvite,
   getSubmissionForTeacher, attachSubmissionToGrade, type SubmittedInvite,
 } from '../db/queries/publishedAssignments'
 import { findLtiCourseLinkByCourseId } from '../db/queries/ltiCourseLinks'
@@ -101,6 +102,20 @@ router.post('/:id/invites', validate(addInviteRules), asyncHandler(async (req, r
     studentEmail: req.body.student_email || null,
   })
   res.status(201).json(invite)
+}))
+
+// POST /:id/invites/bulk — paste a group, get a personal link per student.
+// Adding students one at a time was the only path, which for a 30-person
+// group meant 30 rounds of type-name-click-add before a single link existed —
+// reported as "no way to get the link to share with the students".
+router.post('/:id/invites/bulk', validate(addInvitesBulkRules), asyncHandler(async (req, res) => {
+  const pa = await ownedAssignment(req.params.id, req.teacher.id)
+
+  const names = normaliseInviteNames(req.body.names)
+  if (names.length === 0) throw new ValidationError('В списке нет ни одного имени')
+
+  const invites = await addInvitesBulk(pa.id, names)
+  res.status(201).json({ invites })
 }))
 
 router.delete('/:id/invites/:inviteId', asyncHandler(async (req, res) => {

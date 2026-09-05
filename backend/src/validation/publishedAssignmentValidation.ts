@@ -25,6 +25,18 @@ export const addInviteRules = [
   body('student_email').optional({ nullable: true }).trim().isEmail().withMessage('Некорректный email').normalizeEmail(),
 ]
 
+// Adding a whole group at once, pasted one student per line. Capped at 300:
+// larger than any real учебная группа, small enough that a paste accident
+// can't insert an unbounded number of rows.
+export const MAX_BULK_INVITES = 300
+
+export const addInvitesBulkRules = [
+  body('names')
+    .isArray({ min: 1, max: MAX_BULK_INVITES })
+    .withMessage(`Список студентов: от 1 до ${MAX_BULK_INVITES} строк`),
+  body('names.*').isString().trim().isLength({ min: 1, max: 200 }).withMessage('Слишком длинное имя студента'),
+]
+
 // ─── Public writing surface (token-authed) ────────────────────────────────────
 
 // draft_content is a TipTap JSON document; cap the serialised size to bound

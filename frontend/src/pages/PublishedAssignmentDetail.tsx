@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Button from '../components/ui/Button'
 import { useUIStore } from '../store/uiStore'
 import {
-  getPublishedAssignment, updatePublishedAssignment, addInvite, deleteInvite, writeUrl,
+  getPublishedAssignment, updatePublishedAssignment, addInvite, addInvitesBulk, deleteInvite, writeUrl,
   getLtiRoster, importLtiRoster, type PublishedStatus, type InviteStatus, type LtiRosterMember,
 } from '../api/publishedAssignments'
 import CohortSynthesisPanel from '../components/publishedAssignments/CohortSynthesisPanel'
@@ -33,6 +33,8 @@ export default function PublishedAssignmentDetail() {
 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [bulk, setBulk] = useState('')
+  const [bulkOpen, setBulkOpen] = useState(false)
   const [rosterOpen, setRosterOpen] = useState(false)
   const [rosterPicked, setRosterPicked] = useState<Set<string>>(new Set())
 
@@ -50,6 +52,23 @@ export default function PublishedAssignmentDetail() {
     mutationFn: () => addInvite(id, { student_name: name.trim() || null, student_email: email.trim() || null }),
     onSuccess: () => { invalidate(); setName(''); setEmail(''); addToast('Студент добавлен', 'success') }, onError,
   })
+  const bulkMut = useMutation({
+    mutationFn: () => addInvitesBulk(id, bulk.split('\n').map((l) => l.trim()).filter(Boolean)),
+    onSuccess: (res) => {
+      invalidate(); setBulk(''); setBulkOpen(false)
+      addToast(`Добавлено студентов: ${res.invites.length}`, 'success')
+    },
+    onError,
+  })
+
+  // Срок сдачи. The API and the column have always supported due_at; nothing in
+  // the UI ever set it, so «до какого числа» lived only in whatever the teacher
+  // typed into the задание text.
+  const dueMut = useMutation({
+    mutationFn: (due: string | null) => updatePublishedAssignment(id, { due_at: due }),
+    onSuccess: () => { invalidate(); addToast('Срок сдачи сохранён', 'success') }, onError,
+  })
+
   const delMut = useMutation({
     mutationFn: (inviteId: string) => deleteInvite(id, inviteId),
     onSuccess: () => { invalidate(); addToast('Удалено', 'success') }, onError,
@@ -69,6 +88,18 @@ export default function PublishedAssignmentDetail() {
     },
     onError,
   })
+
+  // One link per student is the whole point (§5.1 — a submission has to be
+  // attributable), so "share the assignment" means handing out N links. Copying
+  // them one at a time is how a teacher loses track at student 12.
+  function copyAllLinks(rows: Array<{ student_name: string | null; student_email: string | null; token: string }>) {
+    const text = rows
+      .map((i) => `${i.student_name || i.student_email || 'Без имени'}\t${writeUrl(i.token)}`)
+      .join('\n')
+    navigator.clipboard.writeText(text)
+      .then(() => addToast(`Скопировано ссылок: ${rows.length}`, 'success'))
+      .catch(() => addToast('Не удалось скопировать', 'error'))
+  }
 
   function copyLink(token: string) {
     navigator.clipboard.writeText(writeUrl(token))
@@ -128,6 +159,33 @@ export default function PublishedAssignmentDetail() {
           )}
         </div>
 
+        {/* Срок сдачи — the "end date" half of what a teacher needs to set up
+            after publishing. datetime-local because a deadline in this context
+            is a date AND an hour («до 23:59 в пятницу»), and a date-only field
+            silently means midnight, which is a different promise. */}
+        <div className="flex flex-wrap items-center gap-3 bg-surface border border-border rounded-lg px-4 py-3 mb-6">
+          <label className="flex items-center gap-2 flex-1 min-w-[240px]">
+            <span className="text-sm font-sans text-ink whitespace-nowrap">Срок сдачи</span>
+            <input
+              type="datetime-local"
+              value={toLocalInput(a.due_at)}
+              onChange={(e) => dueMut.mutate(fromLocalInput(e.target.value))}
+              className="flex-1 min-w-[180px] text-sm font-sans text-ink bg-surface border border-border rounded-md px-2 py-1.5 outline-none focus:border-border-strong"
+            />
+          </label>
+          {a.due_at ? (
+            <button
+              onClick={() => dueMut.mutate(null)}
+              disabled={dueMut.isPending}
+              className="text-xs font-sans text-ink-secondary hover:text-danger transition-colors disabled:opacity-40"
+            >
+              Убрать срок
+            </button>
+          ) : (
+            <span className="text-xs font-sans text-ink-tertiary">Не задан — студенты сдают без ограничения по времени</span>
+          )}
+        </div>
+
         {plan.can('cohortSynthesis') && (
           <div className="mb-6">
             <CohortSynthesisPanel
@@ -147,9 +205,20 @@ export default function PublishedAssignmentDetail() {
             </button>
           )}
         </div>
-        <p className="text-sm font-sans text-ink-secondary mb-3">
-          Сдано {invites.filter((i) => i.status === 'submitted').length} из {invites.length}. Отправьте каждому персональную ссылку.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <p className="text-sm font-sans text-ink-secondary">
+            Сдано {invites.filter((i) => i.status === 'submitted').length} из {invites.length}. У каждого студента своя ссылка.
+          </p>
+          {invites.length > 0 && (
+            <button
+              onClick={() => copyAllLinks(invites)}
+              className="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-md bg-surface border border-border-mid shadow-sm text-xs font-sans font-medium text-ink-secondary hover:bg-surface-warm hover:text-amber transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
+              title="Имя и ссылка на каждой строке — вставляется в таблицу или рассылку"
+            >
+              Скопировать все ссылки
+            </button>
+          )}
+        </div>
 
         {rosterOpen && rosterQuery.data?.available && (
           <div className="mb-4 bg-surface-warm border border-border rounded-lg px-3 py-3">
@@ -203,7 +272,42 @@ export default function PublishedAssignmentDetail() {
               className="w-full text-sm font-sans bg-surface border border-border rounded-md px-2 py-1.5 outline-none focus:border-border-strong" />
           </label>
           <Button onClick={() => name.trim() && addMut.mutate()} loading={addMut.isPending}>Добавить</Button>
+          <button
+            type="button"
+            onClick={() => setBulkOpen((v) => !v)}
+            className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors self-center"
+          >
+            {bulkOpen ? 'Свернуть' : 'Добавить группу списком'}
+          </button>
         </div>
+
+        {/* Pasting the group is the realistic path: a кафедра roster lives in a
+            spreadsheet or a Word table, and adding 30 students one at a time is
+            what made "share the link with students" feel impossible. */}
+        {bulkOpen && (
+          <div className="mb-4 bg-surface-warm border border-border rounded-lg px-3 py-3">
+            <label className="block text-[11px] font-sans text-ink-secondary mb-1">
+              По одному студенту в строке — вставьте список из таблицы
+            </label>
+            <textarea
+              value={bulk}
+              onChange={(e) => setBulk(e.target.value)}
+              rows={6}
+              placeholder={'Иванов И.И.\nПетрова А.С.\nСидоров П.'}
+              className="w-full text-sm font-sans bg-surface border border-border rounded-md px-2 py-1.5 outline-none focus:border-border-strong resize-y"
+            />
+            <div className="flex items-center gap-2 mt-2">
+              <Button
+                onClick={() => bulkMut.mutate()}
+                loading={bulkMut.isPending}
+                disabled={bulk.split('\n').filter((l) => l.trim()).length === 0}
+              >
+                Добавить {bulk.split('\n').filter((l) => l.trim()).length || ''} студентов
+              </Button>
+              <Button variant="secondary" onClick={() => { setBulkOpen(false); setBulk('') }}>Отмена</Button>
+            </div>
+          </div>
+        )}
 
         {invites.length === 0 ? (
           <div className="text-center py-8 text-sm font-sans text-ink-tertiary">Пока никого нет. Добавьте студентов выше.</div>
@@ -243,6 +347,24 @@ export default function PublishedAssignmentDetail() {
       </div>
     </div>
   )
+}
+
+// <input type="datetime-local"> speaks local wall-clock time with no zone;
+// the API stores an ISO instant. These two convert between them explicitly
+// rather than slicing the ISO string, which would show a Moscow teacher the
+// UTC hour and quietly move every deadline by three hours.
+function toLocalInput(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function fromLocalInput(value: string): string | null {
+  if (!value) return null
+  const d = new Date(value)   // parsed as local time, which is what was typed
+  return Number.isNaN(d.getTime()) ? null : d.toISOString()
 }
 
 const LockIcon = () => (
