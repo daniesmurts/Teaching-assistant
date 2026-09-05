@@ -14,6 +14,26 @@ export interface SubmissionTelemetry {
   last_edit_at:   string   // ISO — most recent edit
 }
 
+// The same keys as runtime data, for the server's telemetry allowlist.
+//
+// This exists because the allowlist used to be a hand-written string list in
+// backend/src/validation/publishedAssignmentValidation.ts, and it silently
+// omitted `paste_count` — which the client has always sent, because it is on
+// the interface above. Every draft save and every submit from a student
+// answered 400 «Недопустимые поля телеметрии»: the whole writing surface was
+// down, and nothing failed loudly enough to notice.
+//
+// `Record<keyof SubmissionTelemetry, true>` is what prevents a repeat: adding
+// a field to the interface without adding it here is a compile error (missing
+// property), and a key here that isn't on the interface is a compile error too
+// (excess property). The list can no longer drift from the type it describes.
+const TELEMETRY_KEY_MAP: Record<keyof SubmissionTelemetry, true> = {
+  total_chars: true, active_ms: true, revision_count: true, paste_count: true,
+  pasted_chars: true, largest_paste: true, started_at: true, last_edit_at: true,
+}
+
+export const SUBMISSION_TELEMETRY_KEYS = Object.keys(TELEMETRY_KEY_MAP) as Array<keyof SubmissionTelemetry>
+
 // Provenance facts derived from telemetry — transparent numbers the teacher
 // reads alongside the work (§5.1.3). Deliberately NOT a score or verdict; the
 // teacher judges, the platform attests.

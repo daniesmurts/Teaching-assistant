@@ -1,4 +1,5 @@
 import { body } from 'express-validator'
+import { SUBMISSION_TELEMETRY_KEYS } from '../../../shared/types'
 
 export const createPublishedAssignmentRules = [
   body('title')
@@ -44,15 +45,28 @@ export const addInvitesBulkRules = [
 // the platform promises teachers only ever see aggregate process metrics,
 // never raw keystroke/paste content, so the allowed keys are enforced here
 // rather than trusted from the client.
-const TELEMETRY_KEYS = new Set([
-  'total_chars', 'pasted_chars', 'active_ms', 'revision_count', 'largest_paste', 'started_at', 'last_edit_at',
-])
+//
+// Derived from the shared type, NOT hand-listed. The hand-written version
+// omitted `paste_count`, which the client has always sent, so every draft save
+// and every submit 400'd — see SUBMISSION_TELEMETRY_KEYS in shared/types.ts
+// for why this shape makes that drift a compile error.
+const TELEMETRY_KEYS = new Set<string>(SUBMISSION_TELEMETRY_KEYS)
+
+/**
+ * Exported so the rule below and its regression test check the same thing —
+ * the bug this replaces was invisible precisely because nothing on the server
+ * side ever asserted against a real client payload.
+ */
+export function isAllowedTelemetry(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  return Object.keys(value as Record<string, unknown>).every((k) => TELEMETRY_KEYS.has(k))
+}
 
 export const saveDraftRules = [
   body('draft_content').exists().withMessage('Нет содержимого')
     .custom((v) => JSON.stringify(v).length <= 2_000_000).withMessage('Документ слишком большой'),
   body('telemetry').optional({ nullable: true }).isObject()
-    .custom((v) => Object.keys(v).every((k) => TELEMETRY_KEYS.has(k))).withMessage('Недопустимые поля телеметрии'),
+    .custom(isAllowedTelemetry).withMessage('Недопустимые поля телеметрии'),
   body('snapshot').optional().isBoolean(),
 ]
 
