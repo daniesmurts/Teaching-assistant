@@ -757,10 +757,9 @@ router.post('/:id/approve',
 // Deliberately the same gate documents use for the same act (routes/documents.ts's
 // PATCH /:id/scope): sharing to a unit needs `umu`/edit on that unit, because
 // the consequence is the same class of thing — one teacher's material reaching
-// another teacher's LLM prompt. A plain teacher marks their deck «Готово»
-// (their own signal, their own decks); a методист with the УМУ grant decides
-// what the кафедра as a whole learns from. That is exactly the curation
-// workflow AM's Кабинет методиста exists for.
+// another teacher's LLM prompt. A plain teacher marks their own deck «Готово»;
+// putting it in front of the whole кафедра is a curation decision, and this
+// codebase already decided who makes those.
 //
 // Demotion back to 'private' needs no grant — narrowing visibility is always
 // allowed, and the deck's own author must be able to take it back.
@@ -777,8 +776,8 @@ router.patch('/:id/scope',
 
     if (target === 'private') {
       if (presentation.teacher_id !== req.teacher.id) {
-        // A методист who promoted someone else's deck can also take it back:
-        // they hold the grant on the unit it was shared to.
+        // Whoever promoted someone else's deck can also take it back: they
+        // hold the grant on the unit it was shared to.
         const allowed = presentation.scope_unit_id
           ? await teacherCanActOnUnit(req.teacher.id, presentation.scope_unit_id, ['edit', 'admin'], 'umu')
           : false

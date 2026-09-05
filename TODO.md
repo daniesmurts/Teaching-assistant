@@ -2435,12 +2435,12 @@ of this entry:
     `GET/PUT /api/courses/:id/lecture-plan` and `.../extract`. The form offers
     the тема (filling topic + lecture number without overwriting what was
     typed) and feeds the РПД's own wording into the outline prompt.
-    **Not done:** no UI to edit the plan itself (the PUT exists, nothing calls
-    it — a wrong тема has to be re-extracted or worked around); no
+    Plan editing 🟢 SHIPPED (2026-09-05) —
+    «Править план» (`LecturePlanEditor.tsx`) finally calls that PUT, and
+    «Ввести вручную» covers a course with no РПД to extract from. **Not done:** no
     компетенция/индикатор link yet, which is the other half of what would make
     a deck full УМК evidence; nothing surfaces "which темы of this course have
-    a lecture built" — the obvious next screen, and the one AM's Кабинет
-    методиста would actually consume.
+    a lecture built".
   - **Дек → published assignment.** 🟢 SHIPPED (2026-09-05).
     `POST /:id/assignment` renders `discussion` slides into a draft published
     assignment — no LLM call, `expected_angles` withheld. Back-link 🟢 SHIPPED (2026-09-05):
@@ -2503,9 +2503,7 @@ of this entry:
   - **No кафедра deck bank.** 🟢 SHIPPED (2026-09-05) — migration 123, the
     same scope machinery AN built for documents, surfaced as «Лекции
     кафедры». **Not done:** no filtering or search on the shelf (a 50-deck
-    cap and newest-first ordering is all it has), and nothing surfaces the
-    bank inside AM's Кабинет методиста, which is where a методист curating
-    it would actually be working.
+    cap and newest-first ordering is all it has).
 - **Why:** the generator is mature; the *workflow around it* is not. Phases
   0–2 convert a shipped, actively-used feature from a vending machine into a
   workspace, and pay for themselves twice — less wasted expansion spend, and

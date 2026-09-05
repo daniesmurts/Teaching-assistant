@@ -9,6 +9,7 @@ import {
   extractPresentationSourceText, type GenerateResponse,
 } from '../../api/presentations'
 import OutlineEditor from './OutlineEditor'
+import LecturePlanEditor from './LecturePlanEditor'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
 import { MAX_SLIDE_COUNT, estimateSlideCount } from '../../types'
@@ -84,6 +85,7 @@ export default function PresentationForm({ onResult }: Props) {
   })
 
   const [topicId, setTopicId] = useState('')
+  const [planEditing, setPlanEditing] = useState(false)
 
   const extractPlanMut = useMutation({
     mutationFn: () => extractLecturePlan(form.course_id),
@@ -300,11 +302,29 @@ export default function PresentationForm({ onResult }: Props) {
           thing this removes. */}
       {form.course_id && (
         <div className="bg-surface-warm border border-border rounded-md px-3 py-2.5">
-          {lecturePlan.length > 0 ? (
+          {planEditing ? (
+            <LecturePlanEditor
+              courseId={form.course_id}
+              topics={lecturePlan}
+              onClose={() => setPlanEditing(false)}
+            />
+          ) : lecturePlan.length > 0 ? (
             <>
-              <label className="block text-xs font-sans font-medium text-ink-secondary mb-1">
-                Тема из рабочей программы
-              </label>
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <label className="block text-xs font-sans font-medium text-ink-secondary">
+                  Тема из рабочей программы
+                </label>
+                {/* The plan comes out of a model reading a Word table, so a
+                    wrong or missing тема is routine. Until now the only remedy
+                    was re-extracting the whole thing. */}
+                <button
+                  type="button"
+                  onClick={() => setPlanEditing(true)}
+                  className="text-[11px] font-sans text-ink-secondary hover:text-amber transition-colors"
+                >
+                  Править план
+                </button>
+              </div>
               <select className={selectClass} value={topicId} onChange={(e) => pickTopic(e.target.value)}>
                 <option value="">Своя тема (не из плана)</option>
                 {lecturePlan.map((t: LectureTopic) => (
@@ -321,13 +341,24 @@ export default function PresentationForm({ onResult }: Props) {
                 Можно взять темы лекций прямо из рабочей программы предмета — тогда не придётся
                 вводить тему и номер лекции вручную.
               </p>
-              <Button
-                type="button" size="sm" variant="secondary"
-                loading={extractPlanMut.isPending}
-                onClick={() => extractPlanMut.mutate()}
-              >
-                Разобрать РПД
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button" size="sm" variant="secondary"
+                  loading={extractPlanMut.isPending}
+                  onClick={() => extractPlanMut.mutate()}
+                >
+                  Разобрать РПД
+                </Button>
+                {/* A course whose РПД isn't uploaded — or whose plan the
+                    extractor can't find — still deserves a plan. */}
+                <button
+                  type="button"
+                  onClick={() => setPlanEditing(true)}
+                  className="text-[11px] font-sans text-ink-secondary hover:text-amber transition-colors whitespace-nowrap"
+                >
+                  Ввести вручную
+                </button>
+              </div>
             </div>
           )}
         </div>
