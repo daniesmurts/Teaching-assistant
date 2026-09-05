@@ -14,6 +14,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+*(empty — next release accumulates here)*
+
+---
+
+## [2026-09-05] — v1.6.0
+
+Tagged release. Everything below was deployed to production on this date
+(`1.5.0-8b71eb9`, the last build to carry the old version number) — the tag
+names the state, it does not change it.
+
+
 ### Fixed
 - **Страница студента: вопросы задания читались как сплошной текст, и страница не была рассчитана на телефон.** Reported after a real assignment was opened: instructions rendered as one `whitespace-pre-wrap` paragraph, so a numbered question, its sub-questions and the closing sentence all came out at the same size, weight and colour, indented with literal spaces. It is the one thing on the page a student must read carefully before writing, and on a phone it was a wall of grey.
 
