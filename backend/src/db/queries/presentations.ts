@@ -29,6 +29,8 @@ interface PresentationRow {
   strict_source: boolean | null
   lecture_topic_id: string | null
   approved_at: Date | null
+  visibility_scope: string | null
+  scope_unit_id: string | null
   created_at: Date
 }
 
@@ -50,6 +52,8 @@ function toPresentation(row: PresentationRow): Presentation {
     sources: row.sources,
     lecture_topic_id: row.lecture_topic_id ?? null,
     approved_at: row.approved_at ? row.approved_at.toISOString() : null,
+    visibility_scope: (row.visibility_scope === 'unit' ? 'unit' : 'private'),
+    scope_unit_id: row.scope_unit_id ?? null,
     created_at: row.created_at.toISOString(),
   }
 }
@@ -253,6 +257,8 @@ export interface ExemplarSlide {
   presentation_id: string
   topic:           string
   same_course:     boolean
+  /** False for a deck a colleague shared to the кафедра (migration 123). */
+  is_own:          boolean
   slide:           Slide
 }
 
@@ -277,13 +283,48 @@ export async function findApprovedExemplarSlides(
   courseId: string | undefined,
   deckLimit = 6,
 ): Promise<ExemplarSlide[]> {
-  const { rows } = await pool.query<{ id: string; topic: string; course_id: string | null; slides: Slide[] | null }>(
-    `SELECT id, topic, course_id, slides
-       FROM presentations
-      WHERE teacher_id = $1
-        AND approved_at IS NOT NULL
-        AND slides IS NOT NULL
-      ORDER BY (course_id IS NOT DISTINCT FROM $2) DESC, approved_at DESC
+  // Own approved decks, plus decks a кафедра has shared (migration 123).
+  // The unit match is ancestor-or-self on the reader's own path, identical to
+  // document retrieval's SCOPE_WHERE: a deck shared to /root/faculty reaches
+  // everyone under it, one shared to a single кафедра does not leave it.
+  //
+  // `LIKE path || '%'` is safe against prefix collisions only because
+  // org_units.path carries a trailing slash — '/a/bb/' does not match
+  // '/a/b/%'. Verified against the live column, not assumed.
+  //
+  // Own decks always outrank shared ones, and same-course outranks the rest:
+  // a colleague's style is a useful reference, the teacher's own is a better
+  // one, and their own lecture on this very course is the best.
+  const { rows } = await pool.query<{
+    id: string; topic: string; course_id: string | null; slides: Slide[] | null; is_own: boolean
+  }>(
+    `WITH me AS (
+       SELECT t.id, t.institution_id, u.path AS unit_path
+         FROM teachers t
+         LEFT JOIN org_units u ON u.id = t.primary_org_unit_id
+        WHERE t.id = $1
+     )
+     SELECT p.id, p.topic, p.course_id, p.slides, (p.teacher_id = $1) AS is_own
+       FROM presentations p
+       JOIN teachers pt ON pt.id = p.teacher_id
+       CROSS JOIN me
+      WHERE p.approved_at IS NOT NULL
+        AND p.slides IS NOT NULL
+        AND (
+          p.teacher_id = $1
+          OR (
+            p.visibility_scope = 'unit'
+            AND me.unit_path IS NOT NULL
+            AND pt.institution_id IS NOT DISTINCT FROM me.institution_id
+            AND EXISTS (
+              SELECT 1 FROM org_units su
+               WHERE su.id = p.scope_unit_id AND me.unit_path LIKE su.path || '%'
+            )
+          )
+        )
+      ORDER BY (p.teacher_id = $1) DESC,
+               (p.course_id IS NOT DISTINCT FROM $2) DESC,
+               p.approved_at DESC
       LIMIT $3`,
     [teacherId, courseId ?? null, deckLimit]
   )
@@ -293,7 +334,74 @@ export async function findApprovedExemplarSlides(
       presentation_id: row.id,
       topic:           row.topic,
       same_course:     Boolean(courseId) && row.course_id === courseId,
+      is_own:          row.is_own,
       slide,
     }))
   )
+}
+
+/** Decks shared to a unit on this teacher's own path — the кафедра bank. */
+export async function findSharedPresentations(teacherId: string): Promise<Presentation[]> {
+  const { rows } = await pool.query<PresentationRow>(
+    `WITH me AS (
+       SELECT t.id, t.institution_id, u.path AS unit_path
+         FROM teachers t
+         LEFT JOIN org_units u ON u.id = t.primary_org_unit_id
+        WHERE t.id = $1
+     )
+     SELECT p.*, c.name AS course_name
+       FROM presentations p
+       JOIN teachers pt ON pt.id = p.teacher_id
+       LEFT JOIN courses c ON c.id = p.course_id
+       CROSS JOIN me
+      WHERE p.visibility_scope = 'unit'
+        -- Still «Готово»: the route refuses to share an unapproved deck, and
+        -- un-approving one afterwards must take it off the shelf as well, not
+        -- merely stop it feeding generation. Otherwise the bank slowly fills
+        -- with lectures their own authors have disowned.
+        AND p.approved_at IS NOT NULL
+        AND p.teacher_id <> $1
+        AND me.unit_path IS NOT NULL
+        AND pt.institution_id IS NOT DISTINCT FROM me.institution_id
+        AND EXISTS (
+          SELECT 1 FROM org_units su
+           WHERE su.id = p.scope_unit_id AND me.unit_path LIKE su.path || '%'
+        )
+      ORDER BY p.approved_at DESC NULLS LAST, p.created_at DESC
+      LIMIT 50`,
+    [teacherId]
+  )
+  return rows.map(toPresentation)
+}
+
+/**
+ * Promotes a deck to a кафедра, or takes it back to private. Not teacher-
+ * scoped on purpose: promotion is a curation act a методист performs on
+ * someone else's deck, so the *route* enforces who may do it (the same
+ * umu/edit grant documents require), exactly as promoteDocumentScope does.
+ */
+export async function setPresentationScope(
+  id: string,
+  scope: 'private' | 'unit',
+  scopeUnitId: string | null,
+): Promise<Presentation | null> {
+  const { rows } = await pool.query<PresentationRow>(
+    `UPDATE presentations
+        SET visibility_scope = $2, scope_unit_id = $3
+      WHERE id = $1
+      RETURNING *`,
+    [id, scope, scope === 'unit' ? scopeUnitId : null]
+  )
+  return rows[0] ? toPresentation(rows[0]) : null
+}
+
+/** Unscoped read — the scope route must see a deck it does not own. */
+export async function findPresentationByIdUnscoped(id: string): Promise<Presentation | null> {
+  const { rows } = await pool.query<PresentationRow>(
+    `SELECT p.*, c.name AS course_name FROM presentations p
+       LEFT JOIN courses c ON c.id = p.course_id
+      WHERE p.id = $1 LIMIT 1`,
+    [id]
+  )
+  return rows[0] ? toPresentation(rows[0]) : null
 }

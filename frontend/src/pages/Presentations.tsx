@@ -12,9 +12,11 @@ import Icon from '../components/ui/Icon'
 import { tagColorClasses } from '../lib/tagColor'
 import {
   getPresentations, deletePresentation, updateSlide, regenerateSlide, deleteSlide,
-  insertSlide, moveSlide, setPresentationApproved, type GenerateResponse,
+  insertSlide, moveSlide, setPresentationApproved, setPresentationScope,
+  getSharedPresentations, type GenerateResponse,
 } from '../api/presentations'
 import { useUIStore } from '../store/uiStore'
+import { useAuthStore } from '../store/authStore'
 import type { Presentation, Slide } from '../types'
 import type { SlideEditActions } from '../components/presentations/SlideContent'
 
@@ -65,6 +67,7 @@ function HistoryItem({
 export default function Presentations() {
   const qc = useQueryClient()
   const addToast = useUIStore(s => s.addToast)
+  const myTeacherId = useAuthStore(s => s.teacher?.id)
 
   const [result, setResult]         = useState<GenerateResponse | null>(null)
   const [formCollapsed, setFormCollapsed] = useState(false)
@@ -147,6 +150,39 @@ export default function Presentations() {
       addToast(updated.approved_at ? 'Лекция отмечена как готовая' : 'Отметка снята', 'success')
     },
     onError: () => addToast('Не удалось сохранить отметку', 'error'),
+  })
+
+  // Кафедральный банк (migration 123). Sharing needs a УМУ grant on the
+  // кафедра, exactly as promoting a document does — so a plain teacher sees
+  // the button, tries it, and gets a clear "нужен домен УМУ" answer rather
+  // than a control that silently does nothing. Hiding it entirely would leave
+  // no way to discover the bank exists.
+  // A deck opened from the кафедра shelf is a colleague's. Every write below
+  // is owner-scoped server-side, so offering the controls would only produce
+  // errors — and «Удалить» on someone else's lecture should not even look
+  // possible. Read-only is the honest presentation of what the viewer can do
+  // with it.
+  const isMine = !openHistory || !myTeacherId || openHistory.teacher_id === myTeacherId
+  const shared = openHistory?.visibility_scope === 'unit'
+  const shareMut = useMutation({
+    mutationFn: (next: 'private' | 'unit') => setPresentationScope(displayPresentationId, next),
+    onSuccess: (updated) => {
+      setOpenHistory((h) => (h && h.id === updated.id ? updated : h))
+      qc.invalidateQueries({ queryKey: ['presentations'] })
+      qc.invalidateQueries({ queryKey: ['presentations-shared'] })
+      addToast(updated.visibility_scope === 'unit' ? 'Лекция в банке кафедры' : 'Лекция снова только ваша', 'success')
+    },
+    onError: (err: unknown) => {
+      const res = (err as { response?: { status?: number; data?: { error?: string } } }).response
+      addToast(res?.data?.error ?? 'Не удалось изменить доступ', 'error')
+    },
+  })
+
+  // The кафедра shelf — only rendered when a colleague has actually shared
+  // something, so a teacher without an org unit never sees an empty promise.
+  const { data: sharedDecks = [] } = useQuery({
+    queryKey: ['presentations-shared'],
+    queryFn: getSharedPresentations,
   })
 
   const slideEdit: SlideEditActions = {
@@ -234,6 +270,12 @@ export default function Presentations() {
                 <div className="text-sm font-sans font-medium text-ink">{openHistory.topic}</div>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
+                {!isMine && (
+                  <span className="text-xs font-sans text-ink-tertiary">
+                    Лекция коллеги — только просмотр
+                  </span>
+                )}
+                {isMine && <>
                 <button
                   onClick={() => approveMut.mutate(!approved)}
                   disabled={approveMut.isPending}
@@ -249,6 +291,21 @@ export default function Presentations() {
                   <Icon name="check" size={14} />
                   {approved ? 'Готово — образец стиля' : 'Отметить «Готово»'}
                 </button>
+                <button
+                  onClick={() => shareMut.mutate(shared ? 'private' : 'unit')}
+                  disabled={shareMut.isPending}
+                  title={shared
+                    ? 'Лекция видна коллегам по кафедре и может служить образцом стиля для их лекций. Нажмите, чтобы убрать из банка.'
+                    : 'Положить готовую лекцию в банк кафедры: коллеги смогут её открыть, а ИСПУМ — ориентироваться на неё. Нужны права УМУ на кафедру.'}
+                  className={`inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-md border shadow-sm text-xs font-sans font-medium transition-colors disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber ${
+                    shared
+                      ? 'bg-amber-light border-amber text-amber'
+                      : 'bg-surface border-border-mid text-ink-secondary hover:bg-surface-warm hover:text-amber'
+                  }`}
+                >
+                  <Icon name="users" size={14} />
+                  {shared ? 'В банке кафедры' : 'В банк кафедры'}
+                </button>
                 <Button
                   size="sm"
                   variant="danger"
@@ -257,6 +314,7 @@ export default function Presentations() {
                 >
                   Удалить
                 </Button>
+                </>}
               </div>
             </div>
           )}
@@ -284,8 +342,41 @@ export default function Presentations() {
                 sources={displaySources}
                 presentationId={displayPresentationId}
                 onSlidesChange={setLocalSlides}
-                edit={slideEdit}
+                edit={isMine ? slideEdit : undefined}
               />
+            </div>
+          )}
+
+          {/* Кафедральный банк — colleagues' shared lectures. Above the personal
+              history on purpose: it is the part a teacher does not already
+              know about. */}
+          {!displayContent && sharedDecks.length > 0 && (
+            <div>
+              <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-3">
+                Лекции кафедры
+              </div>
+              <div className="bg-surface border border-border rounded-lg overflow-hidden">
+                {sharedDecks.map((p) => (
+                  <div key={p.id} className="flex items-center gap-4 px-4 py-3 border-b border-border last:border-0">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {p.course_name && (
+                          <Badge className={`flex-shrink-0 max-w-[40%] ${tagColorClasses(p.course_id ?? p.course_name)}`}>
+                            {p.course_name}
+                          </Badge>
+                        )}
+                        <span className="text-sm font-sans font-medium text-ink truncate min-w-0 flex-1">{p.topic}</span>
+                      </div>
+                      <div className="text-xs font-sans text-ink-tertiary mt-0.5">
+                        Поделились с кафедрой · {new Date(p.created_at).toLocaleDateString('ru-RU')}
+                      </div>
+                    </div>
+                    <Button size="sm" variant="secondary" onClick={() => { setOpenHistory(p); setResult(null); setFormCollapsed(true) }}>
+                      Открыть
+                    </Button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

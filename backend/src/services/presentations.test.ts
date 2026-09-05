@@ -543,10 +543,11 @@ describe('buildAssignmentFromDeck', () => {
 // invisible: the deck still generates, it just stops learning anything.
 
 describe('selectExemplars', () => {
-  const ex = (type: Slide['type'], topic: string, sameCourse: boolean, notes = 'речь преподавателя') => ({
+  const ex = (type: Slide['type'], topic: string, sameCourse: boolean, notes = 'речь преподавателя', isOwn = true) => ({
     presentation_id: `p-${topic}`,
     topic,
     same_course: sameCourse,
+    is_own: isOwn,
     slide: { type, title: topic, notes, citations: [], body: {} } as unknown as Slide,
   })
 
@@ -566,6 +567,21 @@ describe('selectExemplars', () => {
   it('prefers the same course — register differs between a first-year and a master\'s lecture', () => {
     const picked = selectExemplars([ex('concept', 'другой курс', false), ex('concept', 'этот курс', true)], ['concept'])
     expect(picked[0].topic).toBe('этот курс')
+  })
+
+  it('prefers the teacher\'s own deck over a кафедра colleague\'s, even on another course', () => {
+    // The flywheel exists so a teacher's lectures sound like *them*; a
+    // colleague's shared deck is a fallback, not an upgrade.
+    const picked = selectExemplars(
+      [ex('concept', 'коллега, этот курс', true, 'речь', false), ex('concept', 'моя, другой курс', false, 'речь', true)],
+      ['concept'],
+    )
+    expect(picked[0].topic).toBe('моя, другой курс')
+  })
+
+  it('falls back to a colleague\'s shared deck when the teacher has none of their own', () => {
+    const picked = selectExemplars([ex('concept', 'кафедральная', true, 'речь', false)], ['concept'])
+    expect(picked.map((p) => p.topic)).toEqual(['кафедральная'])
   })
 
   it('skips a slide with no speaker notes — it teaches nothing about depth', () => {

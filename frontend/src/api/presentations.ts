@@ -274,3 +274,19 @@ export async function importPresentationPptx(
   )
   return res.data
 }
+
+// Кафедральный банк лекций (migration 123). Sharing requires a УМУ grant on
+// the target unit — the same gate documents use — so the control is only shown
+// when the server accepts it; a 403 here is a permissions answer, not an error
+// to hide.
+export async function setPresentationScope(
+  id: string,
+  scope: 'private' | 'unit',
+): Promise<Presentation> {
+  return (await client.patch<Presentation>(`/api/presentations/${id}/scope`, { visibility_scope: scope })).data
+}
+
+/** Decks colleagues have shared to a кафедра on this teacher's own path. */
+export async function getSharedPresentations(): Promise<Presentation[]> {
+  return (await client.get<Presentation[]>('/api/presentations/shared')).data
+}

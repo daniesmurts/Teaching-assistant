@@ -923,6 +923,11 @@ export interface Presentation {
   // generation, the same rule grading follows: AI output is not a training
   // signal until a teacher has reviewed it (invariant 3).
   approved_at: string | null
+  // Кафедральный банк лекций (migration 123). 'private' — the teacher's own;
+  // 'unit' — shared to the кафедра/факультет named by scope_unit_id, where
+  // colleagues can read it and generation may use it as a style reference.
+  visibility_scope: 'private' | 'unit'
+  scope_unit_id: string | null
   topic: string
   duration_minutes: number | null
   audience_level: string | null

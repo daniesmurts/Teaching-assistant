@@ -4,7 +4,7 @@ import { validate } from '../middleware/validate'
 import { aiLimiter } from '../middleware/rateLimits'
 import { uploadFields, verifyFileContent } from '../middleware/fileValidation'
 import { asyncHandler } from '../lib/asyncHandler'
-import { NotFoundError, ValidationError } from '../errors/AppError'
+import { ForbiddenError, NotFoundError, ValidationError } from '../errors/AppError'
 import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
 import { canUseFeature } from '../config/planLimits'
 import {
@@ -27,6 +27,8 @@ import { importPptx } from '../services/pptxImport'
 import { yandexImageSearch } from '../services/yandexImages'
 import { PRESENTATION_JOB_QUEUE, type PresentationJobPayload } from '../services/presentationJobWorker'
 import { getJobQueue } from '../services/jobQueue'
+import { teacherCanActOnUnit } from '../db/queries/orgUnits'
+import { pool } from '../db/connection'
 import {
   createPresentationJob, getPresentationJobById, confirmPresentationJobOutline,
   type PresentationJobRow,
@@ -34,6 +36,7 @@ import {
 import {
   findPresentationsByTeacher, findPresentationById, createPresentation, deletePresentation, setSlideImage,
   replaceSlides, findPresentationGenerationInputs, setPresentationApproved,
+  setPresentationScope, findPresentationByIdUnscoped, findSharedPresentations,
 } from '../db/queries/presentations'
 import {
   recordSlideEvent, findSlideEventsForPresentation,
@@ -254,6 +257,16 @@ router.get('/', asyncHandler(async (req, res) => {
   const courseId = req.query.course_id as string | undefined
   res.json(await findPresentationsByTeacher(req.teacher.id, courseId))
 }))
+
+// GET /api/presentations/shared — the кафедра bank: decks colleagues have
+// shared to a unit on this teacher's own path. Read-only; opening one uses the
+// same viewer, and it is what makes the shared pool visible rather than an
+// invisible influence on generation.
+router.get('/shared',
+  asyncHandler(async (req, res) => {
+    res.json(await findSharedPresentations(req.teacher.id))
+  })
+)
 
 // GET /api/presentations/:id
 router.get('/:id', asyncHandler(async (req, res) => {
@@ -668,6 +681,63 @@ router.post('/:id/approve',
     const updated = await setPresentationApproved(req.params.id, req.teacher.id, approved)
     if (!updated) throw new NotFoundError('Презентация')
     res.json(updated)
+  })
+)
+
+// PATCH /api/presentations/:id/scope — кафедральный банк лекций.
+//
+// Deliberately the same gate documents use for the same act (routes/documents.ts's
+// PATCH /:id/scope): sharing to a unit needs `umu`/edit on that unit, because
+// the consequence is the same class of thing — one teacher's material reaching
+// another teacher's LLM prompt. A plain teacher marks their deck «Готово»
+// (their own signal, their own decks); a методист with the УМУ grant decides
+// what the кафедра as a whole learns from. That is exactly the curation
+// workflow AM's Кабинет методиста exists for.
+//
+// Demotion back to 'private' needs no grant — narrowing visibility is always
+// allowed, and the deck's own author must be able to take it back.
+//
+// No 'institution' rung, unlike documents: for reference material an
+// institution-wide pool is meaningful, for *teaching style* it is not, and a
+// wider blast radius for cross-teacher prompt content buys nothing.
+router.patch('/:id/scope',
+  asyncHandler(async (req, res) => {
+    const presentation = await findPresentationByIdUnscoped(req.params.id)
+    if (!presentation) throw new NotFoundError('Презентация')
+
+    const target = req.body?.visibility_scope === 'unit' ? 'unit' : 'private'
+
+    if (target === 'private') {
+      if (presentation.teacher_id !== req.teacher.id) {
+        // A методист who promoted someone else's deck can also take it back:
+        // they hold the grant on the unit it was shared to.
+        const allowed = presentation.scope_unit_id
+          ? await teacherCanActOnUnit(req.teacher.id, presentation.scope_unit_id, ['edit', 'admin'], 'umu')
+          : false
+        if (!allowed) throw new ForbiddenError('Недостаточно прав для изменения области видимости')
+      }
+      res.json(await setPresentationScope(presentation.id, 'private', null))
+      return
+    }
+
+    if (!presentation.approved_at) {
+      // The кафедра bank is a curated shelf, not a dumping ground: a deck
+      // nobody has vouched for has no business being the reference another
+      // teacher's lecture is written against.
+      throw new ValidationError('Сначала отметьте лекцию «Готово» — в банк кафедры попадают только готовые лекции')
+    }
+
+    const { rows } = await pool.query<{ primary_org_unit_id: string | null }>(
+      'SELECT primary_org_unit_id FROM teachers WHERE id = $1', [req.teacher.id]
+    )
+    const targetUnitId = (typeof req.body?.scope_unit_id === 'string' && req.body.scope_unit_id)
+      || rows[0]?.primary_org_unit_id
+    if (!targetUnitId) throw new ValidationError('Укажите подразделение — у вас не задана основная кафедра')
+
+    const allowed = await teacherCanActOnUnit(req.teacher.id, targetUnitId, ['edit', 'admin'], 'umu')
+    if (!allowed) throw new ForbiddenError('Недостаточно прав на это подразделение (нужен домен УМУ)')
+
+    res.json(await setPresentationScope(presentation.id, 'unit', targetUnitId))
   })
 )
 

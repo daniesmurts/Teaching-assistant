@@ -2391,11 +2391,12 @@ of this entry:
   scores. **Two deliberate deviations, both explained in CHANGELOG:** examples
   come from *all* slides of an approved deck (an edited slide is the teacher's
   own writing — the best example, not the worst), and scope is the teacher's
-  own decks only. **Not done:** кафедра-wide pooling, which needs a real share
-  control first (invariant 7 gates documents behind two explicit flags;
-  presentations have none) — that is the next thing here, and the point at
-  which this stops being a per-teacher convenience and starts being an
-  institutional asset. No embeddings: style, not content, so type+recency
+  own decks only. **Кафедра pooling: 🟢 SHIPPED (2026-09-05)** — migration
+  123 adds `visibility_scope`/`scope_unit_id` to presentations on AN's ladder,
+  gated on the same `umu`/`edit` grant documents require, with no
+  `institution` rung (teaching style is a кафедра-level thing) and a
+  «Лекции кафедры» shelf. Sharing requires «Готово»; un-approving removes it
+  from both shelf and flywheel. Colleagues' decks open read-only. No embeddings: style, not content, so type+recency
   beats similarity — revisit only if exemplars start feeling off-topic.
 - **Phase 3 (shipped, 2026-09-05) — wire the deck into the platform instead
   of leaving it a leaf.** In rough order of value:
@@ -2492,9 +2493,12 @@ of this entry:
   - **Free tier has `presentationHistory: false`** — 🟢 SHIPPED
     (2026-09-05), now `true`. Depth, PPTX export and the style flywheel stay
     the paid lines; losing work you made is not an upsell.
-  - **No кафедра deck bank.** AN built кафедральная библиотека for
-    documents; a методист curating a shared deck bank is the same pattern
-    on the same scope machinery, and feeds AM's Кабинет методиста directly.
+  - **No кафедра deck bank.** 🟢 SHIPPED (2026-09-05) — migration 123, the
+    same scope machinery AN built for documents, surfaced as «Лекции
+    кафедры». **Not done:** no filtering or search on the shelf (a 50-deck
+    cap and newest-first ordering is all it has), and nothing surfaces the
+    bank inside AM's Кабинет методиста, which is where a методист curating
+    it would actually be working.
 - **Why:** the generator is mature; the *workflow around it* is not. Phases
   0–2 convert a shipped, actively-used feature from a vending machine into a
   workspace, and pay for themselves twice — less wasted expansion spend, and

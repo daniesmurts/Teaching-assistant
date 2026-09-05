@@ -1380,9 +1380,14 @@ export function selectExemplars(
   const picked: ExemplarSlide[] = []
   const usedTypes = new Set<SlideType>()
 
-  // Same-course first, then anything else — findApprovedExemplarSlides already
-  // returns them in that order, so a stable partition preserves it.
-  const ordered = [...candidates.filter((c) => c.same_course), ...candidates.filter((c) => !c.same_course)]
+  // Preference order: my own lecture on this course, then my own on another,
+  // then a кафедра colleague's on this course, then theirs on another. Own
+  // outranks shared even across courses — the point of the flywheel is that a
+  // teacher's decks sound like *them*, and a colleague's voice is a fallback,
+  // not an upgrade. findApprovedExemplarSlides returns rows in this order
+  // already; the partition keeps it after any client-side filtering.
+  const rank = (c: ExemplarSlide) => (c.is_own ? 0 : 2) + (c.same_course ? 0 : 1)
+  const ordered = [...candidates].sort((a, b) => rank(a) - rank(b))
 
   for (const candidate of ordered) {
     if (picked.length >= limit) break
