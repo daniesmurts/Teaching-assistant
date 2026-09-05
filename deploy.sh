@@ -13,10 +13,6 @@
 #     (docs/on-prem-deployment.md §16 Track 1.4b)
 #   - YC_REGISTRY_ID set in .env (see .env.example) — the registry CI pushes
 #     the backend image to
-#   - (optional, for CDN purge) CDN_RESOURCE_ID set in the shell or .env — the id
-#     of the CDN resource fronting ispum.ru. Find it with: `yc cdn resource list`.
-#     Without it the deploy still works; clients just update on the SW's own
-#     no-cache revalidation instead of an immediate edge purge.
 #
 # ── Backend deploy model changed (§16 Track 1.4b) ────────────────────────────
 # The backend is no longer built here or on the VM — CI already built and
@@ -132,14 +128,14 @@ IMAGE_TAG="${SEMVER}-${SHORT_SHA}"
 # to find one on disk.
 BUILD_VERSION="${SEMVER} ($(date -u +%Y-%m-%d)+${SHORT_SHA}${DIRTY_SUFFIX})"
 echo "$BUILD_VERSION" > VERSION
-echo "▶ [0/9] Build version: ${BUILD_VERSION}  (image tag: ${IMAGE_TAG})"
+echo "▶ [0/8] Build version: ${BUILD_VERSION}  (image tag: ${IMAGE_TAG})"
 
 # ── CI gate (docs/on-prem-deployment.md §16 Track 1.4b) ──────────────────────
 # The whole point of building images in CI is that a tag is a promise about
 # what's inside it — never deploy a tag that hasn't actually passed. Poll
 # rather than assume: CI takes ~2 minutes end to end, so a push-then-
 # immediately-deploy is a real race, not a hypothetical one.
-echo "▶ [1/9] Waiting for CI to confirm ${SHORT_SHA} is safe to deploy…"
+echo "▶ [1/8] Waiting for CI to confirm ${SHORT_SHA} is safe to deploy…"
 if ! command -v gh >/dev/null 2>&1; then
   echo "❌ gh CLI not found — can't verify CI status. Install: https://cli.github.com"
   exit 1
@@ -179,8 +175,8 @@ if [ -z "${YC_REGISTRY_ID:-}" ]; then
 fi
 
 # ── Backend image guard ──────────────────────────────────────────────────────
-# ORDERING IS THE POINT. The frontend goes live at step [4/9] (Object Storage
-# upload + CDN purge); the backend image is not pulled until [7/9]. Anything
+# ORDERING IS THE POINT. The frontend goes live at step [4/8] (Object Storage
+# upload); the backend image is not pulled until [6/8]. Anything
 # that fails in between leaves the new UI calling an old API — every route the
 # new build added answers 404, and nothing in the browser explains why.
 #
@@ -193,9 +189,9 @@ fi
 #
 # So prove the exact tag exists before shipping anything. Pulling rather than
 # inspecting has a useful side effect — the image is already on the VM when
-# [7/9] runs, which shrinks the window where the two halves disagree from
+# [6/8] runs, which shrinks the window where the two halves disagree from
 # minutes to seconds.
-echo "▶ [2/9] Verifying backend image ${IMAGE_TAG} is in the registry…"
+echo "▶ [2/8] Verifying backend image ${IMAGE_TAG} is in the registry…"
 if ssh "$VM_HOST" "docker pull cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${IMAGE_TAG} >/dev/null 2>&1"; then
   echo "  ✓ image present, and now pre-pulled on the VM"
 else
@@ -206,40 +202,20 @@ else
   exit 1
 fi
 
-echo "▶ [3/9] Building frontend…"
+echo "▶ [3/8] Building frontend…"
 npm run build --workspace=frontend
 
-echo "▶ [4/9] Uploading frontend → s3://${FRONTEND_BUCKET}/ …"
+echo "▶ [4/8] Uploading frontend → s3://${FRONTEND_BUCKET}/ …"
 # Uses S3 static keys (no yc/OAuth). Reads YANDEX_STORAGE_* from the local .env.
 node --env-file=.env scripts/upload-frontend.mjs frontend/dist "${FRONTEND_BUCKET}"
 
-echo "▶ [5/9] Purging CDN cache for the no-cache entrypoints…"
-# index.html / sw.js / registerSW.js / manifest.webmanifest ship with
-# `no-cache, must-revalidate` from Object Storage (upload-frontend.mjs), but the
-# CDN edge can still hold an old copy — which is exactly what leaves PWA clients
-# on a stale service worker after a deploy. Purge just those entrypoints; the
-# hashed /assets/* are immutable (new names every build) and must NOT be purged.
-# Best-effort: a purge hiccup, a missing id, or no `yc` never fails the deploy.
-CDN_RESOURCE_ID="${CDN_RESOURCE_ID:-$(sed -n 's/^CDN_RESOURCE_ID=//p' .env 2>/dev/null | tr -d '"'\''' | head -n1)}"
-if [ -z "${CDN_RESOURCE_ID:-}" ]; then
-  echo "  ⚠ CDN_RESOURCE_ID not set — skipping purge. Find it via 'yc cdn resource list' and add it to .env."
-elif ! command -v yc >/dev/null 2>&1; then
-  echo "  ⚠ yc CLI not found — skipping CDN purge. Purge manually in the console, or install/auth yc."
-elif yc cdn cache purge --resource-id "$CDN_RESOURCE_ID" \
-       --path '/' --path '/index.html' --path '/sw.js' \
-       --path '/registerSW.js' --path '/manifest.webmanifest' >/dev/null 2>&1; then
-  echo "  ✓ CDN cache purged (index.html + sw.js + registerSW.js + manifest)"
-else
-  echo "  ⚠ CDN purge failed (non-fatal) — clients still update within the SW's no-cache revalidation window."
-fi
-
-echo "▶ [6/9] Syncing compose file → VM…"
+echo "▶ [5/8] Syncing compose file → VM…"
 # The backend's SOURCE no longer goes to the VM at all — the image built and
 # tested in CI is the artifact now (§16 Track 1.3/1.4b), not the working
 # tree. Only this one small config file ships.
 rsync -avz "deploy/docker-compose.cloud.yml" "${VM_HOST}:${APP_DIR}/docker-compose.yml"
 
-echo "▶ [7/9] Pulling ${IMAGE_TAG}, migrating, rolling restart on VM…"
+echo "▶ [6/8] Pulling ${IMAGE_TAG}, migrating, rolling restart on VM…"
 # Unquoted heredoc delimiter (REMOTE, not 'REMOTE') is deliberate here, unlike
 # the other ssh blocks in this file — IMAGE_TAG/YC_REGISTRY_ID must be
 # substituted by THIS shell before the commands reach the VM; the remote
@@ -320,7 +296,7 @@ done
 docker image prune -f >/dev/null
 REMOTE
 
-echo "▶ [8/9] nginx guard…"
+echo "▶ [7/8] nginx guard…"
 # nginx is NOT restarted on deploy — there's no reason to. If you ever change
 # its config, do it by hand:  sudo nginx -t && sudo systemctl reload nginx
 # (reload keeps the old config serving if the new one is broken; restart does
@@ -348,7 +324,7 @@ fi
 echo "nginx: $(systemctl is-active nginx)"
 REMOTE
 
-echo "▶ [9/9] Verifying health…"
+echo "▶ [8/8] Verifying health…"
 
 # AUTHORITATIVE check — runs ON the VM, so it can't be fooled by the laptop's
 # network. This is the hard gate: if the public site is truly down, this fails.
@@ -419,7 +395,7 @@ ssh "$VM_HOST" 'set -e
 # routes the new UI called returned 404 to real users. Every health check
 # passed throughout, because the old API was perfectly healthy.
 #
-# The image guard at [2/9] catches the "image was never built" cause. This
+# The image guard at [2/8] catches the "image was never built" cause. This
 # catches all the others — an interrupted run, a recreate that silently didn't
 # take, a stale tag — by asking the one question that actually matters: is the
 # thing serving traffic the thing we just shipped?
