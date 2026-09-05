@@ -36,6 +36,10 @@ export function repairUploadFilename(name: string): string {
 export const ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  // .pptx — «Загрузить свою презентацию» (TODO.md "### AO" Phase 4). Like
+  // .docx it is a zip, so detectMimeFromBuffer sees no known signature and
+  // the content check passes through, exactly as it has for Word all along.
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'image/jpeg',
   'image/png',
 ])

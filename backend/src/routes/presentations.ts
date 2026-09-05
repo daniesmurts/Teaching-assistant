@@ -23,6 +23,7 @@ import { generatePresentationPptx } from '../services/presentationExport'
 import { generatePresentationHandoutPdf } from '../services/presentationHandoutPdf'
 import { findTeacherById } from '../db/queries/teachers'
 import { extractText } from '../services/documentExtractor'
+import { importPptx } from '../services/pptxImport'
 import { yandexImageSearch } from '../services/yandexImages'
 import { PRESENTATION_JOB_QUEUE, type PresentationJobPayload } from '../services/presentationJobWorker'
 import { getJobQueue } from '../services/jobQueue'
@@ -31,7 +32,7 @@ import {
   type PresentationJobRow,
 } from '../db/queries/presentationJobs'
 import {
-  findPresentationsByTeacher, findPresentationById, deletePresentation, setSlideImage,
+  findPresentationsByTeacher, findPresentationById, createPresentation, deletePresentation, setSlideImage,
   replaceSlides, findPresentationGenerationInputs, setPresentationApproved,
 } from '../db/queries/presentations'
 import {
@@ -488,6 +489,54 @@ router.post('/:id/slides/move',
       event: 'reordered', slideIndex: to, slide: presentation.slides[from],
     })
     res.json(updated)
+  })
+)
+
+// POST /api/presentations/import — «Загрузить свою презентацию».
+//
+// The adoption lever (TODO.md "### AO" Phase 4): every prospective teacher
+// already has a folder of decks, and "upload last week's lecture" is a far
+// lower bar than "describe a lecture from scratch" for seeing what ИСПУМ
+// does. Once imported, everything else applies to it — per-slide rewriting,
+// «Проверить усвоение», раздатка, письменная работа, «Готово».
+//
+// No AI quota and no plan gate: this makes no model call at all (it is a zip
+// and some XML), and charging a generation for reading a file the teacher
+// already owns would be indefensible — as would putting the cheapest possible
+// first step behind the paywall.
+router.post('/import',
+  uploadFields([{ name: 'file', maxCount: 1 }]),
+  verifyFileContent,
+  asyncHandler(async (req, res) => {
+    const files = req.files as { file?: Express.Multer.File[] } | undefined
+    const file = files?.file?.[0]
+    if (!file) throw new ValidationError('Загрузите файл презентации (.pptx)')
+
+    const { slides, sourceSlideCount } = await importPptx(file.buffer)
+    if (slides.length === 0) {
+      throw new ValidationError(
+        'Не удалось прочитать эту презентацию. Поддерживается формат .pptx (PowerPoint 2007 и новее) — ' +
+        'старый .ppt нужно сначала пересохранить.'
+      )
+    }
+
+    // The deck's own first slide names it better than the file does
+    // («Лекция_2_финал_v3.pptx»), but a title slide sometimes carries only a
+    // course name, so the filename is the fallback rather than the reverse.
+    const fromSlide = slides[0]?.title?.trim()
+    const fromFile  = file.originalname.replace(/\.pptx$/i, '').replace(/[_-]+/g, ' ').trim()
+    const topic = (fromSlide && fromSlide !== 'Без заголовка' ? fromSlide : fromFile) || 'Импортированная презентация'
+
+    const presentation = await createPresentation({
+      teacherId:        req.teacher.id,
+      courseId:         typeof req.body?.course_id === 'string' && req.body.course_id ? req.body.course_id : undefined,
+      topic:            topic.slice(0, 300),
+      generatedContent: renderSlidesAsText(slides),
+      slides,
+      slideCountTarget: slides.length,
+    })
+
+    res.status(201).json({ presentation, source_slide_count: sourceSlideCount })
   })
 )
 

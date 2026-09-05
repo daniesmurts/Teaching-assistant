@@ -5,6 +5,7 @@ import FeatureIntro from '../components/ui/FeatureIntro'
 import PresentationForm from '../components/presentations/PresentationForm'
 import SlideContent from '../components/presentations/SlideContent'
 import DeckQuizPanel from '../components/presentations/DeckQuizPanel'
+import ImportPptx from '../components/presentations/ImportPptx'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import Icon from '../components/ui/Icon'
@@ -217,6 +218,9 @@ export default function Presentations() {
                     </button>
                   )}
                   <PresentationForm onResult={handleResult} />
+                  <div className="mt-4">
+                    <ImportPptx onImported={(p) => { setOpenHistory(p); setResult(null); setFormCollapsed(true) }} />
+                  </div>
                 </>
               )}
             </div>

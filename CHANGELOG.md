@@ -15,6 +15,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Added
+- **«Загрузить свою презентацию» — .pptx импортируется как обычная лекция ИСПУМ (TODO.md "### AO" Phase 4).** The adoption lever the entry named: every prospective teacher already has a folder of decks, and "upload last week's lecture" is a far lower bar than "describe a lecture from scratch" for seeing what the platform does. Once imported, everything else applies — per-slide «Переписать», «Проверить усвоение», раздатка, письменная работа, «Готово».
+
+  No new dependency (`jszip` + `fast-xml-parser` were already here) and **no model call**: this is a zip and some XML, so it costs no AI quota and sits behind no plan gate — charging a generation for reading a file the teacher already owns would be indefensible, as would putting the cheapest first step behind the paywall.
+
+  Two details that decide whether an import is usable or scrambled:
+  - **Slide order comes from `<p:sldIdLst>`, not filenames.** Reordering slides in PowerPoint rewrites the relationship list, not `slideN.xml` names, so trusting the numbering imports an edited deck out of order. Numeric order remains the fallback when the relationship graph can't be read.
+  - **Notes are matched through each slide's own rels.** A deck where only some slides carry notes numbers them independently, so `slide3.xml` can own `notesSlide1.xml`; numeric correspondence would attach notes to the wrong lecture point.
+  - Title detection prefers the real title placeholder, then **the largest text on the slide** — plenty of decks are typed into plain text boxes, and there "first shape in the tree" is not the title. (This repo's own exporter draws the subtitle first, which is how the round-trip test caught it.)
+
+  Everything but a cover slide imports as `bullets` on purpose: the source carries no type information, and a mis-detected `formula` would render an ordinary sentence as an equation. «Переписать» upgrades any slide in one click. Tested by **round-tripping through this app's own PPTX exporter** rather than a hand-written fixture — the test reads the same OOXML PowerPoint writes — plus a real multi-slide deck built with pptxgenjs, which imported with its title, three bullets and speaker notes intact.
+
+### Changed
+- **«Много текста» — предупреждение о слайдах, которые не поместятся на проектор (Phase 4).** The web viewer renders each slide as a card that grows to fit, so a slide that looks fine in ИСПУМ can overflow the exported 16:9 deck — and the teacher finds out in front of the room. `shared/slideFit.ts` compares each slide's *visible* text (speaker notes excluded — they are never drawn) against per-type budgets derived from the exporter's own font sizes and regions, and the viewer marks the offenders. Deliberately a character/line budget rather than real text measurement: catching the slide with eleven bullets matters, policing the one that runs two words over does not. Shared module, so the warning matches what the exporter will actually do.
+- **История презентаций теперь доступна на бесплатном тарифе.** `presentationHistory` was `false` for Free, meaning a teacher's generated decks vanished from their own history — a churn mechanism rather than a paywall (called out in the Phase 4 list). Losing work you made is not an upsell; depth, PPTX export and the style flywheel remain the paid lines.
+
+  **Deferred from Phase 4, with reasons rather than silence:** institution branding (needs logo storage plus a settings surface — its own slice, not a tail end of this one); OMML formulas in the PPTX (pptxgenjs exposes no raw-XML hook, so this means hand-patching OOXML parts — disproportionate to replacing an already-readable rendered image); generated Mermaid/SVG schematics (needs a headless browser on the API box); persisted image candidates (the picker already re-searches on demand, so this saves a round trip rather than adding a capability); and the кафедра deck bank, which waits on the same share control Phase 2's кафедра pooling does.
+
+### Added
 - **Презентации учатся стилю преподавателя — «Готово» замыкает петлю (TODO.md "### AO" Phase 2).** Phase 1 gave the feature its first real quality signal; this turns it into a loop. A teacher marks a finished lecture «Готово», and from then on ИСПУМ uses that deck's slides as a *style* reference when writing their next one.
 
   **Approval is the gate**, the same rule grading has followed since day one (invariant 3): model output is never a training signal until a teacher has reviewed it. Migration 122 adds `presentations.approved_at`; nothing enters the pool without it, and un-approving removes it again.

@@ -12,6 +12,7 @@ import Button from '../ui/Button'
 import CopyAllButton from '../ui/CopyAllButton'
 import LoadingSpinner from '../ui/LoadingSpinner'
 import SlideEditor from './SlideEditor'
+import { findOverfullSlides } from '../../../../shared/slideFit'
 import { usePlan } from '../../hooks/usePlan'
 import { useUIStore } from '../../store/uiStore'
 import { downloadPresentationPptx } from '../../api/presentations'
@@ -468,6 +469,10 @@ interface TypedSlideCardProps {
   edit?:          SlideEditActions
   isFirst:        boolean
   isLast:         boolean
+  // Set when this slide's body runs past what a projected 16:9 slide holds.
+  // The card grows to fit its content, so nothing on screen would otherwise
+  // hint that the exported deck overflows — the teacher finds out in the hall.
+  overfull?:      string
 }
 
 export interface SlideEditActions {
@@ -484,7 +489,7 @@ export interface SlideEditActions {
 
 function TypedSlideCard({
   slide, slideIdx, slideNumber, sources, onCite, presentationId, onImageChange,
-  edit, isFirst, isLast,
+  edit, isFirst, isLast, overfull,
 }: TypedSlideCardProps) {
   const [copied, setCopied] = useState(false)
   const [mode, setMode] = useState<'view' | 'edit' | 'regenerate'>('view')
@@ -513,6 +518,14 @@ function TypedSlideCard({
             <h3 className="font-display text-[15px] font-bold text-ink truncate">
               <RichText text={slide.title} sources={sources} onOpen={onCite} />
             </h3>
+          )}
+          {overfull && (
+            <span
+              className="text-[10px] font-sans font-medium bg-warning-bg text-warning px-1.5 py-0.5 rounded-sm flex-shrink-0 whitespace-nowrap"
+              title={`Не поместится на слайд 16:9: ${overfull}. В презентации текст обрежется или уедет за край — сократите или разбейте на два слайда.`}
+            >
+              Много текста
+            </span>
           )}
         </div>
         <div className="flex items-center gap-2.5 flex-shrink-0 ml-3">
@@ -858,6 +871,12 @@ export default function SlideContent({
 
   const totalSlides = useTyped ? slides!.length : legacySlides.length
 
+  // Computed from the same module the rest of the app uses, so the warning the
+  // teacher sees matches what the exporter will actually do.
+  const overfull = new Map(
+    (useTyped ? findOverfullSlides(slides!) : []).map((f) => [f.index, f.reason]),
+  )
+
   if (!useTyped && legacySlides.length === 0) {
     // Neither format — show raw content as a fallback (e.g. parse failure).
     return (
@@ -896,6 +915,7 @@ export default function SlideContent({
               edit={presentationId ? edit : undefined}
               isFirst={i === 0}
               isLast={i === slides!.length - 1}
+              overfull={overfull.get(i)}
             />
           ))
         : legacySlides.map((s) => (

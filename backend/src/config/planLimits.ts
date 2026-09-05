@@ -20,7 +20,11 @@ export const PLAN_LIMITS = {
     handout:               false,
     publishedAssignments:  false,   // §5.1 process-of-creation attestation — Pro/Institution
     historyDays:           30,
-    presentationHistory:   false,
+    // Was false, which meant a free teacher's generated decks vanished from
+    // their history — a churn mechanism rather than a paywall (TODO.md "### AO"
+    // Phase 4). Losing work you made is not an upsell; depth, PPTX export and
+    // the style flywheel are the paid lines here.
+    presentationHistory:   true,
     watermark:             true,
     feedbackCritic:        false,
     evidenceFirst:         false,   // Feature AH — evidence-first two-phase grading

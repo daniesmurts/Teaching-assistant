@@ -2293,7 +2293,7 @@ ship them as one thing.
 - **Depends on:** P (org tree — shipped) for scoping; AG's presentation
   image pipeline (shipped) for the Phase 2 insertion point.
 
-### AO. Презентации — from vending machine to workspace · Effort: Phase 0 S–M, 🟢 SHIPPED (2026-09-04) · Phase 1 M, 🟢 SHIPPED (2026-09-04) · Phase 2 M, 🟢 SHIPPED (2026-09-05) · Phase 3 M–L, 🟢 SHIPPED (2026-09-05), Phase 4 M (phased, independently shippable)
+### AO. Презентации — from vending machine to workspace · Effort: Phase 0 S–M, 🟢 SHIPPED (2026-09-04) · Phase 1 M, 🟢 SHIPPED (2026-09-04) · Phase 2 M, 🟢 SHIPPED (2026-09-05) · Phase 3 M–L, 🟢 SHIPPED (2026-09-05) · Phase 4 M, 🟡 PARTIALLY SHIPPED (2026-09-05) (phased, independently shippable)
 
 Presentations are one of the features teachers actually use daily (FEATURES.md,
 GA since AG). AG fixed *generation quality* — outline+expansion, real notes
@@ -2446,14 +2446,24 @@ of this entry:
     deck doesn't record that an assignment came from it (no back-link the way
     `quizzes.presentation_id` gives one), so a second click makes a second
     draft.
-- **Phase 4 — fidelity + institutional finish.** Independent of the above,
-  ordered by how often each one gets raised:
-  - **Import existing PPTX.** Every prospective teacher has 40 old lecture
-    decks. "Upload yours — ИСПУМ writes the speaker notes / fixes the
-    structure / builds the test" is a far lower-friction first action than
-    "describe a lecture from scratch", and `documentExtractor.ts` already
-    does most of the parsing work. This is an **adoption** lever, probably
-    the largest single one available in this feature, not a quality one.
+- **Phase 4 (partially shipped, 2026-09-05) — fidelity + institutional
+  finish.** Independent of the above, ordered by how often each one gets
+  raised. **Shipped:** PPTX import, the 16:9 fit warning, free-tier history.
+  **Still open:** institution branding, OMML formulas, generated schematics,
+  persisted image candidates, the кафедра deck bank — each with its reason
+  inline below.
+  - **Import existing PPTX.** 🟢 SHIPPED (2026-09-05).
+    `services/pptxImport.ts` + `POST /api/presentations/import`. No new
+    dependency (`jszip`/`fast-xml-parser` were already present), no model
+    call, so no quota and no plan gate. Slide order comes from `<p:sldIdLst>`
+    (filenames lie once a deck has been reordered); notes are matched through
+    each slide's own rels (a deck with partial notes numbers them
+    independently, so slide3 can own notesSlide1); title = placeholder, else
+    the largest text on the slide. Round-trip tested through this repo's own
+    PPTX exporter rather than a fixture. **Not done:** a bulk "write speaker
+    notes for every imported slide" pass — everything imports as `bullets`
+    (bar a cover slide) and «Переписать» upgrades one slide at a time, which
+    is fine for fixing a few and tedious for a whole deck.
   - **Institution branding.** `presentationExport.ts` hardcodes one palette
     (`const C`). Титульный лист, logo, кафедра naming — cheap to build,
     impossible to argue with in a B2B demo, belongs next to the existing
@@ -2461,11 +2471,14 @@ of this entry:
   - **Formulas export as PNG** via `formulaRenderer.ts` — readable, but not
     editable in PowerPoint. Emitting OMML makes them native equation
     objects; `ommlToLatex.ts` already exists for the inbound direction.
-  - **The viewer isn't a slide.** `SlideContent.tsx` renders doc-shaped
-    cards, so nothing warns that a body which fits the card overflows a
-    10×5.63in slide. A 16:9 preview (or a fit check at generation) prevents
-    the "looked fine, broke on the projector" failure — the one failure mode
-    that costs a teacher credibility in front of a room.
+  - **The viewer isn't a slide.** 🟡 fit check SHIPPED (2026-09-05).
+    `shared/slideFit.ts` compares each slide's *visible* text (speaker notes
+    excluded — they are never drawn) against per-type budgets taken from the
+    exporter's own regions, and the viewer shows a «Много текста» chip.
+    Deliberately a character/line budget, not real text measurement: catching
+    the slide with eleven bullets is the point, policing the one that runs two
+    words over is not. **Not done:** an actual 16:9 preview — the chip says a
+    slide will overflow, it does not show what it will look like.
   - **`diagram` slides hunt for a photo.** Generating an SVG/Mermaid
     schematic from the brief beats top-1 image search for process/flow
     content and sidesteps the licensing question a web image on a university
@@ -2476,9 +2489,9 @@ of this entry:
     manual step. AG Phase 2 dropped this as unnecessary because the picker
     re-searches on demand; that reasoning holds only while opening the picker
     is rare, which per-slide editing changes.
-  - **Free tier has `presentationHistory: false`** (`planLimits.ts`) — free
-    users lose their decks. That's a churn mechanism, not a paywall; gate
-    depth and PPTX, keep the history.
+  - **Free tier has `presentationHistory: false`** — 🟢 SHIPPED
+    (2026-09-05), now `true`. Depth, PPTX export and the style flywheel stay
+    the paid lines; losing work you made is not an upsell.
   - **No кафедра deck bank.** AN built кафедральная библиотека for
     documents; a методист curating a shared deck bank is the same pattern
     on the same scope machinery, and feeds AM's Кабинет методиста directly.

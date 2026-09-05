@@ -258,3 +258,19 @@ export async function createAssignmentFromPresentation(id: string): Promise<Publ
 export async function setPresentationApproved(id: string, approved: boolean): Promise<Presentation> {
   return (await client.post<Presentation>(`/api/presentations/${id}/approve`, { approved })).data
 }
+
+// «Загрузить свою презентацию» — imports a .pptx as an editable deck
+// (TODO.md "### AO" Phase 4). No model call, no quota: once it is in, every
+// other feature applies to it.
+export async function importPresentationPptx(
+  file: File,
+  courseId?: string,
+): Promise<{ presentation: Presentation; source_slide_count: number }> {
+  const form = new FormData()
+  form.append('file', file)
+  if (courseId) form.append('course_id', courseId)
+  const res = await client.post<{ presentation: Presentation; source_slide_count: number }>(
+    '/api/presentations/import', form, { headers: { 'Content-Type': 'multipart/form-data' } },
+  )
+  return res.data
+}
