@@ -1,6 +1,7 @@
 import { logger } from '../lib/logger'
 import { renderFormulaToPng } from './formulaRenderer'
 import { toPptxColor } from '../lib/brandColor'
+import { containFit } from '../lib/imageSize'
 import type {
   Presentation, Slide, SlideImage, TitleSlide, BulletsSlide, ConceptSlide, FormulaSlide,
   ComparisonSlide, DiagramSlide, DiscussionSlide, SummarySlide,
@@ -43,7 +44,9 @@ const C = {
 export interface DeckBranding {
   accentColor?:     string | null   // '#RRGGBB'; null → the platform amber
   institutionName?: string | null
-  logo?:            { dataUri: string } | null
+  // Both forms: the data URI is what pptxgenjs embeds, the buffer is what
+  // containFit measures so the image keeps its aspect ratio.
+  logo?:            { dataUri: string; buffer: Buffer } | null
 }
 
 let accent = C.amber
@@ -335,41 +338,68 @@ function bulletList(items: string[]): { text: string; options: { bullet: boolean
 
 function addTitleSlide(pptx: Pptx, slide: TitleSlide): void {
   const s = pptx.addSlide()
-  s.background = { color: C.ink }
 
-  // Университет's own mark, top-centre above the title. Sized by height only
-  // (w: undefined would break pptxgenjs) with `sizing: contain`, so a wide
-  // horizontal logo and a square crest both land inside the same box instead
-  // of one of them stretching.
+  // Light, not the dark slab this used to be. Teachers disliked it, and they
+  // were right for a reason beyond taste: a title slide is the one projected
+  // longest, often in a lit room where a black field is the worst case for a
+  // projector's contrast, and most university logos are drawn for white.
+  s.background = { color: C.white }
+
+  // The accent appears as GRAPHICS, never as text on this slide. An institution
+  // may pick a pale brand colour, and pale-on-white text would be unreadable;
+  // a rule is judged at 3:1, and reading the title never depends on it.
+  s.addShape('rect', { x: 0, y: 0, w: SLIDE_W, h: 0.14, fill: { color: accent } })
+  s.addShape('rect', { x: 0, y: SLIDE_H - 0.5, w: SLIDE_W, h: 0.5, fill: { color: C.bg } })
+
+  let y = 0.75
+
   if (branding?.logo) {
-    s.addImage({
-      data: branding.logo.dataUri,
-      x: (SLIDE_W - 2.4) / 2, y: 0.45, w: 2.4, h: 0.7,
-      sizing: { type: 'contain', w: 2.4, h: 0.7 },
-    })
+    // Drawn at the image's own aspect ratio. pptxgenjs stretches to the frame
+    // when given w/h alongside `sizing: contain`, which is what squashed a wide
+    // university logo into a 2.4×0.7 box; containFit computes the true fit
+    // instead, and we pass exact dimensions, which pptxgenjs does honour.
+    const BOX_W = 2.6
+    const BOX_H = 0.85
+    const fit = containFit(branding.logo.buffer, BOX_W, BOX_H)
+    const w = fit?.w ?? BOX_W
+    const h = fit?.h ?? BOX_H
+    s.addImage({ data: branding.logo.dataUri, x: (SLIDE_W - w) / 2, y, w, h })
+    y += h + 0.25
   }
+
   if (branding?.institutionName) {
     s.addText(cleanForSlide(branding.institutionName), {
-      x: MARGIN, y: branding.logo ? 1.2 : 0.6, w: SLIDE_W - MARGIN * 2, h: 0.35,
-      align: 'center', fontSize: 11, color: C.ink3,
+      x: MARGIN, y, w: SLIDE_W - MARGIN * 2, h: 0.3,
+      align: 'center', fontSize: 11, color: C.ink2,
     })
+    y += 0.4
   }
+
   if (slide.body.subtitle) {
-    s.addText(cleanForSlide(slide.body.subtitle), {
-      x: MARGIN, y: 1.5, w: SLIDE_W - MARGIN * 2, h: 0.5,
-      align: 'center', fontSize: 14, color: accent,
+    s.addText(cleanForSlide(slide.body.subtitle).toUpperCase(), {
+      x: MARGIN, y, w: SLIDE_W - MARGIN * 2, h: 0.3,
+      align: 'center', fontSize: 11, bold: true, charSpacing: 1.5, color: C.ink3,
     })
+    y += 0.4
   }
+
   s.addText(cleanForSlide(slide.title), {
-    x: MARGIN, y: 2.0, w: SLIDE_W - MARGIN * 2, h: 1.4,
-    align: 'center', valign: 'middle', fontFace: 'Georgia', fontSize: 30, bold: true, color: C.white,
+    x: MARGIN, y, w: SLIDE_W - MARGIN * 2, h: 1.5,
+    align: 'center', valign: 'middle', fontFace: 'Georgia', fontSize: 30, bold: true, color: C.ink,
   })
+  y += 1.6
+
+  // A short centred rule under the title — the one piece of ornament, and the
+  // place the brand colour reads best.
+  s.addShape('rect', { x: (SLIDE_W - 1.1) / 2, y, w: 1.1, h: 0.045, fill: { color: accent } })
+
   if (slide.body.lecturer) {
     s.addText(cleanForSlide(slide.body.lecturer), {
-      x: MARGIN, y: 3.6, w: SLIDE_W - MARGIN * 2, h: 0.5,
-      align: 'center', fontSize: 12, color: C.border,
+      x: MARGIN, y: y + 0.3, w: SLIDE_W - MARGIN * 2, h: 0.4,
+      align: 'center', fontSize: 12, color: C.ink2,
     })
   }
+
   addNotes(s, slide.notes)
 }
 

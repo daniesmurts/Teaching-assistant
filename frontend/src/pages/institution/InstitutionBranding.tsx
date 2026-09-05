@@ -139,13 +139,17 @@ export default function InstitutionBranding() {
         <div className="bg-surface border border-border rounded-lg p-5">
           <h2 className="font-sans text-sm font-medium text-ink mb-1">Логотип на титульном листе</h2>
           <p className="text-xs font-sans text-ink-secondary mb-3 max-w-[62ch]">
-            PNG или JPEG, до 2 МБ. Ставится по центру над названием лекции. Лучше всего смотрится
-            горизонтальный логотип на прозрачном или тёмном фоне — титульный лист тёмный.
+            PNG или JPEG, до 2 МБ. Ставится по центру над названием лекции — титульный лист
+            светлый, так что лучше всего подойдёт логотип на прозрачном или белом фоне.
+            Пропорции сохраняются: широкий логотип не растянется.
           </p>
 
           <div className="flex items-center gap-4 flex-wrap">
+            {/* Previewed on white, because that is now what the титульный лист
+                actually is — showing it on ink would misrepresent how the logo
+                will print. */}
             {data.has_logo && (
-              <div className="bg-ink rounded-md px-4 py-3 flex items-center justify-center">
+              <div className="bg-white border border-border rounded-md px-4 py-3 flex items-center justify-center">
                 <img
                   src={`/api/institution/branding/logo?v=${logoVersion}`}
                   alt={`Логотип ${data.name}`}

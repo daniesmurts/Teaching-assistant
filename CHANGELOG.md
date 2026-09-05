@@ -14,6 +14,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Fixed
+- **Логотип вуза выгружался сплющенным, а титульный лист был чёрным.** Both reported after the branding release; both are mine.
+  - **The logo was drawn to the frame, not to its own shape.** pptxgenjs stretches an image to the given `w`/`h` even when handed `sizing: { type: 'contain' }` — I passed both, so a 2.5:1 university mark was forced into a 3.06:1 box and came out visibly squashed. New `lib/imageSize.ts` reads the intrinsic dimensions straight from the bytes (PNG's IHDR at a fixed offset; JPEG needs a walk along the marker chain, since the frame segment isn't at a fixed position — no image library for two well-defined headers) and `containFit` computes the true fit, which is then passed as exact dimensions. Verified from the produced package: a 500×200 logo lands 2.13×0.85in — aspect 2.500 against the source's 2.500. A one-off bound bug in the JPEG walk (`offset + 9 < length` where it must be `<=`) was caught by the fixture and fixed.
+  - **The титульный лист is now light.** Teachers disliked the black slab, and they were right for a reason beyond taste: it is the slide projected longest, often in a lit room, where a black field is the worst case for a projector's contrast — and most university logos are drawn for white. White ground, a thin accent rule at the top tying it to the content slides, a warm band along the bottom edge, the тема set in caps as an eyebrow, and a short centred accent rule under the title as the single piece of ornament.
+  - **The accent colour appears only as graphics on that slide, never as text.** An institution may pick a pale brand colour; pale-on-white text would be unreadable, whereas a rule is judged at 3:1 and nothing about reading the slide depends on it. There's a test asserting the colour appears in shapes and not in run properties.
+  - The settings page previewed the logo on ink and told teachers the title slide was dark. Both corrected — it now previews on white and says proportions are preserved.
+
 ### Changed
 - **Шапка просмотра презентации: заголовок больше не дублируется, «Удалить» перестало быть главной кнопкой.** Three issues in one screenful, all of them hierarchy:
   - **The lecture title was printed twice** — once in the card, then again immediately below in uppercase grey. For a 200-character technical title that was six wasted lines, and the all-caps copy was the harder of the two to read. Removed; the card keeps it, clamped to two lines with the full text on hover.

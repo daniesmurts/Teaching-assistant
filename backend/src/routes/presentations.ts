@@ -564,10 +564,10 @@ async function resolveDeckBranding(teacherId: string): Promise<DeckBranding | nu
     const branding = await getBrandingForTeacher(teacherId)
     if (!branding) return null
 
-    let logo: { dataUri: string } | null = null
+    let logo: { dataUri: string; buffer: Buffer } | null = null
     if (branding.logo_path) {
       const buffer = await downloadObject(branding.logo_path)
-      logo = { dataUri: `data:${branding.logo_mime ?? 'image/png'};base64,${buffer.toString('base64')}` }
+      logo = { dataUri: `data:${branding.logo_mime ?? 'image/png'};base64,${buffer.toString('base64')}`, buffer }
     }
     return { accentColor: branding.accent_color, institutionName: branding.name, logo }
   } catch (err) {
