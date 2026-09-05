@@ -2466,10 +2466,16 @@ of this entry:
     button appears only when slides lack notes). **Not done:** slides still
     import as `bullets` bar a cover slide, so type upgrades remain one
     «Переписать» at a time.
-  - **Institution branding.** `presentationExport.ts` hardcodes one palette
-    (`const C`). Титульный лист, logo, кафедра naming — cheap to build,
-    impossible to argue with in a B2B demo, belongs next to the existing
-    institution settings surface.
+  - **Institution branding.** 🟢 SHIPPED (2026-09-05). Migration 125's
+    `brand_accent_color`/`brand_logo_path`/`brand_logo_mime`, a «Фирменный
+    стиль» page under the institution-admin gate, `lib/brandColor.ts`
+    normalising at the boundary (pptxgenjs corrupts a package for a malformed
+    colour, silently), and `DeckBranding` threaded into the exporter. **Not
+    done:** the handout PDF still uses the platform palette — it takes the
+    same branding object, but the title-block layout wants its own design
+    pass rather than a colour swap; no per-кафедра branding (institution-wide
+    only, deliberately — see the migration); no титульный лист template
+    beyond logo + name.
   - **Formulas export as PNG** via `formulaRenderer.ts` — readable, but not
     editable in PowerPoint. Emitting OMML makes them native equation
     objects; `ommlToLatex.ts` already exists for the inbound direction.

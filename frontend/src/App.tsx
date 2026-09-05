@@ -77,6 +77,7 @@ import InstitutionSharedRag from './pages/institution/InstitutionSharedRag'
 import InstitutionLibrary from './pages/institution/InstitutionLibrary'
 import InstitutionStrategyDocument from './pages/institution/InstitutionStrategyDocument'
 import InstitutionModel from './pages/institution/InstitutionModel'
+import InstitutionBranding from './pages/institution/InstitutionBranding'
 import InstitutionLti from './pages/institution/InstitutionLti'
 import InstitutionAudit from './pages/institution/InstitutionAudit'
 import InstitutionPrograms from './pages/institution/InstitutionPrograms'
@@ -376,6 +377,7 @@ export default function App() {
             <Route path="shared-rag"   element={<InstitutionSharedRag />} />
             <Route path="library"      element={<InstitutionLibrary />} />
             <Route path="strategy-document" element={<InstitutionStrategyDocument />} />
+            <Route path="branding"     element={<InstitutionBranding />} />
             <Route path="model"        element={<InstitutionModel />} />
             <Route path="lti"          element={<InstitutionLti />} />
             <Route path="audit"    element={<InstitutionAudit />} />

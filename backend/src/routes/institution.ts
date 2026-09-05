@@ -1,9 +1,14 @@
 import { Router, type Request } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { requireInstitutionAdmin } from '../middleware/requireRole'
+import { uploadObject, downloadObject, deleteObject } from '../services/objectStorage'
+import { normaliseBrandColor } from '../lib/brandColor'
+import {
+  getInstitutionBranding, setInstitutionAccentColor, setInstitutionLogo,
+} from '../db/queries/institutionBranding'
 import { requireDomain, requireDomainOnUnitTypes } from '../middleware/requireDomain'
 import { CRITERIA_READ_UNIT_TYPES, CRITERIA_CREATE_UNIT_TYPES, TEACHING_OVERVIEW_UNIT_TYPES } from '../services/accessScope'
-import { uploadConfig, verifyFileContent } from '../middleware/fileValidation'
+import { uploadConfig, uploadFields, verifyFileContent } from '../middleware/fileValidation'
 import { validate } from '../middleware/validate'
 import { asyncHandler } from '../lib/asyncHandler'
 import { ValidationError, NotFoundError } from '../errors/AppError'
@@ -440,6 +445,87 @@ router.get('/model', asyncHandler(async (req, res) => {
       n:        Number(r.n),
     })),
   })
+}))
+
+// ─── Фирменный стиль (migration 125) ────────────────────────────────────────
+//
+// What a generated deck looks like when it leaves the platform. Sits under
+// this router's institution-admin gate: branding is an institutional identity
+// question, not a per-teacher preference — one кафедра deciding the university
+// is now green would be a support ticket, not a feature.
+
+const MAX_LOGO_BYTES = 2 * 1024 * 1024   // a crest, not a poster
+
+router.get('/branding', asyncHandler(async (req, res) => {
+  const branding = await getInstitutionBranding(institutionId(req))
+  if (!branding) throw new NotFoundError('Учебное заведение')
+  res.json({
+    name:         branding.name,
+    accent_color: branding.accent_color,
+    has_logo:     Boolean(branding.logo_path),
+  })
+}))
+
+router.patch('/branding', asyncHandler(async (req, res) => {
+  const raw = (req.body as { accent_color?: unknown }).accent_color
+  const colour = normaliseBrandColor(raw)
+
+  // An empty value means "back to the ИСПУМ default" and is a legitimate
+  // request; anything else unparseable is a typo worth reporting, because the
+  // alternative is a .pptx that silently fails to open.
+  const clearing = raw === null || raw === undefined || (typeof raw === 'string' && !raw.trim())
+  if (!colour && !clearing) throw new ValidationError('Цвет должен быть в формате #RRGGBB')
+
+  await setInstitutionAccentColor(institutionId(req), colour)
+  res.json({ accent_color: colour })
+}))
+
+router.post('/branding/logo',
+  uploadFields([{ name: 'file', maxCount: 1 }]),
+  verifyFileContent,
+  asyncHandler(async (req, res) => {
+    const files = req.files as { file?: Express.Multer.File[] } | undefined
+    const file = files?.file?.[0]
+    if (!file) throw new ValidationError('Загрузите файл логотипа (PNG или JPEG)')
+    if (!['image/png', 'image/jpeg'].includes(file.mimetype)) {
+      throw new ValidationError('Логотип должен быть PNG или JPEG')
+    }
+    if (file.buffer.length > MAX_LOGO_BYTES) {
+      throw new ValidationError('Логотип слишком большой — до 2 МБ')
+    }
+
+    const id = institutionId(req)
+    // Fixed key per institution: a re-upload replaces the old object rather
+    // than accumulating orphans nobody will ever clean up.
+    const ext  = file.mimetype === 'image/png' ? 'png' : 'jpg'
+    const path = `institution-logos/${id}.${ext}`
+    await uploadObject(file.buffer, path, file.mimetype)
+    await setInstitutionLogo(id, path, file.mimetype)
+
+    res.status(201).json({ has_logo: true })
+  })
+)
+
+router.delete('/branding/logo', asyncHandler(async (req, res) => {
+  const id = institutionId(req)
+  const branding = await getInstitutionBranding(id)
+  // Storage first, row second: an orphaned object is invisible waste, whereas
+  // a row pointing at a deleted object is a broken logo on every export.
+  if (branding?.logo_path) await deleteObject(branding.logo_path)
+  await setInstitutionLogo(id, null, null)
+  res.status(204).end()
+}))
+
+// Streams the logo for the settings preview. Same proxy shape as
+// GET /api/documents/figures/:id/image — this codebase has no pre-signed URL
+// mechanism, so an authenticated route is how a stored object reaches a page.
+router.get('/branding/logo', asyncHandler(async (req, res) => {
+  const branding = await getInstitutionBranding(institutionId(req))
+  if (!branding?.logo_path) throw new NotFoundError('Логотип')
+  const buffer = await downloadObject(branding.logo_path)
+  res.setHeader('Content-Type', branding.logo_mime ?? 'image/png')
+  res.setHeader('Cache-Control', 'private, max-age=300')
+  res.send(buffer)
 }))
 
 router.patch('/model', asyncHandler(async (req, res) => {

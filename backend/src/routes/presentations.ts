@@ -19,7 +19,10 @@ import {
 import { createPublishedAssignment, findAssignmentByPresentation } from '../db/queries/publishedAssignments'
 import { generateQuiz, assertQuizQuota } from '../services/quizzes'
 import { findQuizzesByPresentation } from '../db/queries/quizzes'
-import { generatePresentationPptx } from '../services/presentationExport'
+import { generatePresentationPptx, type DeckBranding } from '../services/presentationExport'
+import { getBrandingForTeacher } from '../db/queries/institutionBranding'
+import { downloadObject } from '../services/objectStorage'
+import { logger } from '../lib/logger'
 import { generatePresentationHandoutPdf } from '../services/presentationHandoutPdf'
 import { findTeacherById } from '../db/queries/teachers'
 import { extractText } from '../services/documentExtractor'
@@ -295,7 +298,10 @@ router.get('/:id/export.pptx',
       throw new ValidationError('Эта презентация ещё в старом текстовом формате и не может быть экспортирована в PPTX — сгенерируйте новую.')
     }
 
-    const pptx = await generatePresentationPptx(presentation)
+    // Фирменный стиль of the teacher's own institution (migration 125), or
+    // the platform's look for an individual-tier teacher. Best-effort: a
+    // storage hiccup must cost the accent colour, not the export.
+    const pptx = await generatePresentationPptx(presentation, await resolveDeckBranding(req.teacher.id))
     // presentation.topic is normally Cyrillic — `\w` only matches ASCII, so
     // a plain regex sanitiser turns the whole topic into underscores (grows
     // with the topic's length, which is exactly the "filename is just a
@@ -552,6 +558,23 @@ router.post('/import',
     res.status(201).json({ presentation, source_slide_count: sourceSlideCount })
   })
 )
+
+async function resolveDeckBranding(teacherId: string): Promise<DeckBranding | null> {
+  try {
+    const branding = await getBrandingForTeacher(teacherId)
+    if (!branding) return null
+
+    let logo: { dataUri: string } | null = null
+    if (branding.logo_path) {
+      const buffer = await downloadObject(branding.logo_path)
+      logo = { dataUri: `data:${branding.logo_mime ?? 'image/png'};base64,${buffer.toString('base64')}` }
+    }
+    return { accentColor: branding.accent_color, institutionName: branding.name, logo }
+  } catch (err) {
+    logger.warn({ message: '[branding] could not resolve institution branding', error: (err as Error).message })
+    return null
+  }
+}
 
 // GET /api/presentations/:id/handout.pdf — раздатка, the student-facing
 // companion to the deck (TODO.md "### AO" Phase 3). The PPTX is what the

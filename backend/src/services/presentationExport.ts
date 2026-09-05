@@ -1,5 +1,6 @@
 import { logger } from '../lib/logger'
 import { renderFormulaToPng } from './formulaRenderer'
+import { toPptxColor } from '../lib/brandColor'
 import type {
   Presentation, Slide, SlideImage, TitleSlide, BulletsSlide, ConceptSlide, FormulaSlide,
   ComparisonSlide, DiagramSlide, DiscussionSlide, SummarySlide,
@@ -28,6 +29,32 @@ const C = {
   border:     'E7E2D9',
   bg:         'F7F5F0',
   white:      'FFFFFF',
+}
+
+// Фирменный стиль (migration 125). A deck leaving the platform should look
+// like the university that paid for it, not like ИСПУМ — a титульный лист with
+// the wrong logo is the first thing a заведующий кафедрой notices.
+//
+// Held in module state rather than threaded through fifteen render functions:
+// an export is a single sequential pass (see the `for` loop in
+// generatePresentationPptx — deliberately not Promise.all), so there is no
+// interleaving to race with, and the alternative is an extra parameter on
+// every slide renderer for a value none of them vary.
+export interface DeckBranding {
+  accentColor?:     string | null   // '#RRGGBB'; null → the platform amber
+  institutionName?: string | null
+  logo?:            { dataUri: string } | null
+}
+
+let accent = C.amber
+let branding: DeckBranding | null = null
+
+function applyBranding(b: DeckBranding | null): void {
+  branding = b
+  const custom = b?.accentColor ? toPptxColor(b.accentColor) : null
+  // Validated at the boundary (lib/brandColor.ts) — but this is the last line
+  // of defence before a bad value becomes a corrupt .pptx nobody can open.
+  accent = custom && /^[0-9A-Fa-f]{6}$/.test(custom) ? custom : C.amber
 }
 
 const SLIDE_W = 10      // inches, 16:9
@@ -203,11 +230,16 @@ async function addSideImage(pptxSlide: Pptx, image: SlideImage | null | undefine
   }
 }
 
-export async function generatePresentationPptx(presentation: Presentation): Promise<Buffer> {
+export async function generatePresentationPptx(
+  presentation: Presentation,
+  deckBranding: DeckBranding | null = null,
+): Promise<Buffer> {
   const slides = presentation.slides
   if (!slides || slides.length === 0) {
     throw new Error('У презентации нет слайдов для экспорта — сгенерируйте её заново.')
   }
+
+  applyBranding(deckBranding)
 
   const PptxGenJS = (await import('pptxgenjs')).default
   const pptx = new PptxGenJS()
@@ -290,7 +322,7 @@ function addNotes(pptxSlide: Pptx, notes: string): void {
 // title text, so the deck reads as one system rather than one layout per type.
 function addHeader(pptxSlide: Pptx, title: string): void {
   pptxSlide.background = { color: C.white }
-  pptxSlide.addShape('rect', { x: 0, y: 0, w: SLIDE_W, h: 0.12, fill: { color: C.amber } })
+  pptxSlide.addShape('rect', { x: 0, y: 0, w: SLIDE_W, h: 0.12, fill: { color: accent } })
   pptxSlide.addText(cleanForSlide(title), {
     x: MARGIN, y: 0.3, w: SLIDE_W - MARGIN * 2, h: 0.7,
     fontFace: 'Georgia', fontSize: 24, bold: true, color: C.ink,
@@ -304,10 +336,28 @@ function bulletList(items: string[]): { text: string; options: { bullet: boolean
 function addTitleSlide(pptx: Pptx, slide: TitleSlide): void {
   const s = pptx.addSlide()
   s.background = { color: C.ink }
+
+  // Университет's own mark, top-centre above the title. Sized by height only
+  // (w: undefined would break pptxgenjs) with `sizing: contain`, so a wide
+  // horizontal logo and a square crest both land inside the same box instead
+  // of one of them stretching.
+  if (branding?.logo) {
+    s.addImage({
+      data: branding.logo.dataUri,
+      x: (SLIDE_W - 2.4) / 2, y: 0.45, w: 2.4, h: 0.7,
+      sizing: { type: 'contain', w: 2.4, h: 0.7 },
+    })
+  }
+  if (branding?.institutionName) {
+    s.addText(cleanForSlide(branding.institutionName), {
+      x: MARGIN, y: branding.logo ? 1.2 : 0.6, w: SLIDE_W - MARGIN * 2, h: 0.35,
+      align: 'center', fontSize: 11, color: C.ink3,
+    })
+  }
   if (slide.body.subtitle) {
     s.addText(cleanForSlide(slide.body.subtitle), {
       x: MARGIN, y: 1.5, w: SLIDE_W - MARGIN * 2, h: 0.5,
-      align: 'center', fontSize: 14, color: C.amber,
+      align: 'center', fontSize: 14, color: accent,
     })
   }
   s.addText(cleanForSlide(slide.title), {
@@ -446,7 +496,7 @@ async function addComparisonSlide(pptx: Pptx, slide: ComparisonSlide): Promise<v
     s.addShape('rect', { x, y: 1.3, w: colW, h: 0.5, fill: { color: C.bg }, line: { color: C.border, width: 0.5 } })
     s.addText(cleanForSlide(c.header).toUpperCase(), {
       x, y: 1.3, w: colW, h: 0.5, align: 'center', valign: 'middle',
-      fontSize: 12, bold: true, color: C.amber,
+      fontSize: 12, bold: true, color: accent,
     })
     if (c.items.length > 0) {
       s.addText(bulletList(c.items), {
@@ -522,14 +572,14 @@ function addSummarySlide(pptx: Pptx, slide: SummarySlide): void {
   addHeader(s, slide.title)
   const half = (SLIDE_W - MARGIN * 2 - 0.3) / 2
   if (slide.body.takeaways.length > 0) {
-    s.addText('ГЛАВНОЕ', { x: MARGIN, y: 1.3, w: half, h: 0.35, fontSize: 11, bold: true, color: C.amber })
+    s.addText('ГЛАВНОЕ', { x: MARGIN, y: 1.3, w: half, h: 0.35, fontSize: 11, bold: true, color: accent })
     s.addText(bulletList(slide.body.takeaways), {
       x: MARGIN, y: 1.7, w: half, h: SLIDE_H - 2.0, fontSize: 13, color: C.ink, valign: 'top',
     })
   }
   if (slide.body.next_steps.length > 0) {
     const x = MARGIN + half + 0.3
-    s.addText('ЧТО ДАЛЬШЕ', { x, y: 1.3, w: half, h: 0.35, fontSize: 11, bold: true, color: C.amber })
+    s.addText('ЧТО ДАЛЬШЕ', { x, y: 1.3, w: half, h: 0.35, fontSize: 11, bold: true, color: accent })
     s.addText(bulletList(slide.body.next_steps), {
       x, y: 1.7, w: half, h: SLIDE_H - 2.0, fontSize: 13, color: C.ink2, valign: 'top',
     })

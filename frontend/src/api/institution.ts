@@ -177,3 +177,31 @@ export async function createInstitutionRubric(data: {
 }): Promise<Rubric> {
   return (await client.post<Rubric>('/api/institution/rubrics', data)).data
 }
+
+// ─── Фирменный стиль (migration 125) ────────────────────────────────────────
+
+export interface InstitutionBranding {
+  name:         string
+  accent_color: string | null
+  has_logo:     boolean
+}
+
+export async function getInstitutionBranding(): Promise<InstitutionBranding> {
+  return (await client.get<InstitutionBranding>('/api/institution/branding')).data
+}
+
+export async function setInstitutionAccentColor(accentColor: string | null): Promise<{ accent_color: string | null }> {
+  return (await client.patch<{ accent_color: string | null }>('/api/institution/branding', { accent_color: accentColor })).data
+}
+
+export async function uploadInstitutionLogo(file: File): Promise<{ has_logo: boolean }> {
+  const form = new FormData()
+  form.append('file', file)
+  return (await client.post<{ has_logo: boolean }>('/api/institution/branding/logo', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })).data
+}
+
+export async function deleteInstitutionLogo(): Promise<void> {
+  await client.delete('/api/institution/branding/logo')
+}

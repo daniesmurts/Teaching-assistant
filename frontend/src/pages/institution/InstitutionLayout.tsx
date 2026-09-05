@@ -41,6 +41,7 @@ const NAV: { to: string; label: string; end: boolean; domain?: NavDomain; minLev
   { to: '/programs',              label: 'Образовательные программы', end: false },
   { to: '/institution/shared-rag', label: 'Общий цикл',  end: false },
   { to: '/institution/strategy-document', label: 'Стратегия развития', end: false },
+  { to: '/institution/branding',   label: 'Фирменный стиль', end: false },
   { to: '/institution/model',      label: 'Модель',   end: false },
   { to: '/institution/lti',        label: 'LTI / LMS',   end: false },
   { to: '/institution/audit',    label: 'Журнал действий', end: false },

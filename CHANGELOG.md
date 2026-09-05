@@ -15,6 +15,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Added
+- **Фирменный стиль учебного заведения на слайдах (migration 125).** `presentationExport.ts` hardcoded one palette (`const C`) and no logo, so every deck the platform produced looked like ИСПУМ rather than like the university that paid for it. Универcитеты care about this more than a feature list suggests: a титульный лист with the wrong logo — or none — is the first thing a заведующий кафедрой notices, and it is what makes a deck unusable at a defence or an open lecture.
+
+  Two settings, deliberately not a theme editor: an accent colour and a logo are what actually appear on a slide, and anything more becomes a design surface every institution then has to fill in correctly. New «Фирменный стиль» page under the institution admin's own gate — branding is an institutional identity question, not a per-teacher preference; one кафедра deciding the university is now green would be a support ticket, not a feature.
+
+  The colour is normalised once at the boundary (`lib/brandColor.ts`, accepting `#RRGGBB`, bare hex and the three-digit shorthand) because **neither consumer validates**: pptxgenjs takes a bare six-digit hex and produces a package PowerPoint silently refuses to open for anything else, while pdfkit wants the `#`. An empty value is a legitimate "back to the ИСПУМ default", not an error. The logo lives in object storage under a fixed per-institution key, so a re-upload replaces the old object instead of accumulating orphans, and is fetched once per export rather than per query.
+
+  **One bug caught before it shipped, by a test written for exactly this shape:** branding is held in module state (an export is a single sequential pass, so nothing races), and the fallback initially read `: accent` rather than `: C.amber` — which would have leaked one university's brand colour into the *next* institution's deck on the same process. The test that fails on that is now permanent.
+
+  Verified by reading the produced package, not by trusting the call: accent colour present, platform amber absent, institution name on the титульный лист, logo embedded as a media part — plus the same checks passing for a teacher with no institution at all.
+
+### Added
 - **«Написать заметки» — загруженная презентация получает сценарий выступления (migration 124 сопутствует).** The import shipped earlier today promises "upload your deck and ИСПУМ writes the speaker notes", and only half of that was true: a .pptx arrives with whatever notes it had — usually none — and «Переписать» filled them one slide at a time. Fine for fixing a slide, absurd for a thirty-slide lecture.
 
   `writeMissingNotes()` fills only the slides that have none, in the same bounded-concurrency batches expansion uses, and **leaves the slides themselves untouched** — they are the teacher's own work, which is the entire reason import exists. The prompt says so outright («это чужая лекция, а не ваша»), and forbids inventing figures or sources that are not on the slide. Title slides are skipped: their notes are structurally an intro line, not a script, the same exclusion `presentationEvalHarness` makes when averaging notes length.
