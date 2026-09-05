@@ -67,3 +67,61 @@ export async function findSlideEventsForPresentation(
   )
   return rows
 }
+
+export interface LiveEditRates {
+  decks:            number   // decks generated in the window
+  decksWithEdits:   number
+  editedSlides:     number
+  regeneratedSlides: number
+  deletedSlides:    number
+  approvedDecks:    number
+  /** Share of generated decks the teacher touched at all. */
+  editedDeckShare:  number
+  /** Share of generated decks the teacher explicitly marked «Готово». */
+  approvedShare:    number
+}
+
+/**
+ * The live counterpart to presentationEvalHarness's structural scores
+ * (TODO.md "### AO" Phase 2). The harness can measure notes length and bullets
+ * share on freshly generated decks; only real teachers rewriting slides says
+ * whether the output was any good. Reporting both on the same axis is the
+ * point — a prompt change that improves `avgNotesWordCount` while raising the
+ * rewrite rate has not improved anything.
+ */
+export async function computeLiveEditRates(days = 30): Promise<LiveEditRates> {
+  const { rows } = await pool.query<{
+    decks: string; decks_with_edits: string; approved_decks: string
+    edited: string; regenerated: string; deleted: string
+  }>(
+    `WITH window_decks AS (
+       SELECT id, approved_at FROM presentations
+        WHERE created_at > NOW() - ($1 || ' days')::interval
+     ),
+     window_events AS (
+       SELECT e.presentation_id, e.event
+         FROM presentation_slide_events e
+         JOIN window_decks d ON d.id = e.presentation_id
+     )
+     SELECT (SELECT count(*) FROM window_decks)                                            AS decks,
+            (SELECT count(DISTINCT presentation_id) FROM window_events)                    AS decks_with_edits,
+            (SELECT count(*) FROM window_decks WHERE approved_at IS NOT NULL)              AS approved_decks,
+            (SELECT count(*) FROM window_events WHERE event = 'edited')                    AS edited,
+            (SELECT count(*) FROM window_events WHERE event = 'regenerated')               AS regenerated,
+            (SELECT count(*) FROM window_events WHERE event = 'deleted')                   AS deleted`,
+    [String(days)]
+  )
+
+  const r = rows[0]
+  const decks = Number(r.decks)
+  return {
+    decks,
+    decksWithEdits:    Number(r.decks_with_edits),
+    editedSlides:      Number(r.edited),
+    regeneratedSlides: Number(r.regenerated),
+    deletedSlides:     Number(r.deleted),
+    approvedDecks:     Number(r.approved_decks),
+    editedDeckShare:   decks > 0 ? Number(r.decks_with_edits) / decks : 0,
+    approvedShare:     decks > 0 ? Number(r.approved_decks) / decks : 0,
+  }
+}

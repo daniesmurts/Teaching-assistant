@@ -10,15 +10,20 @@ vi.mock('../db/queries/documentFigures', () => ({ findRelevantFigures: vi.fn() }
 vi.mock('../db/queries/ragDocumentUses', () => ({ logDocumentRetrievals: vi.fn() }))
 vi.mock('../db/queries/presentations', () => ({
   createPresentation: vi.fn(), findPresentationsByTeacher: vi.fn(),
+  findApprovedExemplarSlides: vi.fn(),
 }))
 vi.mock('../db/queries/courses', () => ({ findCourseById: vi.fn() }))
-vi.mock('../db/queries/usageCounters', () => ({ incrementUsage: vi.fn() }))
+// Returns a promise: the service does `incrementUsage(...).catch(...)`, so a
+// bare vi.fn() (undefined) throws inside the code under test rather than in it.
+vi.mock('../db/queries/usageCounters', () => ({ incrementUsage: vi.fn(async () => undefined) }))
 vi.mock('./yandexImages', () => ({ yandexImageSearch: vi.fn() }))
 vi.mock('./yandexSearch', () => ({ webSearch: vi.fn() }))
 
 import {
   applySlideMove, normaliseEditedSlide, paramsFromPresentation, regenerateSlide,
+  expandPresentation,
 } from './presentations'
+import { findApprovedExemplarSlides, createPresentation } from '../db/queries/presentations'
 import { chatJSON } from './deepseek'
 import { resolveRagRetrievalScope } from './ragScope'
 import type { Presentation, Slide, PresentationSource } from '../../../shared/types'
@@ -199,5 +204,64 @@ describe('regenerateSlide', () => {
   it('returns null when the model gives back nothing usable', async () => {
     vi.mocked(chatJSON).mockResolvedValue({ slides: [] } as never)
     expect(await regenerateSlide({ presentation: DECK, slideIdx: 0, inputs: null, teacherId: 't1' })).toBeNull()
+  })
+})
+
+// ─── Style exemplars reach the prompt (TODO.md "### AO" Phase 2) ────────────
+
+describe('expansion prompt with approved exemplars', () => {
+  const exemplar = {
+    presentation_id: 'p0',
+    topic: 'Прошлая лекция',
+    same_course: true,
+    slide: {
+      type: 'concept', title: 'Кавитация', citations: [],
+      notes: 'Так преподаватель обычно объясняет: сначала зачем, потом пример с числами.',
+      body: { definition: 'Образование пузырьков', supporting: ['падение давления'] },
+    } as unknown as Slide,
+  }
+
+  beforeEach(() => {
+    vi.mocked(findApprovedExemplarSlides).mockResolvedValue([exemplar] as never)
+    vi.mocked(chatJSON).mockResolvedValue({
+      slides: [{ type: 'concept', title: 'Понятие', notes: 'n', citations: [], body: { definition: 'd', supporting: [] } }],
+    } as never)
+    vi.mocked(createPresentation).mockResolvedValue({ id: 'p1' } as never)
+  })
+
+  const params = {
+    teacherId: 't1', topic: 'Насосы', durationMinutes: 60, learningGoals: [],
+  } as never
+
+  it('puts an approved slide in the prompt, labelled as style and not content', async () => {
+    await expandPresentation(params, {
+      outline: [{ type: 'concept', title: 'Понятие', brief: '' }], webGrounding: [], slideTarget: 1,
+    })
+
+    const prompt = vi.mocked(chatJSON).mock.calls[0][0][1].content
+    expect(prompt).toContain('ОБРАЗЕЦ СТИЛЯ, НЕ СОДЕРЖАНИЯ')
+    expect(prompt).toContain('Так преподаватель обычно объясняет')
+    // The instruction that keeps last lecture's facts out of this one.
+    expect(prompt).toMatch(/НЕ переносите их содержание/)
+  })
+
+  it('asks for nothing when the teacher is on a tier without the flywheel', async () => {
+    await expandPresentation({ ...(params as object), styleExemplars: false } as never, {
+      outline: [{ type: 'concept', title: 'Понятие', brief: '' }], webGrounding: [], slideTarget: 1,
+    })
+
+    expect(findApprovedExemplarSlides).not.toHaveBeenCalled()
+    expect(vi.mocked(chatJSON).mock.calls[0][0][1].content).not.toContain('ОБРАЗЕЦ СТИЛЯ')
+  })
+
+  it('generates normally when the exemplar lookup fails', async () => {
+    // Best-effort, like RAG and image search: a flywheel hiccup must not cost
+    // the teacher their lecture.
+    vi.mocked(findApprovedExemplarSlides).mockRejectedValue(new Error('db down'))
+
+    const result = await expandPresentation(params, {
+      outline: [{ type: 'concept', title: 'Понятие', brief: '' }], webGrounding: [], slideTarget: 1,
+    })
+    expect(result.slides).toHaveLength(1)
   })
 })

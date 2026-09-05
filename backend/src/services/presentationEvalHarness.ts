@@ -14,6 +14,7 @@ import {
 } from './presentations'
 import type { Slide, SlideType, PresentationDepth } from '../../../shared/types'
 import { logger } from '../lib/logger'
+import { computeLiveEditRates, type LiveEditRates } from '../db/queries/presentationSlideEvents'
 
 export interface EvalTopic {
   topic:             string
@@ -58,6 +59,14 @@ export interface PresentationEvalReport {
     avgImageCoverage:      number
     avgCitedSlideShare:    number   // averaged only over decks where sourcesAvailable
   }
+  // What real teachers did with real decks over the window (TODO.md "### AO"
+  // Phase 2). Everything above measures freshly generated output against
+  // structural proxies; this is the only part of the report that reflects
+  // whether the output was any *good*. Reported together on purpose: a prompt
+  // change that lifts avgNotesWordCount while raising the rewrite rate has
+  // improved nothing. Null when the database isn't reachable — an offline
+  // scoring run must not fail because live stats are unavailable.
+  live: LiveEditRates | null
 }
 
 function countWords(text: string): number {
@@ -184,5 +193,9 @@ export async function runPresentationEval(
       avgImageCoverage:     avg(scored.map((s) => s.imageCoverageAmongEligible)),
       avgCitedSlideShare:   avg(citedEligible.map((s) => s.citedSlideShare)),
     },
+    live: await computeLiveEditRates().catch((err: Error) => {
+      logger.warn({ message: '[presentation eval] live edit rates unavailable', error: err.message })
+      return null
+    }),
   }
 }

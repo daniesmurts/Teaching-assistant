@@ -918,6 +918,11 @@ export interface Presentation {
   // was started from the plan (migration 121). Nulled — not deleted — if the
   // plan is later re-extracted, so a deck outlives the plan it came from.
   lecture_topic_id: string | null
+  // «Готово» — the teacher stands behind this deck (migration 122). Only an
+  // approved deck's slides are ever used as style references for a later
+  // generation, the same rule grading follows: AI output is not a training
+  // signal until a teacher has reviewed it (invariant 3).
+  approved_at: string | null
   topic: string
   duration_minutes: number | null
   audience_level: string | null

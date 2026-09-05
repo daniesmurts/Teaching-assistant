@@ -5,7 +5,7 @@ vi.mock('./yandexImages', () => ({ yandexImageSearch: vi.fn() }))
 import {
   filterCitations, outlineMaxTokens, expansionBatchMaxTokens,
   normaliseOutline, normaliseEditedOutline, OUTLINE_TITLE_MAX_CHARS, OUTLINE_BRIEF_MAX_CHARS,
-  renderSlidesForQuiz, buildAssignmentFromDeck, createSourcePool, chunkArray,
+  renderSlidesForQuiz, buildAssignmentFromDeck, selectExemplars, createSourcePool, chunkArray,
   getSlideImageQuery, withSlideImage, autoFillImages,
   shouldUseWebGrounding, isStrictSource, OUTLINE_MAX_OUTPUT_TOKENS,
 } from './presentations'
@@ -533,5 +533,60 @@ describe('buildAssignmentFromDeck', () => {
     const bullets = { type: 'bullets', title: 'Т', notes: '', citations: [], body: { items: ['x'] } }
     expect(buildAssignmentFromDeck(deckWith([bullets]))).toBeNull()
     expect(buildAssignmentFromDeck(deckWith([]))).toBeNull()
+  })
+})
+
+// ─── selectExemplars (TODO.md "### AO" Phase 2) ─────────────────────────────
+//
+// The flywheel's selector. Getting this subtly wrong is easy — one deck
+// supplying every example, or the same type twice — and the failure is
+// invisible: the deck still generates, it just stops learning anything.
+
+describe('selectExemplars', () => {
+  const ex = (type: Slide['type'], topic: string, sameCourse: boolean, notes = 'речь преподавателя') => ({
+    presentation_id: `p-${topic}`,
+    topic,
+    same_course: sameCourse,
+    slide: { type, title: topic, notes, citations: [], body: {} } as unknown as Slide,
+  })
+
+  it('picks at most one exemplar per slide type', () => {
+    const picked = selectExemplars(
+      [ex('concept', 'A', true), ex('concept', 'B', true), ex('formula', 'C', true)],
+      ['concept', 'formula'],
+    )
+    expect(picked.map((p) => p.slide.type)).toEqual(['concept', 'formula'])
+  })
+
+  it('only offers types the batch is actually about to write', () => {
+    const picked = selectExemplars([ex('diagram', 'A', true), ex('concept', 'B', true)], ['concept'])
+    expect(picked.map((p) => p.slide.type)).toEqual(['concept'])
+  })
+
+  it('prefers the same course — register differs between a first-year and a master\'s lecture', () => {
+    const picked = selectExemplars([ex('concept', 'другой курс', false), ex('concept', 'этот курс', true)], ['concept'])
+    expect(picked[0].topic).toBe('этот курс')
+  })
+
+  it('skips a slide with no speaker notes — it teaches nothing about depth', () => {
+    const picked = selectExemplars([ex('concept', 'пустая', true, '   '), ex('concept', 'полная', true)], ['concept'])
+    expect(picked.map((p) => p.topic)).toEqual(['полная'])
+  })
+
+  it('never offers a title slide as a style reference', () => {
+    expect(selectExemplars([ex('title', 'A', true)], ['title', 'concept'])).toEqual([])
+  })
+
+  it('respects the limit', () => {
+    const picked = selectExemplars(
+      [ex('concept', 'A', true), ex('formula', 'B', true), ex('diagram', 'C', true), ex('summary', 'D', true)],
+      ['concept', 'formula', 'diagram', 'summary'],
+      2,
+    )
+    expect(picked).toHaveLength(2)
+  })
+
+  it('returns nothing when the teacher has approved no decks', () => {
+    expect(selectExemplars([], ['concept'])).toEqual([])
   })
 })

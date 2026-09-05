@@ -14,7 +14,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
-*(empty — next release accumulates here)*
+### Added
+- **Презентации учатся стилю преподавателя — «Готово» замыкает петлю (TODO.md "### AO" Phase 2).** Phase 1 gave the feature its first real quality signal; this turns it into a loop. A teacher marks a finished lecture «Готово», and from then on ИСПУМ uses that deck's slides as a *style* reference when writing their next one.
+
+  **Approval is the gate**, the same rule grading has followed since day one (invariant 3): model output is never a training signal until a teacher has reviewed it. Migration 122 adds `presentations.approved_at`; nothing enters the pool without it, and un-approving removes it again.
+
+  Two deliberate deviations from the plan's own wording, both load-bearing:
+  - **Not only "kept-verbatim" slides.** In an approved deck the slides the teacher *rewrote* are the best examples in it — their own writing — exactly as grading's flywheel learns from the teacher-corrected grade rather than the model's first attempt. Restricting to untouched slides would have kept only the output nobody bothered to fix. `presentation_slide_events` stays the *measurement*, not the selector — and it could not be the selector anyway, since it keys on `slide_index`, which migration 119's own comment calls a breadcrumb, unreliable in exactly the decks edited most.
+  - **The teacher's own decks only, not кафедра-wide.** The plan said "course → кафедра", but pooling one teacher's decks into a colleague's generation is what invariant 7 gates behind two explicit flags for documents (`institutions.shared_rag_enabled` AND `courses.share_rag_with_institution`), and presentations have no such flag. Building the pooling before the gate would be the leak that invariant exists to prevent, so кафедра scope waits for a real share control.
+
+  **No embeddings, on purpose.** Grading's flywheel retrieves similar *content*; here content grounding already comes from RAG chunks and the conspectus. What approved decks add is how a teacher's slides *read* — notes depth, phrasing, how many bullets is too many — and for that "same slide type, most recently approved, same course first" beats semantic similarity: a semantically similar slide is one about the same subject, which is precisely what must not be copied into a new lecture. The prompt block says so in as many words («ОБРАЗЕЦ СТИЛЯ, НЕ СОДЕРЖАНИЯ»), and `selectExemplars` takes at most one per slide type, skipping slides with no speaker notes (they teach nothing about the depth teachers complained was thin). Rides the same `ragFlywheel` plan flag as grading's; best-effort, so a lookup failure costs a teacher nothing.
+
+  **The eval harness now reports both axes.** `npm run eval:presentations` prints its structural scores and then the live signal from the last 30 days — decks generated, how many the teacher edited, slides rewritten, decks marked «Готово». Reported together because a prompt change that lifts `avgNotesWordCount` while raising the rewrite rate has improved nothing. Null-safe: an offline scoring run doesn't fail when no database is reachable.
+
+  13 new tests. Verified against a real database: an unapproved deck contributes nothing, «Готово» puts its slides in the pool as same-course, selection takes one per type, un-approving removes them, and the live rates compute.
+
 
 ---
 

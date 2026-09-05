@@ -7,10 +7,11 @@ import SlideContent from '../components/presentations/SlideContent'
 import DeckQuizPanel from '../components/presentations/DeckQuizPanel'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
+import Icon from '../components/ui/Icon'
 import { tagColorClasses } from '../lib/tagColor'
 import {
   getPresentations, deletePresentation, updateSlide, regenerateSlide, deleteSlide,
-  insertSlide, moveSlide, type GenerateResponse,
+  insertSlide, moveSlide, setPresentationApproved, type GenerateResponse,
 } from '../api/presentations'
 import { useUIStore } from '../store/uiStore'
 import type { Presentation, Slide } from '../types'
@@ -133,6 +134,20 @@ export default function Presentations() {
   const displayPresentationId =
     result?.presentation_id ?? openHistory?.id ?? ''
 
+  // «Готово» (TODO.md "### AO" Phase 2) — the consent gate for the flywheel.
+  // Approving a deck is what lets ИСПУМ use its slides as a style reference
+  // for this teacher's later lectures; nothing is shared with anyone else.
+  const approved = Boolean(openHistory?.approved_at)
+  const approveMut = useMutation({
+    mutationFn: (next: boolean) => setPresentationApproved(displayPresentationId, next),
+    onSuccess: (updated) => {
+      setOpenHistory((h) => (h && h.id === updated.id ? updated : h))
+      qc.invalidateQueries({ queryKey: ['presentations'] })
+      addToast(updated.approved_at ? 'Лекция отмечена как готовая' : 'Отметка снята', 'success')
+    },
+    onError: () => addToast('Не удалось сохранить отметку', 'error'),
+  })
+
   const slideEdit: SlideEditActions = {
     busy: slideBusy,
     onSave: (idx, slide) =>
@@ -209,19 +224,36 @@ export default function Presentations() {
 
           {/* Viewing a historical presentation */}
           {openHistory && (
-            <div className="bg-surface border border-border rounded-lg px-4 py-3 flex items-center justify-between">
+            <div className="bg-surface border border-border rounded-lg px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <div className="text-xs font-sans text-ink-tertiary mb-0.5">Просмотр презентации</div>
                 <div className="text-sm font-sans font-medium text-ink">{openHistory.topic}</div>
               </div>
-              <Button
-                size="sm"
-                variant="danger"
-                loading={deleteMut.isPending}
-                onClick={() => deleteMut.mutate(openHistory.id)}
-              >
-                Удалить
-              </Button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => approveMut.mutate(!approved)}
+                  disabled={approveMut.isPending}
+                  title={approved
+                    ? 'ИСПУМ ориентируется на эту лекцию как на образец вашего стиля. Нажмите, чтобы снять отметку.'
+                    : 'Отметьте, если лекция получилась как надо — ИСПУМ будет ориентироваться на её стиль в следующих лекциях (ваших, никому не передаётся)'}
+                  className={`inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-md border shadow-sm text-xs font-sans font-medium transition-colors disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber ${
+                    approved
+                      ? 'bg-amber-light border-amber text-amber'
+                      : 'bg-surface border-border-mid text-ink-secondary hover:bg-surface-warm hover:text-amber'
+                  }`}
+                >
+                  <Icon name="check" size={14} />
+                  {approved ? 'Готово — образец стиля' : 'Отметить «Готово»'}
+                </button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  loading={deleteMut.isPending}
+                  onClick={() => deleteMut.mutate(openHistory.id)}
+                >
+                  Удалить
+                </Button>
+              </div>
             </div>
           )}
 

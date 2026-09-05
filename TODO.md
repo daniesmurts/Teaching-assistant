@@ -2293,7 +2293,7 @@ ship them as one thing.
 - **Depends on:** P (org tree — shipped) for scoping; AG's presentation
   image pipeline (shipped) for the Phase 2 insertion point.
 
-### AO. Презентации — from vending machine to workspace · Effort: Phase 0 S–M, 🟢 SHIPPED (2026-09-04) · Phase 1 M, 🟢 SHIPPED (2026-09-04) · Phase 2 M, Phase 3 M–L, 🟢 SHIPPED (2026-09-05), Phase 4 M (phased, independently shippable)
+### AO. Презентации — from vending machine to workspace · Effort: Phase 0 S–M, 🟢 SHIPPED (2026-09-04) · Phase 1 M, 🟢 SHIPPED (2026-09-04) · Phase 2 M, 🟢 SHIPPED (2026-09-05) · Phase 3 M–L, 🟢 SHIPPED (2026-09-05), Phase 4 M (phased, independently shippable)
 
 Presentations are one of the features teachers actually use daily (FEATURES.md,
 GA since AG). AG fixed *generation quality* — outline+expansion, real notes
@@ -2375,7 +2375,7 @@ of this entry:
   title) rather than generating one in place — «Переписать» fills it, which
   is one extra click. Decks generated before migration 119 regenerate without
   their conspectus.
-- **Phase 2 — close the flywheel.** Feed Phase 1's kept-verbatim slides back
+- **Phase 2 (shipped, 2026-09-05) — close the flywheel.** Feed Phase 1's kept-verbatim slides back
   as few-shot examples scoped to course → кафедра (same scope-gate posture
   as `ragScope.ts`, same "teacher approval is what makes it a training
   signal" rule as grading — invariant 3 applies unchanged: an *unedited*
@@ -2383,6 +2383,20 @@ of this entry:
   «Готово» on the deck before anything becomes an example). Add the
   edit/regenerate rates to `presentationEvalHarness.ts`'s summary so the
   offline harness and live usage report the same axis.
+  **As built:** migration 122's `presentations.approved_at` + a «Готово»
+  toggle; `findApprovedExemplarSlides` / `selectExemplars` inject at most one
+  approved slide per type into the expansion prompt as an explicit style (not
+  content) reference, on the `ragFlywheel` plan flag; `computeLiveEditRates`
+  prints edit/regenerate/approval rates alongside the harness's structural
+  scores. **Two deliberate deviations, both explained in CHANGELOG:** examples
+  come from *all* slides of an approved deck (an edited slide is the teacher's
+  own writing — the best example, not the worst), and scope is the teacher's
+  own decks only. **Not done:** кафедра-wide pooling, which needs a real share
+  control first (invariant 7 gates documents behind two explicit flags;
+  presentations have none) — that is the next thing here, and the point at
+  which this stops being a per-teacher convenience and starts being an
+  institutional asset. No embeddings: style, not content, so type+recency
+  beats similarity — revisit only if exemplars start feeling off-topic.
 - **Phase 3 (shipped, 2026-09-05) — wire the deck into the platform instead
   of leaving it a leaf.** In rough order of value:
   - **Дек → тест → аудитория.** 🟢 SHIPPED (2026-09-05).

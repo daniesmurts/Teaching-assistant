@@ -85,6 +85,21 @@ async function main(): Promise<void> {
   console.log(`  avg image coverage:            ${(report.summary.avgImageCoverage * 100).toFixed(0)}%`)
   console.log(`  avg cited-slide share:         ${(report.summary.avgCitedSlideShare * 100).toFixed(0)}%  (courses with sources only)`)
 
+  // The other half of the picture (TODO.md "### AO" Phase 2). Everything above
+  // scores freshly generated decks against structural proxies; this is what
+  // teachers actually did with real ones. A run that improves the numbers
+  // above while the rewrite rate climbs has improved nothing.
+  if (report.live) {
+    const l = report.live
+    console.log('\n── live signal (last 30 days) ──')
+    console.log(`  decks generated:               ${l.decks}`)
+    console.log(`  decks the teacher edited:      ${l.decksWithEdits}  (${(l.editedDeckShare * 100).toFixed(0)}%)  ← lower is better`)
+    console.log(`  slides edited / rewritten:     ${l.editedSlides} / ${l.regeneratedSlides}  (deleted: ${l.deletedSlides})`)
+    console.log(`  decks marked «Готово»:         ${l.approvedDecks}  (${(l.approvedShare * 100).toFixed(0)}%)  ← these feed the flywheel`)
+  } else {
+    console.log('\n  (live signal unavailable — no database connection)')
+  }
+
   process.exit(report.failed.length > 0 ? 1 : 0)
 }
 

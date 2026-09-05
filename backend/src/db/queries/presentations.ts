@@ -28,6 +28,7 @@ interface PresentationRow {
   source_text: string | null
   strict_source: boolean | null
   lecture_topic_id: string | null
+  approved_at: Date | null
   created_at: Date
 }
 
@@ -48,6 +49,7 @@ function toPresentation(row: PresentationRow): Presentation {
     generated_content: row.generated_content,
     sources: row.sources,
     lecture_topic_id: row.lecture_topic_id ?? null,
+    approved_at: row.approved_at ? row.approved_at.toISOString() : null,
     created_at: row.created_at.toISOString(),
   }
 }
@@ -227,4 +229,71 @@ export async function deletePresentation(id: string, teacherId: string): Promise
     [id, teacherId]
   )
   return (rowCount ?? 0) > 0
+}
+
+// ─── «Готово» + style exemplars (TODO.md "### AO" Phase 2) ──────────────────
+
+/** Marks a deck as one the teacher stands behind, or takes that back. */
+export async function setPresentationApproved(
+  id: string,
+  teacherId: string,
+  approved: boolean,
+): Promise<Presentation | null> {
+  const { rows } = await pool.query<PresentationRow>(
+    `UPDATE presentations
+        SET approved_at = ${'$3'}
+      WHERE id = $1 AND teacher_id = $2
+      RETURNING *`,
+    [id, teacherId, approved ? new Date() : null]
+  )
+  return rows[0] ? toPresentation(rows[0]) : null
+}
+
+export interface ExemplarSlide {
+  presentation_id: string
+  topic:           string
+  same_course:     boolean
+  slide:           Slide
+}
+
+/**
+ * Slides from decks this teacher has approved, as style references for a new
+ * generation.
+ *
+ * Scoped to the teacher's OWN decks, deliberately. The plan said "course →
+ * кафедра", but pooling one teacher's decks into a colleague's generation is
+ * exactly what CLAUDE.md invariant 7 gates behind two explicit flags for
+ * documents (`institutions.shared_rag_enabled` AND
+ * `courses.share_rag_with_institution`), and presentations have no such flag
+ * yet. Adding the pooling before the gate would be the leak that invariant
+ * exists to prevent — so кафедра scope waits for a real share control.
+ *
+ * Same-course decks rank first: a teacher's voice is consistent, but the
+ * register of a first-year lecture is not the register of a master's seminar,
+ * and the course is the closest proxy for that we have.
+ */
+export async function findApprovedExemplarSlides(
+  teacherId: string,
+  courseId: string | undefined,
+  deckLimit = 6,
+): Promise<ExemplarSlide[]> {
+  const { rows } = await pool.query<{ id: string; topic: string; course_id: string | null; slides: Slide[] | null }>(
+    `SELECT id, topic, course_id, slides
+       FROM presentations
+      WHERE teacher_id = $1
+        AND approved_at IS NOT NULL
+        AND slides IS NOT NULL
+      ORDER BY (course_id IS NOT DISTINCT FROM $2) DESC, approved_at DESC
+      LIMIT $3`,
+    [teacherId, courseId ?? null, deckLimit]
+  )
+
+  return rows.flatMap((row) =>
+    (row.slides ?? []).map((slide) => ({
+      presentation_id: row.id,
+      topic:           row.topic,
+      same_course:     Boolean(courseId) && row.course_id === courseId,
+      slide,
+    }))
+  )
 }

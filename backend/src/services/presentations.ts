@@ -1,6 +1,9 @@
 import { chatJSON, embed } from './deepseek'
 import { findCourseById } from '../db/queries/courses'
-import { findPresentationsByTeacher, createPresentation } from '../db/queries/presentations'
+import {
+  findPresentationsByTeacher, createPresentation,
+  findApprovedExemplarSlides, type ExemplarSlide,
+} from '../db/queries/presentations'
 import { findRelevantChunks, hasAnyChunksForCourse, type RelevantChunk } from '../db/queries/chunks'
 import { logDocumentRetrievals } from '../db/queries/ragDocumentUses'
 import { resolveRagRetrievalScope, type RagRetrievalScope } from './ragScope'
@@ -59,6 +62,11 @@ export interface GenerateParams {
   // programme instead of the model's idea of the topic.
   lectureTopicId?:          string
   lectureTopicDescription?: string
+  // Style exemplars from the teacher's own approved decks (Phase 2). Defaults
+  // on; the route sets it false for a tier without the flywheel, and the eval
+  // harness sets it false so offline scores measure the prompt, not whichever
+  // decks happen to be approved in the database it runs against.
+  styleExemplars?: boolean
 }
 
 export interface GenerateResult {
@@ -223,6 +231,14 @@ export async function expandPresentation(params: GenerateParams, plan: Presentat
   // when the outline was drawn.
   const ragScope = params.courseId ? await resolveRagRetrievalScope(params.courseId) : null
 
+  // Fetched once for the whole deck, not per batch: it is one indexed read and
+  // the same teacher's style applies to every slide. Gated on the same plan
+  // flag as grading's flywheel — this is the same mechanism, pointed at style
+  // instead of scores.
+  const exemplarPool = params.styleExemplars === false
+    ? []
+    : await findApprovedExemplarSlides(params.teacherId, params.courseId).catch(() => [])
+
   // ── Expansion pass — parallel batches, each with its own RAG retrieval
   // and its own full token budget (this is what actually fixes the
   // shallowness: ~700–1000 tokens/slide instead of the old whole-deck
@@ -247,7 +263,13 @@ export async function expandPresentation(params: GenerateParams, plan: Presentat
     const raw = await chatJSON<{ slides: unknown[] }>(
       [
         { role: 'system', content: expansionSystemPrompt },
-        { role: 'user',   content: buildExpansionPrompt(batch, params, depth, batchSources, pool.fullText, webGrounding) },
+        {
+          role: 'user',
+          content: buildExpansionPrompt(
+            batch, params, depth, batchSources, pool.fullText, webGrounding, undefined,
+            selectExemplars(exemplarPool, batch.map((b) => b.type)),
+          ),
+        },
       ],
       'slides',
       {
@@ -767,6 +789,7 @@ function buildExpansionPrompt(
   fullTextByIdx: Map<number, string>,
   webGrounding: SearchResult[] = [],
   instruction?: string,
+  exemplars: ExemplarSlide[] = [],
 ): string {
   const lines: string[] = []
 
@@ -778,6 +801,7 @@ function buildExpansionPrompt(
   }
 
   lines.push(...renderWebGroundingBlock(webGrounding))
+  lines.push(...renderExemplarBlock(exemplars))
 
   if (sources.length > 0) {
     lines.push(`## Материалы для ссылок`)
@@ -1325,6 +1349,75 @@ function styleLabel(style: string): string {
 // Re-export so existing imports keep working even though we removed the old
 // citation-filter approach (citations now live structurally on each slide).
 export type { Presentation }
+
+// ─── Style exemplars (TODO.md "### AO" Phase 2) ─────────────────────────────
+//
+// The flywheel for presentations. Grading's version retrieves similar *content*
+// via embeddings; this one deliberately does not, because content grounding is
+// already handled — RAG chunks and the conspectus supply what the lecture is
+// about. What a teacher's own approved decks add is how their slides *read*:
+// how long the notes run, how a definition is phrased, how many bullets is too
+// many. For that, "same slide type, most recently approved" is a better
+// selector than semantic similarity — a semantically similar slide is one about
+// the same subject, which is precisely what must not be copied into a new
+// lecture.
+
+const MAX_EXEMPLARS         = 3     // per expansion batch; more crowds out the actual material
+const EXEMPLAR_MAX_CHARS    = 900   // per exemplar, notes included — a style sample, not a transcript
+
+/**
+ * Picks at most one exemplar per slide type the batch is about to write,
+ * preferring same-course decks. Exported for testing: the selection rule is
+ * the whole design here, and it is easy to get subtly wrong (duplicating a
+ * type, or letting one deck supply every example).
+ */
+export function selectExemplars(
+  candidates: ExemplarSlide[],
+  neededTypes: SlideType[],
+  limit = MAX_EXEMPLARS,
+): ExemplarSlide[] {
+  const wanted = new Set<SlideType>(neededTypes.filter((t) => t !== 'title'))
+  const picked: ExemplarSlide[] = []
+  const usedTypes = new Set<SlideType>()
+
+  // Same-course first, then anything else — findApprovedExemplarSlides already
+  // returns them in that order, so a stable partition preserves it.
+  const ordered = [...candidates.filter((c) => c.same_course), ...candidates.filter((c) => !c.same_course)]
+
+  for (const candidate of ordered) {
+    if (picked.length >= limit) break
+    const { type } = candidate.slide
+    if (!wanted.has(type) || usedTypes.has(type)) continue
+    // A slide with no speaker notes teaches nothing about the thing teachers
+    // actually complained was too thin.
+    if (!candidate.slide.notes?.trim()) continue
+    usedTypes.add(type)
+    picked.push(candidate)
+  }
+
+  return picked
+}
+
+function renderExemplarBlock(exemplars: ExemplarSlide[]): string[] {
+  if (exemplars.length === 0) return []
+
+  const lines = [
+    `## Примеры одобренных слайдов этого преподавателя (ОБРАЗЕЦ СТИЛЯ, НЕ СОДЕРЖАНИЯ)`,
+    `Преподаватель отметил эти слайды как готовые. Ориентируйтесь на их манеру: ` +
+    `глубину заметок, длину формулировок, тон. НЕ переносите их содержание, факты и примеры ` +
+    `в новые слайды — темы у вас другие.`,
+    '',
+  ]
+
+  exemplars.forEach((ex) => {
+    const rendered = renderSlidesAsText([ex.slide]).slice(0, EXEMPLAR_MAX_CHARS)
+    lines.push(`### Тип «${ex.slide.type}» (из лекции «${sanitiseForPrompt(ex.topic)}»)`)
+    lines.push(sanitiseForPrompt(rendered))
+    lines.push('')
+  })
+
+  return lines
+}
 
 // ─── Per-slide editing + regeneration (TODO.md "### AO" Phase 1) ────────────
 //

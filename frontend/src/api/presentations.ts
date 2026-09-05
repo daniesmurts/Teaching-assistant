@@ -251,3 +251,10 @@ export async function createAssignmentFromPresentation(id: string): Promise<Publ
   const res = await client.post<PublishedAssignment>(`/api/presentations/${id}/assignment`)
   return res.data
 }
+
+// «Готово» — the teacher stands behind this deck (TODO.md "### AO" Phase 2).
+// Only an approved deck's slides are ever used as style references for that
+// teacher's later generations; nothing is shared with anyone else.
+export async function setPresentationApproved(id: string, approved: boolean): Promise<Presentation> {
+  return (await client.post<Presentation>(`/api/presentations/${id}/approve`, { approved })).data
+}

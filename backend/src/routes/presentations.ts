@@ -32,7 +32,7 @@ import {
 } from '../db/queries/presentationJobs'
 import {
   findPresentationsByTeacher, findPresentationById, deletePresentation, setSlideImage,
-  replaceSlides, findPresentationGenerationInputs,
+  replaceSlides, findPresentationGenerationInputs, setPresentationApproved,
 } from '../db/queries/presentations'
 import {
   recordSlideEvent, findSlideEventsForPresentation,
@@ -82,6 +82,10 @@ function buildGenerateParams(
     depth: depth === 'deep' && canUseFeature(req.teacher.plan_tier, 'presentationDeepMode') ? 'deep' : 'standard',
     lectureTopicId:          lectureTopic?.id,
     lectureTopicDescription: lectureTopic?.description ?? undefined,
+    // Style exemplars from the teacher's own approved decks ride the same
+    // plan flag as grading's flywheel — it is the same mechanism, pointed at
+    // style rather than scores.
+    styleExemplars:          canUseFeature(req.teacher.plan_tier, 'ragFlywheel'),
   }
 }
 
@@ -594,6 +598,27 @@ router.get('/:id/quizzes',
     const presentation = await findPresentationById(req.params.id, req.teacher.id)
     if (!presentation) throw new NotFoundError('Презентация')
     res.json(await findQuizzesByPresentation(presentation.id, req.teacher.id))
+  })
+)
+
+// POST /api/presentations/:id/approve — «Готово» (TODO.md "### AO" Phase 2).
+// Body: { approved: boolean }.
+//
+// This is the consent gate for the flywheel, and the same rule grading has
+// followed since day one (CLAUDE.md invariant 3): model output is never a
+// training signal until a teacher has reviewed it. Only an approved deck's
+// slides are ever shown to a later generation as style references — and only
+// ever to the teacher who approved them (see findApprovedExemplarSlides).
+//
+// Not plan-gated: a teacher on any tier should be able to say "this one came
+// out right". Whether their approved decks then *feed* generation is the
+// gated part, checked at generation time.
+router.post('/:id/approve',
+  asyncHandler(async (req, res) => {
+    const approved = req.body?.approved !== false
+    const updated = await setPresentationApproved(req.params.id, req.teacher.id, approved)
+    if (!updated) throw new NotFoundError('Презентация')
+    res.json(updated)
   })
 )
 
