@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
+import { parseInstructions } from '../lib/assignmentInstructions'
 import StarterKit from '@tiptap/starter-kit'
 import type { SubmissionTelemetry } from '../types'
 import {
@@ -15,7 +16,7 @@ const SNAPSHOT_MS = 90_000    // capture a trajectory snapshot at most this ofte
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-bg">
-      <div className="max-w-3xl mx-auto px-6 py-10">{children}</div>
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-10">{children}</div>
     </div>
   )
 }
@@ -205,7 +206,7 @@ function Composer({ token, state, onSubmitted }: {
       <div className="page-enter">
         <h1 className="font-display text-2xl font-bold text-ink mb-1">{state.assignment.title}</h1>
         {state.assignment.instructions && (
-          <p className="text-sm font-sans text-ink-secondary whitespace-pre-wrap mb-5">{state.assignment.instructions}</p>
+          <Instructions text={state.assignment.instructions} />
         )}
 
         {!online && (
@@ -217,24 +218,33 @@ function Composer({ token, state, onSubmitted }: {
         {/* Minimal toolbar */}
         {editor && (
           <div className="flex items-center gap-1 mb-2">
-            <TBtn active={editor.isActive('bold')}   onClick={() => editor.chain().focus().toggleBold().run()}><b>Ж</b></TBtn>
-            <TBtn active={editor.isActive('italic')} onClick={() => editor.chain().focus().toggleItalic().run()}><i>К</i></TBtn>
-            <TBtn active={editor.isActive('heading', { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</TBtn>
-            <TBtn active={editor.isActive('bulletList')} onClick={() => editor.chain().focus().toggleBulletList().run()}>•</TBtn>
+            <TBtn label="Полужирный" active={editor.isActive('bold')}   onClick={() => editor.chain().focus().toggleBold().run()}><b>Ж</b></TBtn>
+            <TBtn label="Курсив"     active={editor.isActive('italic')} onClick={() => editor.chain().focus().toggleItalic().run()}><i>К</i></TBtn>
+            <TBtn label="Подзаголовок" active={editor.isActive('heading', { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</TBtn>
+            <TBtn label="Список"     active={editor.isActive('bulletList')} onClick={() => editor.chain().focus().toggleBulletList().run()}>•</TBtn>
           </div>
         )}
 
-        <div className="bg-surface border border-border rounded-lg p-5 font-sans text-[15px] text-ink leading-relaxed">
+        {/* 16px, not 15: iOS zooms the viewport when a focused editable is
+            under 16px, which on a phone throws the student out of their own
+            line as soon as they start typing. */}
+        <div className="bg-surface border border-border rounded-lg p-4 sm:p-5 font-sans text-base text-ink leading-relaxed">
           <EditorContent editor={editor} />
         </div>
 
-        <div className="flex items-center justify-between mt-4">
-          <span className="text-xs font-sans text-ink-tertiary">{saveLabel}</span>
+        {/* Sticky on a phone ONLY (sm:static): the editor is 420px tall by
+            design, so on a small screen «Сдать работу» otherwise sits below the
+            fold for the whole session, and the save status — the thing that
+            tells a student their work is safe — goes with it. On a desktop the
+            whole page fits, and leaving it sticky floated the button over the
+            editor the student is typing into. */}
+        <div className="sticky sm:static bottom-0 -mx-4 sm:mx-0 mt-4 px-4 sm:px-0 py-3 sm:py-0 bg-bg/95 backdrop-blur-sm border-t border-border sm:border-0 sm:bg-transparent sm:backdrop-blur-none flex items-center justify-between gap-3">
+          <span className="text-xs font-sans text-ink-secondary" aria-live="polite">{saveLabel}</span>
           <button
             onClick={submit}
             disabled={submitting || !online}
             title={!online ? 'Нет подключения' : undefined}
-            className="px-5 py-2.5 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-60"
+            className="min-h-[44px] px-5 py-2.5 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
           >
             {submitting ? 'Отправка…' : 'Сдать работу'}
           </button>
@@ -244,13 +254,65 @@ function Composer({ token, state, onSubmitted }: {
   )
 }
 
-function TBtn({ children, active, onClick }: { children: React.ReactNode; active: boolean; onClick: () => void }) {
+// 44×44 on touch, tightened to 36 on a pointer. These were 32px squares —
+// under the touch-target floor, on the controls a student on a phone uses
+// most. They also had no accessible name: «Ж» is a letter, not a label.
+function TBtn({ children, active, label, onClick }: {
+  children: React.ReactNode; active: boolean; label: string; onClick: () => void
+}) {
   return (
-    <button onClick={onClick}
-      className={`w-8 h-8 flex items-center justify-center rounded-md text-sm font-sans transition-colors ${
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-pressed={active}
+      title={label}
+      className={`w-11 h-11 sm:w-9 sm:h-9 flex items-center justify-center rounded-md text-sm font-sans transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber ${
         active ? 'bg-amber-light text-amber' : 'text-ink-secondary hover:bg-surface-warm'
       }`}>
       {children}
     </button>
+  )
+}
+
+// Instructions rendered with the hierarchy the plain text implies: the
+// question carries its number and the page's ink colour, its sub-questions sit
+// under it as a real list, and the framing paragraphs stay secondary. 16px
+// (not 14) because this is reading matter on a phone, and capped near 68
+// characters so a wide screen doesn't stretch it past a comfortable measure.
+function Instructions({ text }: { text: string }) {
+  const blocks = parseInstructions(text)
+  if (blocks.length === 0) return null
+
+  return (
+    <div className="max-w-[68ch] mb-6 space-y-4">
+      {blocks.map((block, i) =>
+        block.kind === 'question' ? (
+          <div key={i} className="flex gap-2.5">
+            <span
+              aria-hidden
+              className="flex-shrink-0 mt-0.5 w-6 h-6 rounded-full bg-amber-light text-amber font-sans text-xs font-semibold flex items-center justify-center"
+            >
+              {block.number}
+            </span>
+            <div className="min-w-0">
+              <p className="font-sans text-base text-ink font-medium leading-relaxed">{block.text}</p>
+              {block.prompts.length > 0 && (
+                <ul className="mt-1.5 space-y-1">
+                  {block.prompts.map((prompt, j) => (
+                    <li key={j} className="font-sans text-[15px] text-ink-secondary leading-relaxed flex gap-2">
+                      <span aria-hidden className="text-ink-tertiary flex-shrink-0">—</span>
+                      <span>{prompt}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p key={i} className="font-sans text-base text-ink-secondary leading-relaxed">{block.text}</p>
+        )
+      )}
+    </div>
   )
 }

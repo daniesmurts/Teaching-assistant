@@ -15,6 +15,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Fixed
+- **Страница студента: вопросы задания читались как сплошной текст, и страница не была рассчитана на телефон.** Reported after a real assignment was opened: instructions rendered as one `whitespace-pre-wrap` paragraph, so a numbered question, its sub-questions and the closing sentence all came out at the same size, weight and colour, indented with literal spaces. It is the one thing on the page a student must read carefully before writing, and on a phone it was a wall of grey.
+
+  New `parseInstructions()` (`lib/assignmentInstructions.ts`) turns the plain text into blocks the page renders with real hierarchy — a numbered badge and ink-coloured question, sub-questions as an actual list beneath it, framing paragraphs staying secondary. Deliberately forgiving, because instructions typed by hand are not a format: unrecognised lines stay paragraphs, hard-wrapped text pasted from Word is joined instead of becoming a stack of one-line paragraphs, and a dash in prose does not silently reattach itself to a question above it. 6 tests cover exactly those cases.
+
+  **Mobile pass on the same page**, measured on the real page at 375px rather than assumed:
+  - Toolbar buttons were **32×32** — under the 44px touch floor, on the controls a student on a phone uses most. Now 44×44 on touch, 36 on a pointer. They also had no accessible name («Ж» is a letter, not a label): `aria-label` + `aria-pressed` added.
+  - The editor was **15px**, which makes iOS zoom the viewport the moment a student focuses it and throws them out of their own line. Now 16px.
+  - Instructions were 14px; now 16px, capped near 68 characters so a wide screen doesn't stretch them past a comfortable measure.
+  - «Сдать работу» and the save status sat below a 420px editor, i.e. off-screen for the whole session on a phone. Now a sticky bottom bar on small screens only — `sm:static`, because leaving it sticky on desktop floated the button over the editor being typed into (caught by looking at it, not by the diff). Save status gets `aria-live="polite"`.
+  - Verified: no horizontal overflow at 375px, submit 44px tall, editor 16px computed.
+
 - **Студенты вообще не могли сохранить или сдать работу — `paste_count` не был в белом списке телеметрии.** Reported from production: «Ошибка сохранения» under the editor, every autosave 400, and submit refused. Not a regression from anything recent — the server's telemetry allowlist in `publishedAssignmentValidation.ts` was hand-written and omitted `paste_count`, while `SubmissionTelemetry` in `shared/types.ts` has always declared it and `StudentWrite.tsx` has always sent it (initialised to 0, so this fired on the very first keystroke, not only after a paste). `PUT /api/write/:token/draft` and `POST /:token/submit` share `saveDraftRules`, so both answered 400 «Недопустимые поля телеметрии». **The flagship attestation surface was down for every student, and nothing failed loudly enough to notice.**
 
   Reproduced against a real invite before touching anything — payload with `paste_count` → 400, identical payload without it → 200 — then confirmed fixed the same way, draft *and* submit, with the stored row checked afterwards.
