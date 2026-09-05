@@ -132,14 +132,14 @@ IMAGE_TAG="${SEMVER}-${SHORT_SHA}"
 # to find one on disk.
 BUILD_VERSION="${SEMVER} ($(date -u +%Y-%m-%d)+${SHORT_SHA}${DIRTY_SUFFIX})"
 echo "$BUILD_VERSION" > VERSION
-echo "▶ [0/8] Build version: ${BUILD_VERSION}  (image tag: ${IMAGE_TAG})"
+echo "▶ [0/9] Build version: ${BUILD_VERSION}  (image tag: ${IMAGE_TAG})"
 
 # ── CI gate (docs/on-prem-deployment.md §16 Track 1.4b) ──────────────────────
 # The whole point of building images in CI is that a tag is a promise about
 # what's inside it — never deploy a tag that hasn't actually passed. Poll
 # rather than assume: CI takes ~2 minutes end to end, so a push-then-
 # immediately-deploy is a real race, not a hypothetical one.
-echo "▶ [1/8] Waiting for CI to confirm ${SHORT_SHA} is safe to deploy…"
+echo "▶ [1/9] Waiting for CI to confirm ${SHORT_SHA} is safe to deploy…"
 if ! command -v gh >/dev/null 2>&1; then
   echo "❌ gh CLI not found — can't verify CI status. Install: https://cli.github.com"
   exit 1
@@ -169,14 +169,51 @@ while true; do
   sleep 15
 done
 
-echo "▶ [2/8] Building frontend…"
+# Deploy-only — id of the registry the image lives in. See .env.example.
+# Resolved here rather than just before the VM steps because the image
+# guard below needs it, and that guard has to run before anything ships.
+YC_REGISTRY_ID="${YC_REGISTRY_ID:-$(sed -n 's/^YC_REGISTRY_ID=//p' .env 2>/dev/null | tr -d '"'\''' | head -n1)}"
+if [ -z "${YC_REGISTRY_ID:-}" ]; then
+  echo "❌ YC_REGISTRY_ID not set — add it to .env (see .env.example). Find it on the registry's console page."
+  exit 1
+fi
+
+# ── Backend image guard ──────────────────────────────────────────────────────
+# ORDERING IS THE POINT. The frontend goes live at step [4/9] (Object Storage
+# upload + CDN purge); the backend image is not pulled until [7/9]. Anything
+# that fails in between leaves the new UI calling an old API — every route the
+# new build added answers 404, and nothing in the browser explains why.
+#
+# Not hypothetical: on 2026-09-05 production served a frontend four commits
+# ahead of its backend, and «Проверить усвоение» / «Раздатка» 404'd for real
+# users until the next deploy. The CI gate above did not catch it, and cannot:
+# CI can go green while no image is pushed at all, because ci.yml's image job
+# only pushes when the registry credentials are present AND the event is a
+# push. A green run is a promise about the tests, not about the artifact.
+#
+# So prove the exact tag exists before shipping anything. Pulling rather than
+# inspecting has a useful side effect — the image is already on the VM when
+# [7/9] runs, which shrinks the window where the two halves disagree from
+# minutes to seconds.
+echo "▶ [2/9] Verifying backend image ${IMAGE_TAG} is in the registry…"
+if ssh "$VM_HOST" "docker pull cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${IMAGE_TAG} >/dev/null 2>&1"; then
+  echo "  ✓ image present, and now pre-pulled on the VM"
+else
+  echo "❌ No backend image cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${IMAGE_TAG}"
+  echo "   Nothing was deployed — the frontend has NOT been uploaded, so production is unchanged."
+  echo "   Most likely CI passed but its image job did not push (check that job, and the registry"
+  echo "   credentials), or the VM cannot authenticate to the registry."
+  exit 1
+fi
+
+echo "▶ [3/9] Building frontend…"
 npm run build --workspace=frontend
 
-echo "▶ [3/8] Uploading frontend → s3://${FRONTEND_BUCKET}/ …"
+echo "▶ [4/9] Uploading frontend → s3://${FRONTEND_BUCKET}/ …"
 # Uses S3 static keys (no yc/OAuth). Reads YANDEX_STORAGE_* from the local .env.
 node --env-file=.env scripts/upload-frontend.mjs frontend/dist "${FRONTEND_BUCKET}"
 
-echo "▶ [4/8] Purging CDN cache for the no-cache entrypoints…"
+echo "▶ [5/9] Purging CDN cache for the no-cache entrypoints…"
 # index.html / sw.js / registerSW.js / manifest.webmanifest ship with
 # `no-cache, must-revalidate` from Object Storage (upload-frontend.mjs), but the
 # CDN edge can still hold an old copy — which is exactly what leaves PWA clients
@@ -196,20 +233,13 @@ else
   echo "  ⚠ CDN purge failed (non-fatal) — clients still update within the SW's no-cache revalidation window."
 fi
 
-# Deploy-only — id of the registry the image lives in. See .env.example.
-YC_REGISTRY_ID="${YC_REGISTRY_ID:-$(sed -n 's/^YC_REGISTRY_ID=//p' .env 2>/dev/null | tr -d '"'\''' | head -n1)}"
-if [ -z "${YC_REGISTRY_ID:-}" ]; then
-  echo "❌ YC_REGISTRY_ID not set — add it to .env (see .env.example). Find it on the registry's console page."
-  exit 1
-fi
-
-echo "▶ [5/8] Syncing compose file → VM…"
+echo "▶ [6/9] Syncing compose file → VM…"
 # The backend's SOURCE no longer goes to the VM at all — the image built and
 # tested in CI is the artifact now (§16 Track 1.3/1.4b), not the working
 # tree. Only this one small config file ships.
 rsync -avz "deploy/docker-compose.cloud.yml" "${VM_HOST}:${APP_DIR}/docker-compose.yml"
 
-echo "▶ [6/8] Pulling ${IMAGE_TAG}, migrating, rolling restart on VM…"
+echo "▶ [7/9] Pulling ${IMAGE_TAG}, migrating, rolling restart on VM…"
 # Unquoted heredoc delimiter (REMOTE, not 'REMOTE') is deliberate here, unlike
 # the other ssh blocks in this file — IMAGE_TAG/YC_REGISTRY_ID must be
 # substituted by THIS shell before the commands reach the VM; the remote
@@ -290,7 +320,7 @@ done
 docker image prune -f >/dev/null
 REMOTE
 
-echo "▶ [7/8] nginx guard…"
+echo "▶ [8/9] nginx guard…"
 # nginx is NOT restarted on deploy — there's no reason to. If you ever change
 # its config, do it by hand:  sudo nginx -t && sudo systemctl reload nginx
 # (reload keeps the old config serving if the new one is broken; restart does
@@ -318,7 +348,7 @@ fi
 echo "nginx: $(systemctl is-active nginx)"
 REMOTE
 
-echo "▶ [8/8] Verifying health…"
+echo "▶ [9/9] Verifying health…"
 
 # AUTHORITATIVE check — runs ON the VM, so it can't be fooled by the laptop's
 # network. This is the hard gate: if the public site is truly down, this fails.
@@ -377,6 +407,37 @@ ssh "$VM_HOST" 'set -e
   fi
   echo "  ✓ frontend (from VM)"
 '
+
+# ── Version assertion ────────────────────────────────────────────────────────
+# The checks above prove the API *answers*. They do not prove it is the API we
+# just deployed — and that is the difference between "the site is up" and "the
+# deploy worked". A container that was never recreated answers every one of
+# them perfectly while serving last week's code.
+#
+# That is not a hypothesis. On 2026-09-05 the frontend was live four commits
+# ahead of both API replicas (still on 1.5.0-4ec30f9, "Up 10 hours"), and the
+# routes the new UI called returned 404 to real users. Every health check
+# passed throughout, because the old API was perfectly healthy.
+#
+# The image guard at [2/9] catches the "image was never built" cause. This
+# catches all the others — an interrupted run, a recreate that silently didn't
+# take, a stale tag — by asking the one question that actually matters: is the
+# thing serving traffic the thing we just shipped?
+echo "▶ Confirming both replicas are serving ${SHORT_SHA}…"
+if ! ssh "$VM_HOST" "set -e
+  for port in 3000 3001; do
+    live=\$(curl -fsS --max-time 5 \"http://127.0.0.1:\${port}/api/health\" | sed -n 's/.*\"version\":\"\([^\"]*\)\".*/\1/p')
+    case \"\$live\" in
+      *${SHORT_SHA}*) echo \"  ✓ :\${port} serving \$live\" ;;
+      *) echo \"  ✗ :\${port} is serving '\$live', expected ${SHORT_SHA}\"; exit 1 ;;
+    esac
+  done"; then
+  echo "❌ A replica is not running the version this deploy shipped."
+  echo "   The frontend IS live and now calls an API that may not have its routes —"
+  echo "   users will see 404s. Re-run the deploy, or roll the frontend back:"
+  echo "     deploy/rollback.sh"
+  exit 1
+fi
 
 # BEST-EFFORT check from this laptop — confirms YOUR path to prod, but a flaky
 # local network (DNS/VPN) must NOT fail an otherwise-good deploy. Retry a few
