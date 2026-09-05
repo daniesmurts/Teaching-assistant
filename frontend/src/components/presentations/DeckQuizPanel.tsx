@@ -8,10 +8,11 @@ import Select from '../ui/Select'
 import {
   createQuizFromPresentation, getPresentationQuizzes,
   downloadPresentationHandout, createAssignmentFromPresentation,
+  startNotesJob, getPresentationJob,
 } from '../../api/presentations'
 import { createLiveSession } from '../../api/liveSessions'
 import { useUIStore } from '../../store/uiStore'
-import type { Quiz, QuizLevel, LiveSessionMode } from '../../types'
+import type { Quiz, QuizLevel, LiveSessionMode, Slide } from '../../types'
 
 // What a teacher does with a finished lecture (TODO.md "### AO" Phase 3).
 //
@@ -60,7 +61,11 @@ const LEVEL_OPTIONS = [
   { value: 'application',   label: 'Применение' },
 ]
 
-export default function DeckQuizPanel({ presentationId }: { presentationId: string }) {
+export default function DeckQuizPanel({ presentationId, slides, onSlidesChange }: {
+  presentationId: string
+  slides?: Slide[] | null
+  onSlidesChange?: (slides: Slide[]) => void
+}) {
   const navigate = useNavigate()
   const addToast = useUIStore((s) => s.addToast)
 
@@ -97,6 +102,33 @@ export default function DeckQuizPanel({ presentationId }: { presentationId: stri
   // this is a rendering, not a generation — no model call, no wait. The draft
   // lands in the existing published-assignment flow, which is where deadlines
   // and the student roster live.
+  // Slides an imported deck arrived without notes for. The whole promise of
+  // «Загрузить свою презентацию» is that ИСПУМ writes them, and until this
+  // existed the only way was «Переписать», one slide at a time.
+  const missingNotes = (slides ?? []).filter((s) => s.type !== 'title' && !s.notes?.trim()).length
+
+  const notesMut = useMutation({
+    mutationFn: async () => {
+      const job = await startNotesJob(presentationId)
+      // Same poll loop the generator uses; a long deck takes a few minutes.
+      for (let i = 0; i < 160; i++) {
+        await new Promise((r) => setTimeout(r, i < 10 ? 1500 : 3000))
+        const status = await getPresentationJob(job.id)
+        if (status.status === 'ready' && status.result) return status.result
+        if (status.status === 'failed') throw new Error(status.error_message || 'Не удалось написать заметки')
+      }
+      throw new Error('Слишком долго — попробуйте позже')
+    },
+    onSuccess: (result) => {
+      if (result.slides) onSlidesChange?.(result.slides)
+      addToast('Заметки докладчика готовы', 'success')
+    },
+    onError: (err: unknown) => {
+      const res = (err as { response?: { data?: { error?: string } }; message?: string }).response?.data?.error
+      addToast(res ?? (err as Error).message ?? 'Не удалось написать заметки', 'error')
+    },
+  })
+
   const assignmentMut = useMutation({
     mutationFn: () => createAssignmentFromPresentation(presentationId),
     onSuccess: (a) => navigate(`/published/${a.id}`),
@@ -228,6 +260,23 @@ export default function DeckQuizPanel({ presentationId }: { presentationId: stri
               без конспекта
             </button>
           </div>
+
+          {/* Only when there is something to write: on a generated deck every
+              slide already has notes, and an always-present button would read
+              as "regenerate my notes", which is not what this does. */}
+          {missingNotes > 0 && (
+            <button
+              type="button"
+              onClick={() => notesMut.mutate()}
+              disabled={notesMut.isPending}
+              className={`${ACTION} rounded-md border border-border-mid shadow-sm`}
+              title="ИСПУМ напишет сценарий выступления к слайдам, у которых его нет. Сами слайды не меняются. Расходует одну генерацию из месячного лимита."
+            >
+              {notesMut.isPending
+                ? <><LoadingSpinner size={12} /> Пишем заметки…</>
+                : <><Icon name="sparkle" size={14} /> Написать заметки ({missingNotes})</>}
+            </button>
+          )}
 
           <button
             type="button"

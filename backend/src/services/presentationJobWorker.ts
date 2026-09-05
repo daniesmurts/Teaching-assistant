@@ -8,8 +8,10 @@
 
 import type PgBoss from 'pg-boss'
 import {
-  generatePresentation, planPresentation, expandPresentation, type GenerateParams,
+  generatePresentation, planPresentation, expandPresentation, writeMissingNotes,
+  renderSlidesAsText, type GenerateParams,
 } from './presentations'
+import { findPresentationById, replaceSlides } from '../db/queries/presentations'
 import {
   getPresentationJobByIdUnscoped, setPresentationJobProcessing,
   setPresentationJobOutlineReady, completePresentationJob, failPresentationJob,
@@ -28,12 +30,16 @@ export const PRESENTATION_JOB_QUEUE = 'presentation-job'
 // A single queue with a stage discriminator rather than two queues: the
 // concurrency ceiling that matters is "decks generating at once", and two
 // queues would each need their own share of it.
-export type PresentationJobStage = 'full' | 'outline' | 'expand'
+//   'notes'   — fill in speaker notes on an existing deck (an imported .pptx
+//               usually arrives with none). Queued rather than inline for the
+//               same reason expansion is: sixty slides is twelve LLM calls.
+export type PresentationJobStage = 'full' | 'outline' | 'expand' | 'notes'
 
 export interface PresentationJobPayload {
   jobId:  string          // presentation_jobs row id (NOT the pg-boss job id)
   params: GenerateParams  // fully resolved at enqueue time (plan gates already applied)
   stage?: PresentationJobStage   // absent on messages enqueued before the gate shipped — treated as 'full'
+  presentationId?: string        // 'notes' only — the deck being filled in
 }
 
 // Retry policy mirrors grade_jobs: one retry, short backoff. generatePresentation
@@ -73,7 +79,7 @@ export async function registerPresentationJobWorker(boss: PgBoss): Promise<void>
       PRESENTATION_JOB_QUEUE,
       { includeMetadata: true },
       async ([job]) => {
-        const { jobId, params, stage = 'full' } = job.data
+        const { jobId, params, stage = 'full', presentationId } = job.data
         const isLastAttempt = job.retryCount >= job.retryLimit
         try {
           // Idempotency guard for the requeue-after-crash path: if a previous
@@ -90,6 +96,26 @@ export async function registerPresentationJobWorker(boss: PgBoss): Promise<void>
           if (stage === 'outline') {
             const plan = await planPresentation(params)
             await setPresentationJobOutlineReady(jobId, plan.outline, plan.webGrounding)
+            return
+          }
+
+          if (stage === 'notes') {
+            // Notes-only: the slides are the teacher's own work (this deck was
+            // usually imported), so nothing here rewrites them.
+            if (!presentationId) throw new Error('Не указана презентация')
+            const deck = await findPresentationById(presentationId, params.teacherId)
+            if (!deck) throw new Error('Презентация не найдена')
+
+            const { slides, filled } = await writeMissingNotes(deck, params)
+            if (filled > 0) {
+              await replaceSlides(deck.id, params.teacherId, slides, renderSlidesAsText(slides))
+            }
+            await completePresentationJob(jobId, {
+              presentation_id:   deck.id,
+              slides,
+              generated_content: renderSlidesAsText(slides),
+              sources:           deck.sources ?? [],
+            })
             return
           }
 

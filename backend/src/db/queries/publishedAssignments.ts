@@ -11,6 +11,10 @@ export interface PublishedAssignmentRow {
   id:           string
   teacher_id:   string
   course_id:    string | null
+  // Which lecture this was generated from, when it came from a deck's
+  // discussion slides (migration 124). Null for a hand-made assignment, and
+  // nulled — not deleted — if that deck is later removed.
+  presentation_id: string | null
   rubric_id:    string | null
   title:        string
   instructions: string | null
@@ -50,15 +54,32 @@ export async function createPublishedAssignment(data: {
   title: string
   instructions?: string | null
   dueAt?: string | null
+  presentationId?: string | null
 }): Promise<PublishedAssignmentRow> {
   const { rows } = await pool.query<PublishedAssignmentRow>(
-    `INSERT INTO published_assignments (teacher_id, course_id, rubric_id, title, instructions, due_at)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO published_assignments (teacher_id, course_id, rubric_id, title, instructions, due_at, presentation_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
     [data.teacherId, data.courseId ?? null, data.rubricId ?? null,
-     data.title, data.instructions ?? null, data.dueAt ?? null]
+     data.title, data.instructions ?? null, data.dueAt ?? null, data.presentationId ?? null]
   )
   return rows[0]
+}
+
+/** The assignment already made from this deck, if any — so a second click
+ *  hands back the existing draft instead of quietly creating another. */
+export async function findAssignmentByPresentation(
+  presentationId: string,
+  teacherId: string,
+): Promise<PublishedAssignmentRow | null> {
+  const { rows } = await pool.query<PublishedAssignmentRow>(
+    `SELECT * FROM published_assignments
+      WHERE presentation_id = $1 AND teacher_id = $2
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [presentationId, teacherId]
+  )
+  return rows[0] ?? null
 }
 
 /** Scoped to the owning teacher — returns null if not found or not theirs. */

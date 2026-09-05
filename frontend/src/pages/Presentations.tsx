@@ -333,7 +333,11 @@ export default function Presentations() {
                   a persisted deck with typed slides — a legacy text row has
                   nothing to build questions from. */}
               {displayPresentationId && displaySlides && displaySlides.length > 0 && (
-                <DeckQuizPanel presentationId={displayPresentationId} />
+                <DeckQuizPanel
+                  presentationId={displayPresentationId}
+                  slides={displaySlides}
+                  onSlidesChange={setLocalSlides}
+                />
               )}
 
               <SlideContent

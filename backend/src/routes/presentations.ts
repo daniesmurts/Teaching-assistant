@@ -14,9 +14,9 @@ import {
 import {
   generatePresentation, getSlideImageQuery, normaliseEditedOutline, normaliseEditedSlide,
   regenerateSlide, applySlideMove, renderSlidesAsText, renderSlidesForQuiz,
-  buildAssignmentFromDeck, type GenerateParams,
+  buildAssignmentFromDeck, slidesMissingNotes, paramsFromPresentation, type GenerateParams,
 } from '../services/presentations'
-import { createPublishedAssignment } from '../db/queries/publishedAssignments'
+import { createPublishedAssignment, findAssignmentByPresentation } from '../db/queries/publishedAssignments'
 import { generateQuiz, assertQuizQuota } from '../services/quizzes'
 import { findQuizzesByPresentation } from '../db/queries/quizzes'
 import { generatePresentationPptx } from '../services/presentationExport'
@@ -585,6 +585,40 @@ router.get('/:id/handout.pdf',
   })
 )
 
+// POST /api/presentations/:id/notes — «Написать заметки» for a deck whose
+// slides have none, which is the normal state of an imported .pptx.
+//
+// Costs the monthly presentation quota, and says so in the UI: this is the
+// same order of work as generating a deck (a sixty-slide lecture is twelve
+// LLM calls), so making it free would be an easy way to get generation for
+// nothing by importing an outline first. Import itself stays free — reading a
+// file is not generation.
+router.post('/:id/notes',
+  aiLimiter,
+  checkMonthlyLimit('presentationsPerMonth'),
+  asyncHandler(async (req, res) => {
+    const presentation = await findPresentationById(req.params.id, req.teacher.id)
+    if (!presentation) throw new NotFoundError('Презентация')
+    const slides = presentation.slides ?? []
+    if (slides.length === 0) throw new ValidationError('В этой презентации нет слайдов')
+
+    const missing = slidesMissingNotes(slides)
+    if (missing.length === 0) {
+      throw new ValidationError('У всех слайдов уже есть заметки — отдельные можно переписать кнопкой «Переписать»')
+    }
+
+    const inputs = await findPresentationGenerationInputs(presentation.id, req.teacher.id)
+    const params = paramsFromPresentation(presentation, inputs, req.teacher.id, req.teacher.institution_id ?? undefined)
+
+    const job = await createPresentationJob(req.teacher.id, params)
+    await getJobQueue().send(PRESENTATION_JOB_QUEUE, {
+      jobId: job.id, params, stage: 'notes', presentationId: presentation.id,
+    } satisfies PresentationJobPayload)
+
+    res.status(202).json({ ...toJobResponse(job), slides_missing_notes: missing.length })
+  })
+)
+
 // POST /api/presentations/:id/quiz — «Проверить усвоение»: a test generated
 // from this lecture's own slides and speaker notes (TODO.md "### AO" Phase 3).
 //
@@ -643,11 +677,22 @@ router.post('/:id/assignment',
       )
     }
 
+    // A second click hands back the draft made the first time rather than
+    // making another — the same trap migration 120 closed for tests. The
+    // teacher's edits to that draft are the reason: regenerating over them
+    // would be worse than doing nothing.
+    const existing = await findAssignmentByPresentation(presentation.id, req.teacher.id)
+    if (existing) {
+      res.json({ ...existing, already_existed: true })
+      return
+    }
+
     const assignment = await createPublishedAssignment({
-      teacherId:    req.teacher.id,
-      courseId:     presentation.course_id ?? null,
-      title:        draft.title,
-      instructions: draft.instructions,
+      teacherId:      req.teacher.id,
+      courseId:       presentation.course_id ?? null,
+      presentationId: presentation.id,
+      title:          draft.title,
+      instructions:   draft.instructions,
     })
     res.status(201).json(assignment)
   })

@@ -290,3 +290,15 @@ export async function setPresentationScope(
 export async function getSharedPresentations(): Promise<Presentation[]> {
   return (await client.get<Presentation[]>('/api/presentations/shared')).data
 }
+
+// «Написать заметки» — fills speaker notes on slides that have none, which is
+// the normal state of an imported .pptx. Queued like a generation (a long deck
+// is a dozen model calls), so the caller polls the same job endpoint.
+export async function startNotesJob(
+  presentationId: string,
+): Promise<PresentationJob & { slides_missing_notes: number }> {
+  const res = await client.post<PresentationJob & { slides_missing_notes: number }>(
+    `/api/presentations/${presentationId}/notes`, {},
+  )
+  return res.data
+}

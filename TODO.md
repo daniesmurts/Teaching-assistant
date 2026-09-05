@@ -2443,10 +2443,10 @@ of this entry:
     методиста would actually consume.
   - **Дек → published assignment.** 🟢 SHIPPED (2026-09-05).
     `POST /:id/assignment` renders `discussion` slides into a draft published
-    assignment — no LLM call, `expected_angles` withheld. **Not done:** the
-    deck doesn't record that an assignment came from it (no back-link the way
-    `quizzes.presentation_id` gives one), so a second click makes a second
-    draft.
+    assignment — no LLM call, `expected_angles` withheld. Back-link 🟢 SHIPPED (2026-09-05):
+    migration 124's `published_assignments.presentation_id`, so a second click
+    returns the existing draft rather than making another over the teacher's
+    edits.
 - **Phase 4 (partially shipped, 2026-09-05) — fidelity + institutional
   finish.** Independent of the above, ordered by how often each one gets
   raised. **Shipped:** PPTX import, the 16:9 fit warning, free-tier history.
@@ -2461,10 +2461,11 @@ of this entry:
     each slide's own rels (a deck with partial notes numbers them
     independently, so slide3 can own notesSlide1); title = placeholder, else
     the largest text on the slide. Round-trip tested through this repo's own
-    PPTX exporter rather than a fixture. **Not done:** a bulk "write speaker
-    notes for every imported slide" pass — everything imports as `bullets`
-    (bar a cover slide) and «Переписать» upgrades one slide at a time, which
-    is fine for fixing a few and tedious for a whole deck.
+    PPTX exporter rather than a fixture. Bulk notes: 🟢 SHIPPED (2026-09-05) —
+    `writeMissingNotes()` + `POST /:id/notes` (queued, costs one generation,
+    button appears only when slides lack notes). **Not done:** slides still
+    import as `bullets` bar a cover slide, so type upgrades remain one
+    «Переписать» at a time.
   - **Institution branding.** `presentationExport.ts` hardcodes one palette
     (`const C`). Титульный лист, logo, кафедра naming — cheap to build,
     impossible to argue with in a B2B demo, belongs next to the existing

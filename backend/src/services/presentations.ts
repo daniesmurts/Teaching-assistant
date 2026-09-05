@@ -1424,6 +1424,115 @@ function renderExemplarBlock(exemplars: ExemplarSlide[]): string[] {
   return lines
 }
 
+// ─── Заметки к загруженной презентации (TODO.md "### AO" Phase 4 follow-up) ──
+//
+// The import pitch is "upload your deck and ИСПУМ writes the speaker notes",
+// and until now only half of that was true: a .pptx arrives with whatever
+// notes it had — usually none — and «Переписать» fills them one slide at a
+// time. That is fine for fixing a slide and absurd for a thirty-slide lecture.
+//
+// Deliberately notes-only. The slides are the teacher's own work; rewriting
+// their wording while they asked for notes would be a different, unrequested
+// operation — and the whole reason import exists is that their deck is already
+// what they want on screen.
+
+const NOTES_BATCH_SIZE = 5
+
+/** Slides with no speaker notes, by index — what a notes pass has to fill. */
+export function slidesMissingNotes(slides: Slide[]): number[] {
+  return slides
+    .map((slide, index) => ({ slide, index }))
+    // A title slide's notes are structurally an intro line, not a script; the
+    // eval harness excludes them from its word counts for the same reason.
+    .filter(({ slide }) => slide.type !== 'title' && !slide.notes?.trim())
+    .map(({ index }) => index)
+}
+
+function buildNotesPrompt(batch: Array<{ index: number; slide: Slide }>, params: GenerateParams, depth: PresentationDepth): string {
+  const [wMin, wMax] = NOTES_WORD_TARGET[depth]
+  const lines: string[] = []
+
+  lines.push(`## Лекция: ${sanitiseForPrompt(params.topic)}`)
+  if (params.audienceLevel) lines.push(`Аудитория: ${params.audienceLevel}`)
+  lines.push('')
+  lines.push(`## Слайды, к которым нужны заметки (${batch.length})`)
+  lines.push('')
+
+  batch.forEach(({ slide }, i) => {
+    lines.push(`### Слайд ${i + 1} — тип «${slide.type}»`)
+    lines.push(sanitiseForPrompt(renderSlidesAsText([slide]).slice(0, 1500)))
+    lines.push('')
+  })
+
+  lines.push(`## Задача
+
+Преподаватель загрузил собственную презентацию и просит написать к слайдам
+заметки докладчика — сценарий выступления.
+
+- Текст слайдов НЕ меняйте и не пересказывайте дословно: заметки — это то, что
+  преподаватель ГОВОРИТ, пока слайд на экране.
+- Опирайтесь только на содержание слайда. Не выдумывайте цифры, названия и
+  источники, которых на слайде нет: это чужая лекция, а не ваша.
+- Объём — ${wMin}–${wMax} слов на слайд (примерно полторы минуты речи).
+- Структура: зачем это студенту → развёрнутое объяснение → конкретный пример →
+  типичное заблуждение → переход к следующему слайду.
+- Пишите на русском языке.
+
+Верните JSON: { "notes": ["текст для слайда 1", "текст для слайда 2", ...] } —
+ровно ${batch.length} элементов, в том же порядке.`)
+
+  return lines.join('\n')
+}
+
+/**
+ * Fills in speaker notes for the slides that have none, leaving slide content
+ * untouched. Runs in the same bounded-concurrency batches as expansion — a
+ * sixty-slide import is twelve calls, which is why this goes through the job
+ * queue rather than an HTTP request.
+ */
+export async function writeMissingNotes(
+  presentation: Presentation,
+  params: GenerateParams,
+): Promise<{ slides: Slide[]; filled: number }> {
+  const slides = presentation.slides ?? []
+  const targets = slidesMissingNotes(slides)
+  if (targets.length === 0) return { slides, filled: 0 }
+
+  const depth   = resolveDepth(params)
+  const context = callContextFor(params)
+  const batches = chunkArray(targets.map((index) => ({ index, slide: slides[index] })), NOTES_BATCH_SIZE)
+
+  const written = await mapWithConcurrency(batches, EXPANSION_CONCURRENCY, async (batch) => {
+    const raw = await chatJSON<{ notes: unknown[] }>(
+      [
+        {
+          role: 'system',
+          content:
+            `Вы опытный преподаватель. Вы пишете заметки докладчика к готовым слайдам коллеги — ` +
+            `сами слайды менять нельзя. Пишите на русском языке. Отвечайте строго в формате JSON.`,
+        },
+        { role: 'user', content: buildNotesPrompt(batch, params, depth) },
+      ],
+      'notes',
+      { context, maxTokens: expansionBatchMaxTokens(batch.length, depth) },
+    )
+
+    const notes = Array.isArray(raw?.notes) ? raw.notes : []
+    return batch.map((item, i) => ({
+      index: item.index,
+      notes: typeof notes[i] === 'string' ? (notes[i] as string).trim() : '',
+    }))
+  })
+
+  const byIndex = new Map(written.flat().filter((n) => n.notes).map((n) => [n.index, n.notes]))
+  const next = slides.map((slide, i) => {
+    const notes = byIndex.get(i)
+    return notes ? { ...slide, notes } : slide
+  })
+
+  return { slides: next, filled: byIndex.size }
+}
+
 // ─── Per-slide editing + regeneration (TODO.md "### AO" Phase 1) ────────────
 //
 // A deck used to be immutable once written: the only way to fix one bad slide

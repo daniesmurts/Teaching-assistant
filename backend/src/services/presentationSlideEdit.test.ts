@@ -21,7 +21,7 @@ vi.mock('./yandexSearch', () => ({ webSearch: vi.fn() }))
 
 import {
   applySlideMove, normaliseEditedSlide, paramsFromPresentation, regenerateSlide,
-  expandPresentation,
+  expandPresentation, slidesMissingNotes, writeMissingNotes,
 } from './presentations'
 import { findApprovedExemplarSlides, createPresentation } from '../db/queries/presentations'
 import { chatJSON } from './deepseek'
@@ -263,5 +263,76 @@ describe('expansion prompt with approved exemplars', () => {
       outline: [{ type: 'concept', title: 'Понятие', brief: '' }], webGrounding: [], slideTarget: 1,
     })
     expect(result.slides).toHaveLength(1)
+  })
+})
+
+// ─── Заметки к загруженной презентации ──────────────────────────────────────
+//
+// The import promise is "upload your deck and ИСПУМ writes the speaker notes".
+// The rule that matters: it writes NOTES and leaves the slides alone — they are
+// the teacher's own work, which is the entire reason import exists.
+
+describe('slidesMissingNotes', () => {
+  const slide = (type: Slide['type'], notes: string): Slide =>
+    ({ type, title: 'T', notes, citations: [], body: BODIES[type] } as unknown as Slide)
+
+  it('finds the slides an imported deck arrived without notes for', () => {
+    expect(slidesMissingNotes([slide('bullets', ''), slide('concept', 'есть'), slide('bullets', '   ')])).toEqual([0, 2])
+  })
+
+  it('skips the title slide — its notes are an intro line, not a script', () => {
+    // Same exclusion the eval harness makes when averaging notes length.
+    expect(slidesMissingNotes([slide('title', ''), slide('bullets', '')])).toEqual([1])
+  })
+
+  it('returns nothing for a generated deck, where every slide already has notes', () => {
+    expect(slidesMissingNotes([slide('bullets', 'речь'), slide('concept', 'речь')])).toEqual([])
+  })
+})
+
+describe('writeMissingNotes', () => {
+  const deck = (slides: Slide[]) => ({ id: 'p1', topic: 'Насосы', slides, sources: [] } as unknown as Presentation)
+  const params = { teacherId: 't1', topic: 'Насосы', durationMinutes: 60, learningGoals: [] } as never
+
+  const bare = (title: string): Slide =>
+    ({ type: 'bullets', title, notes: '', citations: [], body: { items: ['тезис'] } } as unknown as Slide)
+
+  it('fills only the empty slides and leaves their content untouched', async () => {
+    vi.mocked(chatJSON).mockResolvedValue({ notes: ['речь про первый', 'речь про третий'] } as never)
+    const withNotes = { ...bare('Второй'), notes: 'уже есть' } as Slide
+
+    const { slides, filled } = await writeMissingNotes(deck([bare('Первый'), withNotes, bare('Третий')]), params)
+
+    expect(filled).toBe(2)
+    expect(slides[0].notes).toBe('речь про первый')
+    expect(slides[1].notes).toBe('уже есть')          // untouched
+    expect(slides[2].notes).toBe('речь про третий')
+    // The slides themselves are the teacher's work — bodies and titles must
+    // survive a notes pass byte for byte.
+    expect(slides.map((s) => s.title)).toEqual(['Первый', 'Второй', 'Третий'])
+    expect((slides[0] as { body: { items: string[] } }).body.items).toEqual(['тезис'])
+  })
+
+  it('tells the model not to invent what is not on the slide', async () => {
+    vi.mocked(chatJSON).mockResolvedValue({ notes: ['речь'] } as never)
+    await writeMissingNotes(deck([bare('Первый')]), params)
+
+    const prompt = vi.mocked(chatJSON).mock.calls[0][0][1].content
+    expect(prompt).toContain('это чужая лекция')
+    expect(prompt).toMatch(/НЕ меняйте/)
+  })
+
+  it('does nothing, and calls nothing, when every slide already has notes', async () => {
+    const done = { ...bare('Есть'), notes: 'речь' } as Slide
+    const { filled } = await writeMissingNotes(deck([done]), params)
+    expect(filled).toBe(0)
+    expect(chatJSON).not.toHaveBeenCalled()
+  })
+
+  it('keeps the original notes when the model returns junk for a slide', async () => {
+    vi.mocked(chatJSON).mockResolvedValue({ notes: [null] } as never)
+    const { slides, filled } = await writeMissingNotes(deck([bare('Первый')]), params)
+    expect(filled).toBe(0)
+    expect(slides[0].notes).toBe('')
   })
 })
