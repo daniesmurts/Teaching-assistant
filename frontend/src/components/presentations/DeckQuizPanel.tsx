@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import Button from '../ui/Button'
 import Icon from '../ui/Icon'
+import LoadingSpinner from '../ui/LoadingSpinner'
 import Select from '../ui/Select'
 import {
   createQuizFromPresentation, getPresentationQuizzes,
@@ -22,6 +23,29 @@ import type { Quiz, QuizLevel, LiveSessionMode } from '../../types'
 // loop in place — the test is built from the deck's own slides and speaker
 // notes, and because it is an ordinary quiz row, «Запустить в аудитории»
 // (Feature Y) works on it unchanged.
+
+// Secondary actions look like buttons, not sentences. The first cut of this row
+// was three bare text links in a line — «Раздатка для студентов (PDF)  …без
+// конспекта  Письменная работа по вопросам лекции» — which teachers read as a
+// caption and never clicked. Three separate defects, all fixed below:
+//
+//   1. No affordance. Same size, weight and colour as body copy, no border, no
+//      icon: nothing said "clickable" until the cursor was already on it.
+//   2. «…без конспекта» is not a third action — it is a *variant* of the first
+//      one, and sitting as a peer it read as a sentence fragment. It is now
+//      visibly welded to Раздатка as a split button.
+//   3. ~17px tall hit areas, well under the 44px touch guideline. Now 40px:
+//      short of 44 to stay in the app's density, but more than double before.
+//
+// The border/surface/shadow treatment is deliberately the one already used by
+// «Показать все ответы» (Quizzes.tsx) and FosStudio — a new button style here
+// would fix affordance by breaking consistency.
+const ACTION =
+  'inline-flex items-center justify-center gap-1.5 min-h-[40px] px-3 py-2 text-xs font-sans font-medium ' +
+  'text-ink-secondary bg-surface transition-colors ' +
+  'hover:bg-surface-warm hover:text-amber ' +
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber ' +
+  'disabled:opacity-40 disabled:hover:bg-surface disabled:hover:text-ink-secondary'
 
 const COUNT_OPTIONS = [
   { value: '5',  label: '5 вопросов' },
@@ -145,7 +169,7 @@ export default function DeckQuizPanel({ presentationId }: { presentationId: stri
             </Button>
             <button
               onClick={() => navigate('/materials/quizzes')}
-              className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors"
+              className={`${ACTION} rounded-md border border-border-mid shadow-sm whitespace-nowrap`}
             >
               Открыть в «Тестах»
             </button>
@@ -161,28 +185,62 @@ export default function DeckQuizPanel({ presentationId }: { presentationId: stri
 
       {/* The other two things a finished lecture turns into. Secondary to the
           in-hall check, but the same idea: the deck is the source, not a
-          dead end. */}
-      <div className="mt-3 pt-3 border-t border-border flex items-center gap-4 flex-wrap">
-        <button
-          onClick={() => void downloadPresentationHandout(presentationId)}
-          className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors"
-        >
-          Раздатка для студентов (PDF)
-        </button>
-        <button
-          onClick={() => void downloadPresentationHandout(presentationId, false)}
-          className="text-xs font-sans text-ink-tertiary hover:text-amber transition-colors"
-          title="Заголовки и содержание слайдов без конспекта — чтобы студенты писали сами"
-        >
-          …без конспекта
-        </button>
-        <button
-          onClick={() => assignmentMut.mutate()}
-          disabled={assignmentMut.isPending}
-          className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors disabled:opacity-40"
-        >
-          {assignmentMut.isPending ? 'Создаём…' : 'Письменная работа по вопросам лекции'}
-        </button>
+          dead end. The caption is what tells a teacher these are outputs for
+          the group rather than more controls for the test above. */}
+      <div className="mt-4 pt-3 border-t border-border">
+        {/* ink-secondary, not the ink-tertiary most micro-captions in this app
+            use: tertiary measures 2.84:1 on white, under the 4.5:1 AA floor.
+            At 10px this is the caption a teacher most needs to read. */}
+        <div className="text-[10px] font-sans font-semibold text-ink-secondary uppercase tracking-wider mb-2">
+          Материалы для студентов
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Split button — one action, two variants. Sharing a border is what
+              says «без конспекта» belongs to Раздатка; as a separate link it
+              read as an unrelated third action with a missing first half. */}
+          <div className="inline-flex rounded-md border border-border-mid shadow-sm overflow-hidden">
+            <button
+              type="button"
+              onClick={() => void downloadPresentationHandout(presentationId)}
+              className={ACTION}
+              title="PDF со слайдами и конспектом лекции — для раздачи студентам"
+            >
+              <Icon name="import" size={14} />
+              Раздатка <span className="opacity-70">PDF</span>
+            </button>
+            {/* Muted, and carrying the same download icon on purpose. Without
+                the icon this half reads as the unselected segment of a toggle —
+                the pacing control directly above uses exactly this shape — and
+                a teacher would take it for a state rather than a second
+                download. The icon says "this also downloads something"; the
+                warm background says "and it's the lesser variant" — the
+                subordination is carried by the surface, NOT by lighter text:
+                ink-tertiary on surface-warm measures 2.68:1, well under the
+                4.5:1 AA floor. ink-secondary on that surface is 5.42:1. */}
+            <button
+              type="button"
+              onClick={() => void downloadPresentationHandout(presentationId, false)}
+              className={`${ACTION} border-l border-border-mid bg-surface-warm`}
+              aria-label="Скачать раздатку без конспекта лекции"
+              title="Только заголовки и содержание слайдов — чтобы студенты конспектировали сами"
+            >
+              <Icon name="import" size={13} />
+              без конспекта
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => assignmentMut.mutate()}
+            disabled={assignmentMut.isPending}
+            className={`${ACTION} rounded-md border border-border-mid shadow-sm`}
+            title="Вопросы со слайдов «Обсуждение» станут письменным заданием"
+          >
+            {assignmentMut.isPending
+              ? <><LoadingSpinner size={12} /> Создаём…</>
+              : <><Icon name="file-check" size={14} /> Письменная работа</>}
+          </button>
+        </div>
       </div>
     </div>
   )
