@@ -14,15 +14,40 @@ export default function Changelog() {
 
         <div className="space-y-12 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
           
-          {/* Version 1.4 — latest */}
+          {/* Version 1.6 — latest */}
           <div className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
             <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-bg bg-amber text-white shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
               <svg className="w-4 h-4 fill-current" viewBox="0 0 16 16"><path d="M8 0a8 8 0 1 0 8 8 8.009 8.009 0 0 0-8-8Zm0 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z" /></svg>
             </div>
             <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] bg-surface p-6 rounded-xl border border-border shadow-sm">
               <div className="flex items-center justify-between mb-2">
-                <span className="font-bold text-ink">Версия 1.4</span>
+                <span className="font-bold text-ink">Версия 1.6</span>
                 <span className="text-xs font-medium text-amber px-2 py-1 rounded bg-amber-light/20">Новое</span>
+              </div>
+              <time className="block text-sm text-ink-secondary mb-3">Сентябрь 2026</time>
+              <div className="text-sm text-ink-secondary space-y-2">
+                <p><strong>Лекция перестала быть «одноразовой».</strong> Раньше готовую презентацию можно было либо принять как есть, либо перегенерировать целиком. Теперь каждый слайд правится отдельно: изменить текст и заметки, переписать один слайд по замечанию («короче», «добавь пример с числами»), удалить, переставить или добавить новый — остальные слайды при этом не трогаются.</p>
+                <p><strong>План лекции — до генерации, а не после.</strong> ИСПУМ за несколько секунд показывает структуру будущей лекции: порядок, тип и краткое содержание каждого слайда. Порядок можно поменять, лишнее убрать, своё добавить — и только потом запускать написание текста и заметок. Поправить план — секунды, переделывать готовую лекцию — долго.</p>
+                <p><strong>Загрузите свою презентацию.</strong> Уже накопленные .pptx больше не нужно переносить вручную: загрузите файл — ИСПУМ разберёт его по слайдам вместе с заметками докладчика, и дальше с ним можно всё то же самое, что с созданным в системе. Бесплатно и без расхода лимита генераций.</p>
+                <p><strong>«Проверить усвоение» — тест по лекции прямо в аудитории.</strong> По готовой лекции одной кнопкой собирается тест — не по теме вообще, а по вашим слайдам и заметкам, то есть по тому, что вы действительно рассказали. Его сразу можно запустить в аудитории: студенты отвечают с телефонов по QR-коду, а результаты сохраняются в журнал.</p>
+                <p><strong>Раздатка для студентов.</strong> PDF по лекции: слайды и заметки как связный конспект — или тот же материал без конспекта, чтобы студенты писали сами.</p>
+                <p><strong>Письменная работа по вопросам лекции.</strong> Слайды с вопросами для обсуждения превращаются в задание для студентов — с персональными ссылками, сроком сдачи и проверкой процесса написания.</p>
+                <p><strong>Тема из рабочей программы.</strong> Тематический план один раз разбирается из РПД предмета — дальше тему и номер лекции можно выбрать из списка, а не вводить руками. Содержание темы из программы становится заданием для генерации, а готовая лекция остаётся связанной с темой — это материал для УМК.</p>
+                <p><strong>ИСПУМ учится вашему стилю.</strong> Отметьте удачную лекцию кнопкой «Готово» — следующие будут писаться с оглядкой на неё: глубина заметок, формулировки, манера подачи. Берётся именно стиль, а не содержание, и только из ваших собственных отмеченных лекций.</p>
+                <p><strong>Задания: срок сдачи и группа списком.</strong> У задания появился срок сдачи с датой и временем. Студентов теперь можно добавить группой — вставить список по одному имени в строке — и скопировать сразу все персональные ссылки для рассылки или таблицы.</p>
+                <p><strong>История презентаций — на всех тарифах.</strong> Созданные лекции больше не пропадают из истории на бесплатном тарифе.</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Version 1.4 */}
+          <div className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group">
+            <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-bg bg-surface-warm text-ink-tertiary shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
+              <svg className="w-4 h-4 fill-current" viewBox="0 0 16 16"><path d="M8 0a8 8 0 1 0 8 8 8.009 8.009 0 0 0-8-8Zm0 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z" /></svg>
+            </div>
+            <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] bg-surface p-6 rounded-xl border border-border shadow-sm opacity-80 transition-opacity hover:opacity-100">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-bold text-ink">Версия 1.4</span>
               </div>
               <time className="block text-sm text-ink-secondary mb-3">Июль 2026</time>
               <div className="text-sm text-ink-secondary space-y-2">
