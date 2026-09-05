@@ -14,6 +14,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Changed
+- **Шапка просмотра презентации: заголовок больше не дублируется, «Удалить» перестало быть главной кнопкой.** Three issues in one screenful, all of them hierarchy:
+  - **The lecture title was printed twice** — once in the card, then again immediately below in uppercase grey. For a 200-character technical title that was six wasted lines, and the all-caps copy was the harder of the two to read. Removed; the card keeps it, clamped to two lines with the full text on hover.
+  - **«Удалить» was a solid red button** sitting shoulder to shoulder with «Отметить "Готово"» and «В банк кафедры» — the destructive action was the loudest thing on a page whose actual subject is the lecture. Now a quiet text action, separated by a rule (the skill's `destructive-emphasis` / `destructive-nav-separation`: keep the danger colour, drop the fill, separate it spatially). It sits at `ink-secondary`, **not** `ink-tertiary` — tertiary on white measures 2.84:1, under the 4.5:1 floor; secondary is 5.74:1. The danger colour arrives on hover, where it belongs. (I made exactly this mistake in my first pass and caught it by measuring rather than looking.)
+  - **Two identical amber blocks sat side by side** in «Проверить усвоение»: the pacing toggle's selected segment and the «Запустить в аудитории» button, one a state and one an action, with nothing to tell them apart. The selected segment is now ink-on-warm with weight (16.4:1), leaving amber to mean "this is the button" — one primary per section. The toggle also became a real `radiogroup` with `aria-checked`, which previously announced nothing about which pacing was selected.
+
 ### Added
 - **Тематический план можно править руками.** `PUT /api/courses/:id/lecture-plan` shipped with the РПД extraction and **nothing ever called it** — so when the model misread the programme's table (a merged cell becoming one тема, a practical counted as a lecture, wording truncated), the only remedy was re-extracting the whole plan and hoping for a better roll. New «Править план» editor: retitle, re-describe, reorder, delete, add. Positions renumber server-side, so the client never reconciles them, and a hand-edited row is stored as `source: 'manual'` rather than pretending it came from the программа.
 

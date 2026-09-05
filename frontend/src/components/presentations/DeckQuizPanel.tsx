@@ -177,19 +177,29 @@ export default function DeckQuizPanel({ presentationId, slides, onSlidesChange }
             {/* Pacing is chosen at launch, as on the Тесты page — it changes
                 the whole interaction model rather than something togglable
                 mid-session. */}
-            <div className="inline-flex rounded-md border border-border-mid overflow-hidden" role="group" aria-label="Темп прохождения">
+            <div className="inline-flex rounded-md border border-border-mid overflow-hidden" role="radiogroup" aria-label="Темп прохождения">
               <button
+                type="button"
+                role="radio"
+                aria-checked={mode === 'paced'}
                 onClick={() => setMode('paced')}
                 className={`px-2.5 py-1.5 text-xs font-sans font-medium whitespace-nowrap transition-colors ${
-                  mode === 'paced' ? 'bg-amber text-white' : 'bg-surface text-ink-secondary hover:bg-surface-warm'
+                  mode === 'paced'
+                    ? 'bg-surface-warm text-ink font-semibold shadow-inner'
+                    : 'bg-surface text-ink-secondary hover:bg-surface-warm'
                 }`}
               >
                 В темпе группы
               </button>
               <button
+                type="button"
+                role="radio"
+                aria-checked={mode === 'self_paced'}
                 onClick={() => setMode('self_paced')}
                 className={`px-2.5 py-1.5 text-xs font-sans font-medium whitespace-nowrap border-l border-border-mid transition-colors ${
-                  mode === 'self_paced' ? 'bg-amber text-white' : 'bg-surface text-ink-secondary hover:bg-surface-warm'
+                  mode === 'self_paced'
+                    ? 'bg-surface-warm text-ink font-semibold shadow-inner'
+                    : 'bg-surface text-ink-secondary hover:bg-surface-warm'
                 }`}
               >
                 В своём темпе

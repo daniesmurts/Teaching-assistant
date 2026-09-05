@@ -201,7 +201,6 @@ export default function Presentations() {
   const displaySlides   = localSlides
   const displayContent  = result?.generated_content ?? openHistory?.generated_content ?? null
   const displaySources  = result?.sources ?? openHistory?.sources ?? []
-  const displayTitle    = openHistory?.topic ?? null
 
   return (
     <div className="flex-1 flex flex-col">
@@ -267,7 +266,9 @@ export default function Presentations() {
             <div className="bg-surface border border-border rounded-lg px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <div className="text-xs font-sans text-ink-tertiary mb-0.5">Просмотр презентации</div>
-                <div className="text-sm font-sans font-medium text-ink">{openHistory.topic}</div>
+                <div className="text-sm font-sans font-medium text-ink line-clamp-2" title={openHistory.topic}>
+                  {openHistory.topic}
+                </div>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 {!isMine && (
@@ -306,14 +307,21 @@ export default function Presentations() {
                   <Icon name="users" size={14} />
                   {shared ? 'В банке кафедры' : 'В банк кафедры'}
                 </button>
-                <Button
-                  size="sm"
-                  variant="danger"
-                  loading={deleteMut.isPending}
+                {/* Destructive, and separated from the two constructive
+                    actions by a rule rather than sitting shoulder to shoulder
+                    with them: it used to be a solid red button, i.e. the
+                    loudest thing on a page whose actual point is the lecture.
+                    Kept at ink-secondary, NOT ink-tertiary — tertiary on white
+                    is 2.84:1, under the 4.5:1 floor; secondary is 5.74:1. The
+                    danger colour arrives on hover, where it belongs. */}
+                <span className="w-px h-6 bg-border mx-1" aria-hidden />
+                <button
                   onClick={() => deleteMut.mutate(openHistory.id)}
+                  disabled={deleteMut.isPending}
+                  className="min-h-[36px] px-2.5 py-1.5 rounded-md text-xs font-sans font-medium text-ink-secondary hover:text-danger hover:bg-danger-bg transition-colors disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-danger"
                 >
-                  Удалить
-                </Button>
+                  {deleteMut.isPending ? 'Удаляем…' : 'Удалить'}
+                </button>
                 </>}
               </div>
             </div>
@@ -322,11 +330,6 @@ export default function Presentations() {
           {/* Generated slides */}
           {(displaySlides || displayContent) && (
             <div className="result-appear">
-              {displayTitle && !result && (
-                <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider mb-4">
-                  {displayTitle}
-                </div>
-              )}
               {/* Лекция → тест → аудитория (TODO.md "### AO" Phase 3). Above
                   the slides: the check on the lecture is the next thing the
                   teacher does with it, not a footnote after 30 cards. Only for
