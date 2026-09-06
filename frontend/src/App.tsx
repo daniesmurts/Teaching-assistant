@@ -54,6 +54,7 @@ import AdminUsage from './pages/admin/AdminUsage'
 import AdminCapacity from './pages/admin/AdminCapacity'
 import AdminPricing from './pages/admin/AdminPricing'
 import AdminActivation from './pages/admin/AdminActivation'
+import AdminStudents from './pages/admin/AdminStudents'
 import AdminPayments from './pages/admin/AdminPayments'
 import AdminTeachers from './pages/admin/AdminTeachers'
 import AdminRubrics from './pages/admin/AdminRubrics'
@@ -345,6 +346,7 @@ export default function App() {
             <Route path="capacity"  element={<AdminCapacity />} />
             <Route path="pricing"  element={<AdminPricing />} />
             <Route path="activation" element={<AdminActivation />} />
+            <Route path="students" element={<AdminStudents />} />
             <Route path="payments"  element={<AdminPayments />} />
             <Route path="teachers"  element={<AdminTeachers />} />
             <Route path="institutions" element={<AdminInstitutions />} />

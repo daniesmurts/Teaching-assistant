@@ -10,6 +10,7 @@ const NAV: Array<{ to: string; label: string; icon: IconName; end: boolean }> = 
   { to: '/admin/capacity', label: 'Capacity',            icon: 'scale',      end: false },
   { to: '/admin/pricing',  label: 'Калькулятор цены',    icon: 'diamond',    end: false },
   { to: '/admin/activation', label: 'Активация',         icon: 'play-circle', end: false },
+  { to: '/admin/students', label: 'Студенты',            icon: 'users',      end: false },
   { to: '/admin/payments', label: 'Платежи',             icon: 'diamond',    end: false },
   { to: '/admin/teachers', label: 'Преподаватели',       icon: 'users',      end: false },
   { to: '/admin/institutions', label: 'Организации',     icon: 'building',   end: false },

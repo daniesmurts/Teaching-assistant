@@ -10,6 +10,7 @@ import { requireDomain, requireDomainOnUnitTypes } from '../middleware/requireDo
 import { CRITERIA_READ_UNIT_TYPES, CRITERIA_CREATE_UNIT_TYPES, TEACHING_OVERVIEW_UNIT_TYPES } from '../services/accessScope'
 import { uploadConfig, uploadFields, verifyFileContent } from '../middleware/fileValidation'
 import { validate } from '../middleware/validate'
+import { recordArtifactEvent } from '../db/queries/artifactEvents'
 import { asyncHandler } from '../lib/asyncHandler'
 import { ValidationError, NotFoundError } from '../errors/AppError'
 import { inviteRules, bulkInviteRules } from '../validation/institutionValidation'
@@ -194,6 +195,12 @@ router.get('/usage/export', requireDomainOnUnitTypes('teaching', 'view', TEACHIN
   res.setHeader('Content-Type', 'text/csv; charset=utf-8')
   res.setHeader('Content-Disposition', `attachment; filename="${csvFilename('ispum_usage')}"`)
   res.send(csv)
+
+  recordArtifactEvent({
+    kind: 'institution_usage', event: 'exported',
+    teacherId: req.teacher.id, institutionId: institutionId(req),
+    format: 'csv',
+  })
 }))
 
 router.get('/teachers', requireDomainOnUnitTypes('teaching', 'view', TEACHING_OVERVIEW_UNIT_TYPES), asyncHandler(async (req, res) => {

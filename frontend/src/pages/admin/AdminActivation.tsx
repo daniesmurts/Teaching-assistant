@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getActivationFunnel, getStalledTeachers } from '../../api/admin'
+import { getActivationFunnel, getFeatureAdoption, getFeatureBreadth, getStalledTeachers } from '../../api/admin'
+import { ARTIFACT_LABEL } from '../../lib/artifactLabels'
 
 // Activation funnel — signup → первый предмет → первая проверка (aha) →
 // первая презентация, derived entirely from existing data server-side.
 
-type Tab = 'funnel' | 'stalled'
+type Tab = 'funnel' | 'features' | 'breadth' | 'stalled'
 
 function fmtDate(iso: string | null): string {
   if (!iso) return '—'
@@ -19,6 +20,12 @@ function fmtHours(h: number | null): string {
   return `${(h / 24).toFixed(1)} дн`
 }
 
+function fmtDays(d: number | null): string {
+  if (d === null || d === undefined) return '—'
+  if (d < 1) return 'сразу'
+  return `${Math.round(d)} дн`
+}
+
 function pct(part: number, total: number): string {
   if (!total) return '—'
   return `${Math.round((part / total) * 100)}%`
@@ -29,7 +36,11 @@ export default function AdminActivation() {
   const [weeks, setWeeks] = useState(12)
 
   const { data: funnel }       = useQuery({ queryKey: ['admin-activation-funnel', weeks], queryFn: () => getActivationFunnel(weeks) })
-  const { data: stalled = [] } = useQuery({ queryKey: ['admin-activation-stalled'], queryFn: () => getStalledTeachers() })
+  const { data: stalled = [] }  = useQuery({ queryKey: ['admin-activation-stalled'], queryFn: () => getStalledTeachers() })
+  const { data: features = [] } = useQuery({ queryKey: ['admin-activation-features'], queryFn: () => getFeatureAdoption() })
+  const { data: breadth = [] }  = useQuery({ queryKey: ['admin-activation-breadth'], queryFn: getFeatureBreadth })
+
+  const breadthTotal = breadth.reduce((sum, b) => sum + b.teachers, 0)
 
   const s = funnel?.summary
 
@@ -92,7 +103,9 @@ export default function AdminActivation() {
         {/* Tabs */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex gap-1">
-            <button className={tabClass('funnel')}  onClick={() => setTab('funnel')}>Когорты по неделям</button>
+            <button className={tabClass('funnel')}   onClick={() => setTab('funnel')}>Когорты по неделям</button>
+            <button className={tabClass('features')} onClick={() => setTab('features')}>Функции</button>
+            <button className={tabClass('breadth')}  onClick={() => setTab('breadth')}>Широта использования</button>
             <button className={tabClass('stalled')} onClick={() => setTab('stalled')}>
               Застрявшие {stalled.length > 0 && <span className="ml-1.5 text-xs font-semibold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">{stalled.length}</span>}
             </button>
@@ -140,6 +153,62 @@ export default function AdminActivation() {
                 </tbody>
               </>
             )}
+            {tab === 'features' && (
+              <>
+                <thead><tr className="border-b border-border bg-surface-warm">
+                  <th className="text-left px-4 py-3 text-ink-secondary font-medium">Функция</th>
+                  <th className="text-right px-4 py-3 text-ink-secondary font-medium">Попробовали</th>
+                  <th className="text-right px-4 py-3 text-ink-secondary font-medium">Вернулись</th>
+                  <th className="text-right px-4 py-3 text-ink-secondary font-medium">Удержание</th>
+                  <th className="text-right px-4 py-3 text-ink-secondary font-medium">Активны за 30 дн</th>
+                  <th className="text-right px-4 py-3 text-ink-secondary font-medium">В среднем раз</th>
+                  <th className="text-right px-4 py-3 text-ink-secondary font-medium">Нашли через</th>
+                </tr></thead>
+                <tbody>
+                  {features.map((f) => (
+                    <tr key={f.kind} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 text-ink">{ARTIFACT_LABEL[f.kind] ?? f.kind}</td>
+                      <td className="px-4 py-3 text-right text-ink">{f.teachers_ever}</td>
+                      <td className="px-4 py-3 text-right text-ink">{f.teachers_returned}</td>
+                      <td className="px-4 py-3 text-right font-medium text-ink">{pct(f.teachers_returned, f.teachers_ever)}</td>
+                      <td className="px-4 py-3 text-right text-ink-secondary">{f.teachers_active}</td>
+                      <td className="px-4 py-3 text-right text-ink-secondary">{f.avg_uses_per_teacher}</td>
+                      <td className="px-4 py-3 text-right text-ink-secondary">{fmtDays(f.median_days_to_first)}</td>
+                    </tr>
+                  ))}
+                  {features.length === 0 && (
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-ink-tertiary">Пока никто ничего не создал</td></tr>
+                  )}
+                </tbody>
+              </>
+            )}
+            {tab === 'breadth' && (
+              <>
+                <thead><tr className="border-b border-border bg-surface-warm">
+                  <th className="text-left px-4 py-3 text-ink-secondary font-medium">Использовано функций</th>
+                  <th className="text-right px-4 py-3 text-ink-secondary font-medium">Преподавателей</th>
+                  <th className="text-right px-4 py-3 text-ink-secondary font-medium">Доля</th>
+                  <th className="text-right px-4 py-3 text-ink-secondary font-medium">Заходили за 14 дн</th>
+                  <th className="text-right px-4 py-3 text-ink-secondary font-medium">Удержание</th>
+                </tr></thead>
+                <tbody>
+                  {breadth.map((b) => (
+                    <tr key={b.features_used} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 text-ink">
+                        {b.features_used === 0 ? 'ни одной' : b.features_used}
+                      </td>
+                      <td className="px-4 py-3 text-right text-ink">{b.teachers}</td>
+                      <td className="px-4 py-3 text-right text-ink-secondary">{pct(b.teachers, breadthTotal)}</td>
+                      <td className="px-4 py-3 text-right text-ink-secondary">{b.still_active}</td>
+                      <td className="px-4 py-3 text-right font-medium text-ink">{pct(b.still_active, b.teachers)}</td>
+                    </tr>
+                  ))}
+                  {breadth.length === 0 && (
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-ink-tertiary">Нет данных</td></tr>
+                  )}
+                </tbody>
+              </>
+            )}
             {tab === 'stalled' && (
               <>
                 <thead><tr className="border-b border-border bg-surface-warm">
@@ -169,10 +238,31 @@ export default function AdminActivation() {
           </table>
         </div>
 
-        <p className="text-sm font-sans text-ink-tertiary mt-4 leading-relaxed">
-          «Застрявшие» — зарегистрировались более 48 часов назад, не проверили ни одной работы
-          и не появлялись в системе последние 48 часов.
-        </p>
+        {tab === 'stalled' && (
+          <p className="text-sm font-sans text-ink-tertiary mt-4 leading-relaxed">
+            «Застрявшие» — зарегистрировались более 48 часов назад, не проверили ни одной работы
+            и не появлялись в системе последние 48 часов.
+          </p>
+        )}
+
+        {tab === 'features' && (
+          <p className="text-sm font-sans text-ink-tertiary mt-4 leading-relaxed">
+            «Вернулись» — использовали функцию в два разных дня, а не два раза за один заход:
+            это отличает «попробовал и забыл» от «пользуюсь». «Нашли через» — медиана от
+            регистрации до первого использования: большое число означает, что функцию находят
+            поздно или случайно. Аккаунты платформенных администраторов исключены.
+          </p>
+        )}
+
+        {tab === 'breadth' && (
+          <p className="text-sm font-sans text-ink-tertiary mt-4 leading-relaxed">
+            Сколько разных функций освоил преподаватель, против того, заходил ли он в последние
+            14 дней. Предметы, рубрики, критерии и загруженные файлы не считаются функциями —
+            это подготовка, а не результат, иначе все прошедшие онбординг оказались бы в одной
+            корзине. Если удержание растёт вместе с числом функций, значит новых преподавателей
+            стоит раньше вести ко второй функции.
+          </p>
+        )}
       </div>
     </div>
   )

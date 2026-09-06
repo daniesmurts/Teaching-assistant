@@ -2,6 +2,7 @@ import { Router, type Request } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { requireDomain } from '../middleware/requireDomain'
 import { checkFeatureAccess } from '../middleware/checkPlan'
+import { recordArtifactEvent } from '../db/queries/artifactEvents'
 import { asyncHandler } from '../lib/asyncHandler'
 import { ValidationError } from '../errors/AppError'
 import { getRootUnitForInstitution } from '../db/queries/orgUnits'
@@ -57,6 +58,14 @@ router.get('/export.xlsx', asyncHandler(async (req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="УМЦ_готовность.xlsx"')
   res.setHeader('Content-Length', buffer.length)
   res.end(buffer)
+
+  // No artifact_id: the readiness dashboard is rendered from a live query,
+  // never stored as a row.
+  recordArtifactEvent({
+    kind: 'umc_dashboard', event: 'exported',
+    teacherId: req.teacher.id, institutionId: institutionId(req),
+    format: 'xlsx',
+  })
 }))
 
 export default router

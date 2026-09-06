@@ -8,6 +8,7 @@ import {
   getDailyUsage, getUsageByTeacher, getTodayCost,
   getUsageByFeature, getUsageByModel, getRecentErrors,
 } from '../db/queries/usageLog'
+import { getArtifactUsage } from '../db/queries/artifactUsage'
 import { upgradeTeacherToPro, cancelTeacherSubscription } from '../db/queries/teachers'
 import { invalidateSpendCapCache } from '../services/spendCap'
 import { sendEmail } from '../services/emailTransport'
@@ -26,6 +27,8 @@ import { listFeedback } from '../db/queries/feedback'
 import { listContactMessages, markContactMessageRead } from '../db/queries/contactMessages'
 import { listAudit } from '../db/queries/audit'
 import { getFunnelSummary, getFunnelByWeek, getStalledTeachers } from '../db/queries/activation'
+import { getFeatureAdoption, getFeatureBreadth } from '../db/queries/featureAdoption'
+import { getWritingFunnel, getLiveSessionEngagement } from '../db/queries/studentEngagement'
 import { listDeploymentsSummary } from '../db/queries/controlPlane'
 import {
   findPaymentsByTeacher, findPaymentByOrderId, markPaymentRefunded,
@@ -113,6 +116,17 @@ router.get('/usage/by-model', asyncHandler(async (req, res) => {
   res.json(await getUsageByModel(Math.min(days, 365)))
 }))
 
+// ─── GET /api/admin/usage/artifacts?days=30 ──────────────────────────────────
+// Product activity, not spend: how many objects of each kind teachers actually
+// created. Derived from the artefact tables themselves, deliberately not from
+// api_usage_log — see the header of db/queries/artifactUsage.ts for why the
+// cost ledger cannot answer this.
+
+router.get('/usage/artifacts', asyncHandler(async (req, res) => {
+  const days = parseInt((req.query.days as string) ?? '30', 10)
+  res.json(await getArtifactUsage(Math.min(days, 365)))
+}))
+
 // ─── GET /api/admin/errors?days=7 ────────────────────────────────────────────
 
 router.get('/errors', asyncHandler(async (req, res) => {
@@ -166,6 +180,39 @@ router.get('/activation/funnel', asyncHandler(async (req, res) => {
 router.get('/activation/stalled', asyncHandler(async (req, res) => {
   const limit = parseInt((req.query.limit as string) ?? '100', 10)
   res.json(await getStalledTeachers(Math.min(limit, 500)))
+}))
+
+// ─── GET /api/admin/activation/features?days=30 ──────────────────────────────
+// Per-feature adoption: who ever used each feature, who came back to it, and
+// how long after signup it gets discovered. The funnel above only knows the
+// three original steps; this covers everything the platform ships.
+
+router.get('/activation/features', asyncHandler(async (req, res) => {
+  const days = parseInt((req.query.days as string) ?? '30', 10)
+  res.json(await getFeatureAdoption(Math.min(days, 365)))
+}))
+
+// ─── GET /api/admin/students?days=90 ─────────────────────────────────────────
+// The two surfaces students actually touch: the writing workspace and live
+// quiz sessions. Aggregate only — see db/queries/studentEngagement.ts. Both
+// render on one page, so they are fetched together.
+
+router.get('/students', asyncHandler(async (req, res) => {
+  const days = parseInt((req.query.days as string) ?? '90', 10)
+  const window = Math.min(days, 365)
+  const [writing, live] = await Promise.all([
+    getWritingFunnel(window),
+    getLiveSessionEngagement(window),
+  ])
+  res.json({ writing, live })
+}))
+
+// ─── GET /api/admin/activation/breadth ───────────────────────────────────────
+// How many distinct features a teacher uses, against whether they are still
+// active — does breadth predict retention, or is depth in one feature enough?
+
+router.get('/activation/breadth', asyncHandler(async (_req, res) => {
+  res.json(await getFeatureBreadth())
 }))
 
 // ─── Cross-institution activity log ───────────────────────────────────────────

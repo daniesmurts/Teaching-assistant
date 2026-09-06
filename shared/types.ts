@@ -2677,6 +2677,47 @@ export interface FunnelCohort {
   median_hours_to_grade: number | null
 }
 
+export interface WritingFunnel {
+  assignments_published:   number
+  invited:                 number
+  opened:                  number
+  started:                 number
+  submitted:               number
+  graded:                  number
+  approved:                number
+  median_active_minutes:   number | null
+  median_elapsed_hours:    number | null
+  median_revisions:        number | null
+  heavy_paste_submissions: number
+}
+
+export interface LiveSessionEngagement {
+  sessions_run:        number
+  sessions_finished:   number
+  sessions_empty:      number
+  participants:        number
+  median_participants: number | null
+  answers:             number
+  correct_answers:     number
+}
+
+export interface FeatureAdoptionRow {
+  kind:                  string
+  teachers_ever:         number
+  /** Used it on 2+ distinct days — came back, rather than tried it once. */
+  teachers_returned:     number
+  teachers_active:       number
+  avg_uses_per_teacher:  number
+  median_days_to_first:  number | null
+}
+
+export interface FeatureBreadthRow {
+  /** Distinct non-setup features the teacher has used; 0 is a real bucket. */
+  features_used: number
+  teachers:      number
+  still_active:  number
+}
+
 export interface StalledTeacher {
   id:              string
   email:           string

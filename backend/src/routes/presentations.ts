@@ -24,6 +24,7 @@ import { getBrandingForTeacher } from '../db/queries/institutionBranding'
 import { downloadObject } from '../services/objectStorage'
 import { logger } from '../lib/logger'
 import { generatePresentationHandoutPdf } from '../services/presentationHandoutPdf'
+import { recordArtifactEvent } from '../db/queries/artifactEvents'
 import { findTeacherById } from '../db/queries/teachers'
 import { extractText } from '../services/documentExtractor'
 import { importPptx } from '../services/pptxImport'
@@ -314,6 +315,14 @@ router.get('/:id/export.pptx',
     res.setHeader('Content-Disposition', `attachment; filename="presentation.pptx"; filename*=UTF-8''${encodeURIComponent(fname)}`)
     res.setHeader('Content-Length', pptx.length)
     res.end(pptx)
+
+    // The deck left the platform — the strongest available evidence that a
+    // generated artefact was actually taken to a lecture (migration 126).
+    recordArtifactEvent({
+      kind: 'presentation', event: 'exported', artifactId: presentation.id,
+      teacherId: req.teacher.id, institutionId: req.teacher.institution_id,
+      format: 'pptx',
+    })
   })
 )
 
@@ -605,6 +614,12 @@ router.get('/:id/handout.pdf',
     res.setHeader('Content-Disposition', `attachment; filename="handout.pdf"; filename*=UTF-8''${encodeURIComponent(fname)}`)
     res.setHeader('Content-Length', pdf.length)
     res.end(pdf)
+
+    recordArtifactEvent({
+      kind: 'presentation', event: 'exported', artifactId: presentation.id,
+      teacherId: req.teacher.id, institutionId: req.teacher.institution_id,
+      format: 'pdf', metadata: { variant: 'handout' },
+    })
   })
 )
 
