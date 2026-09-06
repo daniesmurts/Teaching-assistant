@@ -12,7 +12,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ---
 
-## [Unreleased]
+## [2026-09-06] — v1.6.1
+
+Deployed to production as `1.6.0-43b9957`; the tag bump to v1.6.1 followed the
+deploy, so the build stamp on that image still reads 1.6.0. Everything below
+shipped in it.
+
 
 ### Added
 - **Вкладка «Артефакты» в админ-панели — что на платформе реально создают.** The usage page could only report LLM spend, and `api_usage_log.feature` is a *cost* bucket, not a product feature: `'grading'` is shared by ~15 unrelated services (documentReview, mtoReview, programDiff, docChat, cohortSynthesis, longReview, curriculumAnalysis…), a single teacher action logs several rows under it, and any feature that makes no model call at all — courses, rubrics, БРС, live sessions, uploads — was structurally invisible. So «Тесты: 0» was unanswerable, and «Проверка: 96» was not 96 проверок.
