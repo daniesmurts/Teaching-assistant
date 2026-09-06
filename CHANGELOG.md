@@ -12,6 +12,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **`/api/admin/usage/artifacts` отвечал 500 в продакшене** — «Артефакты» рисовала заголовки и ни одной строки. `ReferenceError: Cannot access 'exports' before initialization`, и это целиком моя ошибка.
+  - The backend compiles to CommonJS, so tsc rewrites a reference to this module's own exported binding as `exports.ARTIFACT_UNION_SQL`. `getArtifactUsage` declared a local `const exports` further down the same function, which put that rewritten reference in its temporal dead zone. Renamed to `exported`.
+  - Latent only since Layer 3: `ARTIFACT_UNION_SQL` was module-private until the adoption queries needed it, and exporting it is what created the collision. The local had been called `exports` from the start.
+  - **Why nothing caught it.** tsc compiles it happily — shadowing `exports` is legal TypeScript. And vitest runs the TypeScript *source* through esbuild, so no test in the suite ever executes the CommonJS emit that breaks. Typecheck green, 1078 tests green, production broken: the build output was never exercised by anything.
+  - New `src/cjsModuleShadowing.test.ts` fails on any local named `exports`/`module`/`require`/`__dirname`/`__filename` anywhere in `src/`. Verified by reintroducing the original bug and watching it name the exact file and line. Comments are stripped before matching, so documenting the bug (as this entry does) doesn't trip it.
+  - Fix confirmed by running the **compiled** `dist/` output against a real database — the check that was missing, and the reason a green suite gave false confidence twice in a row on this feature.
+
 ## [2026-09-06] — v1.6.1
 
 Deployed to production as `1.6.0-43b9957`; the tag bump to v1.6.1 followed the

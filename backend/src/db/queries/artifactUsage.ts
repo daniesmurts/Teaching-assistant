@@ -130,18 +130,24 @@ export async function getArtifactUsage(days = 30): Promise<ArtifactUsageRow[]> {
   )
 
   const created = new Map(rows.map((r) => [r.kind, r]))
-  const exports = new Map((await getArtifactExports(days)).map((r) => [r.kind, r]))
+  // NOT `exports`: tsc's CommonJS emit rewrites this module's own exported
+  // ARTIFACT_UNION_SQL to `exports.ARTIFACT_UNION_SQL`, and a local binding by
+  // that name puts that reference in its temporal dead zone — the query above
+  // then throws "Cannot access 'exports' before initialization" in the built
+  // image while passing every test, because vitest runs the TypeScript source
+  // through esbuild and never produces that emit. Production, 2026-09-06.
+  const exported = new Map((await getArtifactExports(days)).map((r) => [r.kind, r]))
 
   // Union of both key spaces, not just ARTIFACT_SOURCES: some exports are
   // reports rendered from live data with no artefact table behind them
   // (Мониторинг РПД, УМЦ-готовность, выгрузка использования), and dropping
   // them would hide real usage of features that create nothing.
-  const kinds = [...new Set([...ARTIFACT_SOURCES.map((s) => s.kind), ...exports.keys()])]
+  const kinds = [...new Set([...ARTIFACT_SOURCES.map((s) => s.kind), ...exported.keys()])]
 
   return kinds
     .map((kind) => {
       const c = created.get(kind)
-      const e = exports.get(kind)
+      const e = exported.get(kind)
       return {
         kind,
         period_count:    c?.period_count    ?? 0,
