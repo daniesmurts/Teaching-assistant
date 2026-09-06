@@ -1,15 +1,22 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getDailyUsage, getUsageByFeature, getUsageByModel, getUsageByTeacher } from '../../api/admin'
+import { getArtifactUsage, getDailyUsage, getUsageByFeature, getUsageByModel, getUsageByTeacher } from '../../api/admin'
+import { ARTIFACT_LABEL } from '../../lib/artifactLabels'
 
-type Tab = 'day' | 'feature' | 'model' | 'teacher'
+type Tab = 'artifact' | 'day' | 'feature' | 'model' | 'teacher'
 
+// Spend buckets on api_usage_log — NOT product features. 'grading' is shared
+// by ~15 services; use the «Артефакты» tab to see what was actually created.
 const FEATURE_LABEL: Record<string, string> = {
-  grading:        'Проверка',
-  presentation:   'Презентации',
-  feedback_email: 'Письма',
-  embedding:      'Эмбеддинги',
+  grading:             'Проверка (общий бюджет)',
+  presentation:        'Презентации',
+  feedback_email:      'Письма',
+  embedding:           'Эмбеддинги',
+  criteria_assist:     'Подсказки по критериям',
+  rpd_reminder:        'Напоминания по РПД',
+  document_extraction: 'Разбор документов',
 }
+
 
 const PROVIDER_LABEL: Record<string, string> = {
   deepseek: 'DeepSeek',
@@ -19,9 +26,10 @@ const PROVIDER_LABEL: Record<string, string> = {
 }
 
 export default function AdminUsage() {
-  const [tab, setTab]   = useState<Tab>('day')
+  const [tab, setTab]   = useState<Tab>('artifact')
   const [days, setDays] = useState(30)
 
+  const { data: artifact = [] } = useQuery({ queryKey: ['admin-artifacts', days], queryFn: () => getArtifactUsage(days) })
   const { data: daily = [] }   = useQuery({ queryKey: ['admin-daily', days],   queryFn: () => getDailyUsage(days) })
   const { data: feature = [] } = useQuery({ queryKey: ['admin-feature', days], queryFn: () => getUsageByFeature(days) })
   const { data: model = [] }   = useQuery({ queryKey: ['admin-model', days],   queryFn: () => getUsageByModel(days) })
@@ -48,8 +56,9 @@ export default function AdminUsage() {
         {/* Tabs + range */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex gap-1">
+            <button className={tabClass('artifact')} onClick={() => setTab('artifact')}>Артефакты</button>
             <button className={tabClass('day')}     onClick={() => setTab('day')}>По дням</button>
-            <button className={tabClass('feature')} onClick={() => setTab('feature')}>По функциям</button>
+            <button className={tabClass('feature')} onClick={() => setTab('feature')}>Расходы по функциям</button>
             <button className={tabClass('model')}   onClick={() => setTab('model')}>По моделям</button>
             <button className={tabClass('teacher')} onClick={() => setTab('teacher')}>По преподавателям</button>
           </div>
@@ -68,6 +77,39 @@ export default function AdminUsage() {
 
         <div className="bg-surface border border-border rounded-lg overflow-hidden">
           <table className="w-full text-sm font-sans">
+            {tab === 'artifact' && (
+              <>
+                <thead><tr className="border-b border-border bg-surface-warm">
+                  <th className="text-left px-3 py-2 text-ink-secondary font-medium">Функция</th>
+                  <th className="text-right px-3 py-2 text-ink-secondary font-medium">Создано за период</th>
+                  <th className="text-right px-3 py-2 text-ink-secondary font-medium">Преподавателей</th>
+                  <th className="text-right px-3 py-2 text-ink-secondary font-medium">Всего за всё время</th>
+                  <th className="text-right px-3 py-2 text-ink-secondary font-medium">Выгрузок</th>
+                  <th className="text-right px-3 py-2 text-ink-secondary font-medium">Последнее</th>
+                </tr></thead>
+                <tbody>
+                  {artifact.map((r) => (
+                    <tr key={r.kind} className={`border-b border-border last:border-0 ${r.total_count === 0 ? 'opacity-50' : ''}`}>
+                      <td className="px-3 py-2 text-ink">{ARTIFACT_LABEL[r.kind] ?? r.kind}</td>
+                      <td className="px-3 py-2 text-right text-ink">{r.period_count}</td>
+                      <td className="px-3 py-2 text-right text-ink-secondary">{r.period_teachers > 0 ? r.period_teachers : '—'}</td>
+                      <td className="px-3 py-2 text-right text-ink-secondary">{r.total_count}</td>
+                      <td className="px-3 py-2 text-right text-ink-secondary">
+                        {r.export_count > 0 ? (
+                          <span title={`${r.exported_items} объектов, ${r.export_teachers} преподавателей`}>
+                            {r.export_count}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-ink-tertiary">
+                        {r.last_at ? new Date(r.last_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: '2-digit' }) : 'никогда'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </>
+            )}
+
             {tab === 'day' && (
               <>
                 <thead><tr className="border-b border-border bg-surface-warm">
@@ -168,6 +210,26 @@ export default function AdminUsage() {
             )}
           </table>
         </div>
+
+        {tab === 'artifact' && (
+          <p className="mt-3 text-xs font-sans text-ink-tertiary leading-relaxed">
+            «Создано» и «Выгружено» — разные вопросы: первое считается по таблицам артефактов
+            задним числом за всю историю, второе фиксируется с момента включения учёта, поэтому
+            у старых объектов выгрузок не будет. Наведите курсор на число выгрузок, чтобы увидеть,
+            скольких объектов и преподавателей они касаются. Правки после генерации здесь пока
+            не отражены. У программных артефактов (анализ программ, экспертиза РПД, сводки,
+            памятки) автор не сохраняется, поэтому столбец «Преподавателей» для них пуст.
+          </p>
+        )}
+
+        {tab === 'feature' && (
+          <p className="mt-3 text-xs font-sans text-ink-tertiary leading-relaxed">
+            Это бюджеты вызовов модели, а не функции продукта. «Проверка» — общий бюджет,
+            в который пишут и проверка работ, и тесты, и задания, и анализ программ, причём
+            одно действие преподавателя даёт несколько вызовов. Реальную активность
+            смотрите на вкладке «Артефакты».
+          </p>
+        )}
       </div>
     </div>
   )

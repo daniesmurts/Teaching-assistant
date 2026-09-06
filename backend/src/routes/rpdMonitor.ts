@@ -3,6 +3,7 @@ import multer from 'multer'
 import { authenticate } from '../middleware/authenticate'
 import { requireDomain } from '../middleware/requireDomain'
 import { checkFeatureAccess } from '../middleware/checkPlan'
+import { recordArtifactEvent } from '../db/queries/artifactEvents'
 import { asyncHandler } from '../lib/asyncHandler'
 import { ValidationError, NotFoundError, DocumentProcessingError } from '../errors/AppError'
 import { repairUploadFilename } from '../middleware/fileValidation'
@@ -185,6 +186,14 @@ router.get('/export/master', asyncHandler(async (req, res) => {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fname)}"`)
   res.end(buffer)
+
+  // artifact_id is the snapshot the report was rendered from — the monitor
+  // itself is a live view, so the snapshot is what a download identifies.
+  recordArtifactEvent({
+    kind: 'rpd_monitor', event: 'exported', artifactId: snapshotId,
+    teacherId: req.teacher.id, institutionId: instId,
+    format: 'xlsx', metadata: { scope: 'master' },
+  })
 }))
 
 router.get('/export/group/:groupId', asyncHandler(async (req, res) => {
@@ -201,6 +210,12 @@ router.get('/export/group/:groupId', asyncHandler(async (req, res) => {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fname)}"`)
   res.end(buffer)
+
+  recordArtifactEvent({
+    kind: 'rpd_monitor', event: 'exported', artifactId: snapshotId,
+    teacherId: req.teacher.id, institutionId: instId,
+    format: 'xlsx', metadata: { scope: 'group' },
+  })
 }))
 
 router.get('/reminders/:groupId', asyncHandler(async (req, res) => {
@@ -221,6 +236,12 @@ router.get('/reminders/:groupId', asyncHandler(async (req, res) => {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fname)}"`)
   res.end(buffer)
+
+  recordArtifactEvent({
+    kind: 'rpd_reminder', event: 'exported', artifactId: snapshotId,
+    teacherId: req.teacher.id, institutionId: instId,
+    format: 'docx',
+  })
 }))
 
 export default router

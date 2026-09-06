@@ -73,6 +73,27 @@ export async function getUsageByModel(days = 30): Promise<ModelUsage[]> {
   return res.data
 }
 
+export interface ArtifactUsage {
+  kind:            string
+  period_count:    number
+  period_teachers: number
+  total_count:     number
+  last_at:         string | null
+  export_count:    number
+  exported_items:  number
+  export_teachers: number
+}
+
+/**
+ * Product activity per feature — what teachers created, derived from the
+ * artefact tables. Distinct from getUsageByFeature, which reports LLM spend
+ * buckets and cannot separate quizzes/задания/темы from grading.
+ */
+export async function getArtifactUsage(days = 30): Promise<ArtifactUsage[]> {
+  const res = await client.get<ArtifactUsage[]>('/api/admin/usage/artifacts', { params: { days } })
+  return res.data
+}
+
 export interface AdminTeacher {
   id:               string
   email:            string
@@ -365,6 +386,21 @@ export async function getActivationFunnel(weeks = 12): Promise<{ summary: Funnel
   return res.data
 }
 
+export async function getStudentEngagement(days = 90): Promise<{ writing: WritingFunnel; live: LiveSessionEngagement }> {
+  const res = await client.get<{ writing: WritingFunnel; live: LiveSessionEngagement }>('/api/admin/students', { params: { days } })
+  return res.data
+}
+
+export async function getFeatureAdoption(days = 30): Promise<FeatureAdoptionRow[]> {
+  const res = await client.get<FeatureAdoptionRow[]>('/api/admin/activation/features', { params: { days } })
+  return res.data
+}
+
+export async function getFeatureBreadth(): Promise<FeatureBreadthRow[]> {
+  const res = await client.get<FeatureBreadthRow[]>('/api/admin/activation/breadth')
+  return res.data
+}
+
 export async function getStalledTeachers(limit = 100): Promise<StalledTeacher[]> {
   const res = await client.get<StalledTeacher[]>('/api/admin/activation/stalled', { params: { limit } })
   return res.data
@@ -462,7 +498,7 @@ export async function importFgosvoItem(item: { code: string; name: string; level
 // ─── Профстандарт/ОТФ registry (migration 115) ─────────────────────────────
 
 import type { Profstandard, ProfstandardWithChildren, ProfstandardDraft } from '../types'
-import type { FunnelSummary, FunnelCohort, StalledTeacher, AuditFilters, InstitutionContract, PaymentsSummary, MonthlyRevenue, CapacityOverview } from '../../../shared/types'
+import type { FunnelSummary, FunnelCohort, StalledTeacher, FeatureAdoptionRow, FeatureBreadthRow, WritingFunnel, LiveSessionEngagement, AuditFilters, InstitutionContract, PaymentsSummary, MonthlyRevenue, CapacityOverview } from '../../../shared/types'
 export type { InstitutionContract, InstitutionSummaryRow, CapacityOverview } from '../../../shared/types'
 
 export async function getProfstandards(

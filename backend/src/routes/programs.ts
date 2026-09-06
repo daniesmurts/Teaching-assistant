@@ -4,6 +4,7 @@ import { requireProgramAccess } from '../middleware/requireProgramAccess'
 import { requireDomain } from '../middleware/requireDomain'
 import { validate } from '../middleware/validate'
 import { aiLimiter } from '../middleware/rateLimits'
+import { recordArtifactEvent } from '../db/queries/artifactEvents'
 import { asyncHandler } from '../lib/asyncHandler'
 import { ValidationError, NotFoundError, ForbiddenError } from '../errors/AppError'
 import {
@@ -533,6 +534,15 @@ router.get('/:id/analysis.pdf', asyncHandler(async (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${fname}"`)
   res.setHeader('Content-Length', pdf.length)
   res.end(pdf)
+
+  // artifact_id is the programme, not the analysis: getLatestAnalysis returns
+  // the stored `result` JSON only — program_analyses rows are not individually
+  // addressable, so the programme is the finest identity available here.
+  recordArtifactEvent({
+    kind: 'program_analysis', event: 'exported', artifactId: detail.id,
+    teacherId: req.teacher.id, institutionId: req.teacher.institution_id,
+    format: 'pdf',
+  })
 }))
 
 // GET /:id/profstandard-options — Конструктор's ПК↔ОТФ picker (migration
@@ -1245,6 +1255,12 @@ router.get('/:id/documents/:docId/download', asyncHandler(async (req, res) => {
   )
   res.setHeader('Content-Length', buf.length)
   res.end(buf)
+
+  recordArtifactEvent({
+    kind: 'program_document', event: 'exported', artifactId: found.document.id,
+    teacherId: req.teacher.id, institutionId: req.teacher.institution_id,
+    format: found.document.mime_type, metadata: { docKind: found.document.kind },
+  })
 }))
 
 router.delete('/:id/documents/:docId', asyncHandler(async (req, res) => {

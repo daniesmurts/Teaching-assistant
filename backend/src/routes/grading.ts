@@ -3,6 +3,7 @@ import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { aiLimiter } from '../middleware/rateLimits'
 import { gradeRules, approveRules, reviewRules } from '../validation/gradingValidation'
+import { recordArtifactEvent } from '../db/queries/artifactEvents'
 import { asyncHandler } from '../lib/asyncHandler'
 import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
 import { canUseFeature } from '../config/planLimits'
@@ -446,6 +447,15 @@ router.get(
     res.setHeader('Content-Type', 'text/csv; charset=utf-8')
     res.setHeader('Content-Disposition', `attachment; filename="${csvFilename('ispum_grades')}"`)
     res.send(csv)
+
+    // The journal leaving for Moodle/Excel — a teacher exporting grades is
+    // using the result, not just producing it. No artifact_id: this is a
+    // whole-journal export, not one assignment.
+    recordArtifactEvent({
+      kind: 'grading', event: 'exported',
+      teacherId: req.teacher.id, institutionId: req.teacher.institution_id,
+      format: 'csv', metadata: { rowCount: rows.length },
+    })
   })
 )
 

@@ -3,6 +3,7 @@ import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { aiLimiter } from '../middleware/rateLimits'
 import { checkFeatureAccess } from '../middleware/checkPlan'
+import { recordArtifactEvent } from '../db/queries/artifactEvents'
 import { asyncHandler } from '../lib/asyncHandler'
 import { createFosRules, listFosRules, fosIdRules, updateFosRules } from '../validation/fosValidation'
 import { getJobQueue } from '../services/jobQueue'
@@ -103,6 +104,12 @@ router.get(
     res.setHeader('Content-Disposition', `attachment; filename="${fname}"`)
     res.setHeader('Content-Length', pdf.length)
     res.end(pdf)
+
+    recordArtifactEvent({
+      kind: 'fos_document', event: 'exported', artifactId: doc.id,
+      teacherId: req.teacher.id, institutionId: req.teacher.institution_id,
+      format: 'pdf',
+    })
   })
 )
 
@@ -122,6 +129,12 @@ router.get(
     res.setHeader('Content-Disposition', `attachment; filename="${fname}"`)
     res.setHeader('Content-Length', buffer.length)
     res.end(buffer)
+
+    recordArtifactEvent({
+      kind: 'fos_document', event: 'exported', artifactId: doc.id,
+      teacherId: req.teacher.id, institutionId: req.teacher.institution_id,
+      format: 'docx',
+    })
   })
 )
 
