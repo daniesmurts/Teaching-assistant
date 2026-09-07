@@ -3,8 +3,11 @@ import type {
   Assignment, GradeLetter, LongReview, CriterionScore, BulletItem,
   ApprovedEditReason, ApprovedRevision,
 } from '../types'
-import type { StudentSummary, CohortAnalytics, GradeResponse } from '../../../shared/types'
-export type { StudentSummary, GradeResponse } from '../../../shared/types'
+import type {
+  StudentSummary, CohortAnalytics, GradeResponse,
+  StudentMergeSuggestion, StudentMerge, StudentIdentityRef,
+} from '../../../shared/types'
+export type { StudentSummary, GradeResponse, StudentMergeSuggestion, StudentMerge } from '../../../shared/types'
 
 export interface GradeRequest {
   submission_text: string
@@ -142,6 +145,35 @@ export async function getGradingHistory(params?: {
 export async function getStudents(courseId?: string): Promise<StudentSummary[]> {
   const res = await client.get<StudentSummary[]>('/api/grading/students', { params: { course_id: courseId } })
   return res.data
+}
+
+// ─── Duplicate student identities (merge) ─────────────────────────────────────
+
+export async function getStudentMergeSuggestions(courseId?: string): Promise<StudentMergeSuggestion[]> {
+  const res = await client.get<StudentMergeSuggestion[]>('/api/grading/students/merge-suggestions', {
+    params: { course_id: courseId },
+  })
+  return res.data
+}
+
+export async function getStudentMerges(): Promise<StudentMerge[]> {
+  return (await client.get<StudentMerge[]>('/api/grading/students/merges')).data
+}
+
+/** Rewrites `from` onto `to` everywhere. Undoable — see undoStudentMerge. */
+export async function mergeStudents(
+  from: StudentIdentityRef, to: StudentIdentityRef, source: 'suggested' | 'manual' = 'manual',
+): Promise<StudentMerge> {
+  const res = await client.post<StudentMerge>('/api/grading/students/merge', {
+    from:   { name: from.student_name, group: from.student_group },
+    to:     { name: to.student_name,   group: to.student_group },
+    source,
+  })
+  return res.data
+}
+
+export async function undoStudentMerge(id: string): Promise<StudentMerge> {
+  return (await client.post<StudentMerge>(`/api/grading/students/merges/${id}/undo`)).data
 }
 
 export interface TrajectoryEntry {

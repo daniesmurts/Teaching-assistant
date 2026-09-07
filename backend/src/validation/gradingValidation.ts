@@ -1,5 +1,6 @@
 import { body } from 'express-validator'
 import { SINGLE_PASS_CHAR_LIMIT, MAX_REVIEW_CHARS } from '../../../shared/types'
+import { INVITE_NAME_MAX } from '../lib/inviteNames'
 
 export const gradeRules = [
   body('submission_text')
@@ -187,4 +188,21 @@ export const approveRules = [
   // Feature AE — БРС контрольная точка this score counts toward, if any.
   body('approved_brs_checkpoint_id').optional({ nullable: true, checkFalsy: true }).isUUID()
     .withMessage('Неверная контрольная точка'),
+]
+
+// ─── Student identity merge (duplicate roster entries) ────────────────────────
+// Both sides come from the roster the teacher is looking at, so the only real
+// job here is bounding the strings — a name longer than an invite name is a
+// paste accident, not a student.
+
+export const mergeStudentsRules = [
+  body('from.name').isString().trim().notEmpty().withMessage('Не указан объединяемый студент')
+    .isLength({ max: INVITE_NAME_MAX }).withMessage('Слишком длинное имя'),
+  body('from.group').optional({ nullable: true }).isString().isLength({ max: 100 })
+    .withMessage('Слишком длинное название группы'),
+  body('to.name').isString().trim().notEmpty().withMessage('Не указан студент, с которым объединяем')
+    .isLength({ max: INVITE_NAME_MAX }).withMessage('Слишком длинное имя'),
+  body('to.group').optional({ nullable: true }).isString().isLength({ max: 100 })
+    .withMessage('Слишком длинное название группы'),
+  body('source').optional().isIn(['suggested', 'manual']),
 ]

@@ -1,16 +1,23 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/layout/TopBar'
 import FeatureIntro from '../components/ui/FeatureIntro'
 import Select from '../components/ui/Select'
 import Badge from '../components/ui/Badge'
+import Button from '../components/ui/Button'
 import AssignmentDetailModal from '../components/grading/AssignmentDetailModal'
 import { gradeColor } from '../lib/grades'
 import { buildChains, computeStudentStats, formatHours } from '../lib/studentStats'
-import { getStudents, getGradingHistory, getCohortAnalytics, type StudentSummary } from '../api/grading'
+import {
+  getStudents, getGradingHistory, getCohortAnalytics,
+  getStudentMergeSuggestions, mergeStudents, undoStudentMerge,
+  type StudentSummary, type StudentMergeSuggestion, type StudentMerge,
+} from '../api/grading'
 import { getCourses } from '../api/courses'
 import { getBrsStudentLedger } from '../api/brs'
 import type { Assignment, AssignmentStatus } from '../types'
+import type { MergeConfidence, StudentIdentityRef } from '../../../shared/types'
+import { studentsCompatible } from '../../../shared/studentIdentity'
 
 const fmt = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
 
@@ -378,15 +385,254 @@ function CohortView({ courseId, students, onSelectStudent }: {
   )
 }
 
+// ─── Duplicate identities (merge) ─────────────────────────────────────────────
+// The roster is a GROUP BY over free text, so «Алтышев Н.И» and «Алтышев Назар
+// Игоревич» are two students with one work each. Suggestions come from the
+// server matcher (shared/studentIdentity.ts); anything it withholds as ambiguous
+// the teacher can still merge by hand, because they know which Алтышев it was.
+
+const CONFIDENCE_LABEL: Record<MergeConfidence, string> = {
+  high:   'Скорее всего один студент',
+  medium: 'Похоже на одного студента',
+  low:    'Возможно, один студент',
+}
+
+const CONFIDENCE_COLOR: Record<MergeConfidence, string> = {
+  high:   'var(--color-success)',
+  medium: 'var(--color-warning)',
+  low:    'var(--color-ink-tertiary)',
+}
+
+const identityLabel = (s: StudentIdentityRef) =>
+  s.student_group ? `${s.student_name} · ${s.student_group}` : s.student_name
+
+function MergeSuggestions({ courseId, onMerged }: { courseId?: string; onMerged: (m: StudentMerge) => void }) {
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const { data: suggestions = [] } = useQuery({
+    queryKey: ['student-merge-suggestions', courseId],
+    queryFn: () => getStudentMergeSuggestions(courseId),
+  })
+
+  const keyOf = (s: StudentMergeSuggestion) =>
+    [identityLabel(s.target), ...s.sources.map(identityLabel)].join('|')
+
+  const visible = suggestions.filter((s) => !dismissed.has(keyOf(s)))
+  if (visible.length === 0) return null
+
+  // One suggestion can span three spellings; each source is its own rewrite, so
+  // they go one after another and a mid-way failure leaves the earlier ones
+  // applied (each is independently undoable).
+  const apply = async (s: StudentMergeSuggestion) => {
+    setBusy(keyOf(s))
+    setError(null)
+    try {
+      let last: StudentMerge | null = null
+      for (const source of s.sources) last = await mergeStudents(source, s.target, 'suggested')
+      setDismissed((d) => new Set(d).add(keyOf(s)))
+      if (last) onMerged(last)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось объединить')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg overflow-hidden mb-4">
+      <div className="px-4 pt-3 pb-2">
+        <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">
+          Возможные дубли
+        </div>
+        <p className="text-xs font-sans text-ink-tertiary mt-1">
+          Один студент записан по-разному — из-за этого его работы разделены на два профиля,
+          а средний балл считается по половине работ.
+        </p>
+      </div>
+      {error && <p className="px-4 pb-2 text-xs font-sans text-danger">{error}</p>}
+      <div className="border-t border-border">
+        {visible.map((s, i) => (
+          <div
+            key={keyOf(s)}
+            className={`px-4 py-3 flex items-start gap-3 ${i < visible.length - 1 ? 'border-b border-border' : ''}`}
+          >
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-sans text-ink">
+                {s.sources.map((src, idx) => (
+                  <span key={identityLabel(src)}>
+                    {idx > 0 && <span className="text-ink-tertiary">, </span>}
+                    <span className="text-ink-secondary line-through decoration-ink-tertiary/60">
+                      {identityLabel(src)}
+                    </span>
+                  </span>
+                ))}
+                <span className="text-ink-tertiary"> → </span>
+                <span className="font-medium">{identityLabel(s.target)}</span>
+              </div>
+              <div className="text-xs font-sans mt-0.5" style={{ color: CONFIDENCE_COLOR[s.confidence] }}>
+                {CONFIDENCE_LABEL[s.confidence]}
+                <span className="text-ink-tertiary"> · {s.submissions} работ вместе</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <Button size="sm" loading={busy === keyOf(s)} onClick={() => apply(s)}>Объединить</Button>
+              <button
+                onClick={() => setDismissed((d) => new Set(d).add(keyOf(s)))}
+                className="text-xs font-sans text-ink-tertiary hover:text-ink px-2 py-1.5"
+              >
+                Не сейчас
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Manual merge — the teacher picks the duplicates the matcher would not guess. */
+function ManualMergeBar({ picked, onCancel, onMerged }: {
+  picked:   StudentSummary[]
+  onCancel: () => void
+  onMerged: (m: StudentMerge) => void
+}) {
+  const [targetKey, setTargetKey] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const keyOf = (s: StudentIdentityRef) => `${s.student_name}|${s.student_group ?? ''}`
+  // Default target: the fullest spelling, same rule the server's suggestions use.
+  const ranked = picked.slice().sort((a, b) => b.student_name.length - a.student_name.length)
+  const target = picked.find((s) => keyOf(s) === targetKey) ?? ranked[0]
+
+  // The teacher overrules the matcher here by design — they know which Алтышев
+  // it was. But merging names the matcher calls incompatible (different
+  // surnames, contradicting initials, two explicit groups) is far more often a
+  // mis-click than a judgement call, so it says so before the rewrite.
+  const mismatched = target
+    ? picked.filter((s) => keyOf(s) !== keyOf(target) && !studentsCompatible(s, target))
+    : []
+
+  const run = async () => {
+    if (!target) return
+    setBusy(true)
+    setError(null)
+    try {
+      let last: StudentMerge | null = null
+      for (const s of picked) {
+        if (keyOf(s) === keyOf(target)) continue
+        last = await mergeStudents(s, target, 'manual')
+      }
+      if (last) onMerged(last)
+      onCancel()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось объединить')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg px-4 py-3 mb-3">
+      {picked.length < 2 ? (
+        <p className="text-xs font-sans text-ink-secondary">
+          Отметьте двух или больше студентов, которые на самом деле один человек.
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-sans text-ink-secondary">Оставить запись:</span>
+            <Select
+              value={keyOf(target)}
+              onChange={setTargetKey}
+              ariaLabel="Итоговое имя студента"
+              className="min-w-[16rem]"
+              options={picked.map((s) => ({ value: keyOf(s), label: identityLabel(s) }))}
+            />
+            <Button size="sm" loading={busy} onClick={run}>
+              Объединить {picked.length}
+            </Button>
+            <button onClick={onCancel} className="text-xs font-sans text-ink-tertiary hover:text-ink px-2 py-1.5">
+              Отмена
+            </button>
+          </div>
+          <p className="text-xs font-sans text-ink-tertiary mt-2">
+            Работы остальных {picked.length - 1} записей перейдут сюда. Действие можно отменить.
+          </p>
+          {mismatched.length > 0 && (
+            <p className="text-xs font-sans mt-1" style={{ color: 'var(--color-warning)' }}>
+              {mismatched.map((s) => `«${s.student_name}»`).join(', ')} — не похоже на то же имя.
+              Объединяйте, только если это точно один студент.
+            </p>
+          )}
+          {error && <p className="text-xs font-sans text-danger mt-1">{error}</p>}
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Undo strip — shown right after a merge, and only until the page is left. */
+function MergeUndo({ merge, onUndone, onDismiss }: {
+  merge: StudentMerge
+  onUndone: () => void
+  onDismiss: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <div className="flex items-center gap-3 bg-success-bg border border-success/15 rounded-lg px-4 py-2.5 mb-3">
+      <span className="text-xs font-sans text-ink flex-1">
+        «{merge.from_name}» объединён с «{merge.to_name}» — перенесено записей: {merge.row_count}.
+      </span>
+      <button
+        onClick={async () => { setBusy(true); try { await undoStudentMerge(merge.id); onUndone() } finally { setBusy(false) } }}
+        disabled={busy}
+        className="text-xs font-sans font-medium text-amber hover:opacity-80 disabled:opacity-50"
+      >
+        Отменить
+      </button>
+      <button onClick={onDismiss} className="text-xs font-sans text-ink-tertiary hover:text-ink">×</button>
+    </div>
+  )
+}
+
 // ─── Students list ─────────────────────────────────────────────────────────────
 
 export default function Students() {
   const [courseId, setCourseId] = useState('')
   const [selected, setSelected] = useState<StudentSummary | null>(null)
   const [view, setView] = useState<'list' | 'cohort'>('list')
+  // Merge state: null = off, a Set = picking duplicates by hand.
+  const [picking, setPicking] = useState<Set<string> | null>(null)
+  const [lastMerge, setLastMerge] = useState<StudentMerge | null>(null)
+  // Bumped on undo so the suggestions panel remounts: an applied suggestion is
+  // dismissed in local state, and undoing the merge has to bring it back.
+  const [suggestionsEpoch, setSuggestionsEpoch] = useState(0)
 
+  const qc = useQueryClient()
   const { data: courses = [] }  = useQuery({ queryKey: ['courses'], queryFn: getCourses })
   const { data: students = [] } = useQuery({ queryKey: ['students', courseId], queryFn: () => getStudents(courseId || undefined) })
+
+  // A merge rewrites the identity columns the roster, the cohort rollup and
+  // every per-student history are grouped by, so all of them are stale at once.
+  const refreshAfterMerge = () => {
+    qc.invalidateQueries({ queryKey: ['students'] })
+    qc.invalidateQueries({ queryKey: ['student-merge-suggestions'] })
+    qc.invalidateQueries({ queryKey: ['cohort-analytics'] })
+    qc.invalidateQueries({ queryKey: ['student-history'] })
+    qc.invalidateQueries({ queryKey: ['brs-student-ledger'] })
+  }
+
+  const rowKey = (s: StudentIdentityRef) => `${s.student_name}|${s.student_group ?? ''}`
+  const picked = picking ? students.filter((s) => picking.has(rowKey(s))) : []
+  const togglePick = (s: StudentSummary) => setPicking((prev) => {
+    const next = new Set(prev ?? [])
+    const k = rowKey(s)
+    if (next.has(k)) next.delete(k); else next.add(k)
+    return next
+  })
 
   return (
     <div className="flex-1 flex flex-col">
@@ -421,9 +667,19 @@ export default function Students() {
                     ...courses.map((c) => ({ value: c.id, label: c.name })),
                   ]}
                 />
-                <span className="text-xs font-sans text-ink-tertiary whitespace-nowrap">
-                  {students.length}&nbsp;студ.
-                </span>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  {view === 'list' && students.length > 1 && (
+                    <button
+                      onClick={() => setPicking((p) => (p ? null : new Set()))}
+                      className="text-xs font-sans text-ink-secondary hover:text-amber whitespace-nowrap cursor-pointer"
+                    >
+                      {picking ? 'Готово' : 'Объединить дубли'}
+                    </button>
+                  )}
+                  <span className="text-xs font-sans text-ink-tertiary whitespace-nowrap">
+                    {students.length}&nbsp;студ.
+                  </span>
+                </div>
               </div>
 
               <div className="flex border-b border-border mb-4">
@@ -440,6 +696,28 @@ export default function Students() {
                 ))}
               </div>
 
+              {view === 'list' && lastMerge && !lastMerge.undone_at && (
+                <MergeUndo
+                  merge={lastMerge}
+                  onUndone={() => { setLastMerge(null); setSuggestionsEpoch((n) => n + 1); refreshAfterMerge() }}
+                  onDismiss={() => setLastMerge(null)}
+                />
+              )}
+              {view === 'list' && picking && (
+                <ManualMergeBar
+                  picked={picked}
+                  onCancel={() => setPicking(null)}
+                  onMerged={(m) => { setLastMerge(m); refreshAfterMerge() }}
+                />
+              )}
+              {view === 'list' && !picking && (
+                <MergeSuggestions
+                  key={suggestionsEpoch}
+                  courseId={courseId || undefined}
+                  onMerged={(m) => { setLastMerge(m); refreshAfterMerge() }}
+                />
+              )}
+
               {view === 'cohort' ? (
                 <CohortView courseId={courseId || undefined} students={students} onSelectStudent={setSelected} />
               ) : students.length === 0 ? (
@@ -452,6 +730,7 @@ export default function Students() {
                   <table className="w-full text-sm font-sans">
                     <thead>
                       <tr className="border-b border-border bg-surface-warm text-xs text-ink-secondary">
+                        {picking && <th className="w-8 px-3 py-2" aria-label="Выбор для объединения" />}
                         <th className="text-left px-4 py-2 font-medium">Студент</th>
                         <th className="text-left px-4 py-2 font-medium">Группа</th>
                         <th className="text-right px-4 py-2 font-medium">Работ</th>
@@ -463,9 +742,21 @@ export default function Students() {
                       {students.map((s) => (
                         <tr
                           key={`${s.student_name}|${s.student_group}`}
-                          onClick={() => setSelected(s)}
+                          onClick={() => (picking ? togglePick(s) : setSelected(s))}
                           className="border-b border-border last:border-0 cursor-pointer hover:bg-surface-warm transition-colors"
                         >
+                          {picking && (
+                            <td className="w-8 px-3 py-2.5">
+                              <input
+                                type="checkbox"
+                                checked={picking.has(rowKey(s))}
+                                onChange={() => togglePick(s)}
+                                onClick={(e) => e.stopPropagation()}
+                                aria-label={`Выбрать ${s.student_name}`}
+                                className="cursor-pointer accent-[var(--color-amber)]"
+                              />
+                            </td>
+                          )}
                           <td className="px-4 py-2.5 text-ink font-medium">{s.student_name}</td>
                           <td className="px-4 py-2.5 text-ink-secondary">{s.student_group ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right text-ink">{s.submissions}</td>

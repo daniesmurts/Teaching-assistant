@@ -2738,6 +2738,39 @@ export interface StudentSummary {
   last_submission: string          // ISO
 }
 
+// ─── Duplicate student identities ────────────────────────────────────────────
+// A student has no row of their own — identity is the (student_name,
+// student_group) text pair on each graded work — so the same person typed two
+// ways splits their average, history and БРС ledger in half. The merge rewrites
+// one spelling onto the other across every table that carries the pair, and
+// keeps an undoable record of exactly which rows moved.
+
+export interface StudentIdentityRef {
+  student_name:  string
+  student_group: string | null
+}
+
+export type MergeConfidence = 'high' | 'medium' | 'low'
+
+export interface StudentMergeSuggestion {
+  target:      StudentIdentityRef    // the spelling to keep — fullest form wins
+  sources:     StudentIdentityRef[]  // the spellings to rewrite onto it
+  confidence:  MergeConfidence
+  submissions: number                // works that would end up under the target
+}
+
+export interface StudentMerge {
+  id:         string
+  from_name:  string
+  from_group: string | null
+  to_name:    string
+  to_group:   string | null
+  row_count:  number                 // rows rewritten across all tables
+  source:     'suggested' | 'manual'
+  merged_at:  string
+  undone_at:  string | null
+}
+
 // ─── Audit log (admin) ───────────────────────────────────────────────────────
 
 export interface AuditFilters {

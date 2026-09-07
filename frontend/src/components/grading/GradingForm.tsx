@@ -18,6 +18,7 @@ import { usePlan } from '../../hooks/usePlan'
 import { usePersistedState, clearPersistedState } from '../../hooks/usePersistedState'
 import type { GradeRequest, GradeResponse } from '../../api/grading'
 import { SINGLE_PASS_CHAR_LIMIT } from '../../types'
+import { studentsCompatible, normaliseStudentName, nameCompleteness } from '../../../../shared/studentIdentity'
 import type { LongReview, Assignment } from '../../types'
 
 interface Props {
@@ -222,6 +223,41 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
   })
   const nameSuggestions  = Array.from(new Set(students.map((s) => s.student_name).filter(Boolean)))
   const groupSuggestions = Array.from(new Set(students.map((s) => s.student_group).filter((g): g is string => !!g)))
+
+  // The datalist below only helps a teacher who starts typing the same spelling
+  // they used last time. The duplicate this actually costs us is the other
+  // case: «Алтышев Н.И» typed fresh for a student already on the roster as
+  // «Алтышев Назар Игоревич» — a perfectly reasonable thing to type, and no
+  // autocomplete will ever object to it. So the roster is matched against what
+  // was typed with the same ФИО rules the merge suggestions use
+  // (shared/studentIdentity.ts), and an existing record is offered before the
+  // work is graded — cheaper than merging the two profiles afterwards.
+  const rosterMatches = useMemo(() => {
+    const typedName = (form.student_name ?? '').trim()
+    if (typedName.length < 3) return []
+    const typed = { student_name: typedName, student_group: (form.student_group ?? '').trim() || null }
+    const typedCompleteness = nameCompleteness(typedName)
+    return students
+      .filter((s) =>
+        // Already exactly this record — nothing to offer.
+        normaliseStudentName(s.student_name) !== normaliseStudentName(typedName)
+        && studentsCompatible(typed, s)
+        // Never offer to shorten what was typed. Once the full ФИО is in the
+        // field, the abbreviated record still sitting on the roster is a
+        // duplicate to merge on the Students page, not a spelling to adopt
+        // here — offering it would talk the teacher back into the split.
+        && nameCompleteness(s.student_name) >= typedCompleteness)
+      .slice(0, 3)
+  }, [students, form.student_name, form.student_group])
+
+  const useRosterMatch = (s: { student_name: string; student_group: string | null }) =>
+    setForm((f) => ({
+      ...f,
+      student_name:  s.student_name,
+      // Never overwrite a group the teacher typed themselves — the match only
+      // ever agrees with it or leaves it blank (studentsCompatible sees to that).
+      student_group: (f.student_group ?? '').trim() || s.student_group || '',
+    }))
 
   // Criteria available to pick = library minus already-picked
   const pickedIds = useMemo(() => new Set(picked.map((p) => p.id)), [picked])
@@ -552,14 +588,37 @@ export default function GradingForm({ onResult, onReview, revisionOf, onClearRev
             onChange={set('student_group')}
           />
         </div>
+        {rosterMatches.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-xs font-sans text-ink-tertiary">Уже есть в списке:</span>
+            {rosterMatches.map((s) => (
+              <button
+                key={`${s.student_name}|${s.student_group ?? ''}`}
+                type="button"
+                onClick={() => useRosterMatch(s)}
+                className="text-xs font-sans text-amber hover:underline cursor-pointer"
+              >
+                {s.student_name}{s.student_group ? ` · ${s.student_group}` : ''}
+              </button>
+            ))}
+          </div>
+        )}
         <input
           className={`${selectClass} mt-2`}
           placeholder="Email (необязательно)"
           value={form.student_email}
           onChange={set('student_email')}
         />
+        {/* The group rides along as the option label so a roster with two
+            Ивановых is pickable, not a coin flip. */}
         <datalist id="student-name-list">
-          {nameSuggestions.map((n) => <option key={n} value={n} />)}
+          {nameSuggestions.map((n) => (
+            <option
+              key={n}
+              value={n}
+              label={students.find((s) => s.student_name === n)?.student_group ?? undefined}
+            />
+          ))}
         </datalist>
         <datalist id="student-group-list">
           {groupSuggestions.map((g) => <option key={g} value={g} />)}

@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { aiLimiter } from '../middleware/rateLimits'
-import { gradeRules, approveRules, reviewRules } from '../validation/gradingValidation'
+import { gradeRules, approveRules, reviewRules, mergeStudentsRules } from '../validation/gradingValidation'
 import { recordArtifactEvent } from '../db/queries/artifactEvents'
 import { asyncHandler } from '../lib/asyncHandler'
 import { checkMonthlyLimit, checkFeatureAccess } from '../middleware/checkPlan'
@@ -20,6 +20,8 @@ import { searchFeedbackLibrary } from '../services/feedbackLibrary'
 import { getCrossInstitutionUseCount } from '../db/queries/ragRetrievals'
 import { findAssignmentsByTeacher, findStudentsByTeacher, findAssignmentsForExport, findAssignmentById, findApprovalHistory, findStudentTrajectory, findCohortRows } from '../db/queries/assignments'
 import { computeCohortAnalytics } from '../services/cohortAnalytics'
+import { suggestStudentMerges } from '../../../shared/studentIdentity'
+import { mergeStudentIdentity, undoStudentMerge, listStudentMerges, StudentMergeError } from '../db/queries/studentMerges'
 import { toCsv, csvFilename } from '../lib/csv'
 import { pool } from '../db/connection'
 import type { GradeLetter, BulletItem } from '../../../shared/types'
@@ -465,6 +467,67 @@ router.get(
   asyncHandler(async (req, res) => {
     const courseId = req.query.course_id as string | undefined
     res.json(await findStudentsByTeacher(req.teacher.id, courseId))
+  })
+)
+
+// ─── Duplicate student identities (merge) ─────────────────────────────────────
+// The roster is a GROUP BY over free text, so one student typed two ways is two
+// students. See shared/studentIdentity.ts for the matching rules and migration 127
+// for why a merge rewrites rather than aliases.
+
+// GET /api/grading/students/merge-suggestions — roster entries that look like one person
+router.get(
+  '/students/merge-suggestions',
+  asyncHandler(async (req, res) => {
+    const courseId = req.query.course_id as string | undefined
+    const roster = await findStudentsByTeacher(req.teacher.id, courseId)
+    res.json(suggestStudentMerges(roster))
+  })
+)
+
+// GET /api/grading/students/merges — recent merges, for the undo list
+router.get(
+  '/students/merges',
+  asyncHandler(async (req, res) => {
+    res.json(await listStudentMerges(req.teacher.id))
+  })
+)
+
+// POST /api/grading/students/merge — rewrite one identity onto another
+router.post(
+  '/students/merge',
+  validate(mergeStudentsRules),
+  asyncHandler(async (req, res) => {
+    const body = req.body as {
+      from: { name: string; group?: string | null }
+      to:   { name: string; group?: string | null }
+      source?: 'suggested' | 'manual'
+    }
+    try {
+      const merge = await mergeStudentIdentity(
+        req.teacher.id,
+        { name: body.from.name.trim(), group: body.from.group?.trim() || null },
+        { name: body.to.name.trim(),   group: body.to.group?.trim()   || null },
+        body.source ?? 'manual',
+      )
+      // Nothing rewritten = the roster the browser is holding is stale. Not an
+      // error worth a 500; the client refetches and the row is simply gone.
+      if (!merge) return res.status(404).json({ error: 'Такой студент больше не найден — обновите список.' })
+      res.json(merge)
+    } catch (err) {
+      if (err instanceof StudentMergeError) return res.status(400).json({ error: err.message })
+      throw err
+    }
+  })
+)
+
+// POST /api/grading/students/merges/:id/undo — put the original spelling back
+router.post(
+  '/students/merges/:id/undo',
+  asyncHandler(async (req, res) => {
+    const merge = await undoStudentMerge(req.teacher.id, req.params.id)
+    if (!merge) return res.status(404).json({ error: 'Объединение не найдено или уже отменено.' })
+    res.json(merge)
   })
 )
 
