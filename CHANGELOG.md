@@ -15,12 +15,30 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 ## [Unreleased]
 
 ### Fixed
+- **Белая страница при проверке работы студента.** На `/published-assignments/:id/submissions/:inviteId` после «Проверить» страница падала целиком: `Minified React error #31` — объект `{page, text, quote, action, question, severity, correction, criterion_id}` попадал в JSX как дочерний узел.
+  - `ai_strengths`/`ai_improvements` — это jsonb-массив `BulletItem`, а не строки, но `GradeSummary` во фронтовом `api/publishedAssignments.ts` (и `SubmittedInvite` в `db/queries/publishedAssignments.ts`) объявляли их `string[]`. Типы врали одинаково с обеих сторон, поэтому `{s}` в `SubmissionReview.tsx` компилировался без единой ошибки.
+  - Оба интерфейса переведены на `BulletItem`, рендер идёт через хелпер `bulletText()`, который принимает и объект, и строку — старые строки данных не ломают страницу.
+
+- **Тарифные карточки распирали вьюпорт на 768 px.** «Индивидуально» в `text-3xl` требует 259 px min-content, а колонка в `md:grid-cols-3` внутри `max-w-[1000px] px-6` даёт 222 — грид-элементы по умолчанию `min-width:auto`, поэтому трек раздувался и вся страница получала горизонтальный скролл на 12 px (Landing.tsx и Pricing.tsx, одинаковая разметка). Три карточки требуют ~924 px, так что сетка переехала на `lg:grid-cols-3` (вместе с `lg:-translate-y-2` у «Популярного») — на планшете тарифы идут одной колонкой.
+- **Публичная шапка ломалась на телефоне** — «О нас» и «Начать бесплатно» переносились каждая на две строки в гуттере 360 px, а четыре ссылки из шести (`Для ВУЗов`, `Исследования`, `Документация`) были помечены `hidden md:block`, то есть на телефоне до них было не добраться вообще.
+  - `PublicHeader` теперь держит на узких экранах одну строку — логотип, CTA, кнопка меню — а все вторичные ссылки плюс «Войти» уезжают в выпадающую панель. CTA получил `whitespace-nowrap`: он последний flex-элемент, поэтому без этого переносится именно подпись, а не растёт строка.
+  - Инлайновая навигация включается с `lg`, а не с `md`: полный ряд (логотип + 4 ссылки + «Войти» + CTA) требует ~768 px при `px-6`, то есть ровно на брейкпоинте запаса нет. На 768–1023 px планшет получает ту же кнопку меню.
+  - Кнопка 44×44, `aria-label`/`aria-expanded`/`aria-controls`, пункты меню min-height 44 px; панель закрывается по Escape, по тапу вне её и при смене маршрута. Новые иконки `menu` и `close` в `ui/Icon.tsx`.
+  - Проверено на 375 / 768 / 1024 / 1280: горизонтального скролла от шапки нет ни на одной ширине, десктопная раскладка не изменилась.
 - **`/api/admin/usage/artifacts` отвечал 500 в продакшене** — «Артефакты» рисовала заголовки и ни одной строки. `ReferenceError: Cannot access 'exports' before initialization`, и это целиком моя ошибка.
   - The backend compiles to CommonJS, so tsc rewrites a reference to this module's own exported binding as `exports.ARTIFACT_UNION_SQL`. `getArtifactUsage` declared a local `const exports` further down the same function, which put that rewritten reference in its temporal dead zone. Renamed to `exported`.
   - Latent only since Layer 3: `ARTIFACT_UNION_SQL` was module-private until the adoption queries needed it, and exporting it is what created the collision. The local had been called `exports` from the start.
   - **Why nothing caught it.** tsc compiles it happily — shadowing `exports` is legal TypeScript. And vitest runs the TypeScript *source* through esbuild, so no test in the suite ever executes the CommonJS emit that breaks. Typecheck green, 1078 tests green, production broken: the build output was never exercised by anything.
   - New `src/cjsModuleShadowing.test.ts` fails on any local named `exports`/`module`/`require`/`__dirname`/`__filename` anywhere in `src/`. Verified by reintroducing the original bug and watching it name the exact file and line. Comments are stripped before matching, so documenting the bug (as this entry does) doesn't trip it.
   - Fix confirmed by running the **compiled** `dist/` output against a real database — the check that was missing, and the reason a green suite gave false confidence twice in a row on this feature.
+
+### Changed
+- **Страница «Обновления платформы» перерисована.** Зигзаг-таймлайн (`md:odd:flex-row-reverse`) отдавал каждой карточке половину 800-пиксельного контейнера: на десктопе релиз 1.6 — четырнадцать изменений — читался лентой в ~40 знаков в строке, взгляд при этом перепрыгивал через страницу, а порядок в DOM расходился с визуальным.
+  - Контент вынесен в массив `RELEASES` — раньше одна и та же карточка на 20 строк была скопирована в разметке шесть раз, и каждое изменение существовало как `<p><strong>Заголовок.</strong> текст</p>` внутри сплошного блока.
+  - Одна колонка с направляющей слева на всех ширинах, мера строки ~70 знаков при 15 px (было ~40 при 14 px), каждое изменение — заголовок `<h3>` + абзац, между ними волосяные разделители.
+  - Слева на `lg` — липкий указатель версий с подсветкой текущей (rAF-throttled чтение позиции скролла) и якорями на каждый релиз.
+  - Старые релизы свёрнуты до трёх пунктов с кнопкой «Показать ещё N» — но только если прячется хотя бы три пункта, иначе клик дороже экономии. Свежий релиз всегда раскрыт.
+  - Снят `opacity-80` со старых карточек (текст и так `ink-secondary` — это било по контрасту), у `<time>` появился машиночитаемый `dateTime`, у счётчика изменений — нормальные русские склонения, удалён мёртвый класс `is-active`.
 
 ## [2026-09-06] — v1.6.1
 

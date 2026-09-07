@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { pool } from '../connection'
+import type { BulletItem } from '../../../../shared/types'
 
 // Process-of-creation attestation (Research.md §5.1, Feature Q). Teacher
 // publishes a definition; students write against per-student tokenised invites.
@@ -351,8 +352,8 @@ export interface SubmittedInvite {
   ai_grade:             string | null
   ai_grade_label:       string | null
   ai_feedback:          string | null
-  ai_strengths:         string[] | null
-  ai_improvements:      string[] | null
+  ai_strengths:         BulletItem[] | null
+  ai_improvements:      BulletItem[] | null
   grade_status:         string | null
 }
 

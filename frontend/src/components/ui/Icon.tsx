@@ -33,6 +33,8 @@ export type IconName =
   | 'copy'            // copy-to-clipboard actions
   | 'import'          // bulk import from an external page (sveden discovery)
   | 'chevron-down'    // disclosure toggle (rotate 180° for the open state)
+  | 'menu'            // mobile nav toggle (public header)
+  | 'close'           // dismiss — mobile nav toggle in its open state
 
 const PATHS: Record<IconName, JSX.Element> = {
   home: (
@@ -238,6 +240,21 @@ const PATHS: Record<IconName, JSX.Element> = {
       <circle cx="8.5" cy="10.5" r="0.75" fill="currentColor" stroke="none" />
       <circle cx="12"  cy="10.5" r="0.75" fill="currentColor" stroke="none" />
       <circle cx="15.5" cy="10.5" r="0.75" fill="currentColor" stroke="none" />
+    </>
+  ),
+
+  menu: (
+    <>
+      <path d="M4 7h16" />
+      <path d="M4 12h16" />
+      <path d="M4 17h16" />
+    </>
+  ),
+
+  close: (
+    <>
+      <path d="M6 6l12 12" />
+      <path d="M18 6L6 18" />
     </>
   ),
 }

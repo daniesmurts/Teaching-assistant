@@ -1,6 +1,6 @@
 import client from './client'
 import type { ProvenanceFacts } from '../types'
-import type { LtiRosterMember } from '../../../shared/types'
+import type { LtiRosterMember, BulletItem } from '../../../shared/types'
 export type { LtiRosterMember } from '../../../shared/types'
 
 export type PublishedStatus = 'draft' | 'open' | 'closed'
@@ -96,8 +96,10 @@ export interface GradeSummary {
   ai_grade:        string | null
   ai_grade_label:  string | null
   ai_feedback:     string | null
-  ai_strengths:    string[]
-  ai_improvements: string[]
+  // jsonb on assignments — objects, not strings. Legacy rows may still
+  // hold plain strings, so the renderer tolerates both.
+  ai_strengths:    (BulletItem | string)[]
+  ai_improvements: (BulletItem | string)[]
   status:          string | null
 }
 

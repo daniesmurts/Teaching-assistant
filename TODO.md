@@ -2523,6 +2523,246 @@ of this entry:
   AL's cost ledger (shipped) to verify Phase 0's spend reduction is real
   rather than assumed.
 
+### AP. Оффлайн-аудитория — карточки, одно фото, мгновенная обратная связь · Effort: Phase 0 M–L, Phase 1 S–M, Phase 2 M, Phase 3 M, Phase 4 S–M, Phase 5 S (phased; Phase 0+1 are the product, the rest are reach)
+
+**The journey that exposed this (2026-09-06).** Teacher prepares at
+home/office: generates a lecture, «Составить тест» on the deck panel
+(`DeckQuizPanel.tsx`), exports the PPTX. Carries it to class on a flash
+drive, plugs it into the auditorium PC, presents from PowerPoint. At that
+moment the quiz — Feature Y, shipped, working, and demoing well — is
+**unreachable**. Every assumption Y makes is false in that room: it wants a
+logged-in browser on the presenting machine, a `join_code` minted at session
+time (so nothing can be printed into the deck beforehand), a projector view
+served over HTTP, and a teacher within reach of a keyboard. The teacher is
+standing at a board in front of an offline PC with a file on a stick.
+
+A teacher who made a **standalone** quiz on `Quizzes.tsx` is worse off still:
+`routes/quizzes.ts` is four routes (generate/list/get/delete) and the only way
+to get a quiz out of the browser is `CopyAllButton`, which writes plain text
+to the clipboard — **`Ответ:` and `Пояснение:` included on every question**, so
+the single printable artifact the product can produce today is a teacher's key,
+never a student's sheet. The deck teacher at least has a PPTX leaving the
+building; the quiz teacher has no file at all.
+
+**The constraint, from the user, unhedged: «no internet in most auditoriums,
+offline is the reality… it's going to be widely different for different
+universities, faculties, classes, so we should assume worst case and solve
+for it.»** Worst case is not flaky wifi. It is **no connectivity for anyone in
+the room, students' phones included** — thick-walled Soviet-era buildings,
+basement lecture halls, 80 handsets on one cell sector, students without a
+data plan or out of traffic. A design that degrades to "most students could
+join" is not a solution to this constraint; it is the same solution relying on
+better luck, and it fails in exactly the rooms we cannot enumerate in advance.
+
+**The architecture consequence: the offline path is the PRIMARY in-class flow,
+and Feature Y's live session is the online *upgrade* — not the other way
+round.** Y was built first and works; that is a sequencing accident, not a
+statement about which path most classrooms need.
+
+**The shape (decided 2026-09-07, after a first draft built around printed
+бланки + OCR — see «Superseded» below).** Each student gets a printed card
+carrying a **fiducial marker** (ArUco/AprilTag family): the marker id
+identifies the *student*, and **the rotation the student holds it at encodes
+the answer** А/Б/В/Г. Teacher asks a question — from a slide, or out loud —
+students hold up cards, teacher sweeps the room with their phone camera. One
+frame decodes the whole group at once.
+
+Why this is the design and not a variant of the бланк idea — it removes both
+recurring taxes rather than relocating them:
+
+| | printed бланк + OCR | карточки |
+|---|---|---|
+| Printing | 25 sheets **every lecture** | 25 cards **once per semester** |
+| Capture | 25 photos, after class | **1 photo**, in the room |
+| Identity | handwritten name → OCR → teacher confirms every read | **automatic and permanent** |
+| Feedback to teacher | next day | **instant, while it can still change the lecture** |
+| Student device | none | none |
+| Network in room | none | none |
+
+The last row of that table is the point of the whole item, and the fourth row
+is what turns it from an assessment feature into a teaching one.
+
+- **Prior art: this is how Plickers works.** Proven at classroom scale in
+  exactly these conditions, which de-risks the mechanism — and **means there
+  is no patent claim in the capture method**. Do not file it into Research.md
+  as novel IP; the defensible part is Phase 1's loop back into the lecture and
+  the journal/БРС/analytics substrate underneath, not the marker.
+
+- **Phase 0 — карточки: generate, decode, score.**
+  - **Card set per group, printed once.** A PDF of N cards, each a marker id
+    bound to a real student in the roster, name printed in plain text on the
+    card so distribution is trivial. Cards live in the группа's folder or a
+    student's notebook all semester. Generated from an existing course/group
+    roster; the binding (`card_id → student`) is the thing that makes identity
+    free forever after.
+  - **Decoding runs ON-DEVICE, in the browser.** `vite-plugin-pwa` + workbox
+    are **already configured** in `frontend/vite.config.ts`, so the offline
+    teacher client is a much smaller lift than it looks; the missing pieces are
+    a camera surface (there is no `getUserMedia` or capture input anywhere in
+    `frontend/src` today) and a WASM marker decoder (OpenCV-WASM or js-aruco).
+  - **Privacy rule, locked, non-negotiable:** a photo of a room full of
+    students is biometric-adjacent under 152-ФЗ. Decode on-device, upload only
+    `{card_id → answer}`, and **never transmit or store the frame**. This is a
+    *stronger* posture than the бланк path (which does upload images of student
+    work) and it must be stated in the UI, not just honoured in the code —
+    teachers will be asked about it by their own students.
+  - **Scoring reuses Y wholesale**: answers → `correct_index` → score → the
+    same create→approve pipeline `POST /api/live-sessions/:id/save-to-journal`
+    already runs, so cohort analytics, trajectory and БРС checkpoints all light
+    up with no new downstream work.
+  - **Teacher confirms before anything is written (Rule 3).** A card not seen,
+    held sideways, or ambiguously rotated surfaces as «не распознано» for that
+    student — never a guessed answer, never a silent zero.
+
+- **Phase 1 — the instant pedagogical loop (the reason to build Phase 0).**
+  The histogram in the room is worth more than the grade in the journal.
+  Immediately after a sweep: «68% ответили Б — вопрос 3», one tap to jump back
+  to **the slide that taught it** (the quiz was generated from those slides and
+  their notes, so the question→slide provenance already exists in the deck),
+  and the explanation text the quiz already carries per question. The teacher
+  re-explains *now*, then re-sweeps to check it landed.
+  - This is the feature a teacher describes to a colleague in the corridor.
+    Grades are what the institution buys; this is what makes them open it
+    twice a week.
+  - **Re-sweeping the same question is a first-class action, not a repeat
+    attempt** — «до объяснения / после объяснения» as a two-bar comparison is
+    the artifact, and it is direct evidence the lecture worked, which is
+    exactly the evidence АВ (early-warning) and the УМУ reporting surfaces
+    have no source for today.
+  - Depends on nothing external and is small once Phase 0 exists; it is a
+    separate phase only because it can slip without blocking the capture work.
+
+- **Phase 2 — «Скачать комплект для аудитории», and questions on the
+  projector.** One button producing one download: quiz-as-slides PPTX (big
+  А/Б/В/Г, plus a reveal slide per question carrying the existing
+  `explanation`), the group's card PDF, and the teacher key. Teachers should
+  not have to learn three artifacts and three buttons; prep is one click before
+  they leave the office.
+  - **Because the projector displays the questions, paper never has to.** That
+    is what keeps the card to a quarter-A4 and printing to once a semester.
+  - Slide generation is nearly free — `services/presentationExport.ts` already
+    builds decks — and it is what gives the **standalone-quiz** teacher a
+    display path without owning a lecture.
+
+- **Phase 3 — печатный бланк + OCR, as the honest fallback.** Cards do
+  single-choice only, and depend on physical cards having reached the room.
+  For a longer test, open/written answers, or a group whose cards are in
+  someone's other bag, keep a printable бланк: bubble grid А/Б/В/Г, machine-
+  readable header carrying quiz id + question count + key version, teacher
+  photographs the stack at their desk afterwards, `services/yandexVision.ts`'s
+  `yandexVisionOCR` reads it (mature, already rasterizes multi-page PDFs via
+  `pdf-to-img`), teacher reviews every read, same approve pipeline.
+  `services/presentationHandoutPdf.ts` (behind
+  `GET /api/presentations/:id/handout.pdf`, pdfkit) is the closest precedent —
+  same shape of job, teacher-facing printable from a stored artifact.
+  - **Demoted from Phase 0 deliberately.** It is the harder engineering
+    (Cyrillic handwriting for names, per-sheet capture, a full correction UI)
+    *and* the weaker experience. Worth building — just not first.
+  - Keep the scanned image attached to the assignment as evidence for a
+    contested grade; fits the append-only `approved_revisions` culture. Note
+    the asymmetry with Phase 0's no-image rule: here the teacher is
+    photographing *work*, not *faces*.
+
+- **Phase 4 — stable per-quiz join link + QR baked into the export.** Today's
+  `join_code` is minted per session, so nothing can be printed into a deck
+  exported days earlier — and **`QRCodeSVG` appears at exactly one call site in
+  the entire codebase** (`LiveSessionHost.tsx:131`, the projector view), so
+  there is no printable QR anywhere in the product today, for any path. Give
+  the *quiz* a permanent short link resolving to whichever session is currently
+  open (waiting room if none yet, auto-join when the teacher opens one), and
+  auto-insert a QR slide at export. Once this exists the **card sheet should
+  carry the same QR**, so one printed artifact serves the offline room (hold up
+  the card) and the covered room (scan and answer on a phone) with no reprint
+  and no decision at print time.
+
+- **Phase 5 — phone as the host remote for Feature Y, self-paced by default.**
+  Even where coverage exists the teacher is at the board, not the keyboard, and
+  the presenting PC may be offline while their phone is not. Host controls on
+  an already-logged-in phone mean the classroom machine never leaves PowerPoint
+  and never needs credentials typed in front of a room.
+
+- **The tiering this produces — same quiz object, four renderings, chosen at
+  the classroom door rather than at authoring time.** This is the actual answer
+  to "widely different for different universities, faculties, classes":
+  **Tier 0** show of hands, teacher taps aggregate counts, zero material, zero
+  identity · **Tier 1** карточки (Phase 0) · **Tier 2** бланк + OCR (Phase 3) ·
+  **Tier 3** live QR session (Feature Y, shipped) where coverage exists. A
+  teacher must never have to maintain two versions of the same test to move
+  between them.
+
+- **Анонимный vs. именной, per sweep.** Most mid-lecture checks have no
+  business reaching the журнал. Anonymous aggregate is the lower-stakes default
+  — less 152-ФЗ surface, no approve pipeline, no roster binding needed — and
+  writing to the journal becomes the deliberate choice. This also makes Tier 0
+  and un-carded groups first-class rather than degraded.
+
+- **Zero-prep usage is the adoption path.** Once a group has cards, a teacher
+  can run an unplanned check with no quiz, no printing and no preparation:
+  ask a question aloud, sweep the room. Daily habit comes from that, not from
+  the authored-quiz flow — so the capture surface must be reachable in one tap
+  without first selecting a quiz.
+
+- **The one assumption this item rests on, and it is not a code question:**
+  cards must reach students and come back each lecture. A staroste handing them
+  out and collecting them is plausible and is how Plickers works in practice,
+  but it is an adoption question for the test university's teachers, and it is
+  worth asking **before** Phase 0 rather than after. If the answer is no, Phase
+  3 (бланк) is the fallback that survives, and the phases reorder.
+
+- **Superseded (2026-09-07): бланк-first.** This item was first written with
+  the printed бланк + OCR as Phase 0 and cards not considered. Cards are
+  strictly better on printing, capture, identity and feedback latency at
+  comparable effort, so the бланк demoted to Phase 3 as the long/open-answer
+  fallback. The bullets it contributed — machine-readable header, teacher
+  review of every read, scan-as-evidence — survive there unchanged.
+
+- **Rejected: browser presenter mode.** Investigated 2026-09-06.
+  `presentationExport.ts`'s `addNotes()` already writes real speaker notes into
+  every exported slide, so PowerPoint's own Presenter View gives the teacher
+  notes + timer + next-slide preview on their screen with the slide alone on
+  the projector — offline, from the flash drive, today, with zero code. A web
+  presenter route would reimplement that worse and over a network the room does
+  not have. Revisit only if auditoriums become reliably connected, which is the
+  opposite of the trend this item is built on.
+
+- **Rejected for now: an offline-sync student PWA.** Service worker caches the
+  quiz, answers queue in IndexedDB, sync when signal returns. It genuinely
+  solves partial coverage, but it requires every student to have loaded the
+  link *before* entering the room — a coordination problem worse than handing
+  out cards — and it is more complex than Phase 0 for a strictly smaller set of
+  rooms. Revisit only if measured coverage shows the majority-online /
+  minority-offline shape is the common one.
+
+- **What we deliberately are NOT doing: measuring coverage first.** The earlier
+  instinct was to have the test university's teachers check signal in their
+  actual rooms before committing. Overruled, correctly: the answer will differ
+  by building, floor and hour, we cannot survey every future customer's
+  auditoriums, and an on-prem university (see `docs/on-prem-deployment.md`) may
+  have no internet path from the classroom at all by policy rather than
+  physics. Solving worst-case makes the measurement unnecessary — Phase 4 then
+  turns coverage, where it happens to exist, into a bonus rather than a
+  prerequisite. (Distinct from the card-distribution question above, which is
+  about human logistics and genuinely does gate Phase 0.)
+
+- **Touches:** new `services/classroomCards.ts` (pdfkit card sheets, marker id
+  ↔ student binding), new `services/cardSweep.ts` (decoded answers → score →
+  approve), new frontend camera/decoder surface (WASM marker decoder, first
+  `getUserMedia` in the app) + PWA offline queue, `routes/quizzes.ts` (card set
+  download, sweep submit, комплект bundle), `services/presentationExport.ts`
+  (quiz-as-slides, Phase 4 QR slide), `services/quizSheet.ts` +
+  `services/quizSheetScan.ts` (Phase 3), `routes/liveJoin.ts` +
+  `db/queries/liveSessions.ts` (Phase 4 stable link + waiting room),
+  `LiveSessionHost.tsx` (Phase 5 phone layout), `DeckQuizPanel.tsx` and
+  `Quizzes.tsx` (both entry points), `shared/types.ts`, migrations for card
+  sets + sweeps, `config/planLimits.ts` (Phase 0 is near-zero marginal cost —
+  decoding is on-device; **Phase 3's OCR is not**, one Vision call per sheet
+  per student, so the two tiers need different limits and must not share one).
+- **Depends on:** Y (shipped) for the quiz→score→journal pipeline Phases 0 and
+  3 reuse wholesale; AO/AG (shipped) for the deck panel the journey starts from
+  and the slide provenance Phase 1's "jump back to the slide" needs; AN
+  (shipped) for `yandexVisionOCR`'s rasterization path (Phase 3); AE (shipped)
+  for the БРС checkpoint a scored sweep should be attachable to.
+
 ---
 
 ## Build order — locked design (§5–§7)

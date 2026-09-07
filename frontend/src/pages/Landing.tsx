@@ -339,7 +339,7 @@ export default function Landing() {
             </div>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-6 mb-20">
+          <div className="grid lg:grid-cols-3 gap-6 mb-20">
             
             {/* Free */}
             <div className="bg-surface border border-border rounded-xl p-6 shadow-sm flex flex-col">
@@ -359,7 +359,7 @@ export default function Landing() {
             </div>
 
             {/* Pro */}
-            <div className="bg-surface border-2 border-amber rounded-xl p-6 shadow-md relative flex flex-col transform md:-translate-y-2">
+            <div className="bg-surface border-2 border-amber rounded-xl p-6 shadow-md relative flex flex-col transform lg:-translate-y-2">
               <div className="absolute top-0 right-6 -translate-y-1/2 bg-amber text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-sm">Популярный</div>
               <h4 className="font-bold mb-1 text-lg">Профессионал</h4>
               <div className="text-sm text-ink-secondary mb-4">Для преподавателей</div>

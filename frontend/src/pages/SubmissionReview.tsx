@@ -4,6 +4,7 @@ import Button from '../components/ui/Button'
 import { useUIStore } from '../store/uiStore'
 import { getSubmission, gradeSubmission, type GradeSummary } from '../api/publishedAssignments'
 import type { ProvenanceFacts } from '../types'
+import type { BulletItem } from '../../../shared/types'
 
 const GRADE_COLOR: Record<string, string> = {
   '5': 'var(--color-success)', '4': 'var(--color-amber)',
@@ -156,6 +157,14 @@ function Fact({ label, value }: { label: string; value: string }) {
 
 // ─── AI grade (Q4b) ───────────────────────────────────────────────────────────
 
+// ai_strengths/ai_improvements come back as BulletItem objects (jsonb on
+// assignments). Rendering one straight into JSX blanked the page with React
+// error #31; legacy rows may still hold plain strings, so accept both.
+function bulletText(b: BulletItem | string): string {
+  return typeof b === 'string' ? b : b.text
+}
+
+
 function AiGradeSection({ grade, grading, onGrade, onOpenJournal }: {
   grade: GradeSummary | null; grading: boolean; onGrade: () => void; onOpenJournal: () => void
 }) {
@@ -202,7 +211,7 @@ function AiGradeSection({ grade, grading, onGrade, onOpenJournal }: {
             <div className="text-xs font-semibold text-success uppercase tracking-wide mb-2">Сильные стороны</div>
             {grade.ai_strengths.map((s, i) => (
               <div key={i} className="flex gap-1.5 text-xs text-success mb-1 leading-relaxed">
-                <span className="flex-shrink-0">·</span><span>{s}</span>
+                <span className="flex-shrink-0">·</span><span>{bulletText(s)}</span>
               </div>
             ))}
           </div>
@@ -210,7 +219,7 @@ function AiGradeSection({ grade, grading, onGrade, onOpenJournal }: {
             <div className="text-xs font-semibold text-warning uppercase tracking-wide mb-2">Над чем поработать</div>
             {grade.ai_improvements.map((s, i) => (
               <div key={i} className="flex gap-1.5 text-xs text-warning mb-1 leading-relaxed">
-                <span className="flex-shrink-0">·</span><span>{s}</span>
+                <span className="flex-shrink-0">·</span><span>{bulletText(s)}</span>
               </div>
             ))}
           </div>
