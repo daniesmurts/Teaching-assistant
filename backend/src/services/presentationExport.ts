@@ -2,9 +2,7 @@ import { logger } from '../lib/logger'
 import { renderFormulaToPng } from './formulaRenderer'
 import { toPptxColor } from '../lib/brandColor'
 import { containFit } from '../lib/imageSize'
-import { downloadObject } from './objectStorage'
-import { getPresentationMediaById } from '../db/queries/presentationMedia'
-import { getFigureById } from '../db/queries/documentFigures'
+import { loadSlideImage } from './slideImageSource'
 import type {
   Presentation, Slide, SlideImage, TitleSlide, BulletsSlide, ConceptSlide, FormulaSlide,
   ComparisonSlide, DiagramSlide, DiscussionSlide, SummarySlide,
@@ -67,10 +65,9 @@ const SLIDE_W = 10      // inches, 16:9
 const SLIDE_H = 5.63
 const MARGIN  = 0.6
 
-// Best-effort remote image fetch for diagram slides — never blocks the
-// export. A failure (network, non-image content, timeout) falls back to a
-// text placeholder rather than a broken/empty picture frame.
-const IMAGE_FETCH_TIMEOUT_MS = 10_000
+// Slide images are best-effort and never block the export: a failure
+// (network, a deleted object, a URL pointing nowhere) falls back to a text
+// placeholder rather than a broken picture frame. See slideImageSource.ts.
 
 // ─── LaTeX → plain Unicode (best-effort, not a real TeX engine) ────────────
 //
@@ -163,62 +160,13 @@ export function cleanForSlide(text: string): string {
     .trim()
 }
 
-// A slide image is not always out on the web. Two of the three sources are
-// this app's own storage, reached through an authenticated proxy route — the
-// кафедра figure library (`/api/documents/figures/:id/image`) and a picture
-// imported from a .pptx (`/api/presentations/media/:id/image`) — and their
-// URLs are ROOT-RELATIVE. `fetch()` of a relative URL throws in Node, so
-// every such image exported as a "[Изображение]" placeholder even though the
-// bytes were sitting in the same object storage this process can read.
-// Resolving them directly is also a round trip and an HTTP auth hop saved.
-const INTERNAL_IMAGE_ROUTES: [RegExp, (id: string) => Promise<{ path: string; mime: string } | null>][] = [
-  [/^\/api\/presentations\/media\/([0-9a-f-]{36})\/image$/i, async (id) => {
-    const media = await getPresentationMediaById(id)
-    return media ? { path: media.storage_path, mime: media.mime_type } : null
-  }],
-  [/^\/api\/documents\/figures\/([0-9a-f-]{36})\/image$/i, async (id) => {
-    const figure = await getFigureById(id)
-    return figure ? { path: figure.storage_path, mime: figure.mime_type } : null
-  }],
-]
-
-async function localImageAsDataUri(url: string): Promise<string | null> {
-  for (const [pattern, lookup] of INTERNAL_IMAGE_ROUTES) {
-    const match = pattern.exec(url)
-    if (!match) continue
-    try {
-      const found = await lookup(match[1])
-      if (!found) return null
-      const buffer = await downloadObject(found.path)
-      return `data:${found.mime};base64,${buffer.toString('base64')}`
-    } catch (err) {
-      logger.warn({ message: '[PPTX export] could not read stored slide image', url, error: (err as Error).message })
-      return null
-    }
-  }
-  return null
-}
-
 async function fetchImageAsDataUri(url: string): Promise<string | null> {
-  if (url.startsWith('/')) return localImageAsDataUri(url)
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS)
-    let res: Response
-    try {
-      res = await fetch(url, { signal: controller.signal })
-    } finally {
-      clearTimeout(timeout)
-    }
-    if (!res.ok) return null
-    const contentType = res.headers.get('content-type') ?? ''
-    if (!contentType.startsWith('image/')) return null
-    const buf = Buffer.from(await res.arrayBuffer())
-    return `data:${contentType};base64,${buf.toString('base64')}`
-  } catch (err) {
-    logger.warn({ message: '[PPTX export] could not fetch slide image, using placeholder', url, error: (err as Error).message })
+  const loaded = await loadSlideImage(url)
+  if (!loaded) {
+    logger.warn({ message: '[PPTX export] no bytes for slide image, using placeholder', url })
     return null
   }
+  return `data:${loaded.mime};base64,${loaded.buffer.toString('base64')}`
 }
 
 // ─── Side-image layout (TODO.md Feature AG Phase 2 gap) ───────────────────

@@ -1,6 +1,9 @@
 import path from 'path'
 import { latexToPlainText } from './presentationExport'
-import type { Presentation, Slide } from '../../../shared/types'
+import { loadSlideImage } from './slideImageSource'
+import { imageSize } from '../lib/imageSize'
+import { logger } from '../lib/logger'
+import type { Presentation, Slide, SlideImage } from '../../../shared/types'
 
 // Раздатка — the student-facing companion to a lecture deck (TODO.md "### AO"
 // Phase 3). The PPTX export is what the teacher projects; this is what the
@@ -97,6 +100,84 @@ function clean(text: string): string {
     .trim()
 }
 
+// ─── Pictures ────────────────────────────────────────────────────────────────
+//
+// A slide's picture is part of what the lecture said — for a схема lecture it
+// is most of what it said — so the handout carries it. This reverses an
+// earlier call here (images left out because a web photo prints as a grey
+// smudge in greyscale), which was right about photos and wrong as a blanket
+// rule: the pictures that now reach a deck are mostly line drawings imported
+// from the teacher's own .pptx, which is exactly the kind of image that
+// survives a departmental laser printer.
+//
+// pdfkit embeds PNG and JPEG and nothing else — an unsupported format throws
+// mid-document, taking the whole handout with it. imageSize() returns
+// dimensions only for those two, so it doubles as the format gate.
+const IMAGE_MAX_H = 240        // pt — about a third of an A4 text column
+const PX_TO_PT    = 0.75       // 96 dpi source pixels → 72 dpi PDF points
+const MAX_IMAGES  = 60
+// Nominal height of a figure slide's text between heading and drawing.
+const BODY_RESERVE = 44        // pt — about two lines of the bullet face
+
+export interface HandoutPicture {
+  buffer: Buffer
+  w:      number   // points, already fitted
+  h:      number
+  credit: string | null
+}
+
+/** The image a slide carries, wherever that slide type keeps it. */
+function slideImageOf(slide: Slide): SlideImage | null {
+  return (slide.type === 'diagram' ? slide.body.image : slide.image) ?? null
+}
+
+/**
+ * Load and measure every slide's picture BEFORE the document is laid out.
+ *
+ * pdfkit's rendering pass is synchronous — heights are measured and pages
+ * broken as it goes — so an image whose bytes arrive later cannot be
+ * paginated around. Fetching up front also means one round of parallel
+ * network work instead of one blocking wait per slide.
+ */
+export async function loadHandoutPictures(slides: Slide[], maxWidth: number): Promise<Map<number, HandoutPicture>> {
+  const wanted = slides
+    .map((slide, index) => ({ index, image: slideImageOf(slide) }))
+    .filter((c): c is { index: number; image: SlideImage } => c.image !== null && Boolean(c.image.url))
+    .slice(0, MAX_IMAGES)
+
+  const loaded = await Promise.all(wanted.map(async ({ index, image }) => {
+    const found = await loadSlideImage(image.url)
+    if (!found) return null
+
+    const size = imageSize(found.buffer)
+    if (!size) {
+      // WebP, SVG, GIF — pdfkit would throw on these, and a handout that
+      // fails to generate is worse than one printed without a picture.
+      logger.warn({ message: '[handout] skipping an image pdfkit cannot embed', url: image.url, mime: found.mime })
+      return null
+    }
+
+    // Never upscaled past its own resolution: a 200 px schematic blown up to
+    // the column width prints worse than the same drawing left small.
+    const scale = Math.min(maxWidth / (size.width * PX_TO_PT), IMAGE_MAX_H / (size.height * PX_TO_PT), 1)
+    return {
+      index,
+      picture: {
+        buffer: found.buffer,
+        w: size.width  * PX_TO_PT * scale,
+        h: size.height * PX_TO_PT * scale,
+        // Only a web image needs crediting; a picture out of the teacher's own
+        // deck does not, and "Источник: Из загруженной презентации" under
+        // every drawing is noise on a page students are meant to read.
+        credit: image.url.startsWith('/') ? null : (image.source_host || null),
+      },
+    }
+  }))
+
+  return new Map(loaded.filter((l): l is { index: number; picture: HandoutPicture } => l !== null)
+    .map((l) => [l.index, l.picture]))
+}
+
 export async function generatePresentationHandoutPdf(
   presentation: Presentation,
   options: HandoutOptions = {},
@@ -104,6 +185,9 @@ export async function generatePresentationHandoutPdf(
   const { default: PDFDocument } = await import('pdfkit')
   const includeNotes = options.includeNotes !== false
   const slides = presentation.slides ?? []
+
+  // A4 (595pt) less the two 56pt margins — the same column the text uses.
+  const pictures = await loadHandoutPictures(slides, 595.28 - 56 * 2)
 
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({
@@ -148,6 +232,27 @@ export async function generatePresentationHandoutPdf(
       })
     }
 
+    // Drawn centred with its caption, and kept whole: an image that would
+    // straddle the page break moves to the next page instead of being clipped,
+    // which is what `ensure` cannot express for a non-text block.
+    const picture = (pic: HandoutPicture | undefined) => {
+      if (!pic) return
+      const creditH = pic.credit ? 12 : 0
+      y += 6
+      if (y + pic.h + creditH > bottom) { doc.addPage(); y = M }
+
+      doc.image(pic.buffer, M + (CW - pic.w) / 2, y, { width: pic.w, height: pic.h })
+      y += pic.h
+
+      if (pic.credit) {
+        y += 2
+        doc.font('sans').fontSize(8).fillColor(C.ink3)
+        doc.text(`Источник: ${pic.credit}`, M, y, { width: CW, align: 'center' })
+        y += 10
+      }
+      y += 6
+    }
+
     const rule = () => {
       ensure(10)
       doc.moveTo(M, y).lineTo(M + CW, y).lineWidth(1).strokeColor(C.border).stroke()
@@ -180,7 +285,7 @@ export async function generatePresentationHandoutPdf(
     // is skipped (see below), and a handout that opens at "2." reads as a
     // printing error rather than a deliberate omission.
     let n = 0
-    slides.forEach((slide) => {
+    slides.forEach((slide, slideIndex) => {
       // The title slide's content is the cover of the projected deck (subject,
       // lecturer) — already on this page's title block, so repeating it here
       // would open the handout with a duplicate of itself.
@@ -188,11 +293,30 @@ export async function generatePresentationHandoutPdf(
 
       n += 1
       ensure(48)
+
+      // Keep a slide's heading with its figure. These slides are typically a
+      // «Рис. N» heading, one line of обозначения and the drawing — split
+      // across a page break, the heading strands at the foot of one page and
+      // the drawing opens the next with nothing saying what it shows. The
+      // body is measured as a nominal two lines (it is a caption, not prose);
+      // a long body pushes the figure down as it always did, but the heading
+      // then has real content under it either way.
+      const pic = pictures.get(slideIndex)
+      if (pic) {
+        const headingH = doc.font(faceFor('serif', slide.title)).fontSize(13.5)
+          .heightOfString(`${n}. ${clean(slide.title)}`, { width: CW, lineGap: 1.5 })
+        const block = headingH + BODY_RESERVE + pic.h
+        // Only when the block could fit a page at all — otherwise a break
+        // just adds a blank page ahead of content that must flow regardless.
+        if (block <= bottom - M && y + 8 + block > bottom) { doc.addPage(); y = M }
+      }
+
       y += 8
       text(`${n}. ${clean(slide.title)}`, 'serif', 13.5, C.ink)
       y += 4
 
       renderBody(slide)
+      picture(pictures.get(slideIndex))
 
       if (includeNotes && slide.notes) {
         y += 4
