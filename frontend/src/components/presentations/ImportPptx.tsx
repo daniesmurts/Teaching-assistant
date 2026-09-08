@@ -26,9 +26,17 @@ export default function ImportPptx({ onImported }: { onImported: (p: Presentatio
 
     setBusy(true)
     try {
-      const { presentation, source_slide_count } = await importPresentationPptx(file)
+      const { presentation, source_slide_count, images_imported } = await importPresentationPptx(file)
       qc.invalidateQueries({ queryKey: ['presentations'] })
-      addToast(`Загружено слайдов: ${source_slide_count}`, 'success')
+      // Naming the pictures separately matters: a deck of schematics used to
+      // import as captions over nothing, so "10 slides" alone read as success
+      // when half the lecture had been left behind.
+      addToast(
+        images_imported > 0
+          ? `Загружено слайдов: ${source_slide_count}, изображений: ${images_imported}`
+          : `Загружено слайдов: ${source_slide_count}`,
+        'success',
+      )
       onImported(presentation)
     } catch (err: unknown) {
       const message = (err as { response?: { data?: { error?: string } } }).response?.data?.error

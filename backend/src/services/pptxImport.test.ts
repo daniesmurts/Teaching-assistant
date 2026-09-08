@@ -66,18 +66,18 @@ describe('pptx round-trip', () => {
 
   it('returns nothing for a file that is not a pptx, without throwing', async () => {
     // Import must fail as "we couldn't read it", never as a 500.
-    expect(await importPptx(Buffer.from('это не презентация'))).toEqual({ slides: [], sourceSlideCount: 0 })
+    expect(await importPptx(Buffer.from('это не презентация'))).toEqual({ slides: [], sourceSlideCount: 0, imported: [] })
   })
 })
 
 describe('toTypedSlides', () => {
   it('only treats the first slide as a title when it looks like one', () => {
-    const dense = toTypedSlides([{ title: 'Повестка', bullets: ['раз', 'два', 'три', 'четыре'], notes: '' }])
+    const dense = toTypedSlides([{ title: 'Повестка', bullets: ['раз', 'два', 'три', 'четыре'], notes: '', images: [] }])
     expect(dense[0].type).toBe('bullets')   // four bullets is an agenda, not a cover
   })
 
   it('carries the subtitle and lecturer off a cover slide', () => {
-    const [slide] = toTypedSlides([{ title: 'Лекция 1', bullets: ['Гидравлика', 'Иванов И.И.'], notes: '' }])
+    const [slide] = toTypedSlides([{ title: 'Лекция 1', bullets: ['Гидравлика', 'Иванов И.И.'], notes: '', images: [] }])
     expect(slide).toMatchObject({ type: 'title', body: { subtitle: 'Гидравлика', lecturer: 'Иванов И.И.' } })
   })
 })
@@ -123,5 +123,130 @@ describe('run boundaries', () => {
       '<a:p>\n  <a:r><a:t>Кавитация</a:t></a:r>\n  <a:r><a:t>   в насосах</a:t></a:r>\n</a:p>')
     const [slide] = await extractPptxSlides(pptx)
     expect(slide.title).toBe('Кавитация в насосах')
+  })
+})
+
+describe('slide pictures', () => {
+  // Header-only PNGs: imageSize reads the IHDR at a fixed offset and the rest
+  // of the pipeline only ever moves the bytes around, so a real encoded image
+  // would add nothing but weight to the fixture.
+  const png = (w: number, h: number): Buffer => {
+    const buf = Buffer.alloc(33)
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buf, 0)
+    buf.writeUInt32BE(13, 8)
+    buf.write('IHDR', 12, 'latin1')
+    buf.writeUInt32BE(w, 16)
+    buf.writeUInt32BE(h, 20)
+    return buf
+  }
+
+  const deckWithPictures = async (
+    slideBody: string,
+    rels: string,
+    media: Record<string, Buffer>,
+  ): Promise<Buffer> => {
+    const JSZip = (await import('jszip')).default
+    const zip = new JSZip()
+    zip.file('ppt/presentation.xml',
+      '<p:presentation xmlns:p="p" xmlns:r="r"><p:sldIdLst><p:sldId id="256" r:id="rId1"/>' +
+      '</p:sldIdLst></p:presentation>')
+    zip.file('ppt/_rels/presentation.xml.rels',
+      '<Relationships><Relationship Id="rId1" Target="slides/slide1.xml"/></Relationships>')
+    zip.file('ppt/slides/slide1.xml',
+      '<p:sld xmlns:p="p" xmlns:a="a" xmlns:r="r"><p:cSld><p:spTree>' + slideBody + '</p:spTree></p:cSld></p:sld>')
+    zip.file('ppt/slides/_rels/slide1.xml.rels', rels)
+    for (const [name, bytes] of Object.entries(media)) zip.file(`ppt/media/${name}`, bytes)
+    return zip.generateAsync({ type: 'nodebuffer' }) as Promise<Buffer>
+  }
+
+  const IMAGE_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image'
+  const pic = (rId: string) =>
+    `<p:pic><p:blipFill><a:blip r:embed="${rId}"/></p:blipFill></p:pic>`
+
+  it('lifts a picture off the slide it belongs to', async () => {
+    const pptx = await deckWithPictures(
+      pic('rId2'),
+      `<Relationships><Relationship Id="rId2" Type="${IMAGE_REL}" Target="../media/image1.png"/></Relationships>`,
+      { 'image1.png': png(800, 600) },
+    )
+    const [slide] = await extractPptxSlides(pptx)
+    expect(slide.images).toHaveLength(1)
+    expect(slide.images[0]).toMatchObject({ mime: 'image/png', width: 800, height: 600 })
+  })
+
+  it('keeps a slide that has a picture and no text at all', async () => {
+    // A full-page schematic is precisely the slide the text-only import threw
+    // away as blank — the reported deck was mostly these.
+    const pptx = await deckWithPictures(
+      pic('rId2'),
+      `<Relationships><Relationship Id="rId2" Type="${IMAGE_REL}" Target="../media/image1.png"/></Relationships>`,
+      { 'image1.png': png(800, 600) },
+    )
+    const slides = await extractPptxSlides(pptx)
+    expect(slides).toHaveLength(1)
+    expect(slides[0].title).toBe('Без заголовка')
+  })
+
+  it('orders several pictures on one slide largest first', async () => {
+    const pptx = await deckWithPictures(
+      pic('rId2') + pic('rId3'),
+      `<Relationships>
+         <Relationship Id="rId2" Type="${IMAGE_REL}" Target="../media/small.png"/>
+         <Relationship Id="rId3" Type="${IMAGE_REL}" Target="../media/big.png"/>
+       </Relationships>`,
+      { 'small.png': png(200, 150), 'big.png': png(900, 700) },
+    )
+    const [slide] = await extractPptxSlides(pptx)
+    expect(slide.images.map((i) => i.width)).toEqual([900, 200])
+  })
+
+  it('ignores a picture used as a shape fill, not as content', async () => {
+    // <a:blip> also appears in fills and in the layout background. Importing
+    // those would stamp the same texture onto every slide as its illustration.
+    const pptx = await deckWithPictures(
+      '<p:sp><p:spPr><a:blipFill><a:blip r:embed="rId2"/></a:blipFill></p:spPr></p:sp>',
+      `<Relationships><Relationship Id="rId2" Type="${IMAGE_REL}" Target="../media/bg.png"/></Relationships>`,
+      { 'bg.png': png(1920, 1080) },
+    )
+    const slides = await extractPptxSlides(pptx)
+    expect(slides).toHaveLength(0)
+  })
+
+  it('skips furniture — a crest or a bullet glyph is not the drawing', async () => {
+    const pptx = await deckWithPictures(
+      pic('rId2'),
+      `<Relationships><Relationship Id="rId2" Type="${IMAGE_REL}" Target="../media/icon.png"/></Relationships>`,
+      { 'icon.png': png(48, 48) },
+    )
+    const slides = await extractPptxSlides(pptx)
+    expect(slides).toHaveLength(0)
+  })
+
+  it('skips a format it cannot measure or embed (EMF, SVG, video poster)', async () => {
+    const pptx = await deckWithPictures(
+      pic('rId2'),
+      `<Relationships><Relationship Id="rId2" Type="${IMAGE_REL}" Target="../media/drawing.emf"/></Relationships>`,
+      { 'drawing.emf': Buffer.alloc(4000, 1) },
+    )
+    expect(await extractPptxSlides(pptx)).toHaveLength(0)
+  })
+
+  it('ignores an image that is linked rather than embedded', async () => {
+    const pptx = await deckWithPictures(
+      pic('rId2'),
+      `<Relationships><Relationship Id="rId2" Type="${IMAGE_REL}" Target="https://example.org/x.png" TargetMode="External"/></Relationships>`,
+      {},
+    )
+    expect(await extractPptxSlides(pptx)).toHaveLength(0)
+  })
+
+  it('counts the same picture placed twice on a slide once', async () => {
+    const pptx = await deckWithPictures(
+      pic('rId2') + pic('rId2'),
+      `<Relationships><Relationship Id="rId2" Type="${IMAGE_REL}" Target="../media/image1.png"/></Relationships>`,
+      { 'image1.png': png(800, 600) },
+    )
+    const [slide] = await extractPptxSlides(pptx)
+    expect(slide.images).toHaveLength(1)
   })
 })

@@ -328,14 +328,23 @@ function SlideImageBlock({
         />
       </div>
       <div className="flex items-center justify-between mt-1.5 px-1">
-        <a
-          href={image.source_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[10px] font-sans text-ink-tertiary hover:text-amber transition-colors"
-        >
-          Источник: {image.source_host || image.source_url}
-        </a>
+        {/* A picture from the teacher's own uploaded .pptx has no source page
+            to open — its "url" is this app's storage proxy. Linking there
+            would offer «Источник» that just reopens the same image. */}
+        {image.source_url.startsWith('/') ? (
+          <span className="text-[10px] font-sans text-ink-tertiary">
+            {image.source_host || 'Изображение со слайда'}
+          </span>
+        ) : (
+          <a
+            href={image.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] font-sans text-ink-tertiary hover:text-amber transition-colors"
+          >
+            Источник: {image.source_host || image.source_url}
+          </a>
+        )}
         <SlideImagePicker
           presentationId={presentationId}
           slideIdx={slideIdx}

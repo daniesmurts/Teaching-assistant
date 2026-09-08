@@ -22,6 +22,8 @@ import { findQuizzesByPresentation } from '../db/queries/quizzes'
 import { generatePresentationPptx, type DeckBranding } from '../services/presentationExport'
 import { getBrandingForTeacher } from '../db/queries/institutionBranding'
 import { downloadObject } from '../services/objectStorage'
+import { attachImportedImages, deletePresentationMediaObjects } from '../services/presentationMedia'
+import { getPresentationMediaById } from '../db/queries/presentationMedia'
 import { logger } from '../lib/logger'
 import { generatePresentationHandoutPdf } from '../services/presentationHandoutPdf'
 import { recordArtifactEvent } from '../db/queries/artifactEvents'
@@ -281,9 +283,31 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
 // DELETE /api/presentations/:id
 router.delete('/:id', asyncHandler(async (req, res) => {
+  // Objects first, while the rows that name them still exist — the rows go
+  // with the deck (ON DELETE CASCADE) and would take the only pointer with
+  // them. Best-effort inside, so a storage hiccup never blocks the delete.
+  await deletePresentationMediaObjects(req.params.id)
+
   const deleted = await deletePresentation(req.params.id, req.teacher.id)
   if (!deleted) throw new NotFoundError('Презентация')
   res.status(204).send()
+}))
+
+// GET /api/presentations/media/:id/image — streams a picture lifted out of an
+// uploaded .pptx (migration 128). Registered before '/:id' so the literal
+// segment isn't read as a presentation id.
+//
+// Scoped to the owner, unlike GET /api/documents/figures/:id/image, which is
+// authenticated-only: an imported picture is a teacher's own file rather than
+// something they reached through scoped RAG, so "any logged-in teacher with
+// the uuid" is the wrong posture for it.
+router.get('/media/:id/image', asyncHandler(async (req, res) => {
+  const media = await getPresentationMediaById(req.params.id)
+  if (!media || media.teacher_id !== req.teacher.id) throw new NotFoundError('Изображение')
+  const buffer = await downloadObject(media.storage_path)
+  res.setHeader('Content-Type', media.mime_type)
+  res.setHeader('Cache-Control', 'private, max-age=3600')
+  res.send(buffer)
 }))
 
 // GET /api/presentations/:id/export.pptx — real, editable PowerPoint download
@@ -540,7 +564,7 @@ router.post('/import',
     const file = files?.file?.[0]
     if (!file) throw new ValidationError('Загрузите файл презентации (.pptx)')
 
-    const { slides, sourceSlideCount } = await importPptx(file.buffer)
+    const { slides, sourceSlideCount, imported } = await importPptx(file.buffer)
     if (slides.length === 0) {
       throw new ValidationError(
         'Не удалось прочитать эту презентацию. Поддерживается формат .pptx (PowerPoint 2007 и новее) — ' +
@@ -564,7 +588,20 @@ router.post('/import',
       slideCountTarget: slides.length,
     })
 
-    res.status(201).json({ presentation, source_slide_count: sourceSlideCount })
+    // Pictures are stored after the deck exists, because each object's key is
+    // scoped by the presentation id — and a failure here must not cost the
+    // teacher the import, so the deck is already saved by the time it runs.
+    const media = await attachImportedImages(presentation.id, req.teacher.id, presentation.slides ?? slides, imported)
+    const withImages = media.stored > 0
+      ? (await replaceSlides(presentation.id, req.teacher.id, media.slides, renderSlidesAsText(media.slides))) ?? presentation
+      : presentation
+
+    res.status(201).json({
+      presentation:       withImages,
+      source_slide_count: sourceSlideCount,
+      images_imported:    media.stored,
+      images_dropped:     media.dropped,
+    })
   })
 )
 

@@ -1,4 +1,5 @@
 import { XMLParser } from 'fast-xml-parser'
+import { imageSize } from '../lib/imageSize'
 import { logger } from '../lib/logger'
 import { MAX_SLIDE_COUNT } from '../../../shared/types'
 import type { Slide } from '../../../shared/types'
@@ -27,13 +28,36 @@ export interface ImportedSlide {
   title:   string
   bullets: string[]
   notes:   string
+  /** The slide's own pictures, largest first. Empty for a text-only slide. */
+  images:  ImportedImage[]
 }
+
+// A picture lifted out of the archive, still just bytes — it becomes a slide
+// image only once the route has stored it (services/presentationMedia.ts).
+export interface ImportedImage {
+  buffer: Buffer
+  mime:   string
+  width:  number
+  height: number
+}
+
+// PNG and JPEG only. A .pptx may also carry EMF/WMF (a pasted Visio drawing),
+// SVG, or a video poster: pptxgenjs cannot embed the vector formats, browsers
+// cannot render them either, and lib/imageSize can only measure these two — an
+// unmeasurable image would be laid out blind. Skipped rather than stored badly.
+const MEDIA_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+}
+
+// Below this on either axis a picture is furniture — a bullet glyph, a rule, a
+// corner crest — not the drawing the lecture is about.
+const MIN_IMAGE_PX = 100
 
 // Repeating OOXML nodes appear as a single object when there is exactly one of
 // them, and as an array when there are several. Declaring them here means the
 // walk below never has to ask which shape it got.
 const ARRAY_NODES = new Set([
-  'p:sp', 'a:p', 'a:r', 'p:sldId', 'Relationship',
+  'p:sp', 'a:p', 'a:r', 'p:sldId', 'Relationship', 'p:pic',
 ])
 
 const parser = new XMLParser({
@@ -160,6 +184,41 @@ function notesTargetFor(relsXml: string | null): string | null {
   return target ? `ppt/${target.replace(/^\.\.\//, '')}` : null
 }
 
+/** rId → part path, for the image relationships of one slide. */
+function imageRelTargets(relsXml: string | null): Map<string, string> {
+  const out = new Map<string, string>()
+  if (!relsXml) return out
+  const rels = asArray(((parser.parse(relsXml) as Node)['Relationships'] as Node | undefined)?.['Relationship'] as Node[] | undefined)
+  for (const rel of rels) {
+    if (!String(rel['@Type'] ?? '').endsWith('/image')) continue
+    const target = String(rel['@Target'] ?? '')
+    // An external image is linked, not embedded — there are no bytes to take.
+    if (!target || /^https?:/i.test(target) || String(rel['@TargetMode'] ?? '') === 'External') continue
+    out.set(String(rel['@Id'] ?? ''), `ppt/${target.replace(/^\.\.\//, '')}`)
+  }
+  return out
+}
+
+/** Every r:embed under a <p:pic>, in document order.
+ *
+ *  Scoped to <p:pic> deliberately: an <a:blip> also appears in a shape's
+ *  picture FILL and in the layout's background, and those are texture, not
+ *  content — a slide whose background is a photo would otherwise import that
+ *  photo as its illustration on every single slide.
+ */
+function pictureEmbedIds(node: unknown, insidePicture = false): string[] {
+  if (!node || typeof node !== 'object') return []
+  if (Array.isArray(node)) return node.flatMap((n) => pictureEmbedIds(n, insidePicture))
+
+  const out: string[] = []
+  for (const [key, value] of Object.entries(node as Node)) {
+    if (insidePicture && key === '@r:embed') { out.push(String(value)); continue }
+    if (key.startsWith('@')) continue
+    out.push(...pictureEmbedIds(value, insidePicture || key === 'p:pic'))
+  }
+  return out
+}
+
 /**
  * Slide paths in presentation order.
  *
@@ -195,6 +254,52 @@ function extractNotes(notesXml: string): string {
   return shapeTreeLines(spTree).filter((line) => !/^\d+$/.test(line)).join('\n')
 }
 
+/**
+ * One slide's pictures, largest first, measured and filtered.
+ *
+ * Largest first because the app's slide model carries at most one image per
+ * slide: when a slide holds several, area is the honest proxy for which one
+ * the lecture is actually about — the other is usually a кафедра crest or an
+ * arrow. The rest are still returned, so the caller decides rather than this
+ * function silently discarding them.
+ */
+async function slideImages(
+  zip: import('jszip'),
+  slideXml: string,
+  relsXml: string | null,
+): Promise<ImportedImage[]> {
+  const targets = imageRelTargets(relsXml)
+  if (targets.size === 0) return []
+
+  const doc    = parser.parse(slideXml) as Node
+  const spTree = ((doc['p:sld'] as Node | undefined)?.['p:cSld'] as Node | undefined)?.['p:spTree'] as Node | undefined
+  const embeds = pictureEmbedIds(spTree)
+
+  const out: ImportedImage[] = []
+  const seen = new Set<string>()
+  for (const id of embeds) {
+    const partPath = targets.get(id)
+    // The same picture used twice on one slide is one picture.
+    if (!partPath || seen.has(partPath)) continue
+    seen.add(partPath)
+
+    const mime = MEDIA_MIME[partPath.split('.').pop()?.toLowerCase() ?? '']
+    if (!mime) continue
+
+    const file = zip.file(partPath)
+    if (!file) continue
+    const buffer = await file.async('nodebuffer')
+
+    const size = imageSize(buffer)
+    if (!size) continue                                     // not a PNG/JPEG after all
+    if (size.width < MIN_IMAGE_PX || size.height < MIN_IMAGE_PX) continue
+
+    out.push({ buffer, mime, width: size.width, height: size.height })
+  }
+
+  return out.sort((a, b) => b.width * b.height - a.width * a.height)
+}
+
 export async function extractPptxSlides(buffer: Buffer): Promise<ImportedSlide[]> {
   const JSZip = (await import('jszip')).default
   const zip = await JSZip.loadAsync(buffer)
@@ -221,7 +326,8 @@ export async function extractPptxSlides(buffer: Buffer): Promise<ImportedSlide[]
     const { title, bullets } = parseSlideXml(xml)
 
     const relsPath  = path.replace(/slides\/(slide\d+)\.xml$/i, 'slides/_rels/$1.xml.rels')
-    const notesPath = notesTargetFor(await read(relsPath))
+    const relsXml   = await read(relsPath)
+    const notesPath = notesTargetFor(relsXml)
     const notesXml  = notesPath ? await read(notesPath) : null
 
     // A notes part carries more than the notes: PowerPoint also puts a slide
@@ -229,8 +335,12 @@ export async function extractPptxSlides(buffer: Buffer): Promise<ImportedSlide[]
     // numeric-only lines keeps that artefact out of the imported notes.
     const notes = notesXml ? extractNotes(notesXml) : ''
 
-    if (!title && bullets.length === 0 && !notes) continue   // a genuinely blank slide
-    out.push({ title: title || 'Без заголовка', bullets, notes })
+    const images = await slideImages(zip, xml, relsXml)
+
+    // A slide with a picture and no text is not blank — a full-page schematic
+    // is exactly the slide this import used to throw away.
+    if (!title && bullets.length === 0 && !notes && images.length === 0) continue
+    out.push({ title: title || 'Без заголовка', bullets, notes, images })
   }
 
   return out
@@ -266,12 +376,19 @@ export function toTypedSlides(imported: ImportedSlide[]): Slide[] {
   })
 }
 
-export async function importPptx(buffer: Buffer): Promise<{ slides: Slide[]; sourceSlideCount: number }> {
+export async function importPptx(buffer: Buffer): Promise<{
+  slides: Slide[]
+  sourceSlideCount: number
+  /** Index-aligned with `slides` — the caller needs the picture bytes, which
+   *  a Slide cannot carry: an image becomes part of a slide only once it has
+   *  been stored and has a URL (services/presentationMedia.ts). */
+  imported: ImportedSlide[]
+}> {
   try {
     const imported = await extractPptxSlides(buffer)
-    return { slides: toTypedSlides(imported), sourceSlideCount: imported.length }
+    return { slides: toTypedSlides(imported), sourceSlideCount: imported.length, imported }
   } catch (err) {
     logger.warn({ message: '[pptx import] failed to parse', error: (err as Error).message })
-    return { slides: [], sourceSlideCount: 0 }
+    return { slides: [], sourceSlideCount: 0, imported: [] }
   }
 }

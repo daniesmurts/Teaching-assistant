@@ -2,6 +2,9 @@ import { logger } from '../lib/logger'
 import { renderFormulaToPng } from './formulaRenderer'
 import { toPptxColor } from '../lib/brandColor'
 import { containFit } from '../lib/imageSize'
+import { downloadObject } from './objectStorage'
+import { getPresentationMediaById } from '../db/queries/presentationMedia'
+import { getFigureById } from '../db/queries/documentFigures'
 import type {
   Presentation, Slide, SlideImage, TitleSlide, BulletsSlide, ConceptSlide, FormulaSlide,
   ComparisonSlide, DiagramSlide, DiscussionSlide, SummarySlide,
@@ -160,7 +163,44 @@ export function cleanForSlide(text: string): string {
     .trim()
 }
 
+// A slide image is not always out on the web. Two of the three sources are
+// this app's own storage, reached through an authenticated proxy route — the
+// кафедра figure library (`/api/documents/figures/:id/image`) and a picture
+// imported from a .pptx (`/api/presentations/media/:id/image`) — and their
+// URLs are ROOT-RELATIVE. `fetch()` of a relative URL throws in Node, so
+// every such image exported as a "[Изображение]" placeholder even though the
+// bytes were sitting in the same object storage this process can read.
+// Resolving them directly is also a round trip and an HTTP auth hop saved.
+const INTERNAL_IMAGE_ROUTES: [RegExp, (id: string) => Promise<{ path: string; mime: string } | null>][] = [
+  [/^\/api\/presentations\/media\/([0-9a-f-]{36})\/image$/i, async (id) => {
+    const media = await getPresentationMediaById(id)
+    return media ? { path: media.storage_path, mime: media.mime_type } : null
+  }],
+  [/^\/api\/documents\/figures\/([0-9a-f-]{36})\/image$/i, async (id) => {
+    const figure = await getFigureById(id)
+    return figure ? { path: figure.storage_path, mime: figure.mime_type } : null
+  }],
+]
+
+async function localImageAsDataUri(url: string): Promise<string | null> {
+  for (const [pattern, lookup] of INTERNAL_IMAGE_ROUTES) {
+    const match = pattern.exec(url)
+    if (!match) continue
+    try {
+      const found = await lookup(match[1])
+      if (!found) return null
+      const buffer = await downloadObject(found.path)
+      return `data:${found.mime};base64,${buffer.toString('base64')}`
+    } catch (err) {
+      logger.warn({ message: '[PPTX export] could not read stored slide image', url, error: (err as Error).message })
+      return null
+    }
+  }
+  return null
+}
+
 async function fetchImageAsDataUri(url: string): Promise<string | null> {
+  if (url.startsWith('/')) return localImageAsDataUri(url)
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS)

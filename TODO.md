@@ -2463,9 +2463,15 @@ of this entry:
     the largest text on the slide. Round-trip tested through this repo's own
     PPTX exporter rather than a fixture. Bulk notes: 🟢 SHIPPED (2026-09-05) —
     `writeMissingNotes()` + `POST /:id/notes` (queued, costs one generation,
-    button appears only when slides lack notes). **Not done:** slides still
-    import as `bullets` bar a cover slide, so type upgrades remain one
-    «Переписать» at a time.
+    button appears only when slides lack notes). Pictures: 🟢 SHIPPED
+    (2026-09-08) — migration 128's `presentation_media`, a table of its own
+    rather than `document_figures`, which is captioned, embedded and
+    *retrievable* (an imported picture has no business being pulled into a
+    colleague's deck by similarity). One image per slide, because that is what
+    the slide model holds; a slide with several contributes its largest and
+    the API reports what it dropped. **Not done:** slides still import as
+    `bullets` bar a cover slide, so type upgrades remain one «Переписать» at
+    a time; a slide carrying two genuine drawings keeps only one.
   - **Institution branding.** 🟢 SHIPPED (2026-09-05). Migration 125's
     `brand_accent_color`/`brand_logo_path`/`brand_logo_mime`, a «Фирменный
     стиль» page under the institution-admin gate, `lib/brandColor.ts`
