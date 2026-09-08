@@ -81,3 +81,47 @@ describe('toTypedSlides', () => {
     expect(slide).toMatchObject({ type: 'title', body: { subtitle: 'Гидравлика', lecturer: 'Иванов И.И.' } })
   })
 })
+
+describe('run boundaries', () => {
+  // PowerPoint splits one line into a new <a:r> at every formatting change and
+  // leaves the space on the preceding run. The XML parser trims each value by
+  // default, so those spaces disappeared and the words were welded together —
+  // a real deck imported as «ВСС на базеЖКВН» (production, 2026-09-08). This
+  // app's own exporter writes one run per line, so the round-trip tests above
+  // could never have caught it; this fixture is hand-built for that reason.
+  const minimalPptx = async (paragraphXml: string): Promise<Buffer> => {
+    const JSZip = (await import('jszip')).default
+    const zip = new JSZip()
+    zip.file('ppt/presentation.xml',
+      '<p:presentation xmlns:p="p" xmlns:r="r"><p:sldIdLst>' +
+      '<p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>')
+    zip.file('ppt/_rels/presentation.xml.rels',
+      '<Relationships><Relationship Id="rId1" Target="slides/slide1.xml"/></Relationships>')
+    zip.file('ppt/slides/slide1.xml',
+      '<p:sld xmlns:p="p" xmlns:a="a"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr>' +
+      '<p:ph type="ctrTitle"/></p:nvPr></p:nvSpPr><p:txBody>' + paragraphXml +
+      '</p:txBody></p:sp></p:spTree></p:cSld></p:sld>')
+    return zip.generateAsync({ type: 'nodebuffer' }) as Promise<Buffer>
+  }
+
+  it('keeps the space a formatting change left on the preceding run', async () => {
+    const pptx = await minimalPptx(
+      '<a:p><a:r><a:t>ВСС на базе </a:t></a:r><a:r><a:t>ЖКВН</a:t></a:r></a:p>')
+    const [slide] = await extractPptxSlides(pptx)
+    expect(slide.title).toBe('ВСС на базе ЖКВН')
+  })
+
+  it('treats a soft line break as a word boundary', async () => {
+    const pptx = await minimalPptx(
+      '<a:p><a:r><a:t>Рис. 1.</a:t></a:r><a:br/><a:r><a:t>Схема насоса</a:t></a:r></a:p>')
+    const [slide] = await extractPptxSlides(pptx)
+    expect(slide.title).toBe('Рис. 1. Схема насоса')
+  })
+
+  it('still collapses the whitespace a prettified deck carries between runs', async () => {
+    const pptx = await minimalPptx(
+      '<a:p>\n  <a:r><a:t>Кавитация</a:t></a:r>\n  <a:r><a:t>   в насосах</a:t></a:r>\n</a:p>')
+    const [slide] = await extractPptxSlides(pptx)
+    expect(slide.title).toBe('Кавитация в насосах')
+  })
+})

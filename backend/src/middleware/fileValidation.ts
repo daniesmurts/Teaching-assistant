@@ -37,8 +37,8 @@ export const ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   // .pptx — «Загрузить свою презентацию» (TODO.md "### AO" Phase 4). Like
-  // .docx it is a zip, so detectMimeFromBuffer sees no known signature and
-  // the content check passes through, exactly as it has for Word all along.
+  // .docx it is a zip, so the magic-byte check tells them apart by part name,
+  // not by signature — see detectMimeFromBuffer.
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'image/jpeg',
   'image/png',
@@ -94,12 +94,38 @@ export function uploadFields(fields: { name: string; maxCount?: number }[]) {
 
 const MAGIC_BYTES: Record<string, string> = {
   '25504446': 'application/pdf',       // %PDF
-  '504b0304': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // PK zip
   'ffd8ffe0': 'image/jpeg',
   'ffd8ffe1': 'image/jpeg',
   'ffd8ffe2': 'image/jpeg',
   'ffd8ffdb': 'image/jpeg',
   '89504e47': 'image/png',
+}
+
+const ZIP_SIGNATURE = '504b0304'
+
+// Every OOXML format is a zip, so the four leading bytes are identical for
+// .docx, .pptx and .xlsx — mapping the zip signature to one of them (it used
+// to mean .docx) rejects the other two outright: a real PowerPoint sniffed as
+// Word never matched its own declared type, and «Загрузить свою презентацию»
+// answered 422 «Содержимое файла не соответствует его расширению» for every
+// file it was ever given. Found in production 2026-09-08 on a genuine deck.
+//
+// What actually distinguishes them is the part layout inside the archive, and
+// a zip stores each entry's name uncompressed in its local file header — so
+// the names are readable in the raw bytes without unzipping anything. Word is
+// checked first: a .docx may carry an embedded presentation, but it lives at
+// word/embeddings/… and never at ppt/slides/.
+const OOXML_PARTS: [string, string][] = [
+  ['word/document.xml', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  ['ppt/slides/',       'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+  ['xl/workbook.xml',   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+]
+
+function detectOoxmlFromZip(buffer: Buffer): string | null {
+  for (const [part, mime] of OOXML_PARTS) {
+    if (buffer.includes(part, 0, 'latin1')) return mime
+  }
+  return null
 }
 
 // Detect a file's real MIME type from its leading magic bytes, or null when
@@ -109,6 +135,9 @@ const MAGIC_BYTES: Record<string, string> = {
 // shouldn't get a disguised file past us.
 export function detectMimeFromBuffer(buffer: Buffer): string | null {
   const header = buffer.subarray(0, 4).toString('hex').toLowerCase()
+  // A zip that is not recognisably OOXML stays null — "unknown", not "wrong" —
+  // which is how an unknown signature has always been treated.
+  if (header === ZIP_SIGNATURE) return detectOoxmlFromZip(buffer)
   return MAGIC_BYTES[header] ?? null
 }
 

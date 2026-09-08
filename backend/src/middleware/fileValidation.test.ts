@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { repairUploadFilename } from './fileValidation'
+import { repairUploadFilename, detectMimeFromBuffer } from './fileValidation'
 
 // Real mojibake contains NBSP and C1 control chars between the visible
 // glyphs, so we construct test strings by encoding the original name as
@@ -43,5 +43,47 @@ describe('repairUploadFilename', () => {
     const once  = repairUploadFilename(mangle('Расчёт') + '.docx')
     const twice = repairUploadFilename(once)
     expect(twice).toBe(once)
+  })
+})
+
+describe('detectMimeFromBuffer — OOXML', () => {
+  // Every OOXML format opens with the same four zip bytes, so the signature
+  // alone cannot tell .docx from .pptx. It used to be mapped to Word, which
+  // meant a genuine PowerPoint never matched its own declared type and
+  // «Загрузить свою презентацию» answered 422 for every file it was given
+  // (production, 2026-09-08). What separates them is the part layout.
+  const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  const PPTX = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+  const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+  const zipWith = async (paths: string[]): Promise<Buffer> => {
+    const JSZip = (await import('jszip')).default
+    const zip = new JSZip()
+    for (const p of paths) zip.file(p, '<xml/>')
+    return zip.generateAsync({ type: 'nodebuffer' }) as Promise<Buffer>
+  }
+
+  it('reads a presentation as .pptx, not .docx', async () => {
+    expect(detectMimeFromBuffer(await zipWith(['ppt/slides/slide1.xml']))).toBe(PPTX)
+  })
+
+  it('still reads a Word document as .docx', async () => {
+    expect(detectMimeFromBuffer(await zipWith(['word/document.xml']))).toBe(DOCX)
+  })
+
+  it('reads a workbook as .xlsx', async () => {
+    expect(detectMimeFromBuffer(await zipWith(['xl/workbook.xml']))).toBe(XLSX)
+  })
+
+  it('prefers Word when a .docx embeds a presentation object', async () => {
+    expect(detectMimeFromBuffer(await zipWith(['word/document.xml', 'word/embeddings/deck.pptx']))).toBe(DOCX)
+  })
+
+  it('returns null for a zip that is no OOXML format — unknown, not wrong', async () => {
+    expect(detectMimeFromBuffer(await zipWith(['notes.txt']))).toBeNull()
+  })
+
+  it('still identifies a PDF by signature', () => {
+    expect(detectMimeFromBuffer(Buffer.from('%PDF-1.7\n', 'latin1'))).toBe('application/pdf')
   })
 })

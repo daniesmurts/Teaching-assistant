@@ -40,6 +40,13 @@ const parser = new XMLParser({
   ignoreAttributes:   false,
   attributeNamePrefix: '@',
   isArray: (name) => ARRAY_NODES.has(name),
+  // Significant whitespace lives at run boundaries. PowerPoint splits a line
+  // into a new <a:r> at every formatting change and leaves the space on the
+  // preceding run — `<a:t>ВСС на базе </a:t><a:t>ЖКВН</a:t>` — so trimming
+  // each value (the parser's default) welds the words together: a real deck
+  // imported as «ВСС на базеЖКВН». paragraphLines collapses runs of
+  // whitespace afterwards, so nothing downstream sees the untrimmed text.
+  trimValues: false,
 })
 
 type Node = Record<string, unknown>
@@ -47,6 +54,17 @@ type Node = Record<string, unknown>
 function asArray<T>(value: T | T[] | undefined): T[] {
   if (value === undefined || value === null) return []
   return Array.isArray(value) ? value : [value]
+}
+
+// A soft line break (<a:br/>) carries no text, so the words on either side of
+// it would be welded together — «Рис. 1.Схема насоса». It cannot be handled
+// during the walk: the parser groups same-named siblings, so an <a:br> node
+// loses its position relative to the <a:r>s around it. Rewriting it into a
+// whitespace run *before* parsing puts it back in document order, because
+// order among siblings of the same name is preserved. Covers both the empty
+// form and <a:br><a:rPr/></a:br>.
+function breaksToSpaceRuns(xml: string): string {
+  return xml.replace(/<a:br\s*\/>|<a:br(\s[^>]*)?>[\s\S]*?<\/a:br>/g, '<a:r><a:t> </a:t></a:r>')
 }
 
 /** Depth-first text extraction of every <a:t> under a node, in document order. */
@@ -102,7 +120,7 @@ function isTitlePlaceholder(shape: Node): boolean {
 }
 
 function parseSlideXml(xml: string): { title: string; bullets: string[] } {
-  const doc    = parser.parse(xml) as Node
+  const doc    = parser.parse(breaksToSpaceRuns(xml)) as Node
   const spTree = ((doc['p:sld'] as Node | undefined)?.['p:cSld'] as Node | undefined)?.['p:spTree'] as Node | undefined
   const shapes = asArray(spTree?.['p:sp'] as Node[] | undefined)
     .map((shape) => ({ shape, lines: paragraphLines(shape['p:txBody']) }))
@@ -172,7 +190,7 @@ function orderedSlidePaths(presentationXml: string | null, relsXml: string | nul
 }
 
 function extractNotes(notesXml: string): string {
-  const notesDoc = parser.parse(notesXml) as Node
+  const notesDoc = parser.parse(breaksToSpaceRuns(notesXml)) as Node
   const spTree = ((notesDoc['p:notes'] as Node | undefined)?.['p:cSld'] as Node | undefined)?.['p:spTree'] as Node | undefined
   return shapeTreeLines(spTree).filter((line) => !/^\d+$/.test(line)).join('\n')
 }
