@@ -192,13 +192,42 @@ fi
 # [6/8] runs, which shrinks the window where the two halves disagree from
 # minutes to seconds.
 echo "▶ [2/8] Verifying backend image ${IMAGE_TAG} is in the registry…"
-if ssh "$VM_HOST" "docker pull cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${IMAGE_TAG} >/dev/null 2>&1"; then
+
+# Reachability is checked BEFORE the pull, and separately from it.
+#
+# Both used to fail through the same branch, so a dropped SSH connection was
+# reported as "no backend image in the registry" — sending the operator to
+# inspect the CI image job and the registry credentials, the one place the
+# fault was not. FOUND 2026-09-09: sshd closed the connection mid-deploy and
+# the script blamed a missing artifact that had in fact been built and pushed
+# correctly. An error message that names the wrong subsystem costs more than
+# the failure it reports.
+if ! SSH_ERR="$(ssh -o BatchMode=yes -o ConnectTimeout=15 "$VM_HOST" true 2>&1)"; then
+  echo "❌ Cannot reach the VM over SSH (${VM_HOST})."
+  [ -n "${SSH_ERR}" ] && echo "   ssh said: ${SSH_ERR}"
+  echo "   Nothing was deployed — the frontend has NOT been uploaded, so production is unchanged."
+  echo "   This is CONNECTIVITY, not a missing image: the CI artifact is probably fine."
+  echo "   Repeated connections in a short window can trip fail2ban on the VM — wait a few"
+  echo "   minutes and retry before investigating anything else."
+  exit 1
+fi
+
+# Now a failure really is about the artifact, so the pull's own stderr is
+# surfaced rather than discarded: "manifest unknown" (never pushed) and
+# "unauthorized" (VM cannot authenticate to the registry) are different
+# problems with different fixes, and guessing between them in prose was the
+# other half of the original bug.
+if PULL_ERR="$(ssh "$VM_HOST" "docker pull cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${IMAGE_TAG}" 2>&1)"; then
   echo "  ✓ image present, and now pre-pulled on the VM"
 else
-  echo "❌ No backend image cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${IMAGE_TAG}"
+  echo "❌ Could not pull cr.yandex/${YC_REGISTRY_ID}/ispum-backend:${IMAGE_TAG}"
   echo "   Nothing was deployed — the frontend has NOT been uploaded, so production is unchanged."
-  echo "   Most likely CI passed but its image job did not push (check that job, and the registry"
-  echo "   credentials), or the VM cannot authenticate to the registry."
+  echo "   docker said:"
+  echo "${PULL_ERR}" | tail -n 5 | sed 's/^/     /'
+  echo "   • \"manifest unknown\" / \"not found\" — CI passed but its image job did not push."
+  echo "     A green run promises the tests, not the artifact; check that job."
+  echo "   • \"unauthorized\" / \"denied\" — the VM cannot authenticate to the registry"
+  echo "     (docker login cr.yandex on the VM)."
   exit 1
 fi
 
