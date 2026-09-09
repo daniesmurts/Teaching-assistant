@@ -19,6 +19,8 @@ import {
 } from '../db/queries/presentationJobs'
 import { scheduleWithLease } from './schedulerLease'
 import { logger } from '../lib/logger'
+import { userFacingFailure } from '../lib/userFacingFailure'
+import { ValidationError } from '../errors/AppError'
 
 export const PRESENTATION_JOB_QUEUE = 'presentation-job'
 
@@ -125,7 +127,11 @@ export async function registerPresentationJobWorker(boss: PgBoss): Promise<void>
             // this job's payload was built.
             const outline = existing.outline
             if (!outline || outline.length === 0) {
-              throw new Error('Подтверждённый план не найден')
+              // A ValidationError rather than a bare Error so the wording —
+              // which is already written for the teacher — survives
+              // userFacingFailure instead of being replaced by the generic
+              // fallback along with everything unrecognised.
+              throw new ValidationError('Подтверждённый план не найден — создайте презентацию заново')
             }
             const result = await expandPresentation(params, {
               outline,
@@ -151,7 +157,14 @@ export async function registerPresentationJobWorker(boss: PgBoss): Promise<void>
           // retries are exhausted, so the UI doesn't flash "failed" right
           // before a silent retry succeeds.
           if (isLastAttempt) {
-            await failPresentationJob(jobId, (err as Error).message).catch(() => null)
+            // The raw message is in the log line above and in
+            // production_incidents; what lands in this column is printed to
+            // the teacher verbatim by PresentationForm, so it has to be
+            // Russian and actionable (see lib/userFacingFailure.ts).
+            await failPresentationJob(
+              jobId,
+              userFacingFailure(err, 'Не удалось создать презентацию. Попробуйте ещё раз.'),
+            ).catch(() => null)
           }
           throw err   // rethrow — this is what tells pg-boss the attempt failed
         }

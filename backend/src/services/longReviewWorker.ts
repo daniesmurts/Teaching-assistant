@@ -7,6 +7,7 @@ import type PgBoss from 'pg-boss'
 import { runLongReview, type RunParams } from './longReview'
 import { failLongReview } from '../db/queries/longReviews'
 import { logger } from '../lib/logger'
+import { userFacingFailure } from '../lib/userFacingFailure'
 
 export const LONG_REVIEW_QUEUE = 'long-review'
 
@@ -53,7 +54,10 @@ export async function registerLongReviewWorker(boss: PgBoss): Promise<void> {
         // exhausted — otherwise the UI would flash "failed" moments before a
         // silent, automatic retry picks it back up.
         if (isLastAttempt) {
-          await failLongReview(job.data.reviewId, (err as Error).message).catch(() => null)
+          await failLongReview(
+            job.data.reviewId,
+            userFacingFailure(err, 'Не удалось выполнить рецензирование. Попробуйте ещё раз.'),
+          ).catch(() => null)
         }
         throw err   // rethrow — this is what tells pg-boss the attempt failed
       }

@@ -2,6 +2,7 @@ import axios from 'axios'
 import { createUsageLog } from '../../db/queries/usageLog'
 import { calculateQwenCost } from '../../config/planLimits'
 import { logger } from '../../lib/logger'
+import { resolveModelJSON, TruncatedResponseError } from './modelJson'
 import type {
   CallContext, ChatMessage, ChatOptions, LLMProvider, ProviderCapabilities,
 } from './types'
@@ -108,9 +109,22 @@ export class QwenProvider implements LLMProvider {
         }).catch((e) => logger.warn({ message: 'Failed to write usage log', error: e.message }))
       }
 
+      // A cut-off answer is not a transient failure: the identical request
+      // truncates in the same place, and the trimmed remains reach a teacher
+      // as a JSON parser message (production, 2026-09-09). DeepSeek has had
+      // this check since Improvement #10; Qwen never did.
+      const choice = response.data.choices[0]
+      if (choice.finish_reason === 'length') {
+        logger.warn({
+          message: 'Qwen response truncated at the token ceiling — not retrying',
+          feature: opts.context?.feature, model, outputTokens, maxTokens: opts.maxTokens,
+        })
+        throw new TruncatedResponseError(model, opts.maxTokens, 'Qwen')
+      }
+
       // Thinking-mode chain-of-thought lands in message.reasoning_content on
       // most Qwen3-compatible servers — never returned, same policy as DeepSeek.
-      return response.data.choices[0].message.content as string
+      return choice.message.content as string
 
     } catch (err) {
       errorCode = axios.isAxiosError(err) ? `HTTP_${err.response?.status ?? 0}` : 'UNKNOWN'
@@ -137,20 +151,17 @@ export class QwenProvider implements LLMProvider {
     opts:       ChatOptions = {},
   ): Promise<T> {
     const raw = await this.chat(messages, { ...opts, jsonMode: true })
-    try {
-      return JSON.parse(extractJSON(raw)) as T
-    } catch {
-      const retryMessages: ChatMessage[] = [
+    return resolveModelJSON<T>(raw, retryLabel, () => this.chat(
+      [
         ...messages,
         { role: 'assistant', content: raw },
         {
           role:    'user',
           content: `Ваш ${retryLabel} не был валидным JSON. Ответьте ТОЛЬКО валидным JSON-объектом, без markdown и пояснений.`,
         },
-      ]
-      const retryRaw = await this.chat(retryMessages, { ...opts, jsonMode: true })
-      return JSON.parse(extractJSON(retryRaw)) as T
-    }
+      ],
+      { ...opts, jsonMode: true },
+    ))
   }
 
   // Embeddings always route through Yandex regardless of chat provider
@@ -161,10 +172,3 @@ export class QwenProvider implements LLMProvider {
   }
 }
 
-function extractJSON(raw: string): string {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  const candidate = (fenced ? fenced[1] : raw).trim()
-  const first = candidate.indexOf('{')
-  const last  = candidate.lastIndexOf('}')
-  return first !== -1 && last > first ? candidate.slice(first, last + 1) : candidate
-}

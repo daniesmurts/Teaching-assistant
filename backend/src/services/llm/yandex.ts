@@ -3,6 +3,7 @@ import { createUsageLog } from '../../db/queries/usageLog'
 import { calculateYandexChatCostRub, calculateYandexEmbedCostRub } from '../../config/planLimits'
 import { getUsdRubRate, rubToUsd } from '../fxRate'
 import { logger } from '../../lib/logger'
+import { resolveModelJSON, TruncatedResponseError } from './modelJson'
 import type {
   CallContext, ChatMessage, ChatOptions, LLMProvider, ProviderCapabilities,
 } from './types'
@@ -77,6 +78,7 @@ export class YandexProvider implements LLMProvider {
 
       const alternative = response.data.result?.alternatives?.[0]
       const text = (alternative?.message?.text as string | undefined) ?? ''
+
       const usage = response.data.result?.usage as {
         inputTextTokens?:  string | number
         completionTokens?: string | number
@@ -84,6 +86,25 @@ export class YandexProvider implements LLMProvider {
 
       const inputTokens  = Number(usage?.inputTextTokens ?? 0)
       const outputTokens = Number(usage?.completionTokens ?? 0)
+
+      // Yandex reports a cut-off answer in the alternative's STATUS — there is
+      // no finish_reason here — and ignoring it is how a severed answer used
+      // to reach chatJSON, get trimmed back to its last complete `}` and
+      // surface to a teacher as «Expected ',' or ']' after array element in
+      // JSON at position 3203» (production, 2026-09-09). Fail with the fact
+      // instead: an identical retry truncates in the same place.
+      if (String(alternative?.status ?? '').includes('TRUNCATED')) {
+        logger.warn({
+          message: 'Yandex response truncated at the token ceiling — not retrying',
+          feature: opts.context?.feature, model: CHAT_MODEL, outputTokens, maxTokens: opts.maxTokens,
+        })
+        if (opts.context) {
+          logYandexChatUsage(opts.context, inputTokens, outputTokens, Date.now() - start, false, 'TRUNCATED')
+            .catch(() => null)
+        }
+        throw new TruncatedResponseError(CHAT_MODEL, opts.maxTokens, 'Yandex')
+      }
+
 
       if (opts.context) {
         // Fire-and-forget, including the FX lookup — getUsdRubRate() is
@@ -126,20 +147,17 @@ export class YandexProvider implements LLMProvider {
   ): Promise<T> {
     const enforced = enforceJsonInstruction(messages)
     const raw = await this.chat(enforced, opts)
-    try {
-      return JSON.parse(extractJSON(raw)) as T
-    } catch {
-      const retryMessages: ChatMessage[] = [
+    return resolveModelJSON<T>(raw, retryLabel, () => this.chat(
+      [
         ...enforced,
         { role: 'assistant', content: raw },
         {
           role:    'user',
           content: `Ваш ${retryLabel} не был валидным JSON. Ответьте ТОЛЬКО валидным JSON-объектом, без markdown и пояснений.`,
         },
-      ]
-      const retryRaw = await this.chat(retryMessages, opts)
-      return JSON.parse(extractJSON(retryRaw)) as T
-    }
+      ],
+      opts,
+    ))
   }
 
   // ─── embed (existing impl, moved here verbatim) ──────────────────────────
@@ -219,6 +237,7 @@ export class YandexProvider implements LLMProvider {
 
 async function logYandexChatUsage(
   context: CallContext, inputTokens: number, outputTokens: number, durationMs: number, success: boolean,
+  errorCode?: string,
 ): Promise<void> {
   const costRub = calculateYandexChatCostRub(inputTokens, outputTokens)
   const { rate } = await getUsdRubRate()
@@ -230,7 +249,7 @@ async function logYandexChatUsage(
     costNative: costRub,
     currency:   'RUB',
     fxRateUsed: rate,
-    durationMs, success,
+    durationMs, success, errorCode,
   })
 }
 
@@ -268,10 +287,3 @@ function enforceJsonInstruction(messages: ChatMessage[]): ChatMessage[] {
 
 // Same JSON extraction logic as DeepSeek's — pulls the object out of any
 // fencing or surrounding prose.
-function extractJSON(raw: string): string {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  const candidate = (fenced ? fenced[1] : raw).trim()
-  const first = candidate.indexOf('{')
-  const last  = candidate.lastIndexOf('}')
-  return first !== -1 && last > first ? candidate.slice(first, last + 1) : candidate
-}

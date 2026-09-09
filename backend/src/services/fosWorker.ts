@@ -6,6 +6,7 @@ import type PgBoss from 'pg-boss'
 import { runFosGeneration, type RunFosParams } from './fosGenerator'
 import { failFosDocument } from '../db/queries/fosDocuments'
 import { logger } from '../lib/logger'
+import { userFacingFailure } from '../lib/userFacingFailure'
 
 export const FOS_QUEUE = 'fos-generation'
 
@@ -43,7 +44,10 @@ export async function registerFosWorker(boss: PgBoss): Promise<void> {
         // Only surface a terminal failure once retries are exhausted — same
         // "don't flash failed moments before a silent retry" rule as long-review.
         if (isLastAttempt) {
-          await failFosDocument(job.data.fosId, (err as Error).message).catch(() => null)
+          await failFosDocument(
+            job.data.fosId,
+            userFacingFailure(err, 'Не удалось собрать ФОС. Попробуйте ещё раз.'),
+          ).catch(() => null)
         }
         throw err
       }

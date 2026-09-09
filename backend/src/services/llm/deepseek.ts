@@ -3,6 +3,7 @@ import { createUsageLog } from '../../db/queries/usageLog'
 import { calculateDeepSeekCost } from '../../config/planLimits'
 import { logger } from '../../lib/logger'
 import { sendTelegramAlert } from '../../lib/telegramAlert'
+import { extractJSON, resolveModelJSON, TruncatedResponseError } from './modelJson'
 import type {
   CallContext, ChatMessage, ChatOptions, LLMProvider, ProviderCapabilities, VisionContentPart,
 } from './types'
@@ -85,15 +86,8 @@ function isRetryable(err: unknown): boolean {
 // a generic failure lets both retry loops fail fast instead of burning a
 // second doomed call. Not an AxiosError, so isRetryable() above already
 // treats it as non-retryable without any extra casing.
-export class TruncatedResponseError extends Error {
-  constructor(model: string, maxTokens?: number) {
-    super(
-      `DeepSeek response truncated at the token ceiling (model=${model}` +
-      `${maxTokens != null ? `, max_tokens=${maxTokens}` : ''}) — retrying the identical request would truncate again.`
-    )
-    this.name = 'TruncatedResponseError'
-  }
-}
+export { TruncatedResponseError } from './modelJson'
+
 
 // How long a failed account is deprioritized (not excluded — see
 // orderAccounts below) after a retryable failure. Short enough that a
@@ -262,7 +256,7 @@ export class DeepSeekProvider implements LLMProvider {
           message: 'DeepSeek response truncated at token ceiling — not retrying (identical request would truncate again)',
           feature: opts.context?.feature, model, account: account.label, outputTokens, maxTokens: opts.maxTokens,
         })
-        throw new TruncatedResponseError(model, opts.maxTokens)
+        throw new TruncatedResponseError(model, opts.maxTokens, 'DeepSeek')
       }
 
       if (opts.context) {
@@ -421,20 +415,17 @@ export class DeepSeekProvider implements LLMProvider {
     opts:       ChatOptions = {},
   ): Promise<T> {
     const raw = await this.chat(messages, { ...opts, jsonMode: true })
-    try {
-      return JSON.parse(extractJSON(raw)) as T
-    } catch {
-      const retryMessages: ChatMessage[] = [
+    return resolveModelJSON<T>(raw, retryLabel, () => this.chat(
+      [
         ...messages,
         { role: 'assistant', content: raw },
         {
           role:    'user',
           content: `Ваш ${retryLabel} не был валидным JSON. Ответьте ТОЛЬКО валидным JSON-объектом, без markdown и пояснений.`,
         },
-      ]
-      const retryRaw = await this.chat(retryMessages, { ...opts, jsonMode: true })
-      return JSON.parse(extractJSON(retryRaw)) as T
-    }
+      ],
+      { ...opts, jsonMode: true },
+    ))
   }
 
   // Embeddings live on Yandex regardless of which chat provider is selected
@@ -452,13 +443,3 @@ function describeError(err: unknown): string {
   return err instanceof Error ? err.message : 'unknown error'
 }
 
-// Pull a JSON object out of a response that might be fenced or surrounded
-// by prose (the reasoner has no strict mode and even chat-mode sometimes
-// wraps its output).
-function extractJSON(raw: string): string {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  const candidate = (fenced ? fenced[1] : raw).trim()
-  const first = candidate.indexOf('{')
-  const last  = candidate.lastIndexOf('}')
-  return first !== -1 && last > first ? candidate.slice(first, last + 1) : candidate
-}

@@ -11,6 +11,7 @@ import {
   getGradeJobByIdUnscoped, setGradeJobProcessing, completeGradeJob, failGradeJob,
 } from '../db/queries/gradeJobs'
 import { logger } from '../lib/logger'
+import { userFacingFailure } from '../lib/userFacingFailure'
 
 export const GRADE_JOB_QUEUE = 'grade-job'
 
@@ -65,7 +66,10 @@ export async function registerGradeJobWorker(boss: PgBoss): Promise<void> {
         // retries are exhausted, so the UI doesn't flash "failed" right
         // before a silent retry succeeds.
         if (isLastAttempt) {
-          await failGradeJob(jobId, (err as Error).message).catch(() => null)
+          await failGradeJob(
+            jobId,
+            userFacingFailure(err, 'Не удалось проверить работу. Попробуйте ещё раз.'),
+          ).catch(() => null)
         }
         throw err   // rethrow — this is what tells pg-boss the attempt failed
       }

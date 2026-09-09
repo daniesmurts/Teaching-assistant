@@ -123,7 +123,9 @@ describe('presentationJobWorker', () => {
     } as never)
 
     await expect((await captureHandlers())(stagedJob('expand', 1, 1))).rejects.toThrow('Подтверждённый план не найден')
-    expect(failPresentationJob).toHaveBeenCalledWith('job1', 'Подтверждённый план не найден')
+    // An AppError's wording is written for the teacher, so it reaches the row
+    // intact — unlike a raw provider error, which is replaced (see below).
+    expect(failPresentationJob).toHaveBeenCalledWith('job1', 'Подтверждённый план не найден — создайте презентацию заново')
   })
 
   it('treats a payload with no stage as the full pre-gate generation', async () => {
@@ -147,6 +149,9 @@ describe('presentationJobWorker', () => {
     vi.mocked(generatePresentation).mockRejectedValue(new Error('provider down'))
 
     await expect((await captureHandlers())(job(1, 1))).rejects.toThrow('provider down')
-    expect(failPresentationJob).toHaveBeenCalledWith('job1', 'provider down')
+    // The row is what the form prints verbatim, so an internal message never
+    // reaches it — production showed a teacher a raw JSON.parse error this way
+    // (2026-09-09, see lib/userFacingFailure.ts).
+    expect(failPresentationJob).toHaveBeenCalledWith('job1', 'Не удалось создать презентацию. Попробуйте ещё раз.')
   })
 })

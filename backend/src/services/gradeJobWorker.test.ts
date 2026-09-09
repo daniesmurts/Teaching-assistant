@@ -73,6 +73,9 @@ describe('gradeJobWorker', () => {
     vi.mocked(grade).mockRejectedValue(new Error('provider down'))
 
     await expect((await captureHandler())(job(1, 1))).rejects.toThrow('provider down')
-    expect(failGradeJob).toHaveBeenCalledWith('job1', 'provider down')
+    // GradingForm prints this column verbatim, so an internal message never
+    // reaches it (lib/userFacingFailure.ts — a raw JSON.parse error was shown
+    // to a teacher this way on 2026-09-09).
+    expect(failGradeJob).toHaveBeenCalledWith('job1', 'Не удалось проверить работу. Попробуйте ещё раз.')
   })
 })
