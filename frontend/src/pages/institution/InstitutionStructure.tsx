@@ -11,6 +11,9 @@ import {
 } from '../../api/orgStructure'
 import { EDUCATION_LEVELS, STUDY_FORMS } from '../../types'
 import { buildTree, TYPE_LABEL, type TreeNode } from '../../lib/orgTree'
+import {
+  GrantEffectPreview, MemberAccessPanel, toHeldGrants, pendingGrant,
+} from '../../components/institution/AccessPreview'
 
 const ROLE_LABEL: Record<UnitRole, string> = {
   admin: 'Администратор',
@@ -518,6 +521,16 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
   const [roleUnit, setRoleUnit] = useState(units[0]?.id ?? '')
   const [role, setRole] = useState<UnitRole>('edit')
   const [domain, setDomain] = useState<GrantDomain>('all')
+  // «Что видит этот человек» — the resolved effect of every role they hold,
+  // read from shared/accessCatalog.ts. Collapsed by default: the roster is
+  // long, and this is a per-person question.
+  const [showAccess, setShowAccess] = useState(false)
+
+  // Everything the member holds today, in catalog shape. Feeds both the
+  // person view and the assign form's delta ("what does this ADD?"), so a
+  // grant that only duplicates an existing one says so instead of looking
+  // like new access.
+  const heldGrants = useMemo(() => toHeldGrants(member.roles, unitsById), [member.roles, unitsById])
 
   const selectCls =
     'text-sm font-sans bg-surface border border-border rounded-md px-2.5 py-1.5 outline-none ' +
@@ -605,6 +618,11 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
               + роль
             </button>
           )}
+          <button onClick={() => setShowAccess((v) => !v)}
+            aria-expanded={showAccess}
+            className="text-xs font-sans text-ink-secondary hover:text-amber transition-colors px-2 py-1 border border-border-mid rounded-md flex-shrink-0">
+            {showAccess ? 'Скрыть доступ' : 'Что видит'}
+          </button>
         </div>
       </div>
 
@@ -623,6 +641,8 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
           </span>
         </div>
       )}
+
+      {showAccess && <MemberAccessPanel grants={heldGrants} />}
 
       {/* Grant a role — own full-width line so long unit names have room */}
       {adding && (() => {
@@ -676,6 +696,12 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
             <p className="text-[11px] font-sans text-warning bg-warning-bg border border-warning/15 rounded-md px-2.5 py-1.5">
               {warning}
             </p>
+          )}
+          {/* What «Назначить» will actually do — the delta over what this */}
+          {/* member already holds. Hidden for the blocked combination: it */}
+          {/* cannot be submitted, so previewing its effect would be noise. */}
+          {unit && !blocked && (
+            <GrantEffectPreview existing={heldGrants} pending={pendingGrant(unit, role, domain)} />
           )}
         </div>
         )
