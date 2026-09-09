@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { getArtifactUsage, getDailyUsage, getPresentationLifecycle, getUsageByFeature, getUsageByModel, getUsageByTeacher } from '../../api/admin'
 import { ARTIFACT_LABEL } from '../../lib/artifactLabels'
 import CohortCurves from '../../components/admin/CohortCurves'
+import BeforeAfter from '../../components/admin/BeforeAfter'
 
 type Tab = 'artifact' | 'lifecycle' | 'day' | 'feature' | 'model' | 'teacher'
 
@@ -167,6 +168,10 @@ export default function AdminUsage() {
 
               <div className="mb-4">
                 <CohortCurves cohorts={decks?.cohorts ?? []} />
+              </div>
+
+              <div className="mb-4">
+                <BeforeAfter />
               </div>
 
               {/* Что именно правят — сигнал качества генерации, а не использования */}

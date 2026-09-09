@@ -30,6 +30,7 @@ import { getFunnelSummary, getFunnelByWeek, getStalledTeachers } from '../db/que
 import { getFeatureAdoption, getFeatureBreadth } from '../db/queries/featureAdoption'
 import { getWritingFunnel, getLiveSessionEngagement } from '../db/queries/studentEngagement'
 import { getPresentationLifecycle, getSlideEditHotspots, getRecentSlideInstructions, getPresentationCohorts } from '../db/queries/presentationLifecycle'
+import { getWithinSubjectComparison } from '../db/queries/withinSubject'
 import { listDeploymentsSummary } from '../db/queries/controlPlane'
 import {
   findPaymentsByTeacher, findPaymentByOrderId, markPaymentRefunded,
@@ -144,6 +145,23 @@ router.get('/usage/presentation-lifecycle', asyncHandler(async (req, res) => {
     getPresentationCohorts(10),
   ])
   res.json({ lifecycle, hotspots, instructions, cohorts })
+}))
+
+// ─── GET /api/admin/usage/before-after?date=YYYY-MM-DD&days=14 ───────────────
+// Each teacher compared to themselves across a release date, over teachers
+// active on both sides. Removes population mix — the confound big enough to
+// invent findings on its own at this scale. Metrics whose signal did not exist
+// for the whole before-window come back marked uncomparable rather than
+// confidently wrong; see db/queries/withinSubject.ts.
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+router.get('/usage/before-after', asyncHandler(async (req, res) => {
+  const date = String(req.query.date ?? '')
+  if (!ISO_DATE.test(date)) throw new ValidationError('Ожидается дата в формате YYYY-MM-DD.')
+  const parsedDays = parseInt((req.query.days as string) ?? '14', 10)
+  const days = Number.isFinite(parsedDays) ? Math.min(Math.max(parsedDays, 1), 180) : 14
+  res.json(await getWithinSubjectComparison({ date, days }))
 }))
 
 // ─── GET /api/admin/errors?days=7 ────────────────────────────────────────────

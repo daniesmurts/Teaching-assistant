@@ -2700,6 +2700,33 @@ export interface PresentationLifecycle {
   export_tracking_since:     string | null
 }
 
+export interface WithinSubjectMetric {
+  key:   'decks_created' | 'edited_share' | 'exported_share' | 'reused_share' | 'engaged_share'
+  label: string
+  /** False when the signal did not exist for the whole before-window; every figure below is then null. */
+  comparable:         boolean
+  /** The date the signal started being recorded, when that is why it is not comparable. */
+  unavailable_before: string | null
+  before_median: number | null
+  after_median:  number | null
+  /** Median of PER-TEACHER deltas — not the difference of the two medians above. */
+  median_delta:  number | null
+  improved:  number
+  worsened:  number
+  unchanged: number
+}
+
+export interface WithinSubjectComparison {
+  release_date:     string
+  window_days:      number
+  window_start:     string
+  /** Teachers who created at least one deck in BOTH windows — the only ones compared. */
+  matched_teachers: number
+  before_only:      number
+  after_only:       number
+  metrics:          WithinSubjectMetric[]
+}
+
 export interface CohortHorizon {
   days: number
   /** Decks that have actually lived this long AND were created after export recording began. */

@@ -397,6 +397,11 @@ export async function getPresentationLifecycle(days = 30): Promise<{
   return res.data
 }
 
+export async function getBeforeAfter(date: string, days = 14): Promise<WithinSubjectComparison> {
+  const res = await client.get<WithinSubjectComparison>('/api/admin/usage/before-after', { params: { date, days } })
+  return res.data
+}
+
 export async function getStudentEngagement(days = 90): Promise<{ writing: WritingFunnel; live: LiveSessionEngagement }> {
   const res = await client.get<{ writing: WritingFunnel; live: LiveSessionEngagement }>('/api/admin/students', { params: { days } })
   return res.data
@@ -509,7 +514,7 @@ export async function importFgosvoItem(item: { code: string; name: string; level
 // ─── Профстандарт/ОТФ registry (migration 115) ─────────────────────────────
 
 import type { Profstandard, ProfstandardWithChildren, ProfstandardDraft } from '../types'
-import type { FunnelSummary, FunnelCohort, StalledTeacher, FeatureAdoptionRow, FeatureBreadthRow, WritingFunnel, LiveSessionEngagement, PresentationLifecycle, SlideEditHotspot, SlideInstruction, PresentationCohort, AuditFilters, InstitutionContract, PaymentsSummary, MonthlyRevenue, CapacityOverview } from '../../../shared/types'
+import type { FunnelSummary, FunnelCohort, StalledTeacher, FeatureAdoptionRow, FeatureBreadthRow, WritingFunnel, LiveSessionEngagement, PresentationLifecycle, SlideEditHotspot, SlideInstruction, PresentationCohort, WithinSubjectComparison, AuditFilters, InstitutionContract, PaymentsSummary, MonthlyRevenue, CapacityOverview } from '../../../shared/types'
 export type { InstitutionContract, InstitutionSummaryRow, CapacityOverview } from '../../../shared/types'
 
 export async function getProfstandards(

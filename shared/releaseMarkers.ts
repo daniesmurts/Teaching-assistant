@@ -46,3 +46,37 @@ export const RELEASE_MARKERS: readonly ReleaseMarker[] = [
     expect: 'Раньше этой даты выгрузок не «мало» — их не существует как сигнала. Сравнения через эту границу недействительны.',
   },
 ]
+
+// ─── When each behavioural signal started existing ───────────────────────────
+//
+// A before/after comparison is only valid if the signal it measures was being
+// recorded for the WHOLE "before" window. Otherwise the release looks like it
+// caused a jump that is really the telemetry switching on — the most flattering
+// possible error, and the easiest one to publish by accident.
+//
+// These are deploy dates established from git history and the changelog, not
+// guesses: migrations 119/120/122 (slide edits, quiz-from-deck, deck approval)
+// reached production with v1.6.0 on 2026-09-05; migration 126 (export
+// recording) on 2026-09-06.
+//
+// Note what this implies and do not work around it: the v1.6.0 release cannot
+// be evaluated by before/after, because the instrumentation for the very
+// behaviours it introduced shipped inside it. There is no "before" to compare.
+// Only releases after 2026-09-06 are comparable on these signals.
+
+export type BehaviourSignal = 'created' | 'edited' | 'approved' | 'exported' | 'reused'
+
+export const SIGNAL_SINCE: Record<BehaviourSignal, string | null> = {
+  // Derived from the presentations table itself — exists for all history.
+  created:  null,
+  edited:   '2026-09-05',   // migration 119, presentation_slide_events
+  approved: '2026-09-05',   // migration 122, presentations.approved_at
+  reused:   '2026-09-05',   // migration 120/124, quizzes/published_assignments.presentation_id
+  exported: '2026-09-06',   // migration 126, artifact_events
+}
+
+/** True when `signal` was already being recorded at `date` (YYYY-MM-DD). */
+export function signalObservableAt(signal: BehaviourSignal, date: string): boolean {
+  const since = SIGNAL_SINCE[signal]
+  return since === null || date >= since
+}
