@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { pool } from '../connection'
-import { getPresentationLifecycle, getSlideEditHotspots, getRecentSlideInstructions } from './presentationLifecycle'
+import { getPresentationLifecycle, getSlideEditHotspots, getRecentSlideInstructions, getPresentationCohorts } from './presentationLifecycle'
 import { createTestTeacher, createTestCourse } from '../__tests__/fixtures'
 
 beforeEach(async () => { await pool.query('BEGIN') })
@@ -147,5 +147,80 @@ describe('slide edit quality signals', () => {
     const rows = await getRecentSlideInstructions(10)
     expect(rows).toHaveLength(1)
     expect(rows[0].instruction).toBe('короче')
+  })
+})
+
+describe('getPresentationCohorts', () => {
+  async function trackFrom(daysAgo: number, teacherId: string): Promise<void> {
+    await pool.query(
+      `INSERT INTO artifact_events (kind, event, teacher_id, created_at)
+       VALUES ('presentation','exported',$1, NOW() - ($2 || ' days')::INTERVAL)`,
+      [teacherId, daysAgo]
+    )
+  }
+
+  const horizon = (c: { horizons: { days: number; observed: number; engaged: number }[] }, days: number) => {
+    const h = c.horizons.find((x) => x.days === days)
+    if (!h) throw new Error(`no horizon ${days}`)
+    return h
+  }
+
+  // Each deck is scored on ITS OWN first N days, which is what makes two
+  // cohorts comparable even when creation volume differs wildly between them.
+  it('measures every deck on the same horizon since it was made', async () => {
+    const t = await createTestTeacher()
+    const c = await createTestCourse(t.id)
+    await trackFrom(60, t.id)
+
+    const early = await deck(t.id, c.id, 40)
+    await editSlide(early, t.id, { daysAgo: 39 })       // engaged on day 1
+    await deck(t.id, c.id, 40)                          // never engaged
+
+    const cohort = (await getPresentationCohorts(12)).find((r) => r.cohort_size === 2)
+    expect(cohort).toBeDefined()
+    expect(cohort!.tracked).toBe(true)
+    expect(horizon(cohort!, 7)).toEqual({ days: 7, observed: 2, engaged: 1 })
+  })
+
+  // The denominator is what makes a partial cohort readable rather than
+  // misleading: three decks observed at 30 days is not a rate over thirty.
+  it('counts only decks that have actually lived the horizon in its denominator', async () => {
+    const t = await createTestTeacher()
+    const c = await createTestCourse(t.id)
+    await trackFrom(60, t.id)
+    await deck(t.id, c.id, 40)   // has lived 30 days
+    await deck(t.id, c.id, 40)
+    await deck(t.id, c.id, 2)    // has not
+
+    const rows = await getPresentationCohorts(12)
+    const old = rows.find((r) => r.cohort_size === 2)!
+    const recent = rows.find((r) => r.cohort_size === 1)!
+    expect(horizon(old, 30).observed).toBe(2)
+    expect(horizon(recent, 30).observed).toBe(0)
+    expect(horizon(recent, 1).observed).toBe(1)
+  })
+
+  // Before export recording existed a deck's exports are absent, not zero, so
+  // it must not enter a denominator at all.
+  it('keeps decks predating export tracking out of every denominator', async () => {
+    const t = await createTestTeacher()
+    const c = await createTestCourse(t.id)
+    await trackFrom(10, t.id)
+    await deck(t.id, c.id, 40)
+
+    const old = (await getPresentationCohorts(12)).find((r) => r.cohort_size === 1 && !r.tracked)
+    expect(old).toBeDefined()
+    expect(horizon(old!, 1).observed).toBe(0)
+    expect(horizon(old!, 30).observed).toBe(0)
+  })
+
+  it('marks a cohort untracked when nothing has ever been exported', async () => {
+    const t = await createTestTeacher()
+    const c = await createTestCourse(t.id)
+    await deck(t.id, c.id, 20)
+
+    const [only] = await getPresentationCohorts(12)
+    expect(only.tracked).toBe(false)
+    expect(horizon(only, 7).observed).toBe(0)
   })
 })

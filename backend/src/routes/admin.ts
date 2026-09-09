@@ -29,7 +29,7 @@ import { listAudit } from '../db/queries/audit'
 import { getFunnelSummary, getFunnelByWeek, getStalledTeachers } from '../db/queries/activation'
 import { getFeatureAdoption, getFeatureBreadth } from '../db/queries/featureAdoption'
 import { getWritingFunnel, getLiveSessionEngagement } from '../db/queries/studentEngagement'
-import { getPresentationLifecycle, getSlideEditHotspots, getRecentSlideInstructions } from '../db/queries/presentationLifecycle'
+import { getPresentationLifecycle, getSlideEditHotspots, getRecentSlideInstructions, getPresentationCohorts } from '../db/queries/presentationLifecycle'
 import { listDeploymentsSummary } from '../db/queries/controlPlane'
 import {
   findPaymentsByTeacher, findPaymentByOrderId, markPaymentRefunded,
@@ -137,12 +137,13 @@ router.get('/usage/artifacts', asyncHandler(async (req, res) => {
 router.get('/usage/presentation-lifecycle', asyncHandler(async (req, res) => {
   const days = parseInt((req.query.days as string) ?? '30', 10)
   const window = Math.min(days, 365)
-  const [lifecycle, hotspots, instructions] = await Promise.all([
+  const [lifecycle, hotspots, instructions, cohorts] = await Promise.all([
     getPresentationLifecycle(window),
     getSlideEditHotspots(window),
     getRecentSlideInstructions(40),
+    getPresentationCohorts(10),
   ])
-  res.json({ lifecycle, hotspots, instructions })
+  res.json({ lifecycle, hotspots, instructions, cohorts })
 }))
 
 // ─── GET /api/admin/errors?days=7 ────────────────────────────────────────────

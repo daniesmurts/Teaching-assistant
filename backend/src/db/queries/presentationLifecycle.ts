@@ -1,5 +1,5 @@
 import { pool } from '../connection'
-import type { PresentationLifecycle, SlideEditHotspot, SlideInstruction } from '../../../../shared/types'
+import type { PresentationLifecycle, SlideEditHotspot, SlideInstruction, PresentationCohort } from '../../../../shared/types'
 
 // ─── What actually happens to a deck after it is generated ───────────────────
 //
@@ -171,4 +171,110 @@ export async function getRecentSlideInstructions(limit = 40): Promise<SlideInstr
     [Math.min(limit, 200)]
   )
   return rows
+}
+
+/**
+ * Weekly creation cohorts, each measured on the SAME horizons since its own
+ * decks were made — the shape in which a feature's effect is actually visible.
+ * A raw "engaged this month" line moves with creation volume; a cohort curve
+ * does not, because every deck is scored on its own first N days.
+ *
+ * Observability is enforced PER DECK, not per cohort. A horizon's denominator
+ * is the decks that have actually lived N days *and* were created after export
+ * recording began; the numerator is those engaged inside that window. Gating
+ * per cohort instead — demanding the whole week elapse before reporting
+ * anything — is defensible but renders an empty chart for eight days after
+ * every cohort starts, and throws away decks whose window genuinely is
+ * complete. Reporting `observed` alongside `engaged` keeps it honest: the
+ * denominator is on screen, so a rate over three decks cannot pass for a rate
+ * over thirty.
+ *
+ * A horizon with `observed = 0` is omitted from the curve entirely rather than
+ * drawn at zero — "not measurable yet" and "nobody used them" must not share
+ * a pixel.
+ */
+export async function getPresentationCohorts(weeks = 8): Promise<PresentationCohort[]> {
+  const { rows } = await pool.query<{
+    week: string; cohort_size: number; tracked: boolean
+    o1: number; e1: number; o3: number; e3: number; o7: number; e7: number
+    o14: number; e14: number; o30: number; e30: number
+  }>(
+    `WITH tracking AS (
+       SELECT MIN(created_at) AS since FROM artifact_events
+     ),
+     cohort AS (
+       SELECT id, created_at, approved_at, visibility_scope,
+              DATE_TRUNC('week', created_at) AS week
+         FROM presentations
+        WHERE created_at >= DATE_TRUNC('week', NOW()) - ($1 || ' weeks')::INTERVAL
+     ),
+     edits AS (
+       SELECT presentation_id, MIN(created_at) AS first_at
+         FROM presentation_slide_events GROUP BY presentation_id
+     ),
+     exports AS (
+       SELECT artifact_id, MIN(created_at) AS first_at
+         FROM artifact_events
+        WHERE kind = 'presentation' AND event = 'exported' AND artifact_id IS NOT NULL
+        GROUP BY artifact_id
+     ),
+     quiz_reuse AS (
+       SELECT presentation_id, MIN(created_at) AS first_at
+         FROM quizzes WHERE presentation_id IS NOT NULL GROUP BY presentation_id
+     ),
+     assignment_reuse AS (
+       SELECT presentation_id, MIN(created_at) AS first_at
+         FROM published_assignments WHERE presentation_id IS NOT NULL GROUP BY presentation_id
+     ),
+     per_deck AS (
+       SELECT c.week, c.created_at,
+              LEAST(e.first_at, c.approved_at, x.first_at, q.first_at, a.first_at) AS first_at,
+              -- A deck created before export recording began could never have
+              -- an export logged in its window, so it cannot enter any
+              -- denominator: its silence is missing data, not disuse.
+              (t.since IS NOT NULL AND c.created_at >= t.since) AS observable
+         FROM cohort c
+         CROSS JOIN tracking t
+         LEFT JOIN edits            e ON e.presentation_id = c.id
+         LEFT JOIN exports          x ON x.artifact_id     = c.id
+         LEFT JOIN quiz_reuse       q ON q.presentation_id = c.id
+         LEFT JOIN assignment_reuse a ON a.presentation_id = c.id
+     )
+     SELECT
+       TO_CHAR(week, 'YYYY-MM-DD')                     AS week,
+       COUNT(*)::int                                   AS cohort_size,
+       BOOL_OR(observable)                             AS tracked,
+       COUNT(*) FILTER (WHERE observable AND created_at + INTERVAL  '1 day'  <= NOW())::int AS o1,
+       COUNT(*) FILTER (WHERE observable AND created_at + INTERVAL  '1 day'  <= NOW()
+                          AND first_at <= created_at + INTERVAL  '1 day')::int              AS e1,
+       COUNT(*) FILTER (WHERE observable AND created_at + INTERVAL  '3 days' <= NOW())::int AS o3,
+       COUNT(*) FILTER (WHERE observable AND created_at + INTERVAL  '3 days' <= NOW()
+                          AND first_at <= created_at + INTERVAL  '3 days')::int             AS e3,
+       COUNT(*) FILTER (WHERE observable AND created_at + INTERVAL  '7 days' <= NOW())::int AS o7,
+       COUNT(*) FILTER (WHERE observable AND created_at + INTERVAL  '7 days' <= NOW()
+                          AND first_at <= created_at + INTERVAL  '7 days')::int             AS e7,
+       COUNT(*) FILTER (WHERE observable AND created_at + INTERVAL '14 days' <= NOW())::int AS o14,
+       COUNT(*) FILTER (WHERE observable AND created_at + INTERVAL '14 days' <= NOW()
+                          AND first_at <= created_at + INTERVAL '14 days')::int             AS e14,
+       COUNT(*) FILTER (WHERE observable AND created_at + INTERVAL '30 days' <= NOW())::int AS o30,
+       COUNT(*) FILTER (WHERE observable AND created_at + INTERVAL '30 days' <= NOW()
+                          AND first_at <= created_at + INTERVAL '30 days')::int             AS e30
+     FROM per_deck
+     GROUP BY week
+     ORDER BY week DESC`,
+    [weeks]
+  )
+
+  return rows.map((r) => ({
+    week:        r.week,
+    cohort_size: r.cohort_size,
+    tracked:     r.tracked,
+    horizons: [
+      { days: 1,  observed: r.o1,  engaged: r.e1 },
+      { days: 3,  observed: r.o3,  engaged: r.e3 },
+      { days: 7,  observed: r.o7,  engaged: r.e7 },
+      { days: 14, observed: r.o14, engaged: r.e14 },
+      { days: 30, observed: r.o30, engaged: r.e30 },
+    ],
+  }))
 }

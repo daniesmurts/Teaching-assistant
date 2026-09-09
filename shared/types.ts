@@ -2700,6 +2700,23 @@ export interface PresentationLifecycle {
   export_tracking_since:     string | null
 }
 
+export interface CohortHorizon {
+  days: number
+  /** Decks that have actually lived this long AND were created after export recording began. */
+  observed: number
+  /** Of those, engaged within the window. */
+  engaged: number
+}
+
+export interface PresentationCohort {
+  /** ISO date of the cohort week's Monday. */
+  week:        string
+  cohort_size: number
+  /** False when no deck in the week is observable — its horizons are unmeasurable, not zero. */
+  tracked:     boolean
+  horizons:    CohortHorizon[]
+}
+
 export interface SlideEditHotspot {
   slide_type:    string
   events:        number
