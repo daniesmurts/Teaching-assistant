@@ -29,6 +29,7 @@ import { listAudit } from '../db/queries/audit'
 import { getFunnelSummary, getFunnelByWeek, getStalledTeachers } from '../db/queries/activation'
 import { getFeatureAdoption, getFeatureBreadth } from '../db/queries/featureAdoption'
 import { getWritingFunnel, getLiveSessionEngagement } from '../db/queries/studentEngagement'
+import { getPresentationLifecycle, getSlideEditHotspots, getRecentSlideInstructions } from '../db/queries/presentationLifecycle'
 import { listDeploymentsSummary } from '../db/queries/controlPlane'
 import {
   findPaymentsByTeacher, findPaymentByOrderId, markPaymentRefunded,
@@ -125,6 +126,23 @@ router.get('/usage/by-model', asyncHandler(async (req, res) => {
 router.get('/usage/artifacts', asyncHandler(async (req, res) => {
   const days = parseInt((req.query.days as string) ?? '30', 10)
   res.json(await getArtifactUsage(Math.min(days, 365)))
+}))
+
+// ─── GET /api/admin/usage/presentation-lifecycle?days=30 ─────────────────────
+// What happened to each deck created in the window — the answer «62 созданных
+// / 14 выгруженных» cannot give, because those are two different populations
+// and because export stopped being a fair proxy for "used" the moment slides
+// could be edited on the platform. See db/queries/presentationLifecycle.ts.
+
+router.get('/usage/presentation-lifecycle', asyncHandler(async (req, res) => {
+  const days = parseInt((req.query.days as string) ?? '30', 10)
+  const window = Math.min(days, 365)
+  const [lifecycle, hotspots, instructions] = await Promise.all([
+    getPresentationLifecycle(window),
+    getSlideEditHotspots(window),
+    getRecentSlideInstructions(40),
+  ])
+  res.json({ lifecycle, hotspots, instructions })
 }))
 
 // ─── GET /api/admin/errors?days=7 ────────────────────────────────────────────

@@ -2677,6 +2677,43 @@ export interface FunnelCohort {
   median_hours_to_grade: number | null
 }
 
+export interface PresentationLifecycle {
+  total:                     number
+  edited:                    number
+  regenerated:               number
+  approved:                  number
+  exported:                  number
+  reused:                    number
+  shared:                    number
+  /** Composite: any of the above happened to the deck. */
+  engaged:                   number
+  median_days_to_engagement: number | null
+  /**
+   * Decks old enough to have had a full 7-day window AND created after export
+   * recording began — a deck whose week elapsed before instrumentation existed
+   * would measure the instrumentation's age, not behaviour.
+   */
+  mature_total:              number
+  /** Of those, engaged within 7 days of creation — the release-comparable figure. */
+  engaged_within_7d:         number
+  /** When export recording began; null if nothing has ever been exported. */
+  export_tracking_since:     string | null
+}
+
+export interface SlideEditHotspot {
+  slide_type:    string
+  events:        number
+  regenerations: number
+  deletions:     number
+  decks:         number
+}
+
+export interface SlideInstruction {
+  instruction: string
+  slide_type:  string | null
+  created_at:  string
+}
+
 export interface WritingFunnel {
   assignments_published:   number
   invited:                 number

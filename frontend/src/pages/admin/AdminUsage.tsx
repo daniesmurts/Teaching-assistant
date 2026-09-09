@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getArtifactUsage, getDailyUsage, getUsageByFeature, getUsageByModel, getUsageByTeacher } from '../../api/admin'
+import { getArtifactUsage, getDailyUsage, getPresentationLifecycle, getUsageByFeature, getUsageByModel, getUsageByTeacher } from '../../api/admin'
 import { ARTIFACT_LABEL } from '../../lib/artifactLabels'
 
-type Tab = 'artifact' | 'day' | 'feature' | 'model' | 'teacher'
+type Tab = 'artifact' | 'lifecycle' | 'day' | 'feature' | 'model' | 'teacher'
 
 // Spend buckets on api_usage_log — NOT product features. 'grading' is shared
 // by ~15 services; use the «Артефакты» tab to see what was actually created.
@@ -25,11 +25,17 @@ const PROVIDER_LABEL: Record<string, string> = {
   gigachat: 'GigaChat',
 }
 
+function pct(part: number, total: number): string {
+  if (!total) return '—'
+  return `${Math.round((part / total) * 100)}%`
+}
+
 export default function AdminUsage() {
   const [tab, setTab]   = useState<Tab>('artifact')
   const [days, setDays] = useState(30)
 
   const { data: artifact = [] } = useQuery({ queryKey: ['admin-artifacts', days], queryFn: () => getArtifactUsage(days) })
+  const { data: decks }         = useQuery({ queryKey: ['admin-deck-lifecycle', days], queryFn: () => getPresentationLifecycle(days) })
   const { data: daily = [] }   = useQuery({ queryKey: ['admin-daily', days],   queryFn: () => getDailyUsage(days) })
   const { data: feature = [] } = useQuery({ queryKey: ['admin-feature', days], queryFn: () => getUsageByFeature(days) })
   const { data: model = [] }   = useQuery({ queryKey: ['admin-model', days],   queryFn: () => getUsageByModel(days) })
@@ -57,6 +63,7 @@ export default function AdminUsage() {
         <div className="flex items-center justify-between mb-4">
           <div className="flex gap-1">
             <button className={tabClass('artifact')} onClick={() => setTab('artifact')}>Артефакты</button>
+            <button className={tabClass('lifecycle')} onClick={() => setTab('lifecycle')}>Жизнь презентаций</button>
             <button className={tabClass('day')}     onClick={() => setTab('day')}>По дням</button>
             <button className={tabClass('feature')} onClick={() => setTab('feature')}>Расходы по функциям</button>
             <button className={tabClass('model')}   onClick={() => setTab('model')}>По моделям</button>
@@ -75,7 +82,145 @@ export default function AdminUsage() {
           )}
         </div>
 
-        <div className="bg-surface border border-border rounded-lg overflow-hidden">
+        {tab === 'lifecycle' && (() => {
+          const l = decks?.lifecycle
+          const stages = l ? [
+            { label: 'Правились',        count: l.edited,      hint: 'хотя бы один слайд переписан или перегенерирован' },
+            { label: 'Утверждены',       count: l.approved,    hint: null },
+            { label: 'Выгружены',        count: l.exported,    hint: '.pptx или раздатка' },
+            { label: 'Стали тестом / заданием', count: l.reused, hint: null },
+            { label: 'Поделились',       count: l.shared,      hint: 'видимость шире личной' },
+          ] : []
+          return (
+            <>
+              <div className="bg-surface border border-border rounded-lg p-6 mb-4">
+                <div className="flex items-baseline justify-between mb-5">
+                  <div className="text-base font-sans font-medium text-ink">
+                    Что стало с презентациями, созданными за период
+                  </div>
+                  {l && (
+                    <div className="text-right">
+                      <div className="text-sm font-sans text-ink-tertiary">Как-то использованы</div>
+                      <div className="font-display text-2xl font-bold text-amber">
+                        {l.engaged} из {l.total}
+                        <span className="text-ink-tertiary text-base font-normal ml-2">{pct(l.engaged, l.total)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  {stages.map((st) => (
+                    <div key={st.label} className="flex items-center gap-4">
+                      <div className="w-56 flex-shrink-0">
+                        <div className="text-sm font-sans text-ink-secondary">{st.label}</div>
+                        {st.hint && <div className="text-xs font-sans text-ink-tertiary">{st.hint}</div>}
+                      </div>
+                      <div className="flex-1 h-6 bg-surface-warm rounded overflow-hidden">
+                        <div className="h-full bg-amber/70 rounded transition-all"
+                             style={{ width: l && l.total ? `${(st.count / l.total) * 100}%` : 0 }} />
+                      </div>
+                      <div className="w-24 text-sm font-sans text-ink text-right flex-shrink-0">
+                        <span className="font-medium">{st.count}</span>
+                        <span className="text-ink-tertiary ml-1">({pct(st.count, l?.total ?? 0)})</span>
+                      </div>
+                    </div>
+                  ))}
+                  {!l && <div className="text-sm font-sans text-ink-tertiary">Нет данных</div>}
+                </div>
+
+                {l && (
+                  <div className="grid grid-cols-3 gap-6 mt-6 pt-5 border-t border-border text-sm font-sans">
+                    <div>
+                      <div className="text-ink-tertiary mb-0.5">Ни разу не тронуты</div>
+                      <div className="font-medium text-ink">{l.total - l.engaged} из {l.total}</div>
+                    </div>
+                    <div>
+                      <div className="text-ink-tertiary mb-0.5">До первого использования</div>
+                      <div className="font-medium text-ink">
+                        {l.median_days_to_engagement === null ? '—'
+                          : l.median_days_to_engagement < 1 ? 'в тот же день'
+                          : `${Math.round(l.median_days_to_engagement)} дн`}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-ink-tertiary mb-0.5">Использованы за 7 дней</div>
+                      {l.mature_total > 0 ? (
+                        <div className="font-medium text-ink">
+                          {l.engaged_within_7d} из {l.mature_total} <span className="text-ink-tertiary">({pct(l.engaged_within_7d, l.mature_total)})</span>
+                        </div>
+                      ) : (
+                        <div className="text-ink-tertiary">
+                          пока не с чем сравнивать
+                          {l.export_tracking_since && (
+                            <span className="block text-xs mt-0.5">
+                              учёт выгрузок с {new Date(l.export_tracking_since).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Что именно правят — сигнал качества генерации, а не использования */}
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="bg-surface border border-border rounded-lg p-5">
+                  <div className="text-sm font-sans font-medium text-ink mb-3">Какие слайды переписывают</div>
+                  <table className="w-full text-sm font-sans">
+                    <tbody>
+                      {(decks?.hotspots ?? []).slice(0, 8).map((h) => (
+                        <tr key={h.slide_type} className="border-b border-border last:border-0">
+                          <td className="py-1.5 text-ink">{h.slide_type}</td>
+                          <td className="py-1.5 text-right text-ink-secondary">{h.events}</td>
+                          <td className="py-1.5 text-right text-ink-tertiary w-28">
+                            {h.regenerations > 0 ? `${h.regenerations} перегенер.` : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                      {(decks?.hotspots ?? []).length === 0 && (
+                        <tr><td className="py-3 text-ink-tertiary">Правок за период не было</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="bg-surface border border-border rounded-lg p-5">
+                  <div className="text-sm font-sans font-medium text-ink mb-1">Что просят исправить</div>
+                  <div className="text-xs font-sans text-ink-tertiary mb-3">
+                    Текст, который преподаватель писал при перегенерации слайда
+                  </div>
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                    {(decks?.instructions ?? []).map((i, idx) => (
+                      <div key={idx} className="text-sm font-sans text-ink border-b border-border last:border-0 pb-1.5">
+                        «{i.instruction}»
+                        {i.slide_type && <span className="text-ink-tertiary ml-2 text-xs">{i.slide_type}</span>}
+                      </div>
+                    ))}
+                    {(decks?.instructions ?? []).length === 0 && (
+                      <div className="text-sm font-sans text-ink-tertiary">Пока никто ничего не просил</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs font-sans text-ink-tertiary leading-relaxed">
+                «Выгружено» перестало быть мерой пользы, как только слайды стало можно править
+                на платформе: преподаватель, который довёл презентацию в браузере и показал её
+                оттуда же, ничего не скачивает. Поэтому здесь считается любое из действий —
+                правка, утверждение, выгрузка, переиспользование, публикация. Столбец
+                «Использованы за 7 дней» — единственный, который честно сравнивать между
+                релизами: в него попадают только презентации, у которых эти 7 дней уже были,
+                и только то, что случилось внутри них. Презентации, чья неделя прошла до
+                включения учёта выгрузок, не считаются вовсе — иначе цифра измеряла бы возраст
+                телеметрии, а не поведение.
+              </p>
+            </>
+          )
+        })()}
+
+        <div className={`bg-surface border border-border rounded-lg overflow-hidden ${tab === 'lifecycle' ? 'hidden' : ''}`}>
           <table className="w-full text-sm font-sans">
             {tab === 'artifact' && (
               <>

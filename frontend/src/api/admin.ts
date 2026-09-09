@@ -386,6 +386,15 @@ export async function getActivationFunnel(weeks = 12): Promise<{ summary: Funnel
   return res.data
 }
 
+export async function getPresentationLifecycle(days = 30): Promise<{
+  lifecycle: PresentationLifecycle; hotspots: SlideEditHotspot[]; instructions: SlideInstruction[]
+}> {
+  const res = await client.get<{
+    lifecycle: PresentationLifecycle; hotspots: SlideEditHotspot[]; instructions: SlideInstruction[]
+  }>('/api/admin/usage/presentation-lifecycle', { params: { days } })
+  return res.data
+}
+
 export async function getStudentEngagement(days = 90): Promise<{ writing: WritingFunnel; live: LiveSessionEngagement }> {
   const res = await client.get<{ writing: WritingFunnel; live: LiveSessionEngagement }>('/api/admin/students', { params: { days } })
   return res.data
@@ -498,7 +507,7 @@ export async function importFgosvoItem(item: { code: string; name: string; level
 // ─── Профстандарт/ОТФ registry (migration 115) ─────────────────────────────
 
 import type { Profstandard, ProfstandardWithChildren, ProfstandardDraft } from '../types'
-import type { FunnelSummary, FunnelCohort, StalledTeacher, FeatureAdoptionRow, FeatureBreadthRow, WritingFunnel, LiveSessionEngagement, AuditFilters, InstitutionContract, PaymentsSummary, MonthlyRevenue, CapacityOverview } from '../../../shared/types'
+import type { FunnelSummary, FunnelCohort, StalledTeacher, FeatureAdoptionRow, FeatureBreadthRow, WritingFunnel, LiveSessionEngagement, PresentationLifecycle, SlideEditHotspot, SlideInstruction, AuditFilters, InstitutionContract, PaymentsSummary, MonthlyRevenue, CapacityOverview } from '../../../shared/types'
 export type { InstitutionContract, InstitutionSummaryRow, CapacityOverview } from '../../../shared/types'
 
 export async function getProfstandards(
