@@ -5,6 +5,7 @@ import { calculateYandexImageSearchCostRub } from '../config/planLimits'
 import { getUsdRubRate, rubToUsd } from './fxRate'
 import type { ImageCandidate } from '../../../shared/types'
 import type { CallContext } from './llm/types'
+import { toHttpsUrl } from '../../../shared/imageUrl'
 
 // Yandex Cloud Search API v2 — image endpoint.
 //
@@ -163,9 +164,13 @@ export function parseYandexImagesXml(xml: string): ImageCandidate[] {
     if (!/^https?:\/\//.test(imageUrl || thumb)) continue
 
     results.push({
-      url:         imageUrl || thumb,
+      // Yandex serves these over plain http; an https page cannot load one
+      // without the browser upgrading it and warning about mixed content
+      // (shared/imageUrl.ts). source_url is left alone deliberately — it is a
+      // link to click, not an element to load.
+      url:         toHttpsUrl(imageUrl || thumb),
       source_url:  sourceUrl,
-      thumbnail:   thumb,
+      thumbnail:   toHttpsUrl(thumb),
       width,
       height,
       source_host: domain || extractHost(sourceUrl),

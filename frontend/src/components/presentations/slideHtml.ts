@@ -1,4 +1,5 @@
 import type { Slide } from '../../types'
+import { toHttpsUrl } from '../../../../shared/imageUrl'
 
 // HTML rendering of typed slides for the clipboard. Paste targets
 // (PowerPoint, Word, Google Slides / Docs) honour `text/html` and:
@@ -93,7 +94,7 @@ function renderTyped(s: Slide, n: number): string {
       // first so paste targets embed it rather than the thumbnail.
       body = [
         s.body.image
-          ? `<p><img src="${escapeAttr(s.body.image.url)}" alt="${escapeAttr(s.body.caption || s.title)}" /></p>`
+          ? `<p><img src="${escapeAttr(toHttpsUrl(s.body.image.url))}" alt="${escapeAttr(s.body.caption || s.title)}" /></p>`
           : `<p><em>[Подобрать изображение: «${richText(s.body.image_query)}»]</em></p>`,
         s.body.caption ? `<p><strong>${richText(s.body.caption)}</strong></p>` : '',
         ul(s.body.points),

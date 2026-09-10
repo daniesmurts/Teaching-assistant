@@ -8,6 +8,7 @@ import SlideImagePicker from './SlideImagePicker'
 import { slidesToText, legacySlidesToText } from './slideText'
 import { slidesToHtml, legacySlidesToHtml } from './slideHtml'
 import { copyRich } from './clipboard'
+import { toHttpsUrl } from '../../../../shared/imageUrl'
 import Button from '../ui/Button'
 import CopyAllButton from '../ui/CopyAllButton'
 import LoadingSpinner from '../ui/LoadingSpinner'
@@ -321,7 +322,10 @@ function SlideImageBlock({
     <div className="mb-3">
       <div className="bg-surface-warm rounded-md p-2 border border-border flex items-center justify-center">
         <img
-          src={image.thumbnail || image.url}
+          // Upgraded here as well as at ingest: the images already stored in
+          // presentations.slides as JSONB carry the http URLs Yandex gave us,
+          // and no migration is going to rewrite them (shared/imageUrl.ts).
+          src={toHttpsUrl(image.thumbnail || image.url)}
           alt={altText}
           loading="lazy"
           className="max-h-72 w-auto rounded-sm object-contain"

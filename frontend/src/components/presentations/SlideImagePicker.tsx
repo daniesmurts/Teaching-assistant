@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useMutation } from '@tanstack/react-query'
 import { searchSlideImages, setSlideImage } from '../../api/presentations'
 import type { ImageCandidate, SlideImage } from '../../types'
+import { toHttpsUrl } from '../../../../shared/imageUrl'
 
 interface Props {
   presentationId: string
@@ -47,9 +48,11 @@ export default function SlideImagePicker({
 
   function pick(c: ImageCandidate) {
     const image: SlideImage = {
-      url:         c.url,
+      // Belt and braces with the ingest-side upgrade: a candidate may have
+      // come from a cached search response predating it.
+      url:         toHttpsUrl(c.url),
       source_url:  c.source_url,
-      thumbnail:   c.thumbnail,
+      thumbnail:   toHttpsUrl(c.thumbnail),
       width:       c.width,
       height:      c.height,
       query:       queryInput,
@@ -165,7 +168,7 @@ export default function SlideImagePicker({
                       className="group relative aspect-[4/3] bg-surface-warm rounded-md overflow-hidden border border-border hover:border-amber transition-colors disabled:opacity-50"
                     >
                       <img
-                        src={c.thumbnail}
+                        src={toHttpsUrl(c.thumbnail)}
                         alt=""
                         loading="lazy"
                         className="w-full h-full object-cover"

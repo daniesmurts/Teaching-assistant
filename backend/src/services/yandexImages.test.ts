@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { rankImageCandidates } from './yandexImages'
+import { parseYandexImagesXml, rankImageCandidates } from './yandexImages'
 import type { ImageCandidate } from '../../../shared/types'
 
 function candidate(overrides: Partial<ImageCandidate> = {}): ImageCandidate {
@@ -65,5 +65,31 @@ describe('rankImageCandidates', () => {
     // wasn't matched as stock (otherwise stable sort would keep them in
     // their original order: realStock, lookalike).
     expect(out.map((c) => c.source_host)).toEqual(['notshutterstock.com.example.ru', 'shutterstock.com'])
+  })
+})
+
+describe('parseYandexImagesXml — scheme', () => {
+  // Yandex answers with plain-http links; stored verbatim they made every
+  // deck with a searched image fill the browser console with mixed-content
+  // warnings on https://ispum.ru (production, 2026-09-10).
+  const xml = `<yandexsearch><response><results><grouping><group><doc>
+    <url>http://example.org/article</url>
+    <domain>example.org</domain>
+    <image-link>http://avatars.mds.yandex.net/i?id=abc-images</image-link>
+    <thumbnail-link>http://avatars.mds.yandex.net/i?id=abc-images-thumbs</thumbnail-link>
+    <image-width>800</image-width><image-height>600</image-height>
+  </doc></group></grouping></results></response></yandexsearch>`
+
+  it('stores the image and its thumbnail over https', () => {
+    const [c] = parseYandexImagesXml(xml)
+    expect(c.url).toBe('https://avatars.mds.yandex.net/i?id=abc-images')
+    expect(c.thumbnail).toBe('https://avatars.mds.yandex.net/i?id=abc-images-thumbs')
+  })
+
+  it('leaves source_url as the site published it', () => {
+    // A link to click, not an element to load: no mixed-content warning is
+    // raised by a navigation, and http-only hosts are still common for the
+    // Russian university material these searches turn up.
+    expect(parseYandexImagesXml(xml)[0].source_url).toBe('http://example.org/article')
   })
 })
