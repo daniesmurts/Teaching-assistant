@@ -6,8 +6,9 @@ import { cleanText, estimateTokens, extractPdfFigures } from './documentExtracto
 // dynamic `import('pdf-parse')` inside extractText() resolves to this stub.
 // vi.hoisted is required (not plain top-level consts) since vi.mock factories
 // are hoisted above imports and can't close over ordinary module-scope vars.
-const { getTextMock, destroyMock, yandexVisionOCRMock, rasterizePdfPagesMock } = vi.hoisted(() => ({
+const { getTextMock, destroyMock, yandexVisionOCRMock, rasterizePdfPagesMock, transcribeImagesMock } = vi.hoisted(() => ({
   getTextMock: vi.fn(), destroyMock: vi.fn(), yandexVisionOCRMock: vi.fn(), rasterizePdfPagesMock: vi.fn(),
+  transcribeImagesMock: vi.fn(),
 }))
 vi.mock('pdf-parse', () => ({
   // A regular function, not an arrow function — `new PDFParse(...)` needs a
@@ -19,6 +20,11 @@ vi.mock('pdf-parse', () => ({
   }),
 }))
 vi.mock('./yandexVision', () => ({ yandexVisionOCR: yandexVisionOCRMock, rasterizePdfPages: rasterizePdfPagesMock }))
+// The OCR second opinion (2026-09-10). Mocked rather than left to the real
+// registry: unmocked it degrades to null via "no DeepSeek accounts
+// configured", which passes for the wrong reason and would stop passing the
+// moment a test env grew a key.
+vi.mock('./llm/registry', () => ({ transcribeImages: transcribeImagesMock }))
 
 describe('cleanText', () => {
   it('normalizes Windows line endings', () => {
@@ -62,7 +68,10 @@ describe('extractText — scanned-PDF OCR fallback', () => {
   // Call counts (not implementations) accumulate across tests without this —
   // e.g. the previous test's OCR call would still show up in this test's
   // `not.toHaveBeenCalled()` assertion.
-  beforeEach(() => { getTextMock.mockClear(); destroyMock.mockClear(); yandexVisionOCRMock.mockClear() })
+  beforeEach(() => {
+    getTextMock.mockClear(); destroyMock.mockClear(); yandexVisionOCRMock.mockClear()
+    transcribeImagesMock.mockReset().mockResolvedValue(null)
+  })
 
   it('falls back to OCR when pdf-parse only returns per-page markers (no real text)', async () => {
     // A real fgosvo.ru document: a scanned PDF whose only "text layer" is
@@ -90,6 +99,109 @@ describe('extractText — scanned-PDF OCR fallback', () => {
 
     expect(result.method).toBe('text_layer')
     expect(yandexVisionOCRMock).not.toHaveBeenCalled()
+  })
+})
+
+// ─── OCR second opinion (2026-09-10) ─────────────────────────────────────────
+// Yandex Vision stays primary; DeepSeek's multimodal FLASH model is consulted
+// only where Yandex returned essentially nothing, and only wins if it read
+// strictly more. The alternative to this path is handing the grader an empty
+// document, which reads as the teacher's fault rather than ours.
+describe('extractText — OCR second opinion when Yandex comes back near-empty', () => {
+  const RICH = 'Настоящий текст документа с достаточным количеством содержательных слов для прохождения порога в пятьдесят слов подряд без обращения к оптическому распознаванию символов. '
+
+  beforeEach(() => {
+    getTextMock.mockClear(); destroyMock.mockClear()
+    yandexVisionOCRMock.mockReset()
+    rasterizePdfPagesMock.mockReset()
+    transcribeImagesMock.mockReset().mockResolvedValue(null)
+  })
+
+  it('does not consult vision when Yandex OCR already read the document', async () => {
+    getTextMock.mockResolvedValueOnce({ text: '', total: 2 })
+    yandexVisionOCRMock.mockResolvedValueOnce(RICH.repeat(3))
+
+    const { extractText } = await import('./documentExtractor')
+    const result = await extractText(Buffer.from('pdf'), 'application/pdf')
+
+    expect(result.text).toContain('Настоящий текст')
+    expect(transcribeImagesMock).not.toHaveBeenCalled()
+  })
+
+  it('uses the vision transcript when Yandex read essentially nothing', async () => {
+    getTextMock.mockResolvedValueOnce({ text: '', total: 2 })
+    yandexVisionOCRMock.mockResolvedValueOnce('')
+    rasterizePdfPagesMock.mockResolvedValueOnce([Buffer.from('p1'), Buffer.from('p2')])
+    transcribeImagesMock.mockResolvedValueOnce(RICH.repeat(2))
+
+    const { extractText } = await import('./documentExtractor')
+    const result = await extractText(Buffer.from('pdf'), 'application/pdf')
+
+    expect(result.method).toBe('ocr')
+    expect(result.text).toContain('Настоящий текст')
+    expect(transcribeImagesMock).toHaveBeenCalledOnce()
+    expect(transcribeImagesMock.mock.calls[0][0]).toHaveLength(2)
+  })
+
+  it('keeps the Yandex result when vision does not read strictly more', async () => {
+    // A second opinion may decline to improve the answer, but must never make
+    // it worse — the model can hallucinate plausible prose onto a blank page.
+    getTextMock.mockResolvedValueOnce({ text: '', total: 1 })
+    yandexVisionOCRMock.mockResolvedValueOnce('Три слова здесь')
+    rasterizePdfPagesMock.mockResolvedValueOnce([Buffer.from('p1')])
+    transcribeImagesMock.mockResolvedValueOnce('Два слова')
+
+    const { extractText } = await import('./documentExtractor')
+    const result = await extractText(Buffer.from('pdf'), 'application/pdf')
+
+    expect(result.text).toBe('Три слова здесь')
+  })
+
+  it('keeps the Yandex result when vision is unavailable (disabled, no accounts, failed)', async () => {
+    getTextMock.mockResolvedValueOnce({ text: '', total: 1 })
+    yandexVisionOCRMock.mockResolvedValueOnce('Три слова здесь')
+    rasterizePdfPagesMock.mockResolvedValueOnce([Buffer.from('p1')])
+    transcribeImagesMock.mockResolvedValueOnce(null)
+
+    const { extractText } = await import('./documentExtractor')
+    const result = await extractText(Buffer.from('pdf'), 'application/pdf')
+
+    expect(result.text).toBe('Три слова здесь')
+  })
+
+  it('caps the page count at 12 to stay under the resolution downgrade at 15+', async () => {
+    getTextMock.mockResolvedValueOnce({ text: '', total: 30 })
+    yandexVisionOCRMock.mockResolvedValueOnce('')
+    rasterizePdfPagesMock.mockResolvedValueOnce(Array.from({ length: 30 }, (_, i) => Buffer.from(`p${i}`)))
+    transcribeImagesMock.mockResolvedValueOnce(RICH.repeat(2))
+
+    const { extractText } = await import('./documentExtractor')
+    await extractText(Buffer.from('pdf'), 'application/pdf')
+
+    expect(transcribeImagesMock.mock.calls[0][0]).toHaveLength(12)
+  })
+
+  it('skips vision for a PDF that cannot be rasterized at all', async () => {
+    getTextMock.mockResolvedValueOnce({ text: '', total: 1 })
+    yandexVisionOCRMock.mockResolvedValueOnce('')
+    rasterizePdfPagesMock.mockResolvedValueOnce(null)
+
+    const { extractText } = await import('./documentExtractor')
+    await extractText(Buffer.from('pdf'), 'application/pdf')
+
+    expect(transcribeImagesMock).not.toHaveBeenCalled()
+  })
+
+  it('sends a standalone image straight through without rasterizing', async () => {
+    yandexVisionOCRMock.mockResolvedValueOnce('')
+    transcribeImagesMock.mockResolvedValueOnce(RICH)
+
+    const { extractText } = await import('./documentExtractor')
+    const result = await extractText(Buffer.from('jpeg bytes'), 'image/jpeg')
+
+    expect(rasterizePdfPagesMock).not.toHaveBeenCalled()
+    expect(transcribeImagesMock.mock.calls[0][0]).toEqual([{ buffer: expect.any(Buffer), mime: 'image/jpeg' }])
+    expect(result.text).toContain('Настоящий текст')
   })
 })
 

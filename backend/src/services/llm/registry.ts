@@ -171,7 +171,7 @@ export function embed(text: string, ctx?: CallContext): Promise<number[]> {
 // institution routing" shape as embed() always being Yandex: it's currently
 // the only provider with a vision-capable model. Never throws (see
 // DeepSeekProvider.captionImage's own doc comment) — returns null on any
-// failure, including simply being disabled (DEEPSEEK_VISION_ENABLED unset).
+// failure, including simply being disabled (DEEPSEEK_VISION_ENABLED=false).
 export function captionImage(
   imageBuffer: Buffer,
   mimeType:    string,
@@ -179,6 +179,17 @@ export function captionImage(
   ctx?:        CallContext,
 ): Promise<{ caption: string; labels: string[] } | null> {
   return deepSeekProvider.captionImage(imageBuffer, mimeType, promptText, ctx)
+}
+
+// OCR second opinion — same always-DeepSeek, never-throws contract as
+// captionImage above. NOT a replacement for yandexVisionOCR: it runs only
+// where Yandex already returned essentially nothing, so the RU-resident
+// path stays primary for every document that OCRs normally.
+export function transcribeImages(
+  images: { buffer: Buffer; mime: string }[],
+  ctx?:   CallContext,
+): Promise<string | null> {
+  return deepSeekProvider.transcribeImages(images, ctx)
 }
 
 // Silent fallback — when the institution-chosen provider fails and it isn't

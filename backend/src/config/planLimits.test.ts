@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import {
+  calculateDeepSeekCost, isDeepSeekPeakHour,
   calculateYandexChatCostRub, calculateYandexEmbedCostRub,
   calculateYandexVisionCostRub, calculateYandexWebSearchCostRub, calculateYandexImageSearchCostRub,
   getYandexRatesRub,
@@ -66,5 +67,72 @@ describe('Yandex cost calculators', () => {
     process.env.YANDEX_RATE_WEB_SEARCH_RUB_PER_CALL = '-5'
     const rates = getYandexRatesRub()
     expect(rates.webSearchPerCall).toBeGreaterThan(0)
+  })
+})
+
+// ─── DeepSeek pricing (2026-09-10 rewrite) ───────────────────────────────────
+//
+// Two things under test that the old flat table got wrong: V4.1-Flash's real
+// output rate, and the 2× peak/off-peak swing. A "1M in + 1M out" call makes
+// the arithmetic readable — the peak total is just `in + out`.
+describe('DeepSeek cost — peak vs off-peak', () => {
+  const M = 1_000_000
+  const at = (iso: string) => new Date(iso)
+
+  it('charges the full V4.1-Flash rate during a weekday peak window', () => {
+    // 0.30 in + 1.20 out per 1M, peak.
+    expect(calculateDeepSeekCost(M, M, 'deepseek-flash', at('2026-09-15T02:00:00Z'))).toBeCloseTo(1.50, 6)
+  })
+
+  it('halves the rate off-peak', () => {
+    expect(calculateDeepSeekCost(M, M, 'deepseek-flash', at('2026-09-15T12:00:00Z'))).toBeCloseTo(0.75, 6)
+  })
+
+  it('treats the whole weekend as off-peak, including peak-window hours', () => {
+    expect(isDeepSeekPeakHour(at('2026-09-19T02:00:00Z'))).toBe(false)
+    expect(calculateDeepSeekCost(M, M, 'deepseek-flash', at('2026-09-19T02:00:00Z'))).toBeCloseTo(0.75, 6)
+  })
+
+  it('gets both peak windows and their exclusive upper bounds right', () => {
+    // 01:00–04:00 and 06:00–10:00 UTC — 04:00 and 10:00 are already off-peak,
+    // and the 04:00–06:00 gap between the two windows is off-peak too.
+    expect(isDeepSeekPeakHour(at('2026-09-15T01:00:00Z'))).toBe(true)
+    expect(isDeepSeekPeakHour(at('2026-09-15T03:59:00Z'))).toBe(true)
+    expect(isDeepSeekPeakHour(at('2026-09-15T04:00:00Z'))).toBe(false)
+    expect(isDeepSeekPeakHour(at('2026-09-15T05:00:00Z'))).toBe(false)
+    expect(isDeepSeekPeakHour(at('2026-09-15T06:00:00Z'))).toBe(true)
+    expect(isDeepSeekPeakHour(at('2026-09-15T10:00:00Z'))).toBe(false)
+    expect(isDeepSeekPeakHour(at('2026-09-15T00:30:00Z'))).toBe(false)
+  })
+})
+
+describe('DeepSeek cost — model ids after the V4.1 consolidation', () => {
+  const M = 1_000_000
+  const PEAK = new Date('2026-09-15T02:00:00Z')
+
+  it('prices every V4-era alias as the Flash model they now route to', () => {
+    for (const id of ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']) {
+      expect(calculateDeepSeekCost(M, M, id, PEAK)).toBeCloseTo(1.50, 6)
+    }
+  })
+
+  it('still charges deepseek-v4-pro its own rate before the 2026-09-14 cutover', () => {
+    // 12:00 Beijing on the 14th = 04:00 UTC. Friday the 11th, peak window.
+    expect(calculateDeepSeekCost(M, M, 'deepseek-v4-pro', new Date('2026-09-11T02:00:00Z'))).toBeCloseTo(5.28, 6)
+  })
+
+  it('charges deepseek-v4-pro at Flash rates once it is routed to Flash', () => {
+    expect(calculateDeepSeekCost(M, M, 'deepseek-v4-pro', PEAK)).toBeCloseTo(1.50, 6)
+  })
+
+  it('leaves retired V3-era ids flat, outside the peak/off-peak multiplier', () => {
+    const peak    = calculateDeepSeekCost(M, M, 'deepseek-reasoner', PEAK)
+    const offPeak = calculateDeepSeekCost(M, M, 'deepseek-reasoner', new Date('2026-09-15T12:00:00Z'))
+    expect(peak).toBeCloseTo(2.74, 6)
+    expect(offPeak).toBeCloseTo(2.74, 6)
+  })
+
+  it('falls back to Flash pricing for an unrecognised id (e.g. self-hosted on-prem weights)', () => {
+    expect(calculateDeepSeekCost(M, M, 'some-onprem-model', PEAK)).toBeCloseTo(1.50, 6)
   })
 })

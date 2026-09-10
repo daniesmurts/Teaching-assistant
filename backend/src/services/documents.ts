@@ -152,8 +152,8 @@ function sanitiseName(name: string): string {
 /**
  * Feature AN Phase 2 — extracts embedded drawings (.docx) or scanned/
  * drawing-heavy pages (PDF) from a material, captions each (see
- * figureCaptioning.ts's OCR+chatJSON approach — no multimodal chat provider
- * exists in this codebase), and persists them. Best-effort per figure: one
+ * figureCaptioning.ts — vision first, OCR+chatJSON as fallback), and
+ * persists them. Best-effort per figure: one
  * bad image never aborts the rest, and this whole step never fails document
  * processing (the caller already wraps it in .catch()).
  */

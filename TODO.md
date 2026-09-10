@@ -2162,11 +2162,17 @@ text-sparse pages (`extractPdfFigures`, reusing `yandexVision.ts`'s
 `rasterizePdfPages`, now exported), since most real separately-scanned
 чертежи/схемы arrive as PDF rather than embedded in a .docx. Figure
 captioning tries true VLM image understanding first — `services/llm/deepseek.ts`'s
-`captionImage()`, DeepSeek's experimental `deepseek-v4-flash-vision-exp`
-model, gated behind `DEEPSEEK_VISION_ENABLED` (default off) — falling back to
-the original OCR + text `chatJSON` path on any failure or when disabled. See
-CHANGELOG.md [Unreleased] for the full writeup of both the figure library and
-the vision follow-up.
+`captionImage()` — falling back to the original OCR + text `chatJSON` path on
+any failure or when disabled. See CHANGELOG.md [Unreleased] for the full
+writeup of both the figure library and the vision follow-up.
+
+**Update 2026-09-10:** `DEEPSEEK_VISION_ENABLED` now defaults to ON. Vision
+stopped being a separate experimental endpoint — `deepseek-v4-flash-vision-exp`
+was retired into `deepseek-flash`, which is natively multimodal — so one of
+the two reasons the flag shipped default-off no longer exists, and the other
+(cost) is ~$0.0003 per figure. Kept as an explicit `=false` opt-out for
+on-prem weights that can't see images, and for a deployment that hasn't taken
+consent for image transfer (docs/legal/152-fz-dpa.md §6.2.1).
 
 
 Origin: mechanical-engineering courses expose a hard ceiling on what the
@@ -2664,6 +2670,26 @@ is what turns it from an assessment feature into a teaching one.
   - **Demoted from Phase 0 deliberately.** It is the harder engineering
     (Cyrillic handwriting for names, per-sheet capture, a full correction UI)
     *and* the weaker experience. Worth building — just not first.
+  - **Re-examine the OCR assumption before building it (2026-09-10).** The
+    "Cyrillic handwriting is the hard part" judgement was made against
+    `yandexVisionOCR`, and it is weaker than it looks: the Yandex product we
+    actually call is «Распознавание печатного текста» — *printed* text.
+    Handwriting is a **separate Yandex product this codebase has never
+    called** (see the Yandex pricing comment in `config/planLimits.ts`), so
+    Phase 3 was demoted partly on the limits of a tool that was never the
+    right one. Meanwhile DeepSeek's FLASH model went natively multimodal
+    (2026-09-10) and reads a sheet whole rather than emitting a text layer for
+    something else to parse — which would also collapse the brittle
+    bubble-grid parsing step, since the model can return the answer grid as
+    structured JSON in the same call that reads the header and the name.
+    **Not a plan, a hypothesis** — DeepSeek's vision guide makes no Cyrillic
+    or handwriting claim in either direction. Run
+    `npm run probe:handwriting -- <photo>` (backend/scripts/probeHandwritingOCR.ts,
+    prints Yandex and DeepSeek transcripts side by side) against real
+    photographed бланки before re-ranking this phase. If DeepSeek reads
+    handwriting well, Phase 3 gets materially cheaper and should move up; if
+    it doesn't, the correct next probe is Yandex's own handwriting product,
+    not more work on the printed-text one.
   - Keep the scanned image attached to the assignment as evidence for a
     contested grade; fits the append-only `approved_revisions` culture. Note
     the asymmetry with Phase 0's no-image rule: here the teacher is

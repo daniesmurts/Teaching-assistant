@@ -19,8 +19,9 @@ export interface ChatMessage {
 
 // Feature AN Phase 2 follow-up (TODO.md "### AN") — vision captioning.
 // Deliberately NOT folded into ChatMessage.content (kept string-only there):
-// only DeepSeek's experimental deepseek-v4-flash-vision-exp model
-// (api-docs.deepseek.com/guides/vision, confirmed 2026-09) accepts this
+// only DeepSeek's FLASH model, which became natively multimodal when
+// deepseek-v4-flash-vision-exp was retired into it
+// (api-docs.deepseek.com/guides/vision, confirmed 2026-09-10), accepts this
 // shape — yandex.ts builds its own `{role, text}` request straight off
 // `m.content` as a string, and widening the shared type would force every
 // provider file to defensively handle a case none of them can actually

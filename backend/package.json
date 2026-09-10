@@ -20,6 +20,7 @@
     "rollup:backfill": "node --env-file=../.env $(npm root)/.bin/tsx scripts/backfillUsageRollup.ts",
     "rollup:report": "node --env-file=../.env $(npm root)/.bin/tsx scripts/unitEconomics.ts",
     "test:yandex-images": "node --env-file=../.env $(npm root)/.bin/tsx scripts/testYandexImages.ts",
+    "probe:handwriting": "node --env-file=../.env $(npm root)/.bin/tsx scripts/probeHandwritingOCR.ts",
     "repair:filenames": "node --env-file=../.env $(npm root)/.bin/tsx scripts/repairFilenames.ts",
     "repair:role-tree": "node --env-file=../.env $(npm root)/.bin/tsx scripts/repairRoleTreeSync.ts",
     "repair:rpd-dept-mapping": "node --env-file=../.env $(npm root)/.bin/tsx scripts/fixRpdDeptMapping.ts",

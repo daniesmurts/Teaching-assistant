@@ -130,22 +130,81 @@ export function canUseFeature(
   return Boolean(getLimits(tier)[feature])
 }
 
-// ─── DeepSeek V3 pricing (update if rates change) ─────────────────────────────
+// ─── DeepSeek pricing (update if rates change) ────────────────────────────────
+//
+// Confirmed 2026-09-10 against api-docs.deepseek.com/quick_start/pricing and
+// /guides/reasoning_model.
+//
+// **V4.1-Flash (`deepseek-flash`) is the only DeepSeek model still served.**
+// Every V4-era id is now an accepted alias routing to it — `deepseek-v4-flash`
+// and `deepseek-v4-flash-vision-exp` already, `deepseek-v4-pro` from
+// 2026-09-14 04:00 UTC (12:00 Beijing) per DeepSeek's own retirement notice.
+// Whichever id we send, the invoice is Flash's, so the split below is about
+// *when* a call happened, not which weights ran.
+//
+// Two things this fixes, both of which were mis-costing rows silently:
+//   • V4.1-Flash raised output pricing far above V4-Flash's ($0.28 → $1.20 per
+//     1M at peak). Since `deepseek-v4-flash` has been an alias onto it, every
+//     bulk grading/presentation/quiz call has been under-logged on output.
+//   • Peak vs off-peak is a flat 2× swing, previously not modelled at all.
+//     Too large to average away, and free to get right: cost is computed at
+//     request time at all three call sites in `llm/deepseek.ts`, so the call's
+//     own timestamp is the correct rate key.
+//
+// Still NOT modelled: cache-hit input, ~50× cheaper than cache-miss ($0.006 vs
+// $0.30 per 1M at peak). Cached prompts are over-costed — the conservative
+// direction, and the same simplification `calculateQwenCost` makes for Qwen's
+// context tiers.
+interface DeepSeekRate { in: number; out: number }
 
-// USD per 1M tokens — update if DeepSeek rates change.
-const RATES: Record<string, { in: number; out: number }> = {
-  // V4 (current). Flash matches the old chat price; Pro ~3× for the reasoning
-  // tier. Cache-hit input is ~50× cheaper but we don't yet split it out here.
-  'deepseek-v4-flash': { in: 0.14,  out: 0.28 },
-  'deepseek-v4-pro':   { in: 0.435, out: 0.87 },
-  // Legacy — deprecate 2026-07-24. Kept so historical usage rows still cost out.
+// PEAK rates, USD per 1M tokens. Off-peak is exactly half, applied in
+// calculateDeepSeekCost rather than duplicated as a second table.
+const FLASH_RATE: DeepSeekRate = { in: 0.30, out: 1.20 }
+
+// deepseek-v4-pro's own published rate, charged only until the cutover below.
+// Both this and PRO_RETIREMENT_UTC are safe to delete once no traffic being
+// costed can predate 2026-09-14 — i.e. as soon as that date is comfortably
+// past; they exist because this landed days before it.
+const PRO_RATE: DeepSeekRate = { in: 1.32, out: 3.96 }
+const PRO_RETIREMENT_UTC = Date.UTC(2026, 8, 14, 4, 0, 0)
+
+// Retired V3-era ids. Flat, and deliberately OUTSIDE the peak/off-peak
+// multiplier: nothing has sent them since the V4 migration, so they only ever
+// answer a lookup for an id resurrected by an old override or a replayed eval,
+// and reinterpreting their long-settled numbers would be noise. (Rows already
+// written keep the cost_usd they were stored with — usageLog persists cost per
+// row at write time, so none of this changes history.)
+const LEGACY_RATES: Record<string, DeepSeekRate> = {
   'deepseek-chat':     { in: 0.14, out: 0.28 },
   'deepseek-reasoner': { in: 0.55, out: 2.19 },
 }
 
-export function calculateDeepSeekCost(inputTokens: number, outputTokens: number, model = 'deepseek-v4-flash'): number {
-  const r = RATES[model] ?? RATES['deepseek-v4-flash']
-  return (inputTokens / 1_000_000) * r.in + (outputTokens / 1_000_000) * r.out
+/** Peak is 01:00–04:00 and 06:00–10:00 UTC, Monday–Friday. Everything else —
+ *  evenings, nights, whole weekends — is off-peak at half price. */
+export function isDeepSeekPeakHour(at: Date): boolean {
+  const day = at.getUTCDay()
+  if (day === 0 || day === 6) return false
+  const hour = at.getUTCHours()
+  return (hour >= 1 && hour < 4) || (hour >= 6 && hour < 10)
+}
+
+export function calculateDeepSeekCost(
+  inputTokens: number,
+  outputTokens: number,
+  model = 'deepseek-flash',
+  at: Date = new Date(),
+): number {
+  const legacy = LEGACY_RATES[model]
+  if (legacy) {
+    return (inputTokens / 1_000_000) * legacy.in + (outputTokens / 1_000_000) * legacy.out
+  }
+
+  const rate = model === 'deepseek-v4-pro' && at.getTime() < PRO_RETIREMENT_UTC
+    ? PRO_RATE
+    : FLASH_RATE
+  const peakMultiplier = isDeepSeekPeakHour(at) ? 1 : 0.5
+
+  return ((inputTokens / 1_000_000) * rate.in + (outputTokens / 1_000_000) * rate.out) * peakMultiplier
 }
 
 // ─── Qwen3 pricing (DashScope compatible-mode rates) ──────────────────────────

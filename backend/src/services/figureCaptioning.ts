@@ -6,21 +6,20 @@ import type { CallContext } from './llm/types'
 // Feature AN Phase 2 (TODO.md "### AN") — captions a figure two ways,
 // preferring the stronger one when it's available:
 //
-//   1. Vision (services/llm/registry.ts's captionImage, DeepSeek's
-//      experimental deepseek-v4-flash-vision-exp model) — real image
-//      understanding, not just whatever text happens to be printed on the
-//      sheet. Gated behind DEEPSEEK_VISION_ENABLED (default off — see
-//      deepseek.ts's isVisionEnabled doc comment); never throws, so a
-//      disabled/unavailable/failed vision call is indistinguishable from
-//      "not attempted" to this function.
+//   1. Vision (services/llm/registry.ts's captionImage, DeepSeek's natively
+//      multimodal FLASH model) — real image understanding, not just whatever
+//      text happens to be printed on the sheet. On by default since
+//      2026-09-10; DEEPSEEK_VISION_ENABLED=false opts out (see deepseek.ts's
+//      isVisionEnabled doc comment for why the default flipped). Never
+//      throws, so a disabled/unavailable/failed vision call is
+//      indistinguishable from "not attempted" to this function.
 //   2. OCR + text chatJSON fallback — pulls whatever text is printed on the
 //      drawing itself (a чертёж's title block is designed to carry exactly
 //      this: ГОСТ/номер, наименование, обозначения) and turns that plus
 //      surrounding document context into a short structured caption via a
 //      plain text call. Weaker (depends on legible on-sheet text) but has
-//      no dependency on the experimental vision endpoint, so it's what
-//      every deployment gets by default and what every other deployment
-//      falls back to.
+//      no dependency on vision at all, so it stays what a vision-disabled
+//      deployment gets and what every deployment falls back to.
 
 export interface FigureCaption {
   caption: string

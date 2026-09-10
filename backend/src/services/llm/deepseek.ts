@@ -13,29 +13,37 @@ import type {
 // changes. Defaults to the public API.
 const DEFAULT_BASE_URL = 'https://api.deepseek.com'
 
-// V4 migration (legacy deepseek-chat/deepseek-reasoner deprecate 2026-07-24).
-// V4 is one model + a thinking toggle, not two model ids. We run tiered:
-//   • FLASH (thinking off) for the bulk map/synthesis passes — same price as
-//     the old deepseek-chat, stronger base model.
-//   • PRO (thinking on, high effort) for reasoning-critical passes routed via
-//     opts.reasoner — recomputation, calc grading, premise checks.
-// Both ids are env-overridable so we can flip flash↔pro per tier, or point at
-// self-hosted weights, without a redeploy.
-const FLASH_MODEL = () => process.env.DEEPSEEK_MODEL_FLASH?.trim() || 'deepseek-v4-flash'
-const PRO_MODEL   = () => process.env.DEEPSEEK_MODEL_PRO?.trim()   || 'deepseek-v4-pro'
+// V4.1 consolidation (2026-09-10, api-docs.deepseek.com). DeepSeek has
+// collapsed its whole line into ONE served model, `deepseek-flash`
+// (V4.1-Flash): the V4-era ids are accepted aliases that route to it, and
+// `deepseek-v4-pro` stops being distinct weights on 2026-09-14. So the
+// FLASH/PRO split below is no longer two models — it is one model under two
+// request shapes, which is what it already was in the body (`thinking` is a
+// toggle, not a model id) and is now also true of the `model` field.
+//
+// The two env vars survive that collapse deliberately. They are what lets an
+// on-prem deployment (docs/on-prem-deployment.md) point the reasoning tier at
+// genuinely larger self-hosted weights than the bulk tier — a distinction the
+// public API no longer offers but a GPU cluster still does.
+const FLASH_MODEL = () => process.env.DEEPSEEK_MODEL_FLASH?.trim() || 'deepseek-flash'
+const PRO_MODEL   = () => process.env.DEEPSEEK_MODEL_PRO?.trim()   || 'deepseek-flash'
 
 // Vision captioning (Feature AN Phase 2 follow-up, TODO.md "### AN").
-// deepseek-v4-flash-vision-exp is DeepSeek's own "-exp" (experimental)
-// endpoint — a separate model from FLASH, released 2026-08-21, billed at
-// FLASH's per-token rate with images counted as up to 384 input tokens each
-// (api-docs.deepseek.com/guides/vision). Gated behind an explicit env
-// opt-in rather than auto-enabled like the rest of this codebase's
-// best-effort calls: it costs real money per figure AND the vendor itself
-// labels it experimental (shape/availability could change), so a deliberate
-// per-environment switch beats a silent default-on.
-const VISION_MODEL = () => process.env.DEEPSEEK_MODEL_VISION?.trim() || 'deepseek-v4-flash-vision-exp'
+// Vision is no longer a separate endpoint: `deepseek-v4-flash-vision-exp` was
+// retired into `deepseek-flash`, which is natively multimodal (600 images per
+// request, 8192px per side, up to 1024 input tokens per image —
+// api-docs.deepseek.com/guides/vision). Still its own env var so an on-prem
+// deployment whose text weights can't see images can point this elsewhere.
+//
+// **Default-on since 2026-09-10.** It shipped default-off for two reasons:
+// per-figure cost, and the vendor labelling the endpoint experimental. The
+// second reason is gone — this is now the same model every other call already
+// uses — and the first is ~$0.0003 per figure at peak, which is noise against
+// the text call that accompanies it. Kept as an explicit `=false` opt-out
+// rather than deleted, because on-prem weights may genuinely lack vision.
+const VISION_MODEL = () => process.env.DEEPSEEK_MODEL_VISION?.trim() || 'deepseek-flash'
 export function isVisionEnabled(): boolean {
-  return process.env.DEEPSEEK_VISION_ENABLED === 'true'
+  return process.env.DEEPSEEK_VISION_ENABLED !== 'false'
 }
 
 const CAPABILITIES: ProviderCapabilities = {
@@ -192,9 +200,13 @@ export class DeepSeekProvider implements LLMProvider {
   private async attemptChat(account: DeepSeekAccount, messages: ChatMessage[], opts: ChatOptions): Promise<string> {
     const start = Date.now()
     // Tiered routing: reasoner → PRO with thinking on; everything else → FLASH
-    // with thinking off. Thinking is a body toggle in V4, not a separate model,
-    // and it defaults to ENABLED — so we must set it explicitly on every call,
+    // with thinking off. Thinking is a body toggle, not a separate model, and
+    // it defaults to ENABLED — so we must set it explicitly on every call,
     // otherwise the bulk passes silently switch to slow/expensive reasoning.
+    // Post-V4.1 both tiers resolve to the same public model id by default, so
+    // this toggle (plus reasoning_effort) is the *entire* difference between
+    // them there; on-prem, the ids can still differ. Confirmed still supported
+    // on deepseek-flash: api-docs.deepseek.com/guides/reasoning_model.
     const thinking = !!opts.reasoner
     const model = thinking ? PRO_MODEL() : FLASH_MODEL()
 
@@ -305,7 +317,7 @@ export class DeepSeekProvider implements LLMProvider {
   }
 
   // Feature AN Phase 2 follow-up (TODO.md "### AN") — captions a figure
-  // image via deepseek-v4-flash-vision-exp. Deliberately NOT part of the
+  // image via the multimodal FLASH model. Deliberately NOT part of the
   // LLMProvider interface (same "always this provider, no per-institution
   // routing" shape as embed() always being Yandex) — see types.ts's
   // VisionContentPart doc comment for why it's a standalone method instead
@@ -321,6 +333,78 @@ export class DeepSeekProvider implements LLMProvider {
     promptText:  string,
     context?:    CallContext,
   ): Promise<{ caption: string; labels: string[] } | null> {
+    const raw = await this.visionCall(
+      [{ buffer: imageBuffer, mime: mimeType }],
+      promptText,
+      { jsonMode: true, maxTokens: 300, timeoutMs: 45_000, op: 'captioning' },
+      context,
+    )
+    if (raw === null) return null
+    if (!raw) return { caption: '', labels: [] }
+
+    try {
+      const parsed = JSON.parse(extractJSON(raw)) as { caption?: unknown; labels?: unknown }
+      return {
+        caption: typeof parsed.caption === 'string' ? parsed.caption.trim() : '',
+        labels:  Array.isArray(parsed.labels) ? parsed.labels.filter((l): l is string => typeof l === 'string') : [],
+      }
+    } catch {
+      logger.warn({ message: 'DeepSeek vision returned unparseable caption JSON — falling back' })
+      return null
+    }
+  }
+
+  // OCR second opinion (2026-09-10). Yandex Vision stays the primary OCR
+  // everywhere — RU-resident, strong on printed Cyrillic, and carrying the
+  // CCITT-G4 / 8-page-cap workarounds documented in yandexVision.ts. This is
+  // only for the case where that path came back with essentially nothing,
+  // which is a real failure mode (an unusual codec, a photographed page at a
+  // bad angle, a scan Yandex's TEXT_DETECTION product declines) and where the
+  // current behaviour is to hand the grader an empty document.
+  //
+  // Same never-throws contract as captionImage: null means "no second opinion
+  // available", and the caller keeps whatever Yandex gave it.
+  //
+  // Images are sent in ONE call — the model takes up to 600, and staying at or
+  // below 14 also keeps the full 8192px-per-side resolution (it drops to 4096
+  // at 15+), which is exactly the margin that matters for a marginal scan.
+  async transcribeImages(
+    images:   { buffer: Buffer; mime: string }[],
+    context?: CallContext,
+  ): Promise<string | null> {
+    if (images.length === 0) return null
+
+    const prompt =
+      'Это страницы отсканированного документа. Перепишите весь видимый текст ' +
+      'дословно, сохраняя порядок строк. Не переводите, не пересказывайте и не ' +
+      'дополняйте текст. Разделяйте страницы строкой «---». Если на странице ' +
+      'нет читаемого текста, оставьте её пустой.'
+
+    const raw = await this.visionCall(
+      images,
+      prompt,
+      // No jsonMode: a page transcript is prose, and wrapping it in JSON only
+      // adds an escaping failure mode. Token ceiling is generous because the
+      // whole point is a full page of text, not a caption.
+      { jsonMode: false, maxTokens: 4096, timeoutMs: 120_000, op: 'transcription' },
+      context,
+    )
+    if (!raw) return null
+
+    // Normalise the model's page separator onto the \f the rest of the
+    // pipeline already uses for page breaks (cleanText, citation page markers).
+    return raw.replace(/^\s*-{3,}\s*$/gm, '\f').trim()
+  }
+
+  /** Shared account-fallback loop for every vision call. Mirrors chat()'s
+   *  ordering/cooldown/Telegram-alert behaviour rather than reimplementing it,
+   *  and swallows failure the way both vision callers need. */
+  private async visionCall(
+    images:  { buffer: Buffer; mime: string }[],
+    prompt:  string,
+    opts:    { jsonMode: boolean; maxTokens: number; timeoutMs: number; op: string },
+    context?: CallContext,
+  ): Promise<string | null> {
     if (!isVisionEnabled()) return null
     const accounts = resolveAccounts()
     if (accounts.length === 0) return null
@@ -331,7 +415,7 @@ export class DeepSeekProvider implements LLMProvider {
     for (let i = 0; i < ordered.length; i++) {
       const account = ordered[i]
       try {
-        const result = await this.attemptCaptionImage(account, imageBuffer, mimeType, promptText, context)
+        const result = await this.attemptVision(account, images, prompt, opts, context)
         if (i > 0) notifyFallback(ordered[i - 1].label, account.label, describeError(lastErr))
         downUntil.delete(account.label)
         return result
@@ -339,25 +423,28 @@ export class DeepSeekProvider implements LLMProvider {
         lastErr = err
         if (!isRetryable(err)) break
         downUntil.set(account.label, Date.now() + COOLDOWN_MS)
-        logger.warn({ message: 'DeepSeek vision attempt failed, trying next account', account: account.label, error: describeError(err), remaining: ordered.length - i - 1 })
+        logger.warn({ message: 'DeepSeek vision attempt failed, trying next account', op: opts.op, account: account.label, error: describeError(err), remaining: ordered.length - i - 1 })
       }
     }
-    logger.warn({ message: 'DeepSeek vision captioning failed on every account — falling back', error: describeError(lastErr) })
+    logger.warn({ message: 'DeepSeek vision failed on every account — falling back', op: opts.op, error: describeError(lastErr) })
     return null
   }
 
-  private async attemptCaptionImage(
-    account:     DeepSeekAccount,
-    imageBuffer: Buffer,
-    mimeType:    string,
-    promptText:  string,
-    context?:    CallContext,
-  ): Promise<{ caption: string; labels: string[] }> {
+  private async attemptVision(
+    account: DeepSeekAccount,
+    images:  { buffer: Buffer; mime: string }[],
+    prompt:  string,
+    opts:    { jsonMode: boolean; maxTokens: number; timeoutMs: number; op: string },
+    context?: CallContext,
+  ): Promise<string> {
     const start = Date.now()
     const model = VISION_MODEL()
     const content: VisionContentPart[] = [
-      { type: 'text', text: promptText },
-      { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBuffer.toString('base64')}`, detail: 'auto' } },
+      { type: 'text', text: prompt },
+      ...images.map((img): VisionContentPart => ({
+        type: 'image_url',
+        image_url: { url: `data:${img.mime};base64,${img.buffer.toString('base64')}`, detail: 'auto' },
+      })),
     ]
 
     try {
@@ -366,13 +453,13 @@ export class DeepSeekProvider implements LLMProvider {
         {
           model,
           messages: [{ role: 'user', content }],
-          response_format: { type: 'json_object' },
+          ...(opts.jsonMode ? { response_format: { type: 'json_object' } } : {}),
           temperature: 0.1,
-          max_tokens: 300,
+          max_tokens: opts.maxTokens,
         },
         {
           headers: { Authorization: `Bearer ${account.apiKey}`, 'Content-Type': 'application/json' },
-          timeout: 45_000,
+          timeout: opts.timeoutMs,
         }
       )
 
@@ -382,7 +469,7 @@ export class DeepSeekProvider implements LLMProvider {
       const raw          = response.data.choices?.[0]?.message?.content as string | undefined
 
       if (context) {
-        const costUsd = calculateDeepSeekCost(inputTokens, outputTokens, 'deepseek-v4-flash')
+        const costUsd = calculateDeepSeekCost(inputTokens, outputTokens, model)
         createUsageLog({
           ...context, model: `deepseek:${model}`, inputTokens, outputTokens, costUsd,
           costNative: costUsd, currency: 'USD', account: account.label,
@@ -390,12 +477,7 @@ export class DeepSeekProvider implements LLMProvider {
         }).catch((e) => logger.warn({ message: 'Failed to write usage log', error: e.message }))
       }
 
-      if (!raw) return { caption: '', labels: [] }
-      const parsed = JSON.parse(extractJSON(raw)) as { caption?: unknown; labels?: unknown }
-      return {
-        caption: typeof parsed.caption === 'string' ? parsed.caption.trim() : '',
-        labels:  Array.isArray(parsed.labels) ? parsed.labels.filter((l): l is string => typeof l === 'string') : [],
-      }
+      return raw ?? ''
     } catch (err) {
       const errorCode = axios.isAxiosError(err) ? `HTTP_${err.response?.status ?? 0}` : 'UNKNOWN'
       if (context) {
@@ -404,7 +486,7 @@ export class DeepSeekProvider implements LLMProvider {
           currency: 'USD', account: account.label, durationMs: Date.now() - start, success: false, errorCode,
         }).catch(() => null)
       }
-      logger.warn({ message: 'DeepSeek vision call failed', feature: context?.feature, model, account: account.label, errorCode })
+      logger.warn({ message: 'DeepSeek vision call failed', feature: context?.feature, op: opts.op, model, account: account.label, errorCode })
       throw err
     }
   }

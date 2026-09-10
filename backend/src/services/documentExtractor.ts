@@ -1,5 +1,6 @@
 import mammoth from 'mammoth'
 import { yandexVisionOCR, rasterizePdfPages } from './yandexVision'
+import { transcribeImages } from './llm/registry'
 import { extractDocxTextWithFormulas } from './ommlToLatex'
 import { logger } from '../lib/logger'
 import type { CallContext } from './llm/types'
@@ -27,6 +28,68 @@ const MIN_REAL_WORDS = 50
 
 function countRealWords(text: string): number {
   return (text.match(/\p{L}{2,}/gu) ?? []).length
+}
+
+// ─── OCR second opinion (2026-09-10) ──────────────────────────────────────────
+//
+// Yandex Vision is and stays the primary OCR: RU-resident, strongest on
+// printed Cyrillic, and holding the CCITT-G4 / 8-page-cap workarounds
+// documented at length in yandexVision.ts. But when it comes back with
+// essentially nothing, today's behaviour is to hand the grader an empty
+// document and let the failure surface as "работа пустая" — the one outcome
+// that looks like the teacher's fault rather than ours.
+//
+// DeepSeek's FLASH model became natively multimodal (2026-09-10), so there is
+// now a second reader available for exactly that case, at ~$0.0003 per page.
+// It runs ONLY on the near-empty result, never as a replacement, and only wins
+// if it actually read more than Yandex did — a second opinion can't make the
+// answer worse, only decline to improve it.
+//
+// Two deliberate limits:
+//   • 12 pages. The model takes 600 images per request, but resolution drops
+//     from 8192px to 4096px per side at 15+, and resolution is precisely what
+//     a marginal scan needs. Partial text from a document that yielded none
+//     beats completeness we can't read.
+//   • ПДн crosses the border here, same as the submission text already does
+//     (docs/legal/152-fz-dpa.md §6.2) — but as an image, which §6.2's wording
+//     didn't previously cover. Disable with DEEPSEEK_VISION_ENABLED=false for
+//     a deployment that hasn't taken that consent.
+const VISION_FALLBACK_MAX_PAGES = 12
+
+async function ocrWithSecondOpinion(
+  fileBuffer: Buffer,
+  mimeType:   string,
+  context?:   CallContext,
+): Promise<string> {
+  const ocrText = await yandexVisionOCR(fileBuffer, mimeType, context)
+  if (countRealWords(ocrText) >= MIN_REAL_WORDS) return ocrText
+
+  let images: { buffer: Buffer; mime: string }[]
+  if (mimeType === 'application/pdf') {
+    const pages = await rasterizePdfPages(fileBuffer)
+    if (!pages || pages.length === 0) return ocrText
+    images = pages.slice(0, VISION_FALLBACK_MAX_PAGES).map((buffer) => ({ buffer, mime: 'image/png' }))
+  } else {
+    images = [{ buffer: fileBuffer, mime: mimeType }]
+  }
+
+  const transcript = await transcribeImages(images, context)
+  if (!transcript) return ocrText
+
+  // Strictly-more-text is the whole acceptance test. The model can hallucinate
+  // plausible prose onto a blank page, so "it returned something" is not
+  // enough — but it also can't be judged against a ground truth we don't have,
+  // and a page Yandex read as empty has no citations to validate against yet.
+  if (countRealWords(transcript) <= countRealWords(ocrText)) return ocrText
+
+  logger.info({
+    message:      '[ocr] Yandex Vision came back near-empty, used DeepSeek vision transcript instead',
+    mimeType,
+    pagesSent:    images.length,
+    yandexWords:  countRealWords(ocrText),
+    visionWords:  countRealWords(transcript),
+  })
+  return transcript
 }
 
 // ─── Image-only .docx → OCR ───────────────────────────────────────────────────
@@ -273,19 +336,19 @@ export async function extractText(
       // Very little real text → likely a scanned PDF, fall through to OCR.
       // See countRealWords() for why this doesn't count whitespace tokens.
       if (countRealWords(text) < MIN_REAL_WORDS) {
-        const ocrText = await yandexVisionOCR(fileBuffer, 'application/pdf', context)
+        const ocrText = await ocrWithSecondOpinion(fileBuffer, 'application/pdf', context)
         return { text: cleanText(ocrText), method: 'ocr', pageCount }
       }
 
       return { text: cleanText(text), method: 'text_layer', pageCount }
     } catch {
-      const ocrText = await yandexVisionOCR(fileBuffer, 'application/pdf', context)
+      const ocrText = await ocrWithSecondOpinion(fileBuffer, 'application/pdf', context)
       return { text: cleanText(ocrText), method: 'ocr' }
     }
   }
 
   if (mimeType.startsWith('image/')) {
-    const ocrText = await yandexVisionOCR(fileBuffer, mimeType, context)
+    const ocrText = await ocrWithSecondOpinion(fileBuffer, mimeType, context)
     return { text: cleanText(ocrText), method: 'ocr' }
   }
 
