@@ -61,6 +61,7 @@ import AdminRubrics from './pages/admin/AdminRubrics'
 import AdminRubricTemplates from './pages/admin/AdminRubricTemplates'
 import AdminInstitutions from './pages/admin/AdminInstitutions'
 import AdminFeedback from './pages/admin/AdminFeedback'
+import AdminSatisfaction from './pages/admin/AdminSatisfaction'
 import AdminMessages from './pages/admin/AdminMessages'
 import AdminErrors from './pages/admin/AdminErrors'
 import AdminDeployments from './pages/admin/AdminDeployments'
@@ -353,6 +354,7 @@ export default function App() {
             <Route path="rubrics"   element={<AdminRubrics />} />
             <Route path="rubric-templates" element={<AdminRubricTemplates />} />
             <Route path="feedback"  element={<AdminFeedback />} />
+            <Route path="satisfaction" element={<AdminSatisfaction />} />
             <Route path="messages"  element={<AdminMessages />} />
             <Route path="errors"    element={<AdminErrors />} />
             <Route path="deployments" element={<AdminDeployments />} />

@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import EmailVerifyBanner from './EmailVerifyBanner'
 import UpgradeModal from '../ui/UpgradeModal'
+import SatisfactionPrompt from '../ui/SatisfactionPrompt'
 import { useUIStore } from '../../store/uiStore'
 import { useEffect } from 'react'
 
@@ -81,6 +82,7 @@ export default function AppShell() {
 
       <ToastContainer />
       <UpgradeModal />
+      <SatisfactionPrompt />
     </div>
   )
 }

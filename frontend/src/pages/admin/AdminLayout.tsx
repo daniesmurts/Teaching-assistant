@@ -17,6 +17,7 @@ const NAV: Array<{ to: string; label: string; icon: IconName; end: boolean }> = 
   { to: '/admin/rubrics',  label: 'Шаблоны критериев',   icon: 'list-checks', end: false },
   { to: '/admin/rubric-templates', label: 'Шаблоны рубрик', icon: 'list-checks', end: false },
   { to: '/admin/feedback', label: 'Отзывы',              icon: 'mail',       end: false },
+  { to: '/admin/satisfaction', label: 'Оценки функций',  icon: 'bar-chart',  end: false },
   { to: '/admin/messages', label: 'Обращения',           icon: 'mail',       end: false },
   { to: '/admin/errors',   label: 'Ошибки',              icon: 'shield',     end: false },
   { to: '/admin/deployments', label: 'Развёртывания',    icon: 'layers',     end: false },

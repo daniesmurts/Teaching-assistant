@@ -28,6 +28,7 @@ import adminCapacityRouter from './routes/adminCapacity'
 import adminPricingRouter from './routes/adminPricing'
 import institutionRouter from './routes/institution'
 import feedbackRouter from './routes/feedback'
+import satisfactionRouter from './routes/satisfaction'
 import topicsRouter from './routes/topics'
 import tasksRouter from './routes/tasks'
 import curriculumRouter from './routes/curriculum'
@@ -187,6 +188,7 @@ app.use('/api/methodist',  methodistRouter)
 app.use('/api/leadership', leadershipRouter)
 app.use('/api/institution',   institutionRouter)
 app.use('/api/feedback',      feedbackRouter)
+app.use('/api/satisfaction',  satisfactionRouter)
 app.use('/api/challenges',    challengesRouter)
 app.use('/api/payments',      paymentsRouter)
 app.use('/api/account',       accountRouter)

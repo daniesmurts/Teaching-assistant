@@ -1,5 +1,14 @@
 import { create } from 'zustand'
 
+/** The score is always 1..3 with 1 = worst, so features stay comparable — but
+ *  the wording is per-feature, because a generic «плохо/нормально/хорошо»
+ *  asks for a mood, and the answers worth having are about what just
+ *  happened. `labels` is ordered [1, 2, 3]. */
+export interface SatisfactionAsk {
+  question: string
+  labels:   [string, string, string]
+}
+
 export interface Toast {
   id: string
   message: string
@@ -16,6 +25,14 @@ interface UIState {
   upgradeModalCode: string | null
   showUpgradeModal: (code?: string) => void
   hideUpgradeModal: () => void
+  // Micro-satisfaction prompt (TODO Feature SAT). Held in the store rather
+  // than local state at the trigger site so the bar survives the navigation
+  // that often follows the action being rated — approving a grade frequently
+  // sends the teacher straight to История.
+  satisfactionPromptId: string | null
+  satisfactionAsk: SatisfactionAsk | null
+  showSatisfaction: (promptId: string, ask: SatisfactionAsk) => void
+  hideSatisfaction: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -39,4 +56,8 @@ export const useUIStore = create<UIState>((set) => ({
   upgradeModalCode: null,
   showUpgradeModal: (code) => set({ upgradeModalOpen: true, upgradeModalCode: code ?? null }),
   hideUpgradeModal: () => set({ upgradeModalOpen: false, upgradeModalCode: null }),
+  satisfactionPromptId: null,
+  satisfactionAsk: null,
+  showSatisfaction: (promptId, ask) => set({ satisfactionPromptId: promptId, satisfactionAsk: ask }),
+  hideSatisfaction: () => set({ satisfactionPromptId: null, satisfactionAsk: null }),
 }))

@@ -152,6 +152,26 @@ export async function getFeedback(limit = 100): Promise<AdminFeedback[]> {
   return (await client.get<AdminFeedback[]>('/api/admin/feedback', { params: { limit } })).data
 }
 
+export interface AdminSatisfaction {
+  id:               string
+  feature:          string
+  artifact_id:      string | null
+  /** 1 = worst, 3 = best. null when shown but never answered. */
+  score:            number | null
+  comment:          string | null
+  context:          Record<string, unknown>
+  shown_at:         string
+  responded_at:     string | null
+  dismissed_at:     string | null
+  teacher_email:    string | null
+  teacher_name:     string | null
+  institution_name: string | null
+}
+
+export async function getSatisfaction(limit = 200): Promise<AdminSatisfaction[]> {
+  return (await client.get<AdminSatisfaction[]>('/api/admin/satisfaction', { params: { limit } })).data
+}
+
 export interface AdminContactMessage {
   id:           string
   name:         string

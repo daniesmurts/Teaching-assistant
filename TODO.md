@@ -2843,6 +2843,71 @@ Keeping these here so they don't get re-proposed.
 
 ---
 
+### AQ. Микро-опрос удовлетворённости — Phases 2–3 · Effort: Phase 2 S, Phase 3 M · 🚧 Phases 0–1 SHIPPED (2026-09-10)
+
+**Shipped (Phases 0–1).** `satisfaction_prompts` (migration 129, one table —
+a prompt that was shown and ignored is the most important row in it, so
+"shown" and "answered" cannot live in separate tables), `services/satisfaction.ts`
+(the throttle: 14-day global cooldown across all features, 90-day per-feature,
+7-day minimum account age, platform admins excluded, `SATISFACTION_SAMPLE_RATE`
+to dial down without a deploy), and one trigger — grading, **on approve, never
+on the grade**. Score is always 1..3 with 1 = worst so features stay
+comparable; the wording is per-feature, because «плохо/нормально/хорошо» asks
+for a mood and «насколько пришлось переписывать» asks about what just
+happened.
+
+**Phase 2 — extend to презентации and тесты (after export).** Mechanically
+trivial: a `checkSatisfactionPrompt` call at the export handler plus a
+question and three labels.
+
+- **Build it only if the dismissal rate is under ~50%.** The query is
+  `shown_at` rows with neither `responded_at` nor `dismissed_at`, plus the
+  explicit dismissals, over the first ~60 days of Phase 1. Above ~70%, do not
+  extend it — **remove the grading prompt instead**. A prompt people reflex-
+  dismiss produces a number that measures reflex, and every additional
+  surface makes the reflex stronger and the number worse. This is the whole
+  reason dismissals are recorded rather than ignored.
+- **Also don't build it if Phase 1's answers are unanimous.** If essentially
+  everyone taps the best option, the question isn't discriminating and a
+  second copy of it won't either — change the question before adding surfaces.
+- Sequencing note: презентации export is a much higher-volume moment than
+  grading approve, so add the sample rate BEFORE the surface, not after.
+
+**Phase 3 — aggregation: per-feature and per-institution, release-annotated.**
+Admin panels next to the existing usage/cohort views, reusing the release
+markers from `a4279f5`'s cohort curves.
+
+- **Build it when there are enough answered rows for the comparison to mean
+  anything — not when it would be convenient.** The comparison worth making
+  is release-over-release for the same feature (which is also why
+  FEATURE_COOLDOWN_DAYS is 90 rather than 30). A per-quarter absolute CSAT
+  number at this volume is noise dressed as a metric, and shipping a
+  dashboard that displays it will get it quoted in a sales conversation.
+- **Per-institution is the half that earns this feature.** The buyer is the
+  institution, the user is the teacher: aggregate satisfaction next to
+  aggregate usage is a renewal signal, and that is the argument for having
+  built any of this. Per-teacher scores are a product metric and should not
+  be visible to an institution admin — a теacher's rating of ИСПУМ must not
+  become their manager's view of them.
+- Note the CASCADE on `teacher_id`: a departing teacher's rows disappear, so
+  historical per-institution scores shift retroactively. Acceptable
+  (152-ФЗ cascade-delete promise), but the dashboard must not present the
+  series as immutable.
+
+**Explicitly not planned.** NPS («порекомендуете ли вы…»): the respondent is
+a teacher who didn't choose the vendor and can't recommend it to anyone with
+purchasing authority, so the number would be uninterpretable. Free-text
+sentiment analysis via LLM: at this volume the comments can be read.
+
+- **Touches (Phase 2):** `services/satisfaction.ts` (add to
+  `SatisfactionFeature`), the presentation/quiz export handlers,
+  `validation/satisfactionValidation.ts`. **(Phase 3):** new queries +
+  `routes/admin.ts`, `pages/admin/`.
+- **Depends on:** nothing new. Phase 3 wants AL's cost ledger (shipped) if
+  the join to spend-per-artefact is worth making.
+
+---
+
 ## In progress
 
 *(empty — pick from above)*

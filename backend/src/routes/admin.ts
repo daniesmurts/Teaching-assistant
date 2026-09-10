@@ -24,6 +24,7 @@ import {
 import { syncRoleToTree, clearOrgTiesOutsideInstitution, assignDefaultDepartmentIfUnset } from '../db/queries/orgUnits'
 import { metadataUrlForInstitution, acsUrlForInstitution } from '../services/saml'
 import { listFeedback } from '../db/queries/feedback'
+import { listSatisfactionPrompts } from '../db/queries/satisfaction'
 import { listContactMessages, markContactMessageRead } from '../db/queries/contactMessages'
 import { listAudit } from '../db/queries/audit'
 import { getFunnelSummary, getFunnelByWeek, getStalledTeachers } from '../db/queries/activation'
@@ -606,6 +607,14 @@ router.post('/payments/:orderId/refund', asyncHandler(async (req, res) => {
 router.get('/feedback', asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt((req.query.limit as string) ?? '100', 10) || 100, 500)
   res.json(await listFeedback(limit))
+}))
+
+// ─── Micro-satisfaction prompts (TODO Feature AQ) ─────────────────────────────
+// Returns prompts, not just answers — the unanswered ones carry the dismissal
+// rate, which is the documented kill switch for the whole mechanism.
+router.get('/satisfaction', asyncHandler(async (req, res) => {
+  const limit = Math.min(parseInt((req.query.limit as string) ?? '200', 10) || 200, 500)
+  res.json(await listSatisfactionPrompts(limit))
 }))
 
 // ─── Contact messages (marketing-site inbox) ──────────────────────────────────
