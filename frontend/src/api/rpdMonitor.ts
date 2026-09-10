@@ -108,6 +108,12 @@ export async function downloadRpdGroup(groupId: string, snapshotId?: string): Pr
   await downloadBlob(`/api/institution/rpd/export/group/${groupId}`, snapshotId ? { snapshotId } : undefined, 'РПД_институт.xlsx')
 }
 
+/** Every institute's own workbook in one .zip — the УМЦ task is "send each
+ *  institute its file", so this is the shape that matches it. */
+export async function downloadRpdAllGroups(snapshotId?: string): Promise<void> {
+  await downloadBlob('/api/institution/rpd/export/groups', snapshotId ? { snapshotId } : undefined, 'РПД_по_институтам.zip')
+}
+
 export async function downloadRpdReminder(groupId: string, snapshotId?: string): Promise<void> {
   await downloadBlob(`/api/institution/rpd/reminders/${groupId}`, snapshotId ? { snapshotId } : undefined, 'Напоминание.docx')
 }

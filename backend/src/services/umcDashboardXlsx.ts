@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import { STATUS_FILL_HEX } from './rpdMonitor'
+import { STATUS_FILL_HEX, STATUS_FONT_HEX } from './rpdMonitor'
 import type { UmcDashboardResult, UmcReadinessRow, RpdSubmissionStatus } from '../../../shared/types'
 
 // Same five labels as the frontend's SubmissionStatusBadge — kept as its own
@@ -24,6 +24,13 @@ const STATUS_FILLS = {
   danger:  { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${STATUS_FILL_HEX.danger}` } } as ExcelJS.Fill,
   warning: { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${STATUS_FILL_HEX.warning}` } } as ExcelJS.Fill,
   success: { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${STATUS_FILL_HEX.success}` } } as ExcelJS.Fill,
+}
+// Paired with the fills above — the palette is fully saturated, so a shaded
+// cell that keeps Excel's default black text becomes unreadable.
+const STATUS_FONTS: Record<keyof typeof STATUS_FILLS, Partial<ExcelJS.Font>> = {
+  danger:  { color: { argb: `FF${STATUS_FONT_HEX.danger}` } },
+  warning: { color: { argb: `FF${STATUS_FONT_HEX.warning}` } },
+  success: { color: { argb: `FF${STATUS_FONT_HEX.success}` } },
 }
 
 // Coverage is a "higher is better" score (opposite of РПД monitor's debt %),
@@ -98,7 +105,7 @@ export async function generateUmcDashboardXlsx(data: UmcDashboardResult): Promis
       r.submission_status ? STATUS_LABEL[r.submission_status] : '—',
     ])
     const status = coverageStatus(r)
-    if (status) row.eachCell((c) => { c.fill = STATUS_FILLS[status] })
+    if (status) row.eachCell((c) => { c.fill = STATUS_FILLS[status]; c.font = STATUS_FONTS[status] })
   }
   autoWidth(all)
 

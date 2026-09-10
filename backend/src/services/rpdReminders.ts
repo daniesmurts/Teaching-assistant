@@ -6,7 +6,7 @@
 
 import type { RpdSnapshotRecord, RpdSnapshotRowRecord, RpdDeptGroupRecord } from '../db/queries/rpdMonitor'
 import { chat } from './llm/registry'
-import { pctStatus, STATUS_FILL_HEX } from './rpdMonitor'
+import { pctStatus, STATUS_FILL_HEX, STATUS_FONT_HEX } from './rpdMonitor'
 
 interface ProblemRow {
   deptCode:  string
@@ -98,19 +98,29 @@ export async function generateRpdReminderDocx(
   const cellBorder = { style: BorderStyle.SINGLE, size: 1, color: 'D8D2C6' }
   const borders = { top: cellBorder, bottom: cellBorder, left: cellBorder, right: cellBorder }
   const headCell = (text: string) => new TableCell({ borders, children: [new Paragraph({ children: [new TextRun({ text, bold: true })] })] })
-  const cell = (text: string, fill?: string) =>
-    new TableCell({ borders, shading: fill ? { fill } : undefined, children: [new Paragraph({ children: [new TextRun(text)] })] })
+  // `color` travels with `fill` for the same reason the Excel exports pair them:
+  // the status palette is fully saturated, and Word's default black on the red
+  // or the green is unreadable in a letter that gets printed and signed.
+  const cell = (text: string, fill?: string, color?: string) =>
+    new TableCell({
+      borders,
+      shading: fill ? { fill } : undefined,
+      children: [new Paragraph({ children: [new TextRun({ text, color })] })],
+    })
 
   const table = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     rows: [
       new TableRow({ children: [headCell('Кафедра'), headCell('Форма'), headCell('Уровень'), headCell('Сделано / План'), headCell('% долга РПД'), headCell('Долг')] }),
       ...problems.map((r) => {
-        const fill = STATUS_FILL_HEX[pctStatus(r.debtPct)]
+        const status = pctStatus(r.debtPct)
+        const fill = STATUS_FILL_HEX[status]
+        const color = STATUS_FONT_HEX[status]
         return new TableRow({
           children: [
-            cell(r.deptCode, fill), cell(r.eduForm, fill), cell(r.eduLevel, fill),
-            cell(`${r.rpdDone} / ${r.planCount}`, fill), cell(`${r.debtPct}%`, fill), cell(String(r.rpdDebt), fill),
+            cell(r.deptCode, fill, color), cell(r.eduForm, fill, color), cell(r.eduLevel, fill, color),
+            cell(`${r.rpdDone} / ${r.planCount}`, fill, color), cell(`${r.debtPct}%`, fill, color),
+            cell(String(r.rpdDebt), fill, color),
           ],
         })
       }),

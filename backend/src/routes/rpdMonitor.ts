@@ -10,7 +10,7 @@ import { repairUploadFilename } from '../middleware/fileValidation'
 import {
   parseAsuExport, computeOverview, learnDeptCodesFromWorkbook,
 } from '../services/rpdMonitor'
-import { generateRpdMasterWorkbook, generateRpdGroupWorkbook } from '../services/rpdReportXlsx'
+import { generateRpdMasterWorkbook, generateRpdGroupWorkbook, generateRpdGroupZip } from '../services/rpdReportXlsx'
 import { generateRpdReminderDocx, generateRpdReminderText } from '../services/rpdReminders'
 import {
   createSnapshot, listSnapshots, getSnapshot, updateSnapshotCapturedAt, deleteSnapshot,
@@ -193,6 +193,32 @@ router.get('/export/master', asyncHandler(async (req, res) => {
     kind: 'rpd_monitor', event: 'exported', artifactId: snapshotId,
     teacherId: req.teacher.id, institutionId: instId,
     format: 'xlsx', metadata: { scope: 'master' },
+  })
+}))
+
+// One workbook per institute, zipped. The per-institute export has existed
+// since this feature shipped, as a per-row «Отчёт» link — and went unused,
+// because the actual УМЦ task is "send every institute its file", which that
+// shape turns into one click per institute plus remembering which are done.
+router.get('/export/groups', asyncHandler(async (req, res) => {
+  const instId = institutionId(req)
+  const snapshotId = await resolveSnapshotId(instId, req.query.snapshotId)
+  const snapshot = await getSnapshot(snapshotId, instId)
+  if (!snapshot) throw new NotFoundError('Снимок')
+
+  const [groups, rows] = await Promise.all([listDeptGroups(instId), getSnapshotRows(snapshotId)])
+  if (groups.length === 0) throw new NotFoundError('Институты не заданы')
+
+  const buffer = await generateRpdGroupZip(snapshot, groups, rows)
+  const fname = `РПД_по_институтам_${snapshot.captured_at.toString().slice(0, 10)}.zip`
+  res.setHeader('Content-Type', 'application/zip')
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fname)}"`)
+  res.end(buffer)
+
+  recordArtifactEvent({
+    kind: 'rpd_monitor', event: 'exported', artifactId: snapshotId,
+    teacherId: req.teacher.id, institutionId: instId,
+    format: 'zip', metadata: { scope: 'groups', groupCount: groups.length },
   })
 }))
 

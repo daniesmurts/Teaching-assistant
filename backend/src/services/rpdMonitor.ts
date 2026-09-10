@@ -370,14 +370,39 @@ export function pctStatus(debtPct: number): RpdStatus {
   return 'danger'
 }
 
-/** Cell-shading tints (6-hex, no #/alpha prefix) for the Excel/Word exports — same
-    three tiers as the web pills. Saturated enough to read as a clear colour at a
-    glance (the first pass was too washed-out), still light enough for black text. */
+/** Cell-shading colours (6-hex, no #/alpha prefix) for the Excel/Word exports.
+    These are the *web* palette verbatim — `--color-danger`, the bar chart's
+    orange, `--color-success` — not tints of it. Two earlier passes went the
+    other way, picking Material-200 tints so black text stayed readable on top;
+    the head of УМЦ's verdict on the result was that the exported file looks
+    washed-out next to the screen it was exported from, and she is right that a
+    status colour carrying real weight in a printed сводка has to survive being
+    glanced at across a desk. So: full saturation, and the text colour moves to
+    match rather than the fill backing off. */
 export const STATUS_FILL_HEX: Record<RpdStatus, string> = {
-  danger:  'EF9A9A',
-  warning: 'FFCC80',
-  success: 'A5D6A7',
+  danger:  'C0392B',   // --color-danger
+  warning: 'F97316',   // the bar chart's orange
+  success: '2D7D46',   // --color-success
 }
+
+/** Text colour to pair with each fill above — not a style preference, a
+    legibility requirement now that the fills are dark. Chosen by contrast
+    against the fill: white clears 4.5:1 on the red and the green, but only
+    reaches ~2.5:1 on the orange, where near-black reaches ~8:1 instead. Every
+    export that shades a cell must set both, or the saturated fill turns a
+    readable row into an unreadable one. */
+export const STATUS_FONT_HEX: Record<RpdStatus, string> = {
+  danger:  'FFFFFF',
+  warning: '1F2937',
+  success: 'FFFFFF',
+}
+
+/** Data-anomaly marker (done+review+debt ≠ plan, or negative долг) — deliberately
+    outside the three-tier scale, because it flags a broken row rather than a bad
+    one. Platform amber (`--color-amber`) with near-black text, same contrast
+    reasoning as the orange above. */
+export const ANOMALY_FILL_HEX = 'C8860A'
+export const ANOMALY_FONT_HEX = '1F2937'
 
 function sumTotals(rows: RpdSnapshotRowRecord[]): RpdTotals {
   const t = rows.reduce((acc, r) => ({

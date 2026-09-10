@@ -9,7 +9,7 @@ import {
   uploadRpdExport, listRpdSnapshots, getRpdOverview, getRpdMapping,
   createRpdGroup, assignRpdDepts, learnRpdMapping, updateRpdSnapshotDate, deleteRpdSnapshot,
   renameRpdGroup, deleteRpdGroup,
-  downloadRpdMaster, downloadRpdGroup, downloadRpdReminder, getRpdReminderText,
+  downloadRpdMaster, downloadRpdGroup, downloadRpdAllGroups, downloadRpdReminder, getRpdReminderText,
   type RpdOverview, type RpdSnapshot, type RpdDeptGroup, type RpdLeaderDept, type RpdReminderPreview, type RpdAllDept,
   type RpdRegressedDept,
   type RpdGroupOverview,
@@ -451,6 +451,19 @@ export default function RpdMonitor() {
                 <DownloadIcon />
                 Скачать сводную таблицу (.xlsx)
               </button>
+              {/* Sits beside the master export, not buried in the institute table:
+                  the per-institute file is the one that actually gets forwarded,
+                  so it deserves the same weight as the сводка. */}
+              <button
+                onClick={() => downloadRpdAllGroups(overview.snapshot.id)
+                  .catch(() => addToast('Не удалось собрать файлы по институтам', 'error'))}
+                disabled={overview.groups.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-surface border border-border-mid text-ink text-sm font-sans font-medium shadow-sm hover:border-amber hover:text-amber transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-border-mid disabled:hover:text-ink"
+                title="Отдельный файл на каждый институт, одним архивом"
+              >
+                <DownloadIcon />
+                Файлы по институтам (.zip)
+              </button>
             </div>
 
             <GroupsTable
@@ -873,7 +886,7 @@ function GroupsTable({ overview, onDownload, onReminder, onPreviewReminder }: {
                   <td className="px-4 py-2"><DebtBadge pct={debtPct} /></td>
                   <td className={`px-4 py-2 font-semibold ${g.rpdDebt > 0 ? STATUS_TEXT[status] : 'text-ink-tertiary'}`}>{g.rpdDebt}</td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
-                    <button onClick={() => onDownload(g.groupId)} className="text-xs font-sans text-amber-mid hover:underline mr-3">Отчёт</button>
+                    <button onClick={() => onDownload(g.groupId)} className="text-xs font-sans text-amber-mid hover:underline mr-3">Скачать .xlsx</button>
                     <button onClick={() => onPreviewReminder(g.groupId, g.groupName)} className="text-xs font-sans text-amber-mid hover:underline mr-3">Напоминание</button>
                     <button onClick={() => onReminder(g.groupId, g.groupName)} className="text-xs font-sans text-amber-mid hover:underline">.docx</button>
                   </td>
