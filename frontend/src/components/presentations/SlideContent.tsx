@@ -9,6 +9,7 @@ import { slidesToText, legacySlidesToText } from './slideText'
 import { slidesToHtml, legacySlidesToHtml } from './slideHtml'
 import { copyRich } from './clipboard'
 import { toHttpsUrl } from '../../../../shared/imageUrl'
+import { checkSatisfactionPrompt } from '../../api/satisfaction'
 import Button from '../ui/Button'
 import CopyAllButton from '../ui/CopyAllButton'
 import LoadingSpinner from '../ui/LoadingSpinner'
@@ -36,6 +37,7 @@ const DownloadIcon = () => (
 function PptxDownloadButton({ presentationId }: { presentationId: string }) {
   const { can } = usePlan()
   const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
+  const showSatisfaction = useUIStore((s) => s.showSatisfaction)
   const [downloading, setDownloading] = useState(false)
 
   async function handleClick() {
@@ -43,6 +45,21 @@ function PptxDownloadButton({ presentationId }: { presentationId: string }) {
     setDownloading(true)
     try {
       await downloadPresentationPptx(presentationId)
+
+      // Micro-satisfaction prompt (TODO Feature AQ, Phase 2). Export is the
+      // value moment for a deck, the way approve is for a grade: the teacher
+      // has scrolled the slides and decided to actually use them. Prompting on
+      // generation instead would rate the loading spinner. Fired only after
+      // the download resolves, so a failed export never gets a survey attached
+      // to it — and never awaited, so the survey can't delay the file.
+      checkSatisfactionPrompt('presentation', presentationId)
+        .then((promptId) => {
+          if (promptId) showSatisfaction(promptId, {
+            question: 'Слайды пришлось переделывать?',
+            labels:   ['Почти все', 'Частично', 'Почти не пришлось'],
+          })
+        })
+        .catch(() => null)
     } finally {
       setDownloading(false)
     }

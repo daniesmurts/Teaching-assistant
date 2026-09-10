@@ -1,6 +1,6 @@
 import client from './client'
 
-export type SatisfactionFeature = 'grading'
+export type SatisfactionFeature = 'grading' | 'presentation'
 
 /** 1 = плохо, 2 = нормально, 3 = хорошо. */
 export type SatisfactionScore = 1 | 2 | 3

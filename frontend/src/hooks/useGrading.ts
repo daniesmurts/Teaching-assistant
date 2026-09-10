@@ -30,7 +30,7 @@ export function useApprove() {
       checkSatisfactionPrompt('grading', vars.id, { edited: Boolean(vars.data.approved_edit_reason) })
         .then((promptId) => {
           if (promptId) showSatisfaction(promptId, {
-            question: 'Насколько пришлось переписывать оценку?',
+            question: 'Оценку пришлось переписывать?',
             labels:   ['Почти всю', 'Частично', 'Почти не пришлось'],
           })
         })

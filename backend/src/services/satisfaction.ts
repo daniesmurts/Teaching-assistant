@@ -20,7 +20,11 @@
 
 import { getPromptCooldowns } from '../db/queries/satisfaction'
 
-export type SatisfactionFeature = 'grading'
+// 'presentation' leads rather than follows 'grading' on purpose. Usage here is
+// seasonal — decks dominate at the start of a semester, grading at the end —
+// so instrumenting only the approve path would have collected nothing until
+// December and turned the Phase 2 gate into a date instead of a measurement.
+export type SatisfactionFeature = 'grading' | 'presentation'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 

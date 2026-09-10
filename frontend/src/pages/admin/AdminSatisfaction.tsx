@@ -8,12 +8,14 @@ import { getSatisfaction, type AdminSatisfaction } from '../../api/admin'
 // response rate — the number this page exists for — impossible to read.
 
 const FEATURE_LABEL: Record<string, string> = {
-  grading: 'Проверка работ',
+  grading:      'Проверка работ',
+  presentation: 'Презентации',
 }
 
 // Wording is per-feature (the score is not), so the legend has to be too.
 const SCORE_LABEL: Record<string, [string, string, string]> = {
-  grading: ['Почти всю', 'Частично', 'Почти не пришлось'],
+  grading:      ['Почти всю', 'Частично', 'Почти не пришлось'],
+  presentation: ['Почти все', 'Частично', 'Почти не пришлось'],
 }
 const GENERIC_LABELS: [string, string, string] = ['Плохо', 'Нормально', 'Хорошо']
 
@@ -21,6 +23,12 @@ const SCORE_CLS = ['bg-danger-bg text-danger', 'bg-warning-bg text-warning', 'bg
 
 const fmt = (d: string) =>
   new Date(d).toLocaleString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+
+// The log table is four columns of which three are unavoidably wide; the year
+// is the one piece a reader can reconstruct, so it goes. Comments above keep
+// the full date — there the row is a thing you might quote back to someone.
+const fmtShort = (d: string) =>
+  new Date(d).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
 const pct = (n: number, of: number) => (of > 0 ? Math.round((n / of) * 100) : 0)
 
@@ -51,10 +59,10 @@ export default function AdminSatisfaction() {
   // than left in a file nobody opens while looking at the data.
   const walkAwayPct = pct(t.dismissed + t.ignored, t.shown)
   const gate = walkAwayPct >= 70
-    ? { cls: 'text-danger', note: 'Выше 70% — убрать опрос, а не расширять его на другие функции.' }
+    ? { cls: 'text-danger', note: 'Выше 70% — убрать опрос совсем, а не добавлять функции.' }
     : walkAwayPct > 50
-      ? { cls: 'text-warning', note: 'Между 50% и 70% — расширять рано, сначала поменять вопрос.' }
-      : { cls: 'text-success', note: 'Ниже 50% — можно расширять на презентации и тесты (Phase 2).' }
+      ? { cls: 'text-warning', note: 'Между 50% и 70% — добавлять функции рано, сначала поменять вопрос.' }
+      : { cls: 'text-success', note: 'Ниже 50% — можно добавить тесты.' }
 
   const byFeature = useMemo(() => {
     const map = new Map<string, { counts: [number, number, number]; answered: number }>()
@@ -77,7 +85,7 @@ export default function AdminSatisfaction() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="font-display text-2xl font-bold text-ink">Оценки функций</h1>
-            <p className="text-xs font-sans text-ink-tertiary mt-1">Микро-опрос после подтверждения оценки</p>
+            <p className="text-xs font-sans text-ink-tertiary mt-1">Микро-опрос после подтверждения оценки или выгрузки презентации</p>
           </div>
           {features.length > 1 && (
             <select
@@ -205,14 +213,14 @@ export default function AdminSatisfaction() {
                 <tbody>
                   {shown.map((r) => (
                     <tr key={r.id} className="border-b border-border last:border-0">
-                      <td className="px-4 py-2 text-ink-tertiary whitespace-nowrap">{fmt(r.shown_at)}</td>
-                      <td className="px-4 py-2 text-ink-secondary">{FEATURE_LABEL[r.feature] ?? r.feature}</td>
-                      <td className="px-4 py-2 text-ink-secondary truncate max-w-[16rem]">
+                      <td className="px-4 py-2 text-ink-tertiary whitespace-nowrap">{fmtShort(r.shown_at)}</td>
+                      <td className="px-4 py-2 text-ink-secondary whitespace-nowrap">{FEATURE_LABEL[r.feature] ?? r.feature}</td>
+                      <td className="px-4 py-2 text-ink-secondary truncate max-w-[12rem]">
                         {r.teacher_name || r.teacher_email || '—'}
                       </td>
-                      <td className="px-4 py-2">
+                      <td className="px-4 py-2 whitespace-nowrap">
                         {r.score ? (
-                          <span className={`text-[10px] font-sans font-medium px-1.5 py-0.5 rounded-sm ${SCORE_CLS[r.score - 1]}`}>
+                          <span className={`text-[10px] font-sans font-medium px-1.5 py-0.5 rounded-sm whitespace-nowrap ${SCORE_CLS[r.score - 1]}`}>
                             {scoreLabel(r.feature, r.score)}
                           </span>
                         ) : r.dismissed_at ? (

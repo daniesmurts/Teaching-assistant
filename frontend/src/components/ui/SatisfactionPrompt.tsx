@@ -61,8 +61,8 @@ export default function SatisfactionPrompt() {
   }
 
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[min(560px,calc(100vw-2rem))]">
-      <div className="rounded-lg bg-ink text-white shadow-lg px-4 py-3 font-sans text-sm">
+    <div className="fixed bottom-4 left-0 right-0 md:left-[210px] z-40 px-4 flex justify-center pointer-events-none">
+      <div className="w-full max-w-[560px] rounded-lg bg-ink text-white shadow-lg px-4 py-3 font-sans text-sm pointer-events-auto">
         {sent ? (
           <p className="text-white/80">Спасибо — прочитаем.</p>
         ) : commenting ? (
@@ -86,18 +86,20 @@ export default function SatisfactionPrompt() {
             <button onClick={reset} aria-label="Закрыть" className="text-white/50 hover:text-white/90 ml-auto px-1">✕</button>
           </div>
         ) : (
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="mr-auto">{ask.question}</span>
-            {ask.labels.map((label, i) => (
-              <button
-                key={label}
-                onClick={() => answer((i + 1) as SatisfactionScore)}
-                className="px-3 py-1 rounded-md bg-white/10 hover:bg-white/20 transition-colors"
-              >
-                {label}
-              </button>
-            ))}
-            <button onClick={dismiss} aria-label="Закрыть" className="text-white/50 hover:text-white/90 px-1">✕</button>
+          <div className="flex items-center gap-x-3 gap-y-2 flex-wrap">
+            <span className="flex-1 min-w-[14rem]">{ask.question}</span>
+            <div className="flex items-center gap-2 shrink-0 ml-auto">
+              {ask.labels.map((label, i) => (
+                <button
+                  key={label}
+                  onClick={() => answer((i + 1) as SatisfactionScore)}
+                  className="px-3 py-1 rounded-md bg-white/10 hover:bg-white/20 transition-colors whitespace-nowrap"
+                >
+                  {label}
+                </button>
+              ))}
+              <button onClick={dismiss} aria-label="Закрыть" className="text-white/50 hover:text-white/90 px-1">✕</button>
+            </div>
           </div>
         )}
       </div>

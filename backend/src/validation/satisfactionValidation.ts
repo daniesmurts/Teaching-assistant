@@ -1,7 +1,7 @@
 import { body } from 'express-validator'
 
 export const satisfactionCheckRules = [
-  body('feature').isIn(['grading']).withMessage('Неизвестная функция'),
+  body('feature').isIn(['grading', 'presentation']).withMessage('Неизвестная функция'),
   body('artifactId').optional({ nullable: true }).isUUID().withMessage('Неверный идентификатор'),
 ]
 

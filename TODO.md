@@ -2843,7 +2843,7 @@ Keeping these here so they don't get re-proposed.
 
 ---
 
-### AQ. Микро-опрос удовлетворённости — Phases 2–3 · Effort: Phase 2 S, Phase 3 M · 🚧 Phases 0–1 SHIPPED (2026-09-10)
+### AQ. Микро-опрос удовлетворённости — Phase 3 · Effort: Phase 3 M · 🚧 Phases 0–2 SHIPPED (2026-09-10)
 
 **Shipped (Phases 0–1).** `satisfaction_prompts` (migration 129, one table —
 a prompt that was shown and ignored is the most important row in it, so
@@ -2856,22 +2856,39 @@ comparable; the wording is per-feature, because «плохо/нормально/
 for a mood and «насколько пришлось переписывать» asks about what just
 happened.
 
-**Phase 2 — extend to презентации and тесты (after export).** Mechanically
-trivial: a `checkSatisfactionPrompt` call at the export handler plus a
-question and three labels.
+**Phase 2 — презентации, shipped same day as Phase 1, and the gate moved with
+it.** The original plan was to hold Phase 2 until grading's dismissal rate
+came in. That gate was wrong for the calendar: usage here is **seasonal** —
+decks dominate at the start of a semester, grading at the end — so waiting on
+the approve path would have collected almost nothing until December and
+quietly converted "wait for a measurement" into "wait for a date". Презентации
+now carry the gate; grading keeps collecting and will have its own numbers by
+the time the season flips.
 
-- **Build it only if the dismissal rate is under ~50%.** The query is
-  `shown_at` rows with neither `responded_at` nor `dismissed_at`, plus the
-  explicit dismissals, over the first ~60 days of Phase 1. Above ~70%, do not
-  extend it — **remove the grading prompt instead**. A prompt people reflex-
-  dismiss produces a number that measures reflex, and every additional
-  surface makes the reflex stronger and the number worse. This is the whole
-  reason dismissals are recorded rather than ignored.
-- **Also don't build it if Phase 1's answers are unanimous.** If essentially
-  everyone taps the best option, the question isn't discriminating and a
-  second copy of it won't either — change the question before adding surfaces.
-- Sequencing note: презентации export is a much higher-volume moment than
-  grading approve, so add the sample rate BEFORE the surface, not after.
+Trigger is the **PPTX export**, the deck equivalent of approving a grade: the
+teacher has scrolled the slides and decided to use them. Prompting at
+generation would rate the loading spinner.
+
+- **Correction to this entry's earlier note.** It said to add a sample rate
+  BEFORE the higher-volume surface. That was wrong, and acting on it would
+  have slowed data collection for no benefit: `GLOBAL_COOLDOWN_DAYS` already
+  caps each teacher at one prompt a fortnight no matter how many times they
+  export, so action volume doesn't become prompt volume — it just means more
+  *distinct* teachers get asked sooner, which is the goal. `SATISFACTION_SAMPLE_RATE`
+  stays at 1 and remains what it always was: a dial for later.
+- **Adding a surface reallocates prompts, it doesn't add them.** With one
+  global cooldown, whichever feature a teacher touches first in a fortnight
+  wins, and the other is silently starved. Harmless now (grading is seasonally
+  idle) but it bites at end of semester, when презентации traffic could starve
+  grading exactly when grading matters most. If that shows up, the fix is a
+  per-feature allocation rather than a shorter global cooldown — shortening the
+  cooldown solves it by asking people more often, which is the thing this
+  whole design exists to avoid.
+
+**Тесты — still not built, deliberately.** A third surface competes for the
+same per-teacher budget and would slow the презентации signal the gate now
+depends on. Add it once that dismissal rate is readable (weeks, not months, at
+current deck volume), not before.
 
 **Phase 3 — aggregation: per-feature and per-institution, release-annotated.**
 Admin panels next to the existing usage/cohort views, reusing the release
@@ -2889,6 +2906,13 @@ markers from `a4279f5`'s cohort curves.
   built any of this. Per-teacher scores are a product metric and should not
   be visible to an institution admin — a теacher's rating of ИСПУМ must not
   become their manager's view of them.
+- **Do not compare features across seasons without saying so.** Презентации
+  scores are collected in September from teachers preparing courses; grading
+  scores in December from teachers who have been marking for a fortnight. A
+  side-by-side bar chart of the two invites reading seasonal exhaustion as
+  feature quality. Compare a feature to itself across releases; if the
+  dashboard shows features side by side at all, it needs the collection window
+  on the label.
 - Note the CASCADE on `teacher_id`: a departing teacher's rows disappear, so
   historical per-institution scores shift retroactively. Acceptable
   (152-ФЗ cascade-delete promise), but the dashboard must not present the
@@ -2899,10 +2923,10 @@ a teacher who didn't choose the vendor and can't recommend it to anyone with
 purchasing authority, so the number would be uninterpretable. Free-text
 sentiment analysis via LLM: at this volume the comments can be read.
 
-- **Touches (Phase 2):** `services/satisfaction.ts` (add to
-  `SatisfactionFeature`), the presentation/quiz export handlers,
-  `validation/satisfactionValidation.ts`. **(Phase 3):** new queries +
-  `routes/admin.ts`, `pages/admin/`.
+- **Touches (тесты, if built):** `services/satisfaction.ts` (add to
+  `SatisfactionFeature`), `validation/satisfactionValidation.ts`, the quiz
+  export handler, `pages/admin/AdminSatisfaction.tsx`'s label maps.
+  **(Phase 3):** new queries + `routes/admin.ts`, `pages/admin/`.
 - **Depends on:** nothing new. Phase 3 wants AL's cost ledger (shipped) if
   the join to spend-per-artefact is worth making.
 

@@ -66,6 +66,32 @@ describe('satisfaction throttle', () => {
     })
   })
 
+  // Seasonality (TODO Feature AQ): decks dominate at the start of a semester,
+  // grading at the end. These two encode what that means for the throttle —
+  // the global window is what teachers feel, and once it passes a teacher
+  // already asked about one feature becomes available for the other, which is
+  // how grading accumulates answers as the season turns.
+  describe('across features', () => {
+    it('lets a teacher asked about one feature be asked about another once the global window passes', () => {
+      expect(ineligibleReason({
+        ...base,
+        lastAnyPromptAt:     daysAgo(GLOBAL_COOLDOWN_DAYS + 1),  // was asked about презентации
+        lastFeaturePromptAt: null,                                // never about проверка работ
+      })).toBeNull()
+    })
+
+    it('reallocates rather than adds — a second surface cannot double the prompts a teacher sees', () => {
+      // Adding презентации does not add a prompt for a teacher already asked
+      // about grading this fortnight; it competes for the same budget. Benign
+      // while grading is seasonally idle, worth remembering when both are busy.
+      expect(ineligibleReason({
+        ...base,
+        lastAnyPromptAt:     daysAgo(2),
+        lastFeaturePromptAt: null,
+      })).toBe('global_cooldown')
+    })
+  })
+
   // The throttle advances when a prompt is SHOWN (the row is written by
   // /check), so a teacher who dismisses is covered by these same cooldowns
   // rather than being asked again on their next approve. This encodes the
