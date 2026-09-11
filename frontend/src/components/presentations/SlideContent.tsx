@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type {
   PresentationSource, Slide, SlideImage, TitleSlide, BulletsSlide, ConceptSlide,
   FormulaSlide, ComparisonSlide, DiagramSlide, DiscussionSlide, SummarySlide,
@@ -9,6 +9,7 @@ import { slidesToText, legacySlidesToText } from './slideText'
 import { slidesToHtml, legacySlidesToHtml } from './slideHtml'
 import { copyRich } from './clipboard'
 import { toHttpsUrl } from '../../../../shared/imageUrl'
+import { rangeBetween, toSlideNumbers } from '../../lib/slideSelection'
 import { checkSatisfactionPrompt } from '../../api/satisfaction'
 import Button from '../ui/Button'
 import CopyAllButton from '../ui/CopyAllButton'
@@ -34,7 +35,11 @@ const DownloadIcon = () => (
   </svg>
 )
 
-function PptxDownloadButton({ presentationId }: { presentationId: string }) {
+function PptxDownloadButton({ presentationId, selected }: {
+  presentationId: string
+  /** 1-based slide numbers; empty means the whole deck, as it always did. */
+  selected: number[]
+}) {
   const { can } = usePlan()
   const showUpgradeModal = useUIStore((s) => s.showUpgradeModal)
   const showSatisfaction = useUIStore((s) => s.showSatisfaction)
@@ -44,7 +49,7 @@ function PptxDownloadButton({ presentationId }: { presentationId: string }) {
     if (!can('pptxExport')) { showUpgradeModal('FEATURE_NOT_IN_PLAN'); return }
     setDownloading(true)
     try {
-      await downloadPresentationPptx(presentationId)
+      await downloadPresentationPptx(presentationId, selected)
 
       // Micro-satisfaction prompt (TODO Feature AQ, Phase 2). Export is the
       // value moment for a deck, the way approve is for a grade: the teacher
@@ -72,7 +77,9 @@ function PptxDownloadButton({ presentationId }: { presentationId: string }) {
       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-surface border border-border-mid text-xs font-sans font-medium text-ink-secondary shadow-sm whitespace-nowrap shrink-0 hover:border-amber hover:text-amber transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {downloading ? <LoadingSpinner size={13} /> : <DownloadIcon />}
-      {downloading ? 'Экспортируем…' : 'Скачать PPTX'}
+      {downloading
+        ? 'Экспортируем…'
+        : selected.length > 0 ? `Скачать PPTX (${selected.length})` : 'Скачать PPTX'}
     </button>
   )
 }
@@ -503,6 +510,11 @@ interface TypedSlideCardProps {
   // The card grows to fit its content, so nothing on screen would otherwise
   // hint that the exported deck overflows — the teacher finds out in the hall.
   overfull?:      string
+  // «Скачать выбранные слайды». Absent when the deck has no id to export
+  // from, in which case no checkbox is drawn at all rather than one that
+  // cannot lead anywhere.
+  selected?:      boolean
+  onSelect?:      (slideIdx: number, opts: { range: boolean }) => void
 }
 
 export interface SlideEditActions {
@@ -519,7 +531,7 @@ export interface SlideEditActions {
 
 function TypedSlideCard({
   slide, slideIdx, slideNumber, sources, onCite, presentationId, onImageChange,
-  edit, isFirst, isLast, overfull,
+  edit, isFirst, isLast, overfull, selected, onSelect,
 }: TypedSlideCardProps) {
   const [copied, setCopied] = useState(false)
   const [mode, setMode] = useState<'view' | 'edit' | 'regenerate'>('view')
@@ -538,6 +550,25 @@ function TypedSlideCard({
     <div className="bg-surface border border-border rounded-lg overflow-hidden mb-4">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
         <div className="flex items-center gap-2.5 min-w-0">
+          {onSelect && (
+            // A real checkbox in a label: the whole 44×44 square is the target
+            // (teachers do this on tablets), the browser gives us keyboard
+            // and screen-reader behaviour for free, and shift-click extends
+            // from the last one — a forty-slide deck is otherwise forty taps.
+            <label
+              className="-my-2 -ml-1 p-2 flex items-center cursor-pointer flex-shrink-0 rounded-md hover:bg-surface-warm transition-colors"
+              title="Выбрать слайд для выгрузки"
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(selected)}
+                onChange={() => { /* handled in onClick, which knows about shift */ }}
+                onClick={(e) => onSelect(slideIdx, { range: e.shiftKey })}
+                className="w-4 h-4 accent-amber cursor-pointer"
+                aria-label={`Слайд ${slideNumber} — выбрать для выгрузки`}
+              />
+            </label>
+          )}
           <span className="text-[10px] font-sans font-semibold bg-amber-light text-amber px-2 py-0.5 rounded-sm flex-shrink-0 uppercase tracking-wide">
             Слайд {slideNumber}
           </span>
@@ -863,12 +894,23 @@ interface Props {
   // Or: pass `content` (legacy text-DSL fallback).
   content?:         string
   sources?:         PresentationSource[] | null
+  // «Скачать выбранные слайды». Owned by the page, because the раздатка
+  // buttons in DeckQuizPanel honour the same ticks and because a selection
+  // has to be remapped when the editor reorders the deck under it
+  // (lib/slideSelection.ts).
+  selectedSlides?:    Set<number>
+  onSelectionChange?: (next: Set<number>) => void
 }
 
 export default function SlideContent({
   slides, presentationId, onSlidesChange, content, sources, edit,
+  selectedSlides, onSelectionChange,
 }: Props) {
   const [openSource, setOpenSource] = useState<PresentationSource | null>(null)
+  // Anchor for shift-click. Ref, not state: it only ever matters at the
+  // moment of the next click, and re-rendering the deck to remember it would
+  // be work for nothing.
+  const selectionAnchor = useRef<number | null>(null)
   const sourceList = sources ?? []
 
   // Prefer the typed array. Only fall back to the text parser when we have
@@ -884,6 +926,40 @@ export default function SlideContent({
       ? slidesToText(slides!)
       : legacySlidesToText(legacySlides)
     return copyRich(html, text)
+  }
+
+  // Selection is owned by the page; this component only describes the gestures.
+  const selectable    = useTyped && Boolean(presentationId) && Boolean(onSelectionChange)
+  const selectedCount = selectedSlides?.size ?? 0
+  const selectedNumbers = selectedSlides ? toSlideNumbers(selectedSlides) : []
+
+  function handleSelect(slideIdx: number, opts: { range: boolean }) {
+    if (!onSelectionChange) return
+    const next = new Set(selectedSlides ?? [])
+
+    // Shift extends from the last slide clicked, and always ADDS — the
+    // familiar behaviour from file managers, where a range never silently
+    // unticks what you already had.
+    if (opts.range && selectionAnchor.current !== null) {
+      for (const i of rangeBetween(selectionAnchor.current, slideIdx)) next.add(i)
+    } else if (next.has(slideIdx)) {
+      next.delete(slideIdx)
+    } else {
+      next.add(slideIdx)
+    }
+
+    selectionAnchor.current = slideIdx
+    onSelectionChange(next)
+  }
+
+  function selectAll() {
+    if (!onSelectionChange || !useTyped) return
+    onSelectionChange(new Set(slides!.map((_, i) => i)))
+  }
+
+  function clearSelection() {
+    selectionAnchor.current = null
+    onSelectionChange?.(new Set())
   }
 
   function handleImageChange(slideIdx: number, image: SlideImage | null) {
@@ -922,12 +998,39 @@ export default function SlideContent({
   return (
     <div>
       <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
-        <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">
-          {totalSlides} слайдов
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">
+            {totalSlides} слайдов
+          </div>
+          {selectable && (
+            selectedCount > 0 ? (
+              <div className="flex items-center gap-2 text-xs font-sans">
+                <span className="font-medium text-amber">Выбрано: {selectedCount}</span>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="min-h-[32px] px-2 rounded-md text-ink-secondary hover:text-amber transition-colors"
+                >
+                  Снять
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={selectAll}
+                className="min-h-[32px] px-2 -ml-1 rounded-md text-xs font-sans text-ink-secondary hover:text-amber transition-colors"
+                title="Отметить все слайды — снимите лишние, чтобы выгрузить только нужные"
+              >
+                Выбрать все
+              </button>
+            )
+          )}
         </div>
         <div className="flex items-center gap-2">
           <CopyAllButton onCopy={copyAll} />
-          {useTyped && presentationId && <PptxDownloadButton presentationId={presentationId} />}
+          {useTyped && presentationId && (
+            <PptxDownloadButton presentationId={presentationId} selected={selectedNumbers} />
+          )}
         </div>
       </div>
 
@@ -946,6 +1049,8 @@ export default function SlideContent({
               isFirst={i === 0}
               isLast={i === slides!.length - 1}
               overfull={overfull.get(i)}
+              selected={selectedSlides?.has(i)}
+              onSelect={selectable ? handleSelect : undefined}
             />
           ))
         : legacySlides.map((s) => (

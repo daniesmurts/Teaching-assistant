@@ -18,6 +18,7 @@ import {
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import type { Presentation, Slide } from '../types'
+import { remapAfterDelete, remapAfterInsert, remapAfterMove } from '../lib/slideSelection'
 import type { SlideEditActions } from '../components/presentations/SlideContent'
 
 // ─── History list ─────────────────────────────────────────────────────────────
@@ -109,6 +110,20 @@ export default function Presentations() {
     setLocalSlides(result?.slides ?? openHistory?.slides ?? null)
   }, [result, openHistory])
 
+  // ── Выбор слайдов для выгрузки ────────────────────────────────────────────
+  //
+  // Ephemeral on purpose: which slides you want in THIS download is a property
+  // of the download, not of the deck, so nothing here is persisted or sent
+  // anywhere until a button is pressed. Lifted to the page rather than kept in
+  // SlideContent because the раздатка buttons live in DeckQuizPanel and must
+  // honour the same ticks.
+  const [selectedSlides, setSelectedSlides] = useState<Set<number>>(new Set())
+
+  // A selection is a set of indices into an array the editor can reorder under
+  // it; see lib/slideSelection.ts for why leaving it alone is the dangerous
+  // option. Cleared outright when the viewer switches decks.
+  useEffect(() => { setSelectedSlides(new Set()) }, [result, openHistory?.id])
+
   // ── Slide-level editing (TODO.md "### AO" Phase 1) ────────────────────────
   //
   // Every mutation returns the whole updated presentation, so the viewer
@@ -191,12 +206,21 @@ export default function Presentations() {
       void runSlideAction(() => updateSlide(displayPresentationId, idx, slide), 'Не удалось сохранить слайд'),
     onRegenerate: (idx, instruction) =>
       void runSlideAction(() => regenerateSlide(displayPresentationId, idx, instruction || undefined), 'Не удалось переписать слайд'),
-    onDelete: (idx) =>
-      void runSlideAction(() => deleteSlide(displayPresentationId, idx), 'Не удалось удалить слайд'),
-    onMove: (idx, to) =>
-      void runSlideAction(() => moveSlide(displayPresentationId, idx, to), 'Не удалось переместить слайд'),
-    onInsert: (afterIdx) =>
-      void runSlideAction(() => insertSlide(displayPresentationId, afterIdx, 'bullets', 'Новый слайд'), 'Не удалось добавить слайд'),
+    // Each structural edit remaps the selection with the same semantics the
+    // server applies to the array, so a ticked slide keeps meaning the slide
+    // the teacher ticked.
+    onDelete: (idx) => {
+      setSelectedSlides((sel) => remapAfterDelete(sel, idx))
+      void runSlideAction(() => deleteSlide(displayPresentationId, idx), 'Не удалось удалить слайд')
+    },
+    onMove: (idx, to) => {
+      setSelectedSlides((sel) => remapAfterMove(sel, idx, to))
+      void runSlideAction(() => moveSlide(displayPresentationId, idx, to), 'Не удалось переместить слайд')
+    },
+    onInsert: (afterIdx) => {
+      setSelectedSlides((sel) => remapAfterInsert(sel, afterIdx))
+      void runSlideAction(() => insertSlide(displayPresentationId, afterIdx, 'bullets', 'Новый слайд'), 'Не удалось добавить слайд')
+    },
   }
   const displaySlides   = localSlides
   const displayContent  = result?.generated_content ?? openHistory?.generated_content ?? null
@@ -340,6 +364,7 @@ export default function Presentations() {
                   presentationId={displayPresentationId}
                   slides={displaySlides}
                   onSlidesChange={setLocalSlides}
+                  selectedSlides={selectedSlides}
                 />
               )}
 
@@ -350,6 +375,8 @@ export default function Presentations() {
                 presentationId={displayPresentationId}
                 onSlidesChange={setLocalSlides}
                 edit={isMine ? slideEdit : undefined}
+                selectedSlides={selectedSlides}
+                onSelectionChange={setSelectedSlides}
               />
             </div>
           )}

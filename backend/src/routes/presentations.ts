@@ -20,6 +20,7 @@ import { createPublishedAssignment, findAssignmentByPresentation } from '../db/q
 import { generateQuiz, assertQuizQuota } from '../services/quizzes'
 import { findQuizzesByPresentation } from '../db/queries/quizzes'
 import { generatePresentationPptx, type DeckBranding } from '../services/presentationExport'
+import { parseSlideSelection, selectSlides, selectionSuffix } from '../lib/slideSelection'
 import { getBrandingForTeacher } from '../db/queries/institutionBranding'
 import { downloadObject } from '../services/objectStorage'
 import { attachImportedImages, deletePresentationMediaObjects } from '../services/presentationMedia'
@@ -326,7 +327,14 @@ router.get('/:id/export.pptx',
     // Фирменный стиль of the teacher's own institution (migration 125), or
     // the platform's look for an individual-tier teacher. Best-effort: a
     // storage hiccup must cost the accent colour, not the export.
-    const pptx = await generatePresentationPptx(presentation, await resolveDeckBranding(req.teacher.id))
+    // «Скачать выбранные слайды» — `?slides=2,3,5`, absent means the whole
+    // deck exactly as before. Filtering happens here rather than in the
+    // exporter: nothing about a subset is a property of the deck, only of
+    // this one download.
+    const selection = parseSlideSelection(req.query.slides, presentation.slides.length)
+    const subset    = selectSlides(presentation, selection)
+
+    const pptx = await generatePresentationPptx(subset, await resolveDeckBranding(req.teacher.id))
     // presentation.topic is normally Cyrillic — `\w` only matches ASCII, so
     // a plain regex sanitiser turns the whole topic into underscores (grows
     // with the topic's length, which is exactly the "filename is just a
@@ -334,7 +342,7 @@ router.get('/:id/export.pptx',
     // name plus the RFC 5987 `filename*` param for the real UTF-8 name,
     // matching the pattern already used for program document downloads
     // (routes/programs.ts's `/documents/:docId/download`).
-    const fname = `${(presentation.topic || 'presentation').trim()}.pptx`
+    const fname = `${(presentation.topic || 'presentation').trim()}${selectionSuffix(selection, presentation.slides.length)}.pptx`
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
     res.setHeader('Content-Disposition', `attachment; filename="presentation.pptx"; filename*=UTF-8''${encodeURIComponent(fname)}`)
     res.setHeader('Content-Length', pptx.length)
@@ -342,10 +350,14 @@ router.get('/:id/export.pptx',
 
     // The deck left the platform — the strongest available evidence that a
     // generated artefact was actually taken to a lecture (migration 126).
+    // A two-slide export is not the same evidence that a deck reached a
+    // lecture as a forty-slide one, and «Жизнь презентаций» is built on these
+    // rows — record which it was rather than discovering the drift later.
     recordArtifactEvent({
       kind: 'presentation', event: 'exported', artifactId: presentation.id,
       teacherId: req.teacher.id, institutionId: req.teacher.institution_id,
       format: 'pptx',
+      ...(selection ? { metadata: { slides: selection.length, of: presentation.slides.length } } : {}),
     })
   })
 )
@@ -640,13 +652,19 @@ router.get('/:id/handout.pdf',
       throw new ValidationError('Эта презентация сохранена в старом текстовом формате — раздатку по ней собрать нельзя.')
     }
 
+    // Same selection the .pptx takes. A teacher who ticks three slides and
+    // gets a three-slide deck but a full раздатка would read the feature as
+    // broken — every artefact built from the slides honours it.
+    const selection = parseSlideSelection(req.query.slides, presentation.slides.length)
+
     const teacher = await findTeacherById(req.teacher.id)
-    const pdf = await generatePresentationHandoutPdf(presentation, {
+    const pdf = await generatePresentationHandoutPdf(selectSlides(presentation, selection), {
       includeNotes: req.query.notes !== '0',
       lecturer:     teacher?.name ?? null,
     })
 
-    const fname = `${presentation.topic.slice(0, 60).replace(/[^\p{L}\p{N}\s-]/gu, '').trim() || 'Раздатка'}.pdf`
+    const base = presentation.topic.slice(0, 60).replace(/[^\p{L}\p{N}\s-]/gu, '').trim() || 'Раздатка'
+    const fname = `${base}${selectionSuffix(selection, presentation.slides.length)}.pdf`
     res.setHeader('Content-Type', 'application/pdf')
     res.setHeader('Content-Disposition', `attachment; filename="handout.pdf"; filename*=UTF-8''${encodeURIComponent(fname)}`)
     res.setHeader('Content-Length', pdf.length)
@@ -655,7 +673,11 @@ router.get('/:id/handout.pdf',
     recordArtifactEvent({
       kind: 'presentation', event: 'exported', artifactId: presentation.id,
       teacherId: req.teacher.id, institutionId: req.teacher.institution_id,
-      format: 'pdf', metadata: { variant: 'handout' },
+      format: 'pdf',
+      metadata: {
+        variant: 'handout',
+        ...(selection ? { slides: selection.length, of: presentation.slides.length } : {}),
+      },
     })
   })
 )

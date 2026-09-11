@@ -13,6 +13,7 @@ import {
 import { createLiveSession } from '../../api/liveSessions'
 import { useUIStore } from '../../store/uiStore'
 import type { Quiz, QuizLevel, LiveSessionMode, Slide } from '../../types'
+import { toSlideNumbers } from '../../lib/slideSelection'
 
 // What a teacher does with a finished lecture (TODO.md "### AO" Phase 3).
 //
@@ -61,12 +62,19 @@ const LEVEL_OPTIONS = [
   { value: 'application',   label: 'Применение' },
 ]
 
-export default function DeckQuizPanel({ presentationId, slides, onSlidesChange }: {
+export default function DeckQuizPanel({ presentationId, slides, onSlidesChange, selectedSlides }: {
   presentationId: string
   slides?: Slide[] | null
   onSlidesChange?: (slides: Slide[]) => void
+  // The ticks live in the slide list below this panel, but the раздатка is
+  // downloaded from here — a selection that the .pptx honours and the handout
+  // ignores would read as a broken feature, not as a scoped one.
+  selectedSlides?: Set<number>
 }) {
   const navigate = useNavigate()
+  const handoutSelection = selectedSlides && selectedSlides.size > 0
+    ? toSlideNumbers(selectedSlides)
+    : undefined
   const addToast = useUIStore((s) => s.addToast)
 
   const [count, setCount] = useState('8')
@@ -243,12 +251,18 @@ export default function DeckQuizPanel({ presentationId, slides, onSlidesChange }
           <div className="inline-flex rounded-md border border-border-mid shadow-sm overflow-hidden">
             <button
               type="button"
-              onClick={() => void downloadPresentationHandout(presentationId)}
+              onClick={() => void downloadPresentationHandout(presentationId, true, handoutSelection)}
               className={ACTION}
-              title="PDF со слайдами и конспектом лекции — для раздачи студентам"
+              title={handoutSelection
+                ? `PDF по выбранным слайдам (${handoutSelection.length}) — для раздачи студентам`
+                : 'PDF со слайдами и конспектом лекции — для раздачи студентам'}
             >
               <Icon name="import" size={14} />
-              Раздатка <span className="opacity-70">PDF</span>
+              {/* The count is on the primary half only: the split button is
+                  one action with two variants, and repeating «(3)» on both
+                  halves reads as two different selections. */}
+              Раздатка{handoutSelection ? ` (${handoutSelection.length})` : ''}{' '}
+              <span className="opacity-70">PDF</span>
             </button>
             {/* Muted, and carrying the same download icon on purpose. Without
                 the icon this half reads as the unselected segment of a toggle —
@@ -261,7 +275,7 @@ export default function DeckQuizPanel({ presentationId, slides, onSlidesChange }
                 4.5:1 AA floor. ink-secondary on that surface is 5.42:1. */}
             <button
               type="button"
-              onClick={() => void downloadPresentationHandout(presentationId, false)}
+              onClick={() => void downloadPresentationHandout(presentationId, false, handoutSelection)}
               className={`${ACTION} border-l border-border-mid bg-surface-warm`}
               aria-label="Скачать раздатку без конспекта лекции"
               title="Только заголовки и содержание слайдов — чтобы студенты конспектировали сами"

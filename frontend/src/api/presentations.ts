@@ -125,8 +125,16 @@ export async function deletePresentation(id: string): Promise<void> {
 // Blob fetch (so the JWT interceptor authenticates the request) — a plain
 // <a href> can't send the Authorization header, same reasoning as downloadCsv's
 // other callers (fos.ts, InstitutionProgramDetail's PDF export).
-export async function downloadPresentationPptx(id: string): Promise<void> {
-  await downloadCsv(`/api/presentations/${id}/export.pptx`)
+export async function downloadPresentationPptx(id: string, slides?: number[]): Promise<void> {
+  // `slides` is 1-based and comma-separated — the numbers on the slide cards,
+  // so a URL a teacher reads (or hand-edits) means what it looks like it
+  // means. Omitted entirely for a full deck, which keeps today's request
+  // byte-identical.
+  await downloadCsv(`/api/presentations/${id}/export.pptx`, slidesParam(slides))
+}
+
+function slidesParam(slides?: number[]): Record<string, unknown> | undefined {
+  return slides && slides.length > 0 ? { slides: slides.join(',') } : undefined
 }
 
 // ── Image picker for diagram slides ──────────────────────────────────────────
@@ -242,8 +250,16 @@ export async function getPresentationQuizzes(presentationId: string): Promise<Qu
 // ─── Дек → раздатка / письменная работа (TODO.md "### AO" Phase 3) ──────────
 
 /** Student-facing PDF. `includeNotes: false` gives a skeleton to write on. */
-export async function downloadPresentationHandout(id: string, includeNotes = true): Promise<void> {
-  await downloadCsv(`/api/presentations/${id}/handout.pdf${includeNotes ? '' : '?notes=0'}`)
+export async function downloadPresentationHandout(
+  id: string, includeNotes = true, slides?: number[],
+): Promise<void> {
+  // The handout takes the same selection as the .pptx — a teacher who ticks
+  // three slides and gets a three-slide deck but a full раздатка would read
+  // the feature as broken.
+  await downloadCsv(`/api/presentations/${id}/handout.pdf`, {
+    ...(includeNotes ? {} : { notes: '0' }),
+    ...slidesParam(slides),
+  })
 }
 
 /** Turns the deck's discussion slides into a draft published assignment. */
