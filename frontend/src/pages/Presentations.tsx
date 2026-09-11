@@ -20,7 +20,7 @@ import { useAuthStore } from '../store/authStore'
 import type { Presentation, Slide } from '../types'
 import { remapAfterDelete, remapAfterInsert, remapAfterMove } from '../lib/slideSelection'
 import type { SlideEditActions } from '../components/presentations/SlideContent'
-import ReadingGuide, { GuideText, GuideTerm } from '../components/ui/ReadingGuide'
+import { GuideText, GuideTerm } from '../components/ui/ReadingGuide'
 
 // ─── History list ─────────────────────────────────────────────────────────────
 
@@ -119,6 +119,9 @@ export default function Presentations() {
   // SlideContent because the раздатка buttons live in DeckQuizPanel and must
   // honour the same ticks.
   const [selectedSlides, setSelectedSlides] = useState<Set<number>>(new Set())
+
+  // «Что делают «Готово» и «В банк кафедры»?» — closed until asked for.
+  const [flywheelOpen, setFlywheelOpen] = useState(false)
 
   // A selection is a set of indices into an array the editor can reorder under
   // it; see lib/slideSelection.ts for why leaving it alone is the dangerous
@@ -288,7 +291,8 @@ export default function Presentations() {
 
           {/* Viewing a historical presentation */}
           {openHistory && (
-            <div className="bg-surface border border-border rounded-lg px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+            <div className="bg-surface border border-border rounded-lg px-4 py-3">
+             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <div className="text-xs font-sans text-ink-tertiary mb-0.5">Просмотр презентации</div>
                 <div className="text-sm font-sans font-medium text-ink line-clamp-2" title={openHistory.topic}>
@@ -349,6 +353,38 @@ export default function Presentations() {
                 </button>
                 </>}
               </div>
+             </div>
+
+              {/* The explanation lives WITH the two buttons, not in a column
+                  beside the page. It was an always-open aside: a second warm
+                  block under the capability card, 480px tall next to a 230px
+                  panel, leaving a void beside it and pushing the lecture off
+                  the screen — and it repeated what the card above it already
+                  said. Behind a toggle it costs nothing until asked for
+                  (§8 progressive-disclosure), and it opens directly under the
+                  controls it describes. */}
+              {isMine && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setFlywheelOpen((v) => !v)}
+                    aria-expanded={flywheelOpen}
+                    className="mt-1 -ml-1 px-1 py-1 text-[11px] font-sans text-ink-secondary hover:text-amber transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber rounded"
+                  >
+                    {flywheelOpen ? 'Скрыть' : 'Что делают «Готово» и «В банк кафедры»?'}
+                  </button>
+                  {flywheelOpen && (
+                    <div className="mt-2 pt-3 border-t border-border grid gap-3 sm:grid-cols-2">
+                      <GuideText>
+                        <GuideTerm>«Отметить Готово»</GuideTerm> — это не публикация. Отметка говорит ИСПУМ: лекция получилась как надо, и следующие ваши лекции будут писаться с оглядкой на неё — глубина заметок, формулировки, манера подачи. Берётся <GuideTerm>стиль, а не содержание</GuideTerm>, и только из ваших собственных отмеченных лекций. Отметку можно снять.
+                      </GuideText>
+                      <GuideText>
+                        <GuideTerm>«В банк кафедры»</GuideTerm> открывает лекцию коллегам: они увидят её в разделе «Лекции кафедры» и смогут открыть — <GuideTerm>только для просмотра</GuideTerm>. Видно своей кафедре и подразделениям под ней, не всему вузу; нужны права УМУ. Убрать из банка можно тем же нажатием.
+                      </GuideText>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -367,15 +403,14 @@ export default function Presentations() {
                 <FeatureIntro
                   id="presentation-deck"
                   title="Что можно сделать с готовой лекцией"
-                  description="Лекция не заканчивается на слайдах — по ней собирается всё остальное занятие, и каждый слайд можно править отдельно."
+                  tone="quiet"
                   actions={[
-                    { label: 'Править слайд', text: 'изменить текст и заметки вручную или переписать силами ИСПУМ по замечанию — «короче», «добавь пример с числами». Остальные слайды не трогаются.' },
-                    { label: 'Переставить и удалить', text: 'стрелками ↑ ↓ в заголовке слайда; новый слайд добавляется кнопкой внизу.' },
-                    { label: 'Выгрузить часть', text: 'галочки на слайдах — в PowerPoint и раздатку уйдут только отмеченные. Shift+клик отмечает диапазон.' },
-                    { label: 'Проверить усвоение', text: 'тест по вашим слайдам и заметкам, сразу с QR-кодом для аудитории.' },
-                    { label: 'Раздатка', text: 'PDF для студентов — со слайдами и конспектом или без него, чтобы конспектировали сами.' },
-                    { label: 'Письменная работа', text: 'слайды «Обсуждение» превращаются в задание с персональными ссылками и сроком сдачи.' },
-                    { label: '«Готово» и банк кафедры', text: 'отметка учит ИСПУМ вашему стилю, банк открывает лекцию коллегам — что именно происходит, написано в подсказке к этим кнопкам.' },
+                    { label: 'Править слайд', text: 'текст и заметки вручную или «Переписать» по замечанию — остальные слайды не трогаются.' },
+                    { label: 'Переставить и удалить', text: 'стрелки ↑ ↓ в заголовке слайда, новый — кнопкой внизу.' },
+                    { label: 'Выгрузить часть', text: 'галочки на слайдах, Shift+клик — диапазон.' },
+                    { label: 'Проверить усвоение', text: 'тест по этой лекции, сразу с QR-кодом для аудитории.' },
+                    { label: 'Раздатка', text: 'PDF студентам — с конспектом или без.' },
+                    { label: 'Письменная работа', text: 'из слайдов «Обсуждение», со сроком и персональными ссылками.' },
                   ]}
                 />
               )}
@@ -386,36 +421,12 @@ export default function Presentations() {
                   a persisted deck with typed slides — a legacy text row has
                   nothing to build questions from. */}
               {displayPresentationId && displaySlides && displaySlides.length > 0 && (
-                <div className="lg:flex lg:items-start lg:gap-4">
-                  <div className="flex-1 min-w-0">
-                    <DeckQuizPanel
-                      presentationId={displayPresentationId}
-                      slides={displaySlides}
-                      onSlidesChange={setLocalSlides}
-                      selectedSlides={selectedSlides}
-                    />
-                  </div>
-
-                  {/* The two buttons in the header above are the ones whose
-                      CONSEQUENCE is invisible: one teaches ИСПУМ from this
-                      lecture, the other shows it to the кафедра. Both were
-                      explained only by a `title` tooltip, which nobody hovers
-                      before pressing. Owner only — a colleague viewing a
-                      shared lecture has neither button. */}
-                  {isMine && (
-                    <ReadingGuide title="«Готово» и банк кафедры" className="mb-4">
-                      <GuideText>
-                        <GuideTerm>«Отметить Готово»</GuideTerm> — это не публикация. Отметка говорит ИСПУМ: лекция получилась как надо. Следующие ваши лекции будут писаться с оглядкой на неё — глубина заметок, формулировки, манера подачи. Берётся <GuideTerm>стиль, а не содержание</GuideTerm>, и только из ваших собственных отмеченных лекций. Отметку можно снять.
-                      </GuideText>
-                      <GuideText>
-                        <GuideTerm>«В банк кафедры»</GuideTerm> открывает лекцию коллегам: они увидят её в разделе «Лекции кафедры» и смогут открыть — <GuideTerm>только для просмотра</GuideTerm>, править вашу лекцию никто не может. ИСПУМ будет ориентироваться на неё и при подготовке их лекций.
-                      </GuideText>
-                      <GuideText>
-                        Видно <GuideTerm>своей кафедре и подразделениям под ней</GuideTerm>, не всему вузу. Нужны права УМУ на кафедру — если их нет, кнопка ответит об этом прямо. Убрать из банка можно тем же нажатием.
-                      </GuideText>
-                    </ReadingGuide>
-                  )}
-                </div>
+                <DeckQuizPanel
+                  presentationId={displayPresentationId}
+                  slides={displaySlides}
+                  onSlidesChange={setLocalSlides}
+                  selectedSlides={selectedSlides}
+                />
               )}
 
               <SlideContent
