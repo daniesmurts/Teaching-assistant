@@ -7,6 +7,12 @@ interface Props {
   title:        string
   description:  string
   steps?:       string[]
+  // Capabilities rather than a sequence. Numbered circles would say "do these
+  // in this order", which is wrong for a list of things a page can do — and
+  // wrong in a way a newcomer would believe. Rendered as a plain list with
+  // the name of each action in front of what it does, so the panel can be
+  // skimmed for the word the teacher is looking for.
+  actions?:     { label: string; text: string }[]
   videoSlug?:   string          // matches a HelpVideo slug — links to its how-to video
 }
 
@@ -16,7 +22,7 @@ interface Props {
  * that user (persisted) but can always be reopened — never nags, never hides
  * the explanation for good.
  */
-export default function FeatureIntro({ id, title, description, steps, videoSlug }: Props) {
+export default function FeatureIntro({ id, title, description, steps, actions, videoSlug }: Props) {
   const storageKey = `feat_intro_${id}`
   const [open, setOpen] = useState<boolean>(() => {
     try { return localStorage.getItem(storageKey) !== 'collapsed' } catch { return true }
@@ -58,6 +64,19 @@ export default function FeatureIntro({ id, title, description, steps, videoSlug 
                 </li>
               ))}
             </ol>
+          )}
+          {actions && actions.length > 0 && (
+            <ul className="mt-3 space-y-1.5">
+              {actions.map((action) => (
+                <li key={action.label} className="flex gap-2 text-[13px] font-sans text-ink-secondary leading-relaxed">
+                  <span className="text-amber flex-shrink-0 leading-relaxed" aria-hidden>•</span>
+                  <span>
+                    <span className="font-medium text-ink">{action.label}</span>
+                    {' — '}{action.text}
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
           {videoSlug && (
             <Link

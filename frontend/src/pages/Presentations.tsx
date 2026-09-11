@@ -20,6 +20,7 @@ import { useAuthStore } from '../store/authStore'
 import type { Presentation, Slide } from '../types'
 import { remapAfterDelete, remapAfterInsert, remapAfterMove } from '../lib/slideSelection'
 import type { SlideEditActions } from '../components/presentations/SlideContent'
+import ReadingGuide, { GuideText, GuideTerm } from '../components/ui/ReadingGuide'
 
 // ─── History list ─────────────────────────────────────────────────────────────
 
@@ -354,18 +355,67 @@ export default function Presentations() {
           {/* Generated slides */}
           {(displaySlides || displayContent) && (
             <div className="result-appear">
+              {/* What a finished lecture can do, shown where the capabilities
+                  actually are. The intro card at the top of the page is only
+                  rendered BEFORE a deck exists — i.e. it disappears at exactly
+                  the moment all of this appears — and the list has grown past
+                  the point where a teacher finds it by looking around: правка
+                  слайдов, тест, раздатка, письменная работа, банк кафедры,
+                  выбор слайдов. Same dismissible card as every other page, so
+                  it collapses for good on the first «Скрыть» and never nags. */}
+              {isMine && displaySlides && displaySlides.length > 0 && (
+                <FeatureIntro
+                  id="presentation-deck"
+                  title="Что можно сделать с готовой лекцией"
+                  description="Лекция не заканчивается на слайдах — по ней собирается всё остальное занятие, и каждый слайд можно править отдельно."
+                  actions={[
+                    { label: 'Править слайд', text: 'изменить текст и заметки вручную или переписать силами ИСПУМ по замечанию — «короче», «добавь пример с числами». Остальные слайды не трогаются.' },
+                    { label: 'Переставить и удалить', text: 'стрелками ↑ ↓ в заголовке слайда; новый слайд добавляется кнопкой внизу.' },
+                    { label: 'Выгрузить часть', text: 'галочки на слайдах — в PowerPoint и раздатку уйдут только отмеченные. Shift+клик отмечает диапазон.' },
+                    { label: 'Проверить усвоение', text: 'тест по вашим слайдам и заметкам, сразу с QR-кодом для аудитории.' },
+                    { label: 'Раздатка', text: 'PDF для студентов — со слайдами и конспектом или без него, чтобы конспектировали сами.' },
+                    { label: 'Письменная работа', text: 'слайды «Обсуждение» превращаются в задание с персональными ссылками и сроком сдачи.' },
+                    { label: '«Готово» и банк кафедры', text: 'отметка учит ИСПУМ вашему стилю, банк открывает лекцию коллегам — что именно происходит, написано в подсказке к этим кнопкам.' },
+                  ]}
+                />
+              )}
+
               {/* Лекция → тест → аудитория (TODO.md "### AO" Phase 3). Above
                   the slides: the check on the lecture is the next thing the
                   teacher does with it, not a footnote after 30 cards. Only for
                   a persisted deck with typed slides — a legacy text row has
                   nothing to build questions from. */}
               {displayPresentationId && displaySlides && displaySlides.length > 0 && (
-                <DeckQuizPanel
-                  presentationId={displayPresentationId}
-                  slides={displaySlides}
-                  onSlidesChange={setLocalSlides}
-                  selectedSlides={selectedSlides}
-                />
+                <div className="lg:flex lg:items-start lg:gap-4">
+                  <div className="flex-1 min-w-0">
+                    <DeckQuizPanel
+                      presentationId={displayPresentationId}
+                      slides={displaySlides}
+                      onSlidesChange={setLocalSlides}
+                      selectedSlides={selectedSlides}
+                    />
+                  </div>
+
+                  {/* The two buttons in the header above are the ones whose
+                      CONSEQUENCE is invisible: one teaches ИСПУМ from this
+                      lecture, the other shows it to the кафедра. Both were
+                      explained only by a `title` tooltip, which nobody hovers
+                      before pressing. Owner only — a colleague viewing a
+                      shared lecture has neither button. */}
+                  {isMine && (
+                    <ReadingGuide title="«Готово» и банк кафедры" className="mb-4">
+                      <GuideText>
+                        <GuideTerm>«Отметить Готово»</GuideTerm> — это не публикация. Отметка говорит ИСПУМ: лекция получилась как надо. Следующие ваши лекции будут писаться с оглядкой на неё — глубина заметок, формулировки, манера подачи. Берётся <GuideTerm>стиль, а не содержание</GuideTerm>, и только из ваших собственных отмеченных лекций. Отметку можно снять.
+                      </GuideText>
+                      <GuideText>
+                        <GuideTerm>«В банк кафедры»</GuideTerm> открывает лекцию коллегам: они увидят её в разделе «Лекции кафедры» и смогут открыть — <GuideTerm>только для просмотра</GuideTerm>, править вашу лекцию никто не может. ИСПУМ будет ориентироваться на неё и при подготовке их лекций.
+                      </GuideText>
+                      <GuideText>
+                        Видно <GuideTerm>своей кафедре и подразделениям под ней</GuideTerm>, не всему вузу. Нужны права УМУ на кафедру — если их нет, кнопка ответит об этом прямо. Убрать из банка можно тем же нажатием.
+                      </GuideText>
+                    </ReadingGuide>
+                  )}
+                </div>
               )}
 
               <SlideContent

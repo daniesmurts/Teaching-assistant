@@ -37,6 +37,7 @@ import {
 import { useAuthStore } from '../../store/authStore'
 import { EXAMPLE_PROGRAM } from '../../lib/programExample'
 import { useUIStore } from '../../store/uiStore'
+import ReadingGuide, { GuideText, GuideTerm } from '../../components/ui/ReadingGuide'
 import type {
   ProgramDetail, ProgramDiscipline, ProgramCompetency, ProgramCompetencyIndicator, ProgramAnalysis,
   CompetencyProgressionRow, CoverageLevel, PrerequisiteEdge,
@@ -973,15 +974,11 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
                 status; kept visible next to the table rather than tucked away,
                 since "почему тут пробел" / "что значит цвет" are the two
                 questions this table reliably raises. */}
-            <aside className="w-full lg:w-72 flex-shrink-0 bg-amber-light/30 border border-amber/15 rounded-lg p-4 space-y-3">
-              <div className="text-[11px] font-sans font-semibold uppercase tracking-wide text-ink-secondary">
-                Как читать таблицу
-              </div>
-
+            <ReadingGuide title="Как читать таблицу">
               <div className="space-y-1.5">
-                <p className="text-xs font-sans text-ink-secondary leading-relaxed">
-                  Цвет точки — это <span className="text-ink font-medium">не оценка</span>, а глубина освоения компетенции в этом семестре:
-                </p>
+                <GuideText>
+                  Цвет точки — это <GuideTerm>не оценка</GuideTerm>, а глубина освоения компетенции в этом семестре:
+                </GuideText>
                 <ul className="space-y-1">
                   {(['introduce', 'develop', 'master'] as CoverageLevel[]).map((lv) => (
                     <li key={lv} className="flex items-start gap-1.5 text-xs font-sans text-ink-secondary leading-relaxed">
@@ -997,14 +994,14 @@ function Report({ analysis, duration, program, reviews = [] }: { analysis: Progr
                 </ul>
               </div>
 
-              <p className="text-xs font-sans text-ink-secondary leading-relaxed">
-                Точки в строке показывают, в каких семестрах компетенция проходит путь <span className="text-ink font-medium">введение → развитие → владение</span>. Бледная точка рано, янтарная позже, зелёная ещё позже — значит план выстраивает компетенцию постепенно, а не даёт всё в одной дисциплине. Это и есть статус «{STATUS_META.ok.label}».
-              </p>
+              <GuideText>
+                Точки в строке показывают, в каких семестрах компетенция проходит путь <GuideTerm>введение → развитие → владение</GuideTerm>. Бледная точка рано, янтарная позже, зелёная ещё позже — значит план выстраивает компетенцию постепенно, а не даёт всё в одной дисциплине. Это и есть статус «{STATUS_META.ok.label}».
+              </GuideText>
 
-              <p className="text-xs font-sans text-ink-secondary leading-relaxed">
-                Пропуски между точками — это нормально: значит, в промежуточных семестрах ни одна дисциплина эту компетенцию не затрагивает. «{STATUS_META.ok.label}» означает, что верна сама <span className="text-ink font-medium">последовательность уровней</span>, а не то, что точка должна стоять в каждом семестре.
-              </p>
-            </aside>
+              <GuideText>
+                Пропуски между точками — это нормально: значит, в промежуточных семестрах ни одна дисциплина эту компетенцию не затрагивает. «{STATUS_META.ok.label}» означает, что верна сама <GuideTerm>последовательность уровней</GuideTerm>, а не то, что точка должна стоять в каждом семестре.
+              </GuideText>
+            </ReadingGuide>
           </div>
         </section>
       )}
@@ -1349,25 +1346,22 @@ function DisciplineCoverageSection({
             mistake an empty "не проверено" row for a bug. Kept visible next
             to the table since "what does % mean" / "why isn't my discipline
             checked" are the two questions this list reliably raises. */}
-        <aside className="w-full lg:w-72 flex-shrink-0 bg-amber-light/30 border border-amber/15 rounded-lg p-4 space-y-3">
-          <div className="text-[11px] font-sans font-semibold uppercase tracking-wide text-ink-secondary">
-            Что это и как этим пользоваться
-          </div>
-          <p className="text-xs font-sans text-ink-secondary leading-relaxed">
-            Здесь — результат проверки, действительно ли <span className="text-ink font-medium">содержание загруженной РПД</span> раскрывает компетенции, заявленные за дисциплиной. Это отдельная, более точная проверка на уровне одной дисциплины — она не связана с общим анализом плана выше.
-          </p>
-          <p className="text-xs font-sans text-ink-secondary leading-relaxed">
-            <span className="text-ink font-medium">«не проверено»</span> значит, что для этой дисциплины ещё не загружена РПД или проверка ещё не запускалась — это не ошибка. Загрузите файл и запустите проверку на вкладке <span className="text-ink font-medium">«Документы»</span> кнопкой «Проверить соответствие компетенциям».
-          </p>
-          <p className="text-xs font-sans text-ink-secondary leading-relaxed">
-            Процент — это доля покрытия компетенций дисциплины (полностью / частично / не раскрыты, посчитано по индикаторам). <span className="text-ink font-medium">Нажмите на строку</span>, чтобы развернуть её и увидеть разбор по каждой компетенции с цитатами из текста.
-          </p>
+        <ReadingGuide title="Что это и как этим пользоваться">
+          <GuideText>
+            Здесь — результат проверки, действительно ли <GuideTerm>содержание загруженной РПД</GuideTerm> раскрывает компетенции, заявленные за дисциплиной. Это отдельная, более точная проверка на уровне одной дисциплины — она не связана с общим анализом плана выше.
+          </GuideText>
+          <GuideText>
+            <GuideTerm>«не проверено»</GuideTerm> значит, что для этой дисциплины ещё не загружена РПД или проверка ещё не запускалась — это не ошибка. Загрузите файл и запустите проверку на вкладке <GuideTerm>«Документы»</GuideTerm> кнопкой «Проверить соответствие компетенциям».
+          </GuideText>
+          <GuideText>
+            Процент — это доля покрытия компетенций дисциплины (полностью / частично / не раскрыты, посчитано по индикаторам). <GuideTerm>Нажмите на строку</GuideTerm>, чтобы развернуть её и увидеть разбор по каждой компетенции с цитатами из текста.
+          </GuideText>
           {totalCount > 0 && (
             <p className="text-xs font-sans text-ink-tertiary leading-relaxed pt-1 border-t border-amber/15">
               Проверено {checkedCount} из {totalCount} дисциплин.
             </p>
           )}
-        </aside>
+        </ReadingGuide>
       </div>
     </section>
   )
