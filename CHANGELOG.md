@@ -14,6 +14,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Changed
+- **Панель над слайдами закреплена, «Выбрать все» и «Снять» стали кнопками.** On a forty-slide deck the toolbar scrolled away within two cards, taking every way to export, copy or select with it — a teacher deep in the lecture had to scroll back to the top to do anything with it. It now sticks to the top of the scroll area with a solid ground and a bottom rule.
+  - The selection controls were bare text with a hover colour: no border, no background, and on a touch device no hover at all, so they read as a caption rather than something to press — which is exactly how they were reported. They now use the same bordered chip as «Скопировать всё» beside them, one step smaller, so the row reads as three controls.
+
 ### Fixed
 - **Акцентный цвет не проходил по контрасту ни в одну сторону.** `--color-amber` was `#C8860A`, on which white measured **3.06:1** and which measured **3.06:1** on white — the same number, because contrast is symmetric — against the 4.5:1 AA floor. It cleared only the 3:1 large-text exemption, while the app puts it behind 12–13px semibold labels on **64 surfaces** and in front of white grounds everywhere else. Found while restyling the PPTX export button, which was deliberately made tinted rather than primary partly because of this.
   - **One token, both directions, every call site.** Darkened at constant hue (39°) and saturation (90%) to the *lightest* value that clears AA on every ground amber actually lands on — `#966508`. The button alone would have been satisfied two steps earlier; amber is also text on the warm page ground and inside `amber-light` chips, and those fail last: **white on it 5.05, on white 5.05, on the page 4.59, on amber-light 4.57**. Measured back out of the rendered DOM, not just computed.

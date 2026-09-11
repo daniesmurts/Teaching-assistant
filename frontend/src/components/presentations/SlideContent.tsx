@@ -27,6 +27,17 @@ import { downloadPresentationPptx } from '../../api/presentations'
 // Pro-gated (`pptxExport`): generation itself stays available on Free, the
 // native .pptx download is the differentiator.
 
+// Секундные действия над выделением. They were bare text with a hover colour:
+// no border, no background, and on a touch device no hover at all — so they
+// read as a caption rather than something to press, which is exactly how they
+// were reported. Same bordered chip as «Скопировать всё» beside them, one step
+// smaller, so the toolbar says «these three are controls».
+const CHIP =
+  'inline-flex items-center min-h-[32px] px-2.5 rounded-md bg-surface border border-border-mid ' +
+  'text-xs font-sans font-medium text-ink-secondary whitespace-nowrap ' +
+  'hover:border-amber hover:text-amber transition-colors ' +
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber'
+
 const DownloadIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1009,7 +1020,10 @@ export default function SlideContent({
 
   return (
     <div>
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+      {/* Sticky: on a forty-slide deck this row scrolls away within two cards,
+          and with it every way to export, copy or select — a teacher deep in
+          the lecture had to scroll back to the top to do anything with it. */}
+      <div className="sticky top-0 z-20 -mx-2 px-2 py-2.5 mb-2 bg-bg border-b border-border flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="text-xs font-sans font-semibold text-ink-tertiary uppercase tracking-wider">
             {totalSlides} слайдов
@@ -1018,11 +1032,7 @@ export default function SlideContent({
             selectedCount > 0 ? (
               <div className="flex items-center gap-2 text-xs font-sans">
                 <span className="font-medium text-amber">Выбрано: {selectedCount}</span>
-                <button
-                  type="button"
-                  onClick={clearSelection}
-                  className="min-h-[32px] px-2 rounded-md text-ink-secondary hover:text-amber transition-colors"
-                >
+                <button type="button" onClick={clearSelection} className={CHIP}>
                   Снять
                 </button>
               </div>
@@ -1030,7 +1040,7 @@ export default function SlideContent({
               <button
                 type="button"
                 onClick={selectAll}
-                className="min-h-[32px] px-2 -ml-1 rounded-md text-xs font-sans text-ink-secondary hover:text-amber transition-colors"
+                className={CHIP}
                 title="Отметить все слайды — снимите лишние, чтобы выгрузить только нужные"
               >
                 Выбрать все
