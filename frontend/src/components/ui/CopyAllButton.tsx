@@ -30,7 +30,11 @@ export default function CopyAllButton({ onCopy, label = 'Скопировать 
   return (
     <button
       onClick={handleClick}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-surface border border-border-mid text-xs font-sans font-medium text-ink-secondary shadow-sm whitespace-nowrap shrink-0 hover:border-amber hover:text-amber transition-colors"
+      // min-h-[40px] matches the action buttons it sits beside (DeckQuizPanel's
+      // row, the PPTX export) and moves a 30px chip toward the 44px touch
+      // target guidance. Shared by four generator pages, so they all grow
+      // together rather than this one drifting.
+      className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-md bg-surface border border-border-mid text-xs font-sans font-medium text-ink-secondary shadow-sm whitespace-nowrap shrink-0 hover:border-amber hover:text-amber transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
     >
       <Icon name={copied ? 'check' : 'copy'} size={13} />
       {copied ? 'Скопировано' : label}

@@ -14,6 +14,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Changed
+- **«Скачать PPTX» перестала теряться рядом с «Скопировать всё».** Reported as easy to miss, and it was: the export was the same white chip with grey text as the copy action beside it, in a toolbar above a long deck — while being the page's value moment (the satisfaction prompt hangs off it three lines below).
+  - **Tinted, not filled.** `bg-amber text-white` — this app's own primary — measures **3.06:1** against white text, under the 4.5:1 AA floor for text this size; it passes only as «large text», which 12px semibold is not. Ink on `amber-light` is **15.77:1**. So the export reads louder *and* legibly, and «Составить тест» stays the only solid CTA on the screen rather than gaining a competitor.
+  - Both buttons went from a ~30px chip to `min-h-[40px]`, matching the action row in `DeckQuizPanel` and moving toward the 44px touch-target guidance. `CopyAllButton` is shared by four generator pages, so they grow together rather than this one drifting.
+
 ### Added
 - **«Что можно сделать с готовой лекцией» — подсказки на странице презентации.** The list of things a finished deck can do has grown past the point where a teacher finds it by looking around (правка слайдов, тест, раздатка, письменная работа, банк кафедры, выбор слайдов), and the page's existing `FeatureIntro` card is rendered only when NO deck is open — it disappears at exactly the moment all of those appear. A second instance now sits above the viewer, same dismissible card as every other page, collapsed for good on the first «Скрыть».
   - `FeatureIntro` gained an `actions` variant. `steps` renders numbered circles, which say «do these in this order» — wrong for a set of capabilities, and wrong in a way a newcomer would believe.

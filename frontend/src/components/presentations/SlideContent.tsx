@@ -74,9 +74,21 @@ function PptxDownloadButton({ presentationId, selected }: {
     <button
       onClick={handleClick}
       disabled={downloading}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-surface border border-border-mid text-xs font-sans font-medium text-ink-secondary shadow-sm whitespace-nowrap shrink-0 hover:border-amber hover:text-amber transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      // Tinted rather than filled. A teacher reported missing this button
+      // entirely: it was the same white-on-white chip as «Скопировать всё»
+      // beside it, and the export is the point of the page — the value moment
+      // the satisfaction prompt is attached to, three lines below.
+      //
+      // NOT `bg-amber text-white`, the house primary: white on amber measures
+      // 3.06:1, under the 4.5:1 AA floor for text this size (it passes only as
+      // «large text», which 12px semibold is not). Ink on amber-light is
+      // 15.77:1 — louder AND readable. It also leaves «Составить тест» as the
+      // only solid CTA on the screen instead of competing with it.
+      className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-md bg-amber-light border border-amber/40 text-xs font-sans font-semibold text-ink shadow-sm whitespace-nowrap shrink-0 hover:bg-amber-mid/30 hover:border-amber transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber disabled:opacity-50 disabled:cursor-not-allowed"
     >
-      {downloading ? <LoadingSpinner size={13} /> : <DownloadIcon />}
+      {downloading
+        ? <LoadingSpinner size={13} />
+        : <span className="text-amber flex-shrink-0"><DownloadIcon /></span>}
       {downloading
         ? 'Экспортируем…'
         : selected.length > 0 ? `Скачать PPTX (${selected.length})` : 'Скачать PPTX'}
