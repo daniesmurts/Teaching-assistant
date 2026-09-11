@@ -243,7 +243,13 @@ export default function Presentations() {
         }
       />
 
-      <div className="flex-1 overflow-y-auto">
+      {/* NOT `overflow-y-auto`. AppShell is `min-h-screen`, so the DOCUMENT
+          scrolls and this box never did — measured: scrollHeight === clientHeight.
+          What it did do was declare itself a scrollport, which is what
+          `position: sticky` resolves against, so the toolbar over the slides
+          was pinning to a container that scrolls away instead of to the
+          window. Inert overflow, live side effect. */}
+      <div className="flex-1">
         <div className="max-w-[960px] mx-auto px-6 py-6 space-y-6">
 
           {!result && !openHistory && (
