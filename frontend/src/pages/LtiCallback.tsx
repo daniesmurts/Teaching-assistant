@@ -41,7 +41,7 @@ export default function LtiCallback() {
             </p>
             <Link
               to="/login"
-              className="inline-block px-4 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity"
+              className="inline-block px-4 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors"
             >
               Вернуться ко входу
             </Link>

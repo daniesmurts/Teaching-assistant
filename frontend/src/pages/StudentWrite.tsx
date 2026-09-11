@@ -98,7 +98,7 @@ function ConsentGate({ state, onAccept }: { state: WriteState; onAccept: () => P
         <button
           onClick={async () => { setBusy(true); try { await onAccept() } finally { setBusy(false) } }}
           disabled={busy}
-          className="px-5 py-2.5 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-60"
+          className="px-5 py-2.5 rounded-md bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors disabled:opacity-60"
         >
           {busy ? 'Подождите…' : 'Начать работу'}
         </button>
@@ -244,7 +244,7 @@ function Composer({ token, state, onSubmitted }: {
             onClick={submit}
             disabled={submitting || !online}
             title={!online ? 'Нет подключения' : undefined}
-            className="min-h-[44px] px-5 py-2.5 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
+            className="min-h-[44px] px-5 py-2.5 rounded-md bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
           >
             {submitting ? 'Отправка…' : 'Сдать работу'}
           </button>

@@ -118,7 +118,7 @@ export default function EditProgramModal({ program, onClose }: { program: Progra
           <button
             onClick={submit}
             disabled={saveMut.isPending}
-            className="px-4 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="px-4 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors disabled:opacity-50"
           >
             {saveMut.isPending ? 'Сохраняем…' : 'Сохранить'}
           </button>

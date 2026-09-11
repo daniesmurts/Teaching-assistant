@@ -29,7 +29,7 @@ export default function Landing() {
           Больше студентов — без потери качества. Быстрее проверка — без потери глубины. ИСПУМ делает возможным то, на что раньше не хватало времени.
         </p>
         <div className="flex items-center justify-center gap-4">
-          <Link to="/register" className="px-6 py-3 rounded-md bg-amber text-white font-medium hover:opacity-90 transition-opacity">Попробовать бесплатно</Link>
+          <Link to="/register" className="px-6 py-3 rounded-md bg-amber text-white font-medium hover:bg-amber-deep transition-colors">Попробовать бесплатно</Link>
         </div>
         
         {/* Abstract UI Visual (Hero) */}
@@ -385,7 +385,7 @@ export default function Landing() {
                 <li className="flex gap-2 text-ink"><span>•</span> Письма с отзывами для студентов</li>
                 <li className="flex gap-2 text-ink"><span>•</span> Без водяных знаков, приоритетная поддержка</li>
               </ul>
-              <Link to="/register" className="w-full block text-center px-4 py-2 rounded-md bg-amber text-white font-medium hover:opacity-90 transition-opacity">Выбрать Pro</Link>
+              <Link to="/register" className="w-full block text-center px-4 py-2 rounded-md bg-amber text-white font-medium hover:bg-amber-deep transition-colors">Выбрать Pro</Link>
             </div>
 
             {/* Institution */}

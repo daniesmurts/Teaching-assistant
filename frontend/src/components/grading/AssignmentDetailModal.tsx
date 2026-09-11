@@ -168,7 +168,7 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
           {a.status === 'pending' && (
             <button
               onClick={resumeApproval}
-              className="text-xs font-sans font-medium px-3 py-1.5 rounded-md bg-amber text-white hover:opacity-90 transition-opacity flex-shrink-0"
+              className="text-xs font-sans font-medium px-3 py-1.5 rounded-md bg-amber text-white hover:bg-amber-deep transition-colors flex-shrink-0"
               title="Открыть в режиме проверки и подтвердить оценку"
             >
               Подтвердить оценку
@@ -177,7 +177,7 @@ export default function AssignmentDetailModal({ assignment: a, onClose }: Props)
           {(a.status === 'approved' || a.status === 'sent') && (
             <button
               onClick={gradeRevision}
-              className="text-xs font-sans font-medium px-3 py-1.5 rounded-md bg-amber text-white hover:opacity-90 transition-opacity flex-shrink-0"
+              className="text-xs font-sans font-medium px-3 py-1.5 rounded-md bg-amber text-white hover:bg-amber-deep transition-colors flex-shrink-0"
               title="Открыть форму проверки для переработанной версии"
             >
               ↻ Оценить переработку

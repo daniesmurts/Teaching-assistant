@@ -78,7 +78,7 @@ export default function UpgradeModal() {
         <button
           onClick={handlePay}
           disabled={loading}
-          className="w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-60"
+          className="w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors disabled:opacity-60"
         >
           {loading ? 'Переход к оплате…' : 'Перейти к оплате'}
         </button>

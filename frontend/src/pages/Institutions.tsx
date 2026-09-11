@@ -24,7 +24,7 @@ export default function Institutions() {
             ИСПУМ для институтов — это всё из тарифа Pro для каждого преподавателя, плюс инструменты управления для деканата и кафедры: общие рубрики, массовое подключение, аналитика, журнал действий. Размещение в Российской Федерации, без VPN.
           </p>
           <div className="flex flex-col sm:flex-row justify-center gap-3">
-            <Link to="/contact" className="px-8 py-3 rounded-md bg-amber text-white font-medium hover:opacity-90 transition-opacity">
+            <Link to="/contact" className="px-8 py-3 rounded-md bg-amber text-white font-medium hover:bg-amber-deep transition-colors">
               Запросить коммерческое предложение
             </Link>
             <Link to="/contact" className="px-8 py-3 rounded-md border border-border-mid bg-transparent text-ink font-medium hover:bg-surface transition-colors">
@@ -249,7 +249,7 @@ export default function Institutions() {
               Покажем демо на ваших задачах, обсудим пилот на одну кафедру, подготовим коммерческое предложение под вашу организацию. Без обязательств.
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-3">
-              <Link to="/contact" className="px-8 py-3 rounded-md bg-amber text-white font-medium hover:opacity-90 transition-opacity">
+              <Link to="/contact" className="px-8 py-3 rounded-md bg-amber text-white font-medium hover:bg-amber-deep transition-colors">
                 Запросить КП
               </Link>
               <Link to="/contact" className="px-8 py-3 rounded-md border border-border-mid bg-transparent text-ink font-medium hover:bg-surface-warm transition-colors">

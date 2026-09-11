@@ -81,7 +81,7 @@ export default function FeedbackLibrary() {
             <button
               type="submit"
               disabled={query.trim().length < 3}
-              className="px-4 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+              className="px-4 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Искать
             </button>

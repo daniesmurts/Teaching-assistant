@@ -1,3 +1,8 @@
+// Brand amber here is #966508, matching --color-amber in the app (frontend/
+// src/index.css). It was #C8860A, on which white CTA text measured 3.06:1 and
+// link text on white the same — under the 4.5:1 AA floor, in a medium nobody
+// can zoom or restyle. The .pptx/PDF export palette keeps the lighter amber
+// deliberately: a projected slide is large text at a distance.
 import type { EmailPayload } from '../services/emailTransport'
 import { escapeHtml } from './escapeHtml'
 
@@ -11,7 +16,7 @@ function wrap(body: string): string {
   <div style="max-width:560px;margin:32px auto;background:#fff;border:1px solid rgba(0,0,0,0.08);border-radius:10px;overflow:hidden">
     <div style="padding:20px 28px;border-bottom:1px solid rgba(0,0,0,0.08)">
       <span style="font-size:18px;font-weight:700;color:#1A1A1A;font-family:Georgia,serif">
-        ИС<span style="color:#C8860A">ПУМ</span>
+        ИС<span style="color:#966508">ПУМ</span>
       </span>
     </div>
     <div style="padding:28px;font-size:15px;line-height:1.7;color:#1A1A1A">
@@ -29,7 +34,7 @@ function wrap(body: string): string {
 function btn(href: string, label: string): string {
   return `<p style="margin:20px 0">
     <a href="${href}"
-       style="display:inline-block;padding:10px 22px;background:#C8860A;color:#fff;
+       style="display:inline-block;padding:10px 22px;background:#966508;color:#fff;
               text-decoration:none;border-radius:8px;font-weight:500;font-size:14px">
       ${label}
     </a>
@@ -165,7 +170,7 @@ export function proGrantedEmail(
       </ul>
       ${btn(url, 'Перейти в ИСПУМ')}
       <p style="color:#6B6560;font-size:13px">
-        Если у вас есть вопросы, напишите нам: <a href="mailto:support@ispum.ru" style="color:#C8860A">support@ispum.ru</a>.
+        Если у вас есть вопросы, напишите нам: <a href="mailto:support@ispum.ru" style="color:#966508">support@ispum.ru</a>.
       </p>
     `),
     text:
@@ -231,7 +236,7 @@ export function passwordChangedEmail(name: string): Omit<EmailPayload, 'to'> {
       <p>Пароль вашего аккаунта ИСПУМ был успешно изменён.</p>
       <p style="color:#6B6560;font-size:13px">
         Если это были не вы, немедленно свяжитесь с нами:
-        <a href="mailto:support@ispum.ru" style="color:#C8860A">support@ispum.ru</a>
+        <a href="mailto:support@ispum.ru" style="color:#966508">support@ispum.ru</a>
       </p>
     `),
     text:
@@ -306,7 +311,7 @@ export function feedbackEmail(data: {
         Категория: ${escapeHtml(cat)}
       </p>
       <div style="margin-top:12px;padding:14px 16px;background:#FAF8F4;border:1px solid rgba(0,0,0,0.08);border-radius:8px;white-space:pre-wrap">${safe}</div>
-      <p style="margin-top:16px"><a href="mailto:${escapeHtml(data.email)}" style="color:#C8860A">Ответить ${escapeHtml(data.email)}</a></p>
+      <p style="margin-top:16px"><a href="mailto:${escapeHtml(data.email)}" style="color:#966508">Ответить ${escapeHtml(data.email)}</a></p>
     `),
     text:
       `Новый отзыв в ИСПУМ\n\n` +
@@ -332,7 +337,7 @@ export function contactMessageEmail(data: {
         Тема: ${escapeHtml(topicLabel)}
       </p>
       <div style="margin-top:12px;padding:14px 16px;background:#FAF8F4;border:1px solid rgba(0,0,0,0.08);border-radius:8px;white-space:pre-wrap">${safe}</div>
-      <p style="margin-top:16px"><a href="mailto:${escapeHtml(data.email)}" style="color:#C8860A">Ответить ${escapeHtml(data.email)}</a></p>
+      <p style="margin-top:16px"><a href="mailto:${escapeHtml(data.email)}" style="color:#966508">Ответить ${escapeHtml(data.email)}</a></p>
     `),
     text:
       `Новое обращение с сайта ИСПУМ (${data.sourcePage === 'research' ? '/research' : '/contact'})\n\n` +
@@ -359,7 +364,7 @@ export function teacherInviteEmail(
       ${btn(inviteUrl, 'Принять приглашение')}
       <p style="color:#6B6560;font-size:13px">
         Приглашение действительно 7 дней. Если ссылка не открывается, скопируйте её в браузер:<br>
-        <span style="color:#C8860A;word-break:break-all">${escapeHtml(inviteUrl)}</span>
+        <span style="color:#966508;word-break:break-all">${escapeHtml(inviteUrl)}</span>
       </p>
     `),
     text:

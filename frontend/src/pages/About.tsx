@@ -143,7 +143,7 @@ export default function About() {
           <p className="text-ink-secondary mb-10 leading-relaxed">
             Бесплатный тариф позволит спокойно посмотреть, как ИСПУМ работает с вашими задачами. Без обязательств, без привязки карты.
           </p>
-          <Link to="/register" className="inline-block px-8 py-3 rounded-md bg-amber text-white font-medium hover:opacity-90 transition-opacity">
+          <Link to="/register" className="inline-block px-8 py-3 rounded-md bg-amber text-white font-medium hover:bg-amber-deep transition-colors">
             Попробовать ИСПУМ
           </Link>
         </div>

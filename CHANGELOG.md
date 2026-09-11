@@ -14,6 +14,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com): grouped i
 
 ## [Unreleased]
 
+### Fixed
+- **Акцентный цвет не проходил по контрасту ни в одну сторону.** `--color-amber` was `#C8860A`, on which white measured **3.06:1** and which measured **3.06:1** on white — the same number, because contrast is symmetric — against the 4.5:1 AA floor. It cleared only the 3:1 large-text exemption, while the app puts it behind 12–13px semibold labels on **64 surfaces** and in front of white grounds everywhere else. Found while restyling the PPTX export button, which was deliberately made tinted rather than primary partly because of this.
+  - **One token, both directions, every call site.** Darkened at constant hue (39°) and saturation (90%) to the *lightest* value that clears AA on every ground amber actually lands on — `#966508`. The button alone would have been satisfied two steps earlier; amber is also text on the warm page ground and inside `amber-light` chips, and those fail last: **white on it 5.05, on white 5.05, on the page 4.59, on amber-light 4.57**. Measured back out of the rendered DOM, not just computed.
+  - **`hover:opacity-90` was its own bug.** It faded the button *into the page* and dimmed its label with it, so contrast **fell** on hover — a compliant button became non-compliant exactly when the pointer was on it. Hover now darkens to a new `--color-amber-deep` (**6.24:1**). Swept across 29 files where the fade was hand-written; `transition-opacity` became `transition-colors` with it. `danger` keeps its fade — it measures 5.44 and still 4.65 faded.
+  - **`amber-mid` and `amber-light` untouched.** Neither has a contrast problem, and darkening `amber-mid` would have created one: it is the accent on the dark sidebar, where it measures 10.52:1.
+  - **Email templates got the same colour** (7 literals): white-on-amber CTAs and link text had the identical defect in a medium nobody can zoom or restyle.
+  - **The .pptx/PDF export palette keeps the original amber**, deliberately — a projected slide is large text on a screen metres away, and changing it would restyle every deck a teacher has already produced.
+
 ### Changed
 - **«Скачать PPTX» перестала теряться рядом с «Скопировать всё».** Reported as easy to miss, and it was: the export was the same white chip with grey text as the copy action beside it, in a toolbar above a long deck — while being the page's value moment (the satisfaction prompt hangs off it three lines below).
   - **Tinted, not filled.** `bg-amber text-white` — this app's own primary — measures **3.06:1** against white text, under the 4.5:1 AA floor for text this size; it passes only as «large text», which 12px semibold is not. Ink on `amber-light` is **15.77:1**. So the export reads louder *and* legibly, and «Составить тест» stays the only solid CTA on the screen rather than gaining a competitor.

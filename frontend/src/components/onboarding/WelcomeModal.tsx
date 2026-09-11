@@ -77,7 +77,7 @@ export default function WelcomeModal() {
         <div className="flex gap-2 px-6 py-4 border-t border-border">
           <button
             onClick={start}
-            className="flex-1 px-4 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity"
+            className="flex-1 px-4 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors"
           >
             Создать первый предмет →
           </button>

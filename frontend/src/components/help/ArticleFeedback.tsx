@@ -93,7 +93,7 @@ export default function ArticleFeedback({ slug, title }: { slug: string; title: 
           <div className="flex items-center gap-2 mt-2">
             <button
               onClick={() => sendComment(comment.trim())}
-              className="px-3 py-1.5 rounded-md bg-amber text-white text-xs font-sans font-medium hover:opacity-90 transition-opacity"
+              className="px-3 py-1.5 rounded-md bg-amber text-white text-xs font-sans font-medium hover:bg-amber-deep transition-colors"
             >
               Отправить
             </button>

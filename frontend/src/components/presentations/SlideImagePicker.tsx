@@ -121,7 +121,7 @@ export default function SlideImagePicker({
                     type="button"
                     onClick={() => searchMut.mutate(queryInput)}
                     disabled={searchMut.isPending || queryInput.trim().length < 3}
-                    className="px-3 py-1.5 text-sm font-sans font-medium bg-amber text-white rounded-md hover:opacity-90 disabled:opacity-50 transition-opacity"
+                    className="px-3 py-1.5 text-sm font-sans font-medium bg-amber text-white rounded-md hover:bg-amber-deep disabled:opacity-50 transition-colors"
                   >
                     {searchMut.isPending ? '...' : 'Найти'}
                   </button>

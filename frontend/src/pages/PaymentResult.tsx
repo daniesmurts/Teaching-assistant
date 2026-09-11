@@ -76,7 +76,7 @@ export default function PaymentResult() {
               <p className="font-sans text-sm text-ink-secondary mb-5">
                 Оплата прошла успешно. Все возможности ИСПУМ Pro теперь доступны.
               </p>
-              <Link to="/dashboard" className="inline-block px-5 py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity">
+              <Link to="/dashboard" className="inline-block px-5 py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors">
                 Перейти в кабинет
               </Link>
             </>

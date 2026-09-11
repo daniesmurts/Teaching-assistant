@@ -189,7 +189,7 @@ export default function SvedenImportModal({
             <button
               onClick={() => void discover()}
               disabled={phase === 'discovering'}
-              className="mt-4 w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2"
+              className="mt-4 w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
             >
               {phase === 'discovering' && <LoadingSpinner size={16} />}
               {phase === 'discovering' ? 'Ищем документы на странице…' : 'Найти документы'}
@@ -342,7 +342,7 @@ export default function SvedenImportModal({
               <button
                 onClick={() => void runImport()}
                 disabled={selected.length === 0}
-                className="mt-4 w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-60"
+                className="mt-4 w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors disabled:opacity-60"
               >
                 Загрузить выбранные · {selected.length}
               </button>
@@ -424,7 +424,7 @@ export default function SvedenImportModal({
             )}
             <button
               onClick={onClose}
-              className="mt-2 w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity"
+              className="mt-2 w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors"
             >
               Готово
             </button>

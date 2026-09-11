@@ -170,7 +170,7 @@ export default function InstitutionLayout() {
               {(teacher?.is_platform_admin ?? teacher?.role === 'platform_admin') && (
                 <button
                   onClick={() => navigate('/admin/institutions')}
-                  className="px-5 py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity"
+                  className="px-5 py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors"
                 >
                   Перейти к организациям →
                 </button>

@@ -74,7 +74,7 @@ export default function Research() {
               образовательных программ — и публикуем результаты в рецензируемых изданиях.
             </motion.p>
             <motion.div variants={fadeUp} className="flex flex-col sm:flex-row justify-center gap-3">
-              <a href="#contact" className="px-8 py-3 rounded-md bg-amber text-white font-medium hover:opacity-90 transition-opacity">
+              <a href="#contact" className="px-8 py-3 rounded-md bg-amber text-white font-medium hover:bg-amber-deep transition-colors">
                 Стать партнёром программы
               </a>
               <a href="#format" className="px-8 py-3 rounded-md border border-white/25 bg-transparent text-white font-medium hover:bg-white/10 transition-colors">

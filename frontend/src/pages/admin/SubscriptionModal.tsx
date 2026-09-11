@@ -71,7 +71,7 @@ export default function SubscriptionModal({ teacher, onClose }: Props) {
               className="w-20 text-xs px-2 py-1 border border-border rounded-md ml-1" />
           </div>
           <button onClick={() => grantMut.mutate()} disabled={grantMut.isPending}
-            className="text-sm px-4 py-2 rounded-md bg-amber text-white font-medium hover:opacity-90 disabled:opacity-60">
+            className="text-sm px-4 py-2 rounded-md bg-amber text-white font-medium hover:bg-amber-deep disabled:opacity-60">
             {grantMut.isPending ? 'Выдаём…' : `Выдать ${days} дн. Pro`}
           </button>
           <span className="text-xs text-ink-tertiary ml-2">добавляется к текущему сроку</span>

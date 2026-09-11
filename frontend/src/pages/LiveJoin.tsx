@@ -157,7 +157,7 @@ export default function LiveJoin() {
         <button
           onClick={join}
           disabled={!canJoin}
-          className="w-full max-w-xs px-4 py-3 rounded-md bg-amber text-white font-sans font-medium hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+          className="w-full max-w-xs px-4 py-3 rounded-md bg-amber text-white font-sans font-medium hover:bg-amber-deep transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Присоединиться
         </button>
@@ -220,7 +220,7 @@ export default function LiveJoin() {
             <button
               onClick={next}
               disabled={answering}
-              className="mt-6 w-full max-w-xs px-4 py-3 rounded-md bg-amber text-white font-sans font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="mt-6 w-full max-w-xs px-4 py-3 rounded-md bg-amber text-white font-sans font-medium hover:bg-amber-deep transition-colors disabled:opacity-50"
             >
               Далее
             </button>

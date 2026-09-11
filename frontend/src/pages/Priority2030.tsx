@@ -43,7 +43,7 @@ export default function Priority2030() {
               данных. ИСПУМ закрывает эти пункты программы развития — конкретными, отчётными цифрами.
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-3">
-              <a href="#contact" className="px-8 py-3 rounded-md bg-amber text-white font-medium hover:opacity-90 transition-opacity">
+              <a href="#contact" className="px-8 py-3 rounded-md bg-amber text-white font-medium hover:bg-amber-deep transition-colors">
                 Обсудить пилот на кафедру
               </a>
               <a href="#mapping" className="px-8 py-3 rounded-md border border-white/25 bg-transparent text-white font-medium hover:bg-white/10 transition-colors">

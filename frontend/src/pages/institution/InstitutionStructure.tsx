@@ -679,7 +679,7 @@ function MemberRow({ member, departments, units, unitsById, onSetPrimary, onGran
             </label>
             <button onClick={() => { if (roleUnit && !blocked) { onGrant(roleUnit, role, domain); setAdding(false) } }}
               disabled={blocked}
-              className="px-3 py-1.5 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40">
+              className="px-3 py-1.5 rounded-md bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40">
               Назначить
             </button>
             <button onClick={() => setAdding(false)}

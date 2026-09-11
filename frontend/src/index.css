@@ -110,9 +110,42 @@
   --color-ink-inv-muted-rgb: 154 148 144;
   --color-ink-inv-muted:     rgb(var(--color-ink-inv-muted-rgb));
 
-  /* Accent */
-  --color-amber-rgb:         200 134 10;
+  /* Accent
+   *
+   * amber was rgb(200 134 10) = #C8860A, and at that value it could not carry
+   * text in EITHER direction: white on it measured 3.06:1 and it on white
+   * measured 3.06:1 — the same number, because contrast is symmetric — against
+   * a 4.5:1 AA floor. It cleared only the 3:1 large-text exemption, while the
+   * app puts it behind 12–13px semibold labels on 64 surfaces and in front of
+   * white grounds everywhere else.
+   *
+   * Darkened at constant hue (39°) and saturation (90%) to the LIGHTEST value
+   * that clears AA on every ground this colour actually lands on — the button
+   * alone would have been satisfied two steps earlier, but amber is also text
+   * on the warm page and inside amber-light chips, and those are the pairs
+   * that fail last:
+   *
+   *   #966508 (L 31%)   white on it 5.05   ·   on white 5.05
+   *                     on page ground 4.59 · on amber-light 4.57
+   *
+   * One change, both directions, every call site.  amber-mid (the accent on
+   * the dark sidebar, 10.52:1 there) and amber-light are untouched — neither
+   * has a contrast problem, and darkening amber-mid would have created one.
+   *
+   * amber-deep exists for the hover state of a solid amber surface. The old
+   * `hover:opacity-90` faded the button INTO the page and took its label with
+   * it, so contrast FELL on hover — hovering a compliant button made it
+   * non-compliant. Hover darkens now, and contrast rises to 6.24:1.
+   *
+   * The .pptx/PDF export palette (services/presentationExport.ts) keeps the
+   * original amber deliberately: a projected slide is large text on a screen
+   * metres away, a different medium with a different floor, and changing it
+   * would restyle every deck a teacher has already produced.
+   */
+  --color-amber-rgb:         150 101 8;
   --color-amber:             rgb(var(--color-amber-rgb));
+  --color-amber-deep-rgb:    131 88 7;
+  --color-amber-deep:        rgb(var(--color-amber-deep-rgb));
   --color-amber-light-rgb:   253 243 220;
   --color-amber-light:       rgb(var(--color-amber-light-rgb));
   --color-amber-mid-rgb:     244 197 90;

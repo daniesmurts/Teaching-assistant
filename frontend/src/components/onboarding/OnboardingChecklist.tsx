@@ -90,7 +90,7 @@ export default function OnboardingChecklist() {
                 <Link
                   to={s.to}
                   className={`flex-shrink-0 text-xs font-sans font-medium px-3 py-1.5 rounded-md transition-colors ${
-                    isNext ? 'bg-amber text-white hover:opacity-90' : 'text-amber hover:bg-amber-light'
+                    isNext ? 'bg-amber text-white hover:bg-amber-deep' : 'text-amber hover:bg-amber-light'
                   }`}
                 >
                   {s.cta} →

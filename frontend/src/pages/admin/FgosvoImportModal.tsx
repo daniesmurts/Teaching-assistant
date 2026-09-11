@@ -129,7 +129,7 @@ export default function FgosvoImportModal({ onClose, onImported }: { onClose: ()
               className="w-full px-3 py-2 rounded-lg border border-border bg-canvas font-sans text-sm text-ink placeholder:text-ink-tertiary focus:outline-none focus:border-amber"
             />
             <button onClick={() => void discover()} disabled={phase === 'discovering'}
-              className="mt-4 w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2">
+              className="mt-4 w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
               {phase === 'discovering' && <LoadingSpinner size={16} />}
               {phase === 'discovering' ? 'Обходим категории на fgosvo.ru…' : 'Найти документы'}
             </button>
@@ -194,7 +194,7 @@ export default function FgosvoImportModal({ onClose, onImported }: { onClose: ()
             </div>
 
             <button onClick={() => void runImport()} disabled={selected.length === 0}
-              className="mt-4 w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-60">
+              className="mt-4 w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors disabled:opacity-60">
               Импортировать выбранные · {selected.length}
             </button>
           </>
@@ -228,7 +228,7 @@ export default function FgosvoImportModal({ onClose, onImported }: { onClose: ()
                 {failures.map((f, i) => <li key={i}>· {f.text}</li>)}
               </ul>
             )}
-            <button onClick={onClose} className="mt-2 w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity">Готово</button>
+            <button onClick={onClose} className="mt-2 w-full py-2.5 rounded-lg bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors">Готово</button>
           </div>
         )}
       </div>

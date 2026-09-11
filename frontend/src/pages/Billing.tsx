@@ -74,7 +74,7 @@ export default function Billing() {
               </div>
               <button
                 onClick={() => showUpgradeModal()}
-                className="px-4 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:opacity-90 transition-opacity flex-shrink-0"
+                className="px-4 py-2 rounded-md bg-amber text-white font-sans text-sm font-medium hover:bg-amber-deep transition-colors flex-shrink-0"
               >
                 {isFree ? 'Перейти на Pro' : 'Продлить'}
               </button>

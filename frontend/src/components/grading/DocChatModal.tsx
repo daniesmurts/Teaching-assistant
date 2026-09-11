@@ -111,7 +111,7 @@ export default function DocChatModal({ courseId, onClose }: Props) {
           <button
             onClick={submit}
             disabled={askMut.isPending || !question.trim()}
-            className="px-4 py-2 text-sm font-sans font-medium text-white bg-amber rounded-md hover:opacity-90 disabled:opacity-50 transition-opacity"
+            className="px-4 py-2 text-sm font-sans font-medium text-white bg-amber rounded-md hover:bg-amber-deep disabled:opacity-50 transition-colors"
           >
             Спросить
           </button>

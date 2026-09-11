@@ -55,7 +55,7 @@ export default function PublicHeader() {
             rather than the row growing. */}
         <Link
           to="/register"
-          className="px-4 py-2 rounded-md bg-amber text-white text-sm font-medium whitespace-nowrap hover:opacity-90 transition-opacity"
+          className="px-4 py-2 rounded-md bg-amber text-white text-sm font-medium whitespace-nowrap hover:bg-amber-deep transition-colors"
         >
           Начать бесплатно
         </Link>
